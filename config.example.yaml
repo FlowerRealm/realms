@@ -17,8 +17,17 @@ server:
   idle_timeout: 2m
 
 db:
+  # driver: sqlite（默认）/ mysql（可选）
+  # 兼容旧配置：不写 driver 但填写 dsn 时，会自动推断为 mysql。
+  driver: "sqlite"
+
+  # SQLite 数据库文件路径（可包含 DSN query，如 ?_busy_timeout=30000）。
+  # 建议容器部署时挂载持久化卷到 ./data/ 目录。
+  sqlite_path: "./data/realms.db?_busy_timeout=30000"
+
+  # MySQL DSN（db.driver=mysql 时必填）
   # 示例：user:pass@tcp(127.0.0.1:3306)/realms?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci
-  dsn: "root:root@tcp(127.0.0.1:3306)/realms?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci"
+  dsn: ""
 
 security:
   allow_open_registration: true

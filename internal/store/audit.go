@@ -30,7 +30,7 @@ INSERT INTO audit_events(
   time, request_id, actor_type, user_id, token_id, action, endpoint, model,
   upstream_channel_id, upstream_endpoint_id, upstream_credential_id, status_code, latency_ms, error_class, error_message
 ) VALUES(
-  NOW(), ?, ?, ?, ?, ?, ?, ?,
+  CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?,
   ?, ?, ?, ?, ?, ?, ?
 )
 `, in.RequestID, in.ActorType, in.UserID, in.TokenID, in.Action, in.Endpoint, in.Model,

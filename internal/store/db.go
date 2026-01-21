@@ -8,11 +8,33 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
+	_ "modernc.org/sqlite"
 )
+
+func OpenDB(env string, driver string, mysqlDSN string, sqlitePath string) (*sql.DB, Dialect, error) {
+	switch strings.ToLower(strings.TrimSpace(driver)) {
+	case "sqlite":
+		db, err := OpenSQLite(sqlitePath)
+		if err != nil {
+			return nil, "", err
+		}
+		return db, DialectSQLite, nil
+	case "mysql":
+		db, err := OpenMySQL(env, mysqlDSN)
+		if err != nil {
+			return nil, "", err
+		}
+		return db, DialectMySQL, nil
+	default:
+		return nil, "", fmt.Errorf("不支持的 db.driver：%s", driver)
+	}
+}
 
 func OpenMySQL(env string, dsn string) (*sql.DB, error) {
 	db, err := openMySQL(dsn)
@@ -32,6 +54,47 @@ func OpenMySQL(env string, dsn string) (*sql.DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	return db, nil
+}
+
+func OpenSQLite(path string) (*sql.DB, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, errors.New("sqlite_path 不能为空")
+	}
+
+	// 允许通过 query 参数传递 driver 选项（例如 ?_busy_timeout=30000），这里需要先确保文件目录存在。
+	filePath := path
+	if i := strings.IndexByte(filePath, '?'); i >= 0 {
+		filePath = filePath[:i]
+	}
+	if filePath != "" && filePath != ":memory:" && !strings.HasPrefix(filePath, "file::memory:") {
+		dir := filepath.Dir(filePath)
+		if dir != "" && dir != "." {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return nil, fmt.Errorf("创建 sqlite 数据目录失败: %w", err)
+			}
+		}
+	}
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, fmt.Errorf("sql.Open(sqlite): %w", err)
+	}
+	// SQLite 多连接写入容易触发锁竞争；单机默认收敛为单连接更稳。
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("db.Ping(sqlite): %w", err)
+	}
+
+	// WAL 模式是数据库级别持久设置，执行一次即可对后续连接生效。
+	_, _ = db.Exec(`PRAGMA journal_mode=WAL`)
 	return db, nil
 }
 

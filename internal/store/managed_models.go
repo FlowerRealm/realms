@@ -185,16 +185,16 @@ ORDER BY m.id DESC
 	defer rows.Close()
 
 	var out []ManagedModel
-		for rows.Next() {
-			var m ManagedModel
-			var upstreamModel sql.NullString
-			var ownedBy sql.NullString
-			if err := rows.Scan(&m.ID, &m.PublicID, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheUSDPer1M, &m.Status, &m.CreatedAt); err != nil {
-				return nil, fmt.Errorf("扫描可用 managed_models 失败: %w", err)
-			}
-			if err := normalizeManagedModelPricing(&m); err != nil {
-				return nil, err
-			}
+	for rows.Next() {
+		var m ManagedModel
+		var upstreamModel sql.NullString
+		var ownedBy sql.NullString
+		if err := rows.Scan(&m.ID, &m.PublicID, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheUSDPer1M, &m.Status, &m.CreatedAt); err != nil {
+			return nil, fmt.Errorf("扫描可用 managed_models 失败: %w", err)
+		}
+		if err := normalizeManagedModelPricing(&m); err != nil {
+			return nil, err
+		}
 		if upstreamModel.Valid {
 			v := upstreamModel.String
 			m.UpstreamModel = &v
@@ -442,7 +442,7 @@ INSERT INTO managed_models(
 ) VALUES(
   ?, ?,
   ?, ?, ?,
-  ?, NOW()
+  ?, CURRENT_TIMESTAMP
 )
 `, in.PublicID, in.OwnedBy, inUSD, outUSD, cacheUSD, in.Status)
 	if err != nil {
@@ -493,7 +493,7 @@ WHERE id=?
 	if oldPublicID != in.PublicID {
 		if _, err := tx.ExecContext(ctx, `
 UPDATE channel_models
-SET public_id=?, updated_at=NOW()
+SET public_id=?, updated_at=CURRENT_TIMESTAMP
 WHERE public_id=?
 `, in.PublicID, oldPublicID); err != nil {
 			return fmt.Errorf("同步更新 channel_models public_id 失败: %w", err)
@@ -621,7 +621,7 @@ INSERT INTO managed_models(
 ) VALUES(
   ?, NULL,
   ?, ?, ?,
-  0, NOW()
+  0, CURRENT_TIMESTAMP
 )
 `)
 	if err != nil {

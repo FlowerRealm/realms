@@ -141,7 +141,7 @@ func (s *Store) CreateChannelGroup(ctx context.Context, name string, description
 	priceMultiplier = priceMultiplier.Truncate(PriceMultiplierScale)
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO channel_groups(name, description, price_multiplier, max_attempts, status, created_at, updated_at)
-VALUES(?, ?, ?, ?, ?, NOW(), NOW())
+VALUES(?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `, name, desc, priceMultiplier, maxAttempts, status)
 	if err != nil {
 		return 0, fmt.Errorf("创建 channel_group 失败: %w", err)
@@ -179,7 +179,7 @@ func (s *Store) UpdateChannelGroup(ctx context.Context, id int64, description *s
 	priceMultiplier = priceMultiplier.Truncate(PriceMultiplierScale)
 	_, err := s.db.ExecContext(ctx, `
 UPDATE channel_groups
-SET description=?, price_multiplier=?, max_attempts=?, status=?, updated_at=NOW()
+SET description=?, price_multiplier=?, max_attempts=?, status=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, desc, priceMultiplier, maxAttempts, status, id)
 	if err != nil {
@@ -302,11 +302,11 @@ func (s *Store) ForceDeleteChannelGroup(ctx context.Context, id int64) (ChannelG
 				sum.ChannelsDisabled++
 			}
 			newCSV = DefaultGroupName
-			if _, err := tx.ExecContext(ctx, "UPDATE upstream_channels SET `groups`=?, status=0, updated_at=NOW() WHERE id=?", newCSV, ch.id); err != nil {
+			if _, err := tx.ExecContext(ctx, "UPDATE upstream_channels SET `groups`=?, status=0, updated_at=CURRENT_TIMESTAMP WHERE id=?", newCSV, ch.id); err != nil {
 				return ChannelGroupDeleteSummary{}, fmt.Errorf("更新 upstream_channels.groups 失败: %w", err)
 			}
 		} else {
-			if _, err := tx.ExecContext(ctx, "UPDATE upstream_channels SET `groups`=?, updated_at=NOW() WHERE id=?", newCSV, ch.id); err != nil {
+			if _, err := tx.ExecContext(ctx, "UPDATE upstream_channels SET `groups`=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", newCSV, ch.id); err != nil {
 				return ChannelGroupDeleteSummary{}, fmt.Errorf("更新 upstream_channels.groups 失败: %w", err)
 			}
 		}
@@ -328,7 +328,7 @@ func (s *Store) ForceDeleteChannelGroup(ctx context.Context, id int64) (ChannelG
 			}
 			if _, err := tx.ExecContext(ctx, `
 INSERT INTO channel_group_members(parent_group_id, member_channel_id, priority, promotion, created_at, updated_at)
-VALUES(?, ?, 0, 0, NOW(), NOW())
+VALUES(?, ?, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `, gid, ch.id); err != nil {
 				return ChannelGroupDeleteSummary{}, fmt.Errorf("写入 channel_group_members 失败: %w", err)
 			}

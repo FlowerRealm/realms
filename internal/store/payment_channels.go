@@ -218,7 +218,7 @@ INSERT INTO payment_channels(
 ) VALUES(?, ?, ?,
   ?, ?, ?,
   ?, ?, ?,
-  NOW(), NOW()
+  CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 )
 `, typ, name, status,
 		normOrNil(in.StripeCurrency), normOrNil(in.StripeSecretKey), normOrNil(in.StripeWebhookSecret),
@@ -281,7 +281,7 @@ SET name=?, status=?,
   epay_gateway=?,
   epay_partner_id=?,
   epay_key=COALESCE(?, epay_key),
-  updated_at=NOW()
+  updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, name, status,
 		normOrNil(in.StripeCurrency),

@@ -19,7 +19,8 @@ const (
 )
 
 type Store struct {
-	db *sql.DB
+	db      *sql.DB
+	dialect Dialect
 
 	appSettingsDefaults    config.AppSettingsDefaultsConfig
 	hasAppSettingsDefaults bool
@@ -27,8 +28,16 @@ type Store struct {
 
 func New(db *sql.DB) *Store {
 	return &Store{
-		db: db,
+		db:      db,
+		dialect: DialectMySQL,
 	}
+}
+
+func (s *Store) SetDialect(d Dialect) {
+	if strings.TrimSpace(string(d)) == "" {
+		return
+	}
+	s.dialect = d
 }
 
 func (s *Store) SetAppSettingsDefaults(v config.AppSettingsDefaultsConfig) {
@@ -53,7 +62,7 @@ func (s *Store) CreateUser(ctx context.Context, email string, username string, p
 	}
 	res, err := s.db.ExecContext(ctx, `
 	INSERT INTO users(email, username, password_hash, role, status, created_at, updated_at)
-	VALUES(?, ?, ?, ?, 1, NOW(), NOW())
+	VALUES(?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	`, email, username, passwordHash, role)
 	if err != nil {
 		return 0, fmt.Errorf("创建用户失败: %w", err)
@@ -62,7 +71,11 @@ func (s *Store) CreateUser(ctx context.Context, email string, username string, p
 	if err != nil {
 		return 0, fmt.Errorf("获取用户 id 失败: %w", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT IGNORE INTO user_groups(user_id, group_name, created_at) VALUES(?, ?, NOW())`, id, DefaultGroupName); err != nil {
+	insertGroupStmt := `INSERT IGNORE INTO user_groups(user_id, group_name, created_at) VALUES(?, ?, CURRENT_TIMESTAMP)`
+	if s.dialect == DialectSQLite {
+		insertGroupStmt = `INSERT OR IGNORE INTO user_groups(user_id, group_name, created_at) VALUES(?, ?, CURRENT_TIMESTAMP)`
+	}
+	if _, err := s.db.ExecContext(ctx, insertGroupStmt, id, DefaultGroupName); err != nil {
 		return 0, fmt.Errorf("初始化用户分组失败: %w", err)
 	}
 	return id, nil
@@ -70,68 +83,62 @@ func (s *Store) CreateUser(ctx context.Context, email string, username string, p
 
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (User, error) {
 	var u User
-	var groupsCSV sql.NullString
 	err := s.db.QueryRowContext(ctx, `
 	SELECT
-	  id, email, username, password_hash, role, status, created_at, updated_at,
-	  (SELECT GROUP_CONCAT(group_name ORDER BY group_name SEPARATOR ',') FROM user_groups ug WHERE ug.user_id=users.id) AS groups_csv
+	  id, email, username, password_hash, role, status, created_at, updated_at
 	FROM users
 	WHERE email=?
-	`, email).Scan(&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt, &groupsCSV)
+	`, email).Scan(&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, sql.ErrNoRows
 		}
 		return User{}, fmt.Errorf("查询用户失败: %w", err)
 	}
-	u.Groups = s.scanUserGroupsCSV(groupsCSV)
+	u.Groups, _ = s.ListUserGroups(ctx, u.ID)
 	return u, nil
 }
 
 func (s *Store) GetUserByID(ctx context.Context, userID int64) (User, error) {
 	var u User
-	var groupsCSV sql.NullString
 	err := s.db.QueryRowContext(ctx, `
 	SELECT
-	  id, email, username, password_hash, role, status, created_at, updated_at,
-	  (SELECT GROUP_CONCAT(group_name ORDER BY group_name SEPARATOR ',') FROM user_groups ug WHERE ug.user_id=users.id) AS groups_csv
+	  id, email, username, password_hash, role, status, created_at, updated_at
 	FROM users
 	WHERE id=?
-	`, userID).Scan(&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt, &groupsCSV)
+	`, userID).Scan(&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, sql.ErrNoRows
 		}
 		return User{}, fmt.Errorf("查询用户失败: %w", err)
 	}
-	u.Groups = s.scanUserGroupsCSV(groupsCSV)
+	u.Groups, _ = s.ListUserGroups(ctx, u.ID)
 	return u, nil
 }
 
 func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, error) {
 	var u User
-	var groupsCSV sql.NullString
 	err := s.db.QueryRowContext(ctx, `
 	SELECT
-	  id, email, username, password_hash, role, status, created_at, updated_at,
-	  (SELECT GROUP_CONCAT(group_name ORDER BY group_name SEPARATOR ',') FROM user_groups ug WHERE ug.user_id=users.id) AS groups_csv
+	  id, email, username, password_hash, role, status, created_at, updated_at
 	FROM users
 	WHERE username=?
-	`, username).Scan(&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt, &groupsCSV)
+	`, username).Scan(&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, sql.ErrNoRows
 		}
 		return User{}, fmt.Errorf("查询用户失败: %w", err)
 	}
-	u.Groups = s.scanUserGroupsCSV(groupsCSV)
+	u.Groups, _ = s.ListUserGroups(ctx, u.ID)
 	return u, nil
 }
 
 func (s *Store) UpdateUserEmail(ctx context.Context, userID int64, email string) error {
 	_, err := s.db.ExecContext(ctx, `
 UPDATE users
-SET email=?, updated_at=NOW()
+SET email=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, email, userID)
 	if err != nil {
@@ -146,7 +153,7 @@ func (s *Store) UpdateUserUsername(ctx context.Context, userID int64, username s
 	}
 	_, err := s.db.ExecContext(ctx, `
 	UPDATE users
-	SET username=?, updated_at=NOW()
+	SET username=?, updated_at=CURRENT_TIMESTAMP
 	WHERE id=?
 	`, username, userID)
 	if err != nil {
@@ -158,7 +165,7 @@ func (s *Store) UpdateUserUsername(ctx context.Context, userID int64, username s
 func (s *Store) UpdateUserPasswordHash(ctx context.Context, userID int64, passwordHash []byte) error {
 	_, err := s.db.ExecContext(ctx, `
 UPDATE users
-SET password_hash=?, updated_at=NOW()
+SET password_hash=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, passwordHash, userID)
 	if err != nil {
@@ -180,7 +187,7 @@ func (s *Store) CreateUserToken(ctx context.Context, userID int64, name *string,
 	hint := tokenHint(rawToken)
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO user_tokens(user_id, name, token_hash, token_hint, status, created_at)
-VALUES(?, ?, ?, ?, 1, NOW())
+VALUES(?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
 `, userID, name, tokenHash, hint)
 	if err != nil {
 		return 0, nil, fmt.Errorf("创建 Token 失败: %w", err)
@@ -249,7 +256,7 @@ ORDER BY id DESC
 func (s *Store) RevokeUserToken(ctx context.Context, userID, tokenID int64) error {
 	res, err := s.db.ExecContext(ctx, `
 UPDATE user_tokens
-SET status=0, revoked_at=NOW()
+SET status=0, revoked_at=CURRENT_TIMESTAMP
 WHERE id=? AND user_id=? AND status=1
 `, tokenID, userID)
 	if err != nil {
@@ -286,7 +293,7 @@ func (s *Store) RevokeActiveUserTokensByName(ctx context.Context, userID int64, 
 	}
 	_, err := s.db.ExecContext(ctx, `
 UPDATE user_tokens
-SET status=0, revoked_at=NOW()
+SET status=0, revoked_at=CURRENT_TIMESTAMP
 WHERE user_id=? AND name=? AND status=1
 `, userID, name)
 	if err != nil {
@@ -309,23 +316,21 @@ func (s *Store) GetTokenAuthByRawToken(ctx context.Context, rawToken string) (To
 
 func (s *Store) GetTokenAuthByTokenHash(ctx context.Context, tokenHash []byte) (TokenAuth, error) {
 	var auth TokenAuth
-	var groupsCSV sql.NullString
 	err := s.db.QueryRowContext(ctx, `
 SELECT
-  u.id, t.id, u.role,
-  (SELECT GROUP_CONCAT(group_name ORDER BY group_name SEPARATOR ',') FROM user_groups ug WHERE ug.user_id=u.id) AS groups_csv
+  u.id, t.id, u.role
 FROM user_tokens t
 JOIN users u ON u.id=t.user_id
 WHERE t.token_hash=? AND t.status=1 AND u.status=1
-`, tokenHash).Scan(&auth.UserID, &auth.TokenID, &auth.Role, &groupsCSV)
+`, tokenHash).Scan(&auth.UserID, &auth.TokenID, &auth.Role)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return TokenAuth{}, sql.ErrNoRows
 		}
 		return TokenAuth{}, fmt.Errorf("查询 Token 鉴权失败: %w", err)
 	}
-	auth.Groups = s.scanUserGroupsCSV(groupsCSV)
-	_, _ = s.db.ExecContext(ctx, `UPDATE user_tokens SET last_used_at=NOW() WHERE id=?`, auth.TokenID)
+	auth.Groups, _ = s.ListUserGroups(ctx, auth.UserID)
+	_, _ = s.db.ExecContext(ctx, `UPDATE user_tokens SET last_used_at=CURRENT_TIMESTAMP WHERE id=?`, auth.TokenID)
 	return auth, nil
 }
 
@@ -333,7 +338,7 @@ func (s *Store) CreateSession(ctx context.Context, userID int64, rawSession stri
 	sessionHash := crypto.TokenHash(rawSession)
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO user_sessions(user_id, session_hash, csrf_token, expires_at, created_at, last_seen_at)
-VALUES(?, ?, ?, ?, NOW(), NOW())
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `, userID, sessionHash, csrfToken, expiresAt)
 	if err != nil {
 		return 0, fmt.Errorf("创建会话失败: %w", err)
@@ -392,7 +397,7 @@ WHERE session_hash=?
 		_, _ = s.db.ExecContext(ctx, `DELETE FROM user_sessions WHERE id=?`, sess.ID)
 		return UserSession{}, sql.ErrNoRows
 	}
-	_, _ = s.db.ExecContext(ctx, `UPDATE user_sessions SET last_seen_at=NOW() WHERE id=?`, sess.ID)
+	_, _ = s.db.ExecContext(ctx, `UPDATE user_sessions SET last_seen_at=CURRENT_TIMESTAMP WHERE id=?`, sess.ID)
 	return sess, nil
 }
 

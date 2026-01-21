@@ -39,7 +39,7 @@ func (s *Store) CreateAnnouncement(ctx context.Context, title string, body strin
 
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO announcements(title, body, status, created_at, updated_at)
-VALUES(?, ?, ?, NOW(), NOW())
+VALUES(?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `, title, body, status)
 	if err != nil {
 		return 0, fmt.Errorf("创建公告失败: %w", err)
@@ -101,7 +101,7 @@ func (s *Store) UpdateAnnouncementStatus(ctx context.Context, announcementID int
 
 	res, err := s.db.ExecContext(ctx, `
 UPDATE announcements
-SET status=?, updated_at=NOW()
+SET status=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, status, announcementID)
 	if err != nil {
@@ -220,11 +220,17 @@ LIMIT 1
 }
 
 func (s *Store) MarkAnnouncementRead(ctx context.Context, userID int64, announcementID int64) error {
-	if _, err := s.db.ExecContext(ctx, `
-INSERT INTO announcement_reads(user_id, announcement_id, read_at)
-VALUES(?, ?, NOW())
-ON DUPLICATE KEY UPDATE read_at=read_at
-`, userID, announcementID); err != nil {
+	stmt := `
+INSERT IGNORE INTO announcement_reads(user_id, announcement_id, read_at)
+VALUES(?, ?, CURRENT_TIMESTAMP)
+`
+	if s.dialect == DialectSQLite {
+		stmt = `
+INSERT OR IGNORE INTO announcement_reads(user_id, announcement_id, read_at)
+VALUES(?, ?, CURRENT_TIMESTAMP)
+`
+	}
+	if _, err := s.db.ExecContext(ctx, stmt, userID, announcementID); err != nil {
 		return fmt.Errorf("标记已读失败: %w", err)
 	}
 	return nil

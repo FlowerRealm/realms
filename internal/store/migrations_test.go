@@ -30,4 +30,3 @@ func TestMigration0038_PolicyToFeatureBans(t *testing.T) {
 		t.Fatalf("unexpected stmt count: %d", len(stmts))
 	}
 }
-

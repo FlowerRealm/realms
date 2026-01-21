@@ -7,12 +7,22 @@
 ### 前置
 
 - Go 1.22+
-- MySQL 8.x（或兼容）
+- SQLite（默认，无需额外依赖）或 MySQL 8.x（可选）
 
-### MySQL（本地开发）
+### SQLite（默认，本地/单机部署）
+
+默认使用 SQLite（配置见 `config.example.yaml` 的 `db.driver/sqlite_path`）。首次启动会自动创建数据库文件并初始化 schema。
+
+### MySQL（可选）
+
+如需使用 MySQL，请在 `config.yaml` 中设置：
+- `db.driver=mysql`
+- `db.dsn=...`
 
 `make dev` 会在检测到 `127.0.0.1:3306` 未监听时，自动尝试用 docker compose 启动 MySQL 容器。  
 如需禁用该行为，可在环境变量或 `.env` 中设置：`REALMS_DEV_MYSQL=skip`。
+
+> 说明：仅当你选择使用 MySQL（`db.driver=mysql` 或配置了 `db.dsn`）时，`make dev` 才会尝试拉起 MySQL 容器。SQLite 默认配置下不会启动 MySQL。
 
 如需手动启动：
 
@@ -43,8 +53,12 @@ make dev
 > 注意：移除应用层加密后，历史已加密入库的上游凭证 / OAuth 账号会在迁移中被禁用（需要在管理后台重新录入/重新授权）。
 
 首次启动会自动执行内置迁移（`internal/store/migrations/*.sql`）。  
-在 `env=dev` 且账号具备权限时，如果目标数据库不存在，会自动创建数据库后继续迁移。  
-如果 MySQL 处于启动过程中（常见于刚 `docker compose up`），dev 环境会等待 MySQL 就绪（最多 30s）后再继续。
+当 `db.driver=mysql`：
+- 在 `env=dev` 且账号具备权限时，如果目标数据库不存在，会自动创建数据库后继续迁移
+- 如果 MySQL 处于启动过程中（常见于刚 `docker compose up`），dev 环境会等待 MySQL 就绪（最多 30s）后再继续
+
+当 `db.driver=sqlite`（默认）：
+- 首次启动会执行一次性 schema 初始化（创建全量表/索引）
 
 ## 2) Web 控制台
 

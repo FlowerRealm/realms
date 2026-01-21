@@ -87,12 +87,15 @@ func (s *Store) UpsertAppSetting(ctx context.Context, key string, value string) 
 	if s.db == nil {
 		return errors.New("db 为空")
 	}
-	_, err := s.db.ExecContext(ctx,
-		"INSERT INTO app_settings(`key`, value, created_at, updated_at)\n"+
-			"VALUES(?, ?, NOW(), NOW())\n"+
-			"ON DUPLICATE KEY UPDATE value=VALUES(value), updated_at=NOW()",
-		key, value,
-	)
+	stmt := "INSERT INTO app_settings(`key`, value, created_at, updated_at)\n" +
+		"VALUES(?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)\n" +
+		"ON DUPLICATE KEY UPDATE value=VALUES(value), updated_at=CURRENT_TIMESTAMP"
+	if s.dialect == DialectSQLite {
+		stmt = "INSERT INTO app_settings(`key`, value, created_at, updated_at)\n" +
+			"VALUES(?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)\n" +
+			"ON CONFLICT(`key`) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP"
+	}
+	_, err := s.db.ExecContext(ctx, stmt, key, value)
 	if err != nil {
 		return fmt.Errorf("写入 app_settings 失败: %w", err)
 	}

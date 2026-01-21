@@ -28,11 +28,11 @@ type AdminConfigExport struct {
 }
 
 type AdminConfigChannelGroup struct {
-	Name            string           `json:"name"`
-	Description     *string          `json:"description,omitempty"`
-	PriceMultiplier decimal.Decimal  `json:"price_multiplier"`
-	MaxAttempts     int              `json:"max_attempts"`
-	Status          int              `json:"status"`
+	Name            string          `json:"name"`
+	Description     *string         `json:"description,omitempty"`
+	PriceMultiplier decimal.Decimal `json:"price_multiplier"`
+	MaxAttempts     int             `json:"max_attempts"`
+	Status          int             `json:"status"`
 }
 
 type AdminConfigChannelGroupMember struct {
@@ -65,19 +65,19 @@ type AdminConfigUpstreamEndpoint struct {
 	ChannelType string `json:"channel_type"`
 	ChannelName string `json:"channel_name"`
 
-	BaseURL   string `json:"base_url"`
+	BaseURL  string `json:"base_url"`
 	Status   int    `json:"status"`
 	Priority int    `json:"priority"`
 }
 
 type AdminConfigManagedModel struct {
-	PublicID      string          `json:"public_id"`
-	UpstreamModel *string         `json:"upstream_model,omitempty"`
-	OwnedBy       *string         `json:"owned_by,omitempty"`
-	InputUSDPer1M decimal.Decimal `json:"input_usd_per_1m"`
+	PublicID       string          `json:"public_id"`
+	UpstreamModel  *string         `json:"upstream_model,omitempty"`
+	OwnedBy        *string         `json:"owned_by,omitempty"`
+	InputUSDPer1M  decimal.Decimal `json:"input_usd_per_1m"`
 	OutputUSDPer1M decimal.Decimal `json:"output_usd_per_1m"`
-	CacheUSDPer1M decimal.Decimal `json:"cache_usd_per_1m"`
-	Status        int             `json:"status"`
+	CacheUSDPer1M  decimal.Decimal `json:"cache_usd_per_1m"`
+	Status         int             `json:"status"`
 }
 
 type AdminConfigChannelModel struct {
@@ -259,6 +259,29 @@ func (s *Store) ImportAdminConfig(ctx context.Context, in AdminConfigExport) (Ad
 		}
 	}
 
+	stmtUpsertGroup := `
+INSERT INTO channel_groups(name, description, price_multiplier, max_attempts, status, created_at, updated_at)
+VALUES(?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON DUPLICATE KEY UPDATE
+  description=VALUES(description),
+  price_multiplier=VALUES(price_multiplier),
+  max_attempts=VALUES(max_attempts),
+  status=VALUES(status),
+  updated_at=CURRENT_TIMESTAMP
+`
+	if s.dialect == DialectSQLite {
+		stmtUpsertGroup = `
+INSERT INTO channel_groups(name, description, price_multiplier, max_attempts, status, created_at, updated_at)
+VALUES(?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT(name) DO UPDATE SET
+  description=excluded.description,
+  price_multiplier=excluded.price_multiplier,
+  max_attempts=excluded.max_attempts,
+  status=excluded.status,
+  updated_at=CURRENT_TIMESTAMP
+`
+	}
+
 	for _, g := range in.ChannelGroups {
 		name := strings.TrimSpace(g.Name)
 		if name == "" {
@@ -285,16 +308,7 @@ func (s *Store) ImportAdminConfig(ctx context.Context, in AdminConfigExport) (Ad
 			status = 1
 		}
 
-		if _, err := tx.ExecContext(ctx, `
-INSERT INTO channel_groups(name, description, price_multiplier, max_attempts, status, created_at, updated_at)
-VALUES(?, ?, ?, ?, ?, NOW(), NOW())
-ON DUPLICATE KEY UPDATE
-  description=VALUES(description),
-  price_multiplier=VALUES(price_multiplier),
-  max_attempts=VALUES(max_attempts),
-  status=VALUES(status),
-  updated_at=NOW()
-`, name, desc, pm, maxAttempts, status); err != nil {
+		if _, err := tx.ExecContext(ctx, stmtUpsertGroup, name, desc, pm, maxAttempts, status); err != nil {
 			return AdminConfigImportReport{}, fmt.Errorf("导入 channel_groups 失败: %w", err)
 		}
 	}
@@ -408,7 +422,7 @@ ON DUPLICATE KEY UPDATE
 				return 0, fmt.Errorf("遍历 upstream_channels 失败: %w", err)
 			}
 			if len(ids) == 0 {
-				return 0,  sql.ErrNoRows
+				return 0, sql.ErrNoRows
 			}
 			if len(ids) > 1 {
 				return 0, fmt.Errorf("存在多个同名 channel（type=%s, name=%s），请先清理重复记录", typ, name)
@@ -436,7 +450,7 @@ ON DUPLICATE KEY UPDATE
 				}
 				res, err := tx.ExecContext(ctx, `
 INSERT INTO upstream_channels(type, name, `+"`groups`"+`, status, priority, promotion, limit_sessions, limit_rpm, limit_tpm, created_at, updated_at)
-VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, NOW(), NOW())
+VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `, typ, name, ch.Status, ch.Priority, p, nullableIntPtr(ch.LimitSessions), nullableIntPtr(ch.LimitRPM), nullableIntPtr(ch.LimitTPM))
 				if err != nil {
 					return 0, fmt.Errorf("创建 upstream_channel 失败: %w", err)
@@ -458,7 +472,7 @@ UPDATE upstream_channels
 SET name=COALESCE(NULLIF(?, ''), name),
     status=?, priority=?, promotion=?,
     limit_sessions=?, limit_rpm=?, limit_tpm=?,
-    updated_at=NOW()
+    updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, name, ch.Status, ch.Priority, p, nullableIntPtr(ch.LimitSessions), nullableIntPtr(ch.LimitRPM), nullableIntPtr(ch.LimitTPM), id); err != nil {
 				return 0, fmt.Errorf("更新 upstream_channel 失败: %w", err)
@@ -490,6 +504,27 @@ WHERE id=?
 		return id, nil
 	}
 
+	stmtUpsertEndpoint := `
+INSERT INTO upstream_endpoints(channel_id, base_url, status, priority, created_at, updated_at)
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON DUPLICATE KEY UPDATE
+  base_url=VALUES(base_url),
+  status=VALUES(status),
+  priority=VALUES(priority),
+  updated_at=CURRENT_TIMESTAMP
+`
+	if s.dialect == DialectSQLite {
+		stmtUpsertEndpoint = `
+INSERT INTO upstream_endpoints(channel_id, base_url, status, priority, created_at, updated_at)
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT(channel_id) DO UPDATE SET
+  base_url=excluded.base_url,
+  status=excluded.status,
+  priority=excluded.priority,
+  updated_at=CURRENT_TIMESTAMP
+`
+	}
+
 	for _, ep := range in.UpstreamEndpoints {
 		typ := strings.TrimSpace(ep.ChannelType)
 		name := strings.TrimSpace(ep.ChannelName)
@@ -502,17 +537,34 @@ WHERE id=?
 			continue
 		}
 		p := ep.Priority
-		if _, err := tx.ExecContext(ctx, `
-INSERT INTO upstream_endpoints(channel_id, base_url, status, priority, created_at, updated_at)
-VALUES(?, ?, ?, ?, NOW(), NOW())
-ON DUPLICATE KEY UPDATE
-  base_url=VALUES(base_url),
-  status=VALUES(status),
-  priority=VALUES(priority),
-  updated_at=NOW()
-`, channelID, baseURL, ep.Status, p); err != nil {
+		if _, err := tx.ExecContext(ctx, stmtUpsertEndpoint, channelID, baseURL, ep.Status, p); err != nil {
 			return AdminConfigImportReport{}, fmt.Errorf("导入 upstream_endpoints 失败: %w", err)
 		}
+	}
+
+	stmtUpsertManagedModel := `
+INSERT INTO managed_models(public_id, upstream_model, owned_by, input_usd_per_1m, output_usd_per_1m, cache_usd_per_1m, status, created_at)
+VALUES(?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+ON DUPLICATE KEY UPDATE
+  upstream_model=VALUES(upstream_model),
+  owned_by=VALUES(owned_by),
+  input_usd_per_1m=VALUES(input_usd_per_1m),
+  output_usd_per_1m=VALUES(output_usd_per_1m),
+  cache_usd_per_1m=VALUES(cache_usd_per_1m),
+  status=VALUES(status)
+`
+	if s.dialect == DialectSQLite {
+		stmtUpsertManagedModel = `
+INSERT INTO managed_models(public_id, upstream_model, owned_by, input_usd_per_1m, output_usd_per_1m, cache_usd_per_1m, status, created_at)
+VALUES(?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+ON CONFLICT(public_id) DO UPDATE SET
+  upstream_model=excluded.upstream_model,
+  owned_by=excluded.owned_by,
+  input_usd_per_1m=excluded.input_usd_per_1m,
+  output_usd_per_1m=excluded.output_usd_per_1m,
+  cache_usd_per_1m=excluded.cache_usd_per_1m,
+  status=excluded.status
+`
 	}
 
 	for _, m := range in.ManagedModels {
@@ -530,19 +582,28 @@ ON DUPLICATE KEY UPDATE
 		if status != 0 && status != 1 {
 			status = 1
 		}
-		if _, err := tx.ExecContext(ctx, `
-INSERT INTO managed_models(public_id, upstream_model, owned_by, input_usd_per_1m, output_usd_per_1m, cache_usd_per_1m, status, created_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, NOW())
-ON DUPLICATE KEY UPDATE
-  upstream_model=VALUES(upstream_model),
-  owned_by=VALUES(owned_by),
-  input_usd_per_1m=VALUES(input_usd_per_1m),
-  output_usd_per_1m=VALUES(output_usd_per_1m),
-  cache_usd_per_1m=VALUES(cache_usd_per_1m),
-  status=VALUES(status)
-`, publicID, m.UpstreamModel, m.OwnedBy, inUSD, outUSD, cacheUSD, status); err != nil {
+		if _, err := tx.ExecContext(ctx, stmtUpsertManagedModel, publicID, m.UpstreamModel, m.OwnedBy, inUSD, outUSD, cacheUSD, status); err != nil {
 			return AdminConfigImportReport{}, fmt.Errorf("导入 managed_models 失败: %w", err)
 		}
+	}
+
+	stmtUpsertChannelModel := `
+INSERT INTO channel_models(channel_id, public_id, upstream_model, status, created_at, updated_at)
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON DUPLICATE KEY UPDATE
+  upstream_model=VALUES(upstream_model),
+  status=VALUES(status),
+  updated_at=CURRENT_TIMESTAMP
+`
+	if s.dialect == DialectSQLite {
+		stmtUpsertChannelModel = `
+INSERT INTO channel_models(channel_id, public_id, upstream_model, status, created_at, updated_at)
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT(channel_id, public_id) DO UPDATE SET
+  upstream_model=excluded.upstream_model,
+  status=excluded.status,
+  updated_at=CURRENT_TIMESTAMP
+`
 	}
 
 	for _, m := range in.ChannelModels {
@@ -561,16 +622,49 @@ ON DUPLICATE KEY UPDATE
 		if status != 0 && status != 1 {
 			status = 1
 		}
-		if _, err := tx.ExecContext(ctx, `
-INSERT INTO channel_models(channel_id, public_id, upstream_model, status, created_at, updated_at)
-VALUES(?, ?, ?, ?, NOW(), NOW())
-ON DUPLICATE KEY UPDATE
-  upstream_model=VALUES(upstream_model),
-  status=VALUES(status),
-  updated_at=NOW()
-`, channelID, publicID, upstreamModel, status); err != nil {
+		if _, err := tx.ExecContext(ctx, stmtUpsertChannelModel, channelID, publicID, upstreamModel, status); err != nil {
 			return AdminConfigImportReport{}, fmt.Errorf("导入 channel_models 失败: %w", err)
 		}
+	}
+
+	stmtUpsertMemberGroup := `
+INSERT INTO channel_group_members(parent_group_id, member_group_id, member_channel_id, priority, promotion, created_at, updated_at)
+VALUES(?, ?, NULL, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON DUPLICATE KEY UPDATE
+  parent_group_id=VALUES(parent_group_id),
+  priority=VALUES(priority),
+  promotion=VALUES(promotion),
+  updated_at=CURRENT_TIMESTAMP
+`
+	if s.dialect == DialectSQLite {
+		stmtUpsertMemberGroup = `
+INSERT INTO channel_group_members(parent_group_id, member_group_id, member_channel_id, priority, promotion, created_at, updated_at)
+VALUES(?, ?, NULL, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT(member_group_id) DO UPDATE SET
+  parent_group_id=excluded.parent_group_id,
+  priority=excluded.priority,
+  promotion=excluded.promotion,
+  updated_at=CURRENT_TIMESTAMP
+`
+	}
+
+	stmtUpsertMemberChannel := `
+INSERT INTO channel_group_members(parent_group_id, member_group_id, member_channel_id, priority, promotion, created_at, updated_at)
+VALUES(?, NULL, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON DUPLICATE KEY UPDATE
+  priority=VALUES(priority),
+  promotion=VALUES(promotion),
+  updated_at=CURRENT_TIMESTAMP
+`
+	if s.dialect == DialectSQLite {
+		stmtUpsertMemberChannel = `
+INSERT INTO channel_group_members(parent_group_id, member_group_id, member_channel_id, priority, promotion, created_at, updated_at)
+VALUES(?, NULL, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT(parent_group_id, member_channel_id) DO UPDATE SET
+  priority=excluded.priority,
+  promotion=excluded.promotion,
+  updated_at=CURRENT_TIMESTAMP
+`
 	}
 
 	for _, m := range in.ChannelGroupMembers {
@@ -595,15 +689,7 @@ ON DUPLICATE KEY UPDATE
 			if err != nil {
 				return AdminConfigImportReport{}, err
 			}
-			if _, err := tx.ExecContext(ctx, `
-INSERT INTO channel_group_members(parent_group_id, member_group_id, member_channel_id, priority, promotion, created_at, updated_at)
-VALUES(?, ?, NULL, ?, ?, NOW(), NOW())
-ON DUPLICATE KEY UPDATE
-  parent_group_id=VALUES(parent_group_id),
-  priority=VALUES(priority),
-  promotion=VALUES(promotion),
-  updated_at=NOW()
-`, parentID, childID, m.Priority, p); err != nil {
+			if _, err := tx.ExecContext(ctx, stmtUpsertMemberGroup, parentID, childID, m.Priority, p); err != nil {
 				return AdminConfigImportReport{}, fmt.Errorf("导入 channel_group_members(group) 失败: %w", err)
 			}
 		case m.MemberChannelType != nil && m.MemberChannelName != nil && strings.TrimSpace(*m.MemberChannelType) != "" && strings.TrimSpace(*m.MemberChannelName) != "":
@@ -613,14 +699,7 @@ ON DUPLICATE KEY UPDATE
 			if err != nil {
 				return AdminConfigImportReport{}, err
 			}
-			if _, err := tx.ExecContext(ctx, `
-INSERT INTO channel_group_members(parent_group_id, member_group_id, member_channel_id, priority, promotion, created_at, updated_at)
-VALUES(?, NULL, ?, ?, ?, NOW(), NOW())
-ON DUPLICATE KEY UPDATE
-  priority=VALUES(priority),
-  promotion=VALUES(promotion),
-  updated_at=NOW()
-`, parentID, channelID, m.Priority, p); err != nil {
+			if _, err := tx.ExecContext(ctx, stmtUpsertMemberChannel, parentID, channelID, m.Priority, p); err != nil {
 				return AdminConfigImportReport{}, fmt.Errorf("导入 channel_group_members(channel) 失败: %w", err)
 			}
 		default:

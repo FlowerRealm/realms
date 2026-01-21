@@ -49,7 +49,7 @@ func (s *Store) CreateTopupOrder(ctx context.Context, userID int64, amountCNY de
 
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO topup_orders(user_id, amount_cny, credit_usd, status, created_at, updated_at)
-VALUES(?, ?, ?, ?, NOW(), NOW())
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `, o.UserID, o.AmountCNY, o.CreditUSD, o.Status)
 	if err != nil {
 		return TopupOrder{}, fmt.Errorf("创建 topup_order 失败: %w", err)
@@ -254,12 +254,12 @@ func (s *Store) MarkTopupOrderPaid(ctx context.Context, orderID int64, paidMetho
 	var creditUSD decimal.Decimal
 	var status int
 	var existingPaidChannelID sql.NullInt64
-	err = tx.QueryRowContext(ctx, `
+	qOrder := `
 SELECT id, user_id, amount_cny, credit_usd, status, paid_channel_id
 FROM topup_orders
 WHERE id=?
-FOR UPDATE
-`, orderID).Scan(&o.ID, &o.UserID, &amountCNY, &creditUSD, &status, &existingPaidChannelID)
+` + forUpdateClause(s.dialect)
+	err = tx.QueryRowContext(ctx, qOrder, orderID).Scan(&o.ID, &o.UserID, &amountCNY, &creditUSD, &status, &existingPaidChannelID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return errors.New("订单不存在")
@@ -274,7 +274,7 @@ SET paid_at=COALESCE(paid_at, ?),
     paid_method=COALESCE(paid_method, ?),
     paid_ref=COALESCE(paid_ref, ?),
     paid_channel_id=COALESCE(paid_channel_id, ?),
-    updated_at=NOW()
+    updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, paidAt, paidMethod, paidRef, paidChannelID, o.ID); err != nil {
 			return fmt.Errorf("更新订单失败: %w", err)
@@ -302,21 +302,22 @@ WHERE id=?
 
 	if _, err := tx.ExecContext(ctx, `
 UPDATE topup_orders
-SET status=?, paid_at=?, paid_method=?, paid_ref=?, paid_channel_id=?, updated_at=NOW()
+SET status=?, paid_at=?, paid_method=?, paid_ref=?, paid_channel_id=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
-`, TopupOrderStatusPaid, paidAt, paidMethod, paidRef, paidChannelID, o.ID); err != nil {
+	`, TopupOrderStatusPaid, paidAt, paidMethod, paidRef, paidChannelID, o.ID); err != nil {
 		return fmt.Errorf("更新订单失败: %w", err)
 	}
 
-	if _, err := tx.ExecContext(ctx, `
-INSERT IGNORE INTO user_balances(user_id, usd, created_at, updated_at)
-VALUES(?, 0, NOW(), NOW())
-`, o.UserID); err != nil {
+	stmtInitBalance := fmt.Sprintf(`
+%s INTO user_balances(user_id, usd, created_at, updated_at)
+VALUES(?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+`, insertIgnoreVerb(s.dialect))
+	if _, err := tx.ExecContext(ctx, stmtInitBalance, o.UserID); err != nil {
 		return fmt.Errorf("初始化余额失败: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-	UPDATE user_balances
-	SET usd=usd+?, updated_at=NOW()
+		UPDATE user_balances
+	SET usd=usd+?, updated_at=CURRENT_TIMESTAMP
 	WHERE user_id=?
 `, creditUSD, o.UserID); err != nil {
 		return fmt.Errorf("入账失败: %w", err)
@@ -343,12 +344,12 @@ func (s *Store) CancelTopupOrderByUser(ctx context.Context, userID int64, orderI
 	defer func() { _ = tx.Rollback() }()
 
 	var status int
-	if err := tx.QueryRowContext(ctx, `
+	qStatus := `
 SELECT status
 FROM topup_orders
 WHERE id=? AND user_id=?
-FOR UPDATE
-`, orderID, userID).Scan(&status); err != nil {
+` + forUpdateClause(s.dialect)
+	if err := tx.QueryRowContext(ctx, qStatus, orderID, userID).Scan(&status); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return sql.ErrNoRows
 		}
@@ -359,7 +360,7 @@ FOR UPDATE
 	case TopupOrderStatusPending:
 		if _, err := tx.ExecContext(ctx, `
 UPDATE topup_orders
-SET status=?, updated_at=NOW()
+SET status=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=? AND user_id=?
 `, TopupOrderStatusCanceled, orderID, userID); err != nil {
 			return fmt.Errorf("更新订单失败: %w", err)

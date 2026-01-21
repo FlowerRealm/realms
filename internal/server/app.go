@@ -55,6 +55,7 @@ type App struct {
 
 func NewApp(opts AppOptions) (*App, error) {
 	st := store.New(opts.DB)
+	st.SetDialect(store.Dialect(opts.Config.DB.Driver))
 	st.SetAppSettingsDefaults(opts.Config.AppSettingsDefaults)
 
 	sched := scheduler.New(st)

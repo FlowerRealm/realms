@@ -37,4 +37,3 @@ func splitUpstreamChannelGroupsCSV(groupsCSV string) []string {
 	}
 	return out
 }
-

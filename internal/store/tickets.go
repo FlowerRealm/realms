@@ -52,7 +52,7 @@ func (s *Store) CreateTicketWithMessageAndAttachments(ctx context.Context, userI
 
 	res, err := tx.ExecContext(ctx, `
 INSERT INTO tickets(user_id, subject, status, last_message_at, closed_at, created_at, updated_at)
-VALUES(?, ?, ?, NOW(), NULL, NOW(), NOW())
+VALUES(?, ?, ?, CURRENT_TIMESTAMP, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `, userID, subject, TicketStatusOpen)
 	if err != nil {
 		return 0, 0, fmt.Errorf("创建工单失败: %w", err)
@@ -64,7 +64,7 @@ VALUES(?, ?, ?, NOW(), NULL, NOW(), NOW())
 
 	res, err = tx.ExecContext(ctx, `
 INSERT INTO ticket_messages(ticket_id, actor_type, actor_user_id, body, created_at)
-VALUES(?, ?, ?, ?, NOW())
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP)
 `, ticketID, TicketActorTypeUser, userID, body)
 	if err != nil {
 		return 0, 0, fmt.Errorf("创建工单消息失败: %w", err)
@@ -83,7 +83,7 @@ VALUES(?, ?, ?, ?, NOW())
 		}
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO ticket_attachments(ticket_id, message_id, uploader_user_id, original_name, content_type, size_bytes, sha256, storage_rel_path, expires_at, created_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 `, ticketID, messageID, a.UploaderUserID, a.OriginalName, a.ContentType, a.SizeBytes, a.SHA256, a.StorageRelPath, a.ExpiresAt); err != nil {
 			return 0, 0, fmt.Errorf("创建工单附件失败: %w", err)
 		}
@@ -104,7 +104,7 @@ func (s *Store) AddTicketMessageWithAttachments(ctx context.Context, ticketID in
 
 	res, err := tx.ExecContext(ctx, `
 INSERT INTO ticket_messages(ticket_id, actor_type, actor_user_id, body, created_at)
-VALUES(?, ?, ?, ?, NOW())
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP)
 `, ticketID, actorType, actorUserID, body)
 	if err != nil {
 		return 0, fmt.Errorf("创建工单消息失败: %w", err)
@@ -123,7 +123,7 @@ VALUES(?, ?, ?, ?, NOW())
 		}
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO ticket_attachments(ticket_id, message_id, uploader_user_id, original_name, content_type, size_bytes, sha256, storage_rel_path, expires_at, created_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 `, ticketID, messageID, a.UploaderUserID, a.OriginalName, a.ContentType, a.SizeBytes, a.SHA256, a.StorageRelPath, a.ExpiresAt); err != nil {
 			return 0, fmt.Errorf("创建工单附件失败: %w", err)
 		}
@@ -131,7 +131,7 @@ VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
 
 	res, err = tx.ExecContext(ctx, `
 UPDATE tickets
-SET last_message_at=NOW(), updated_at=NOW()
+SET last_message_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, ticketID)
 	if err != nil {
@@ -150,7 +150,7 @@ WHERE id=?
 func (s *Store) CloseTicket(ctx context.Context, ticketID int64) error {
 	res, err := s.db.ExecContext(ctx, `
 UPDATE tickets
-SET status=?, closed_at=NOW(), updated_at=NOW()
+SET status=?, closed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, TicketStatusClosed, ticketID)
 	if err != nil {
@@ -165,7 +165,7 @@ WHERE id=?
 func (s *Store) ReopenTicket(ctx context.Context, ticketID int64) error {
 	res, err := s.db.ExecContext(ctx, `
 UPDATE tickets
-SET status=?, closed_at=NULL, updated_at=NOW()
+SET status=?, closed_at=NULL, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, TicketStatusOpen, ticketID)
 	if err != nil {
@@ -405,7 +405,7 @@ func (s *Store) ListExpiredTicketAttachments(ctx context.Context, limit int) ([]
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, ticket_id, message_id, uploader_user_id, original_name, content_type, size_bytes, sha256, storage_rel_path, expires_at, created_at
 FROM ticket_attachments
-WHERE expires_at < NOW()
+WHERE expires_at < CURRENT_TIMESTAMP
 ORDER BY expires_at ASC
 LIMIT ?
 `, limit)

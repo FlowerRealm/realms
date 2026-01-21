@@ -146,7 +146,7 @@ func (s *Store) ReplaceUserGroups(ctx context.Context, userID int64, groups []st
 		return fmt.Errorf("清理 user_groups 失败: %w", err)
 	}
 
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO user_groups(user_id, group_name, created_at) VALUES(?, ?, NOW())`)
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO user_groups(user_id, group_name, created_at) VALUES(?, ?, CURRENT_TIMESTAMP)`)
 	if err != nil {
 		return fmt.Errorf("准备写入 user_groups 失败: %w", err)
 	}
