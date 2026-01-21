@@ -64,11 +64,20 @@ Realms 本身不自带可用上游，启动后请先完成一次上游配置，�
 - OpenAI 兼容上游：创建 Channel → 配置 Endpoint 的 `base_url` → 添加 API Key（示例写 `sk-***`）
 - Codex OAuth 上游：创建 Channel → 发起 OAuth 授权并导入账号（如遇 `redirect_uri` 回跳端口问题，按后台提示走“复制回调 URL 粘贴完成授权”的兜底流程）
 
-### 4. 创建数据面 Token（给客户端用）
+### 4. 配置模型（默认必须）
+
+默认情况下，数据面只允许使用“已启用且已绑定到可用渠道”的模型。你需要：
+
+1) 在管理后台的模型目录（`/admin/models`）添加并启用一个模型（例如 `gpt-4.1-mini`）  
+2) 在渠道的模型绑定页（`/admin/channels/{channel_id}/models`）把该模型绑定到你的 Channel（必要时配置 alias/upstream_model）
+
+> 自用模式下如果你只想“原样透传 model”，可以在「系统设置」开启 `feature_disable_models=true` 进入 model passthrough（会关闭 `GET /v1/models`；部分客户端可能依赖该接口）。
+
+### 5. 创建数据面 Token（给客户端用）
 
 登录后在控制台的 `API 令牌` 页面（`/tokens`）创建数据面令牌（`rlm_...`）。令牌明文只在创建/重新生成时展示一次，请妥善保存。
 
-### 5. 用 curl 测试（OpenAI 兼容）
+### 6. 用 curl 测试（OpenAI 兼容）
 
 ```bash
 curl "http://localhost:8080/v1/responses" \
