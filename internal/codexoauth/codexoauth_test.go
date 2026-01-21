@@ -5,14 +5,22 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
 	"realms/internal/config"
 )
+
+type roundTripperFunc func(r *http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
 
 func TestNewPKCE(t *testing.T) {
 	verifier, challenge, err := NewPKCE()
@@ -331,6 +339,86 @@ func TestClientFetchQuota(t *testing.T) {
 		}
 		if se.StatusCode != http.StatusUnauthorized {
 			t.Fatalf("StatusCode = %d, want %d", se.StatusCode, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("retry_on_eof", func(t *testing.T) {
+		calls := 0
+		c := NewClient(config.CodexOAuthConfig{TokenURL: "http://example.com", ClientID: "app_test"})
+		c.http.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			calls++
+			if r.Method != http.MethodGet {
+				t.Fatalf("method = %s, want GET", r.Method)
+			}
+			if r.URL.Path != "/api/codex/usage" {
+				t.Fatalf("path = %q, want %q", r.URL.Path, "/api/codex/usage")
+			}
+			if got := r.Header.Get("Authorization"); got != "Bearer at" {
+				t.Fatalf("Authorization = %q, want %q", got, "Bearer at")
+			}
+			if got := r.Header.Get("Accept"); got != "application/json" {
+				t.Fatalf("Accept = %q, want %q", got, "application/json")
+			}
+			if got := r.Header.Get("Chatgpt-Account-Id"); got != "user-123" {
+				t.Fatalf("Chatgpt-Account-Id = %q, want %q", got, "user-123")
+			}
+			if calls == 1 {
+				return nil, io.EOF
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"plan_type":"plus"}`)),
+			}, nil
+		})
+
+		out, err := c.FetchQuota(context.Background(), "https://example.com", "at", "user-123")
+		if err != nil {
+			t.Fatalf("FetchQuota: %v", err)
+		}
+		if calls != 2 {
+			t.Fatalf("calls = %d, want 2", calls)
+		}
+		if out.PlanType != "plus" {
+			t.Fatalf("PlanType = %q, want %q", out.PlanType, "plus")
+		}
+	})
+
+	t.Run("fallback_backend_api", func(t *testing.T) {
+		calls := 0
+		c := NewClient(config.CodexOAuthConfig{TokenURL: "http://example.com", ClientID: "app_test"})
+		c.http.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			calls++
+			switch calls {
+			case 1, 2:
+				if r.URL.Path != "/backend-api/wham/usage" {
+					t.Fatalf("path = %q, want %q", r.URL.Path, "/backend-api/wham/usage")
+				}
+				return nil, io.EOF
+			case 3:
+				if r.URL.Path != "/backend-api/codex/usage" {
+					t.Fatalf("path = %q, want %q", r.URL.Path, "/backend-api/codex/usage")
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"plan_type":"plus"}`)),
+				}, nil
+			default:
+				t.Fatalf("unexpected call %d, path=%q", calls, r.URL.Path)
+				return nil, nil
+			}
+		})
+
+		out, err := c.FetchQuota(context.Background(), "https://example.com/backend-api/codex", "at", "user-123")
+		if err != nil {
+			t.Fatalf("FetchQuota: %v", err)
+		}
+		if calls != 3 {
+			t.Fatalf("calls = %d, want 3", calls)
+		}
+		if out.PlanType != "plus" {
+			t.Fatalf("PlanType = %q, want %q", out.PlanType, "plus")
 		}
 	})
 }

@@ -61,6 +61,7 @@ func (f *fakeChannelTestStore) UpdateUpstreamChannelTest(_ context.Context, chan
 
 type fakeUpstreamDoer struct {
 	gotSel    scheduler.Selection
+	gotSels   []scheduler.Selection
 	gotPath   string
 	gotBodies []map[string]any
 
@@ -70,10 +71,18 @@ type fakeUpstreamDoer struct {
 		header http.Header
 		err    error
 	}
+
+	respByCredential map[int64]struct {
+		status int
+		body   string
+		header http.Header
+		err    error
+	}
 }
 
 func (d *fakeUpstreamDoer) Do(_ context.Context, sel scheduler.Selection, downstream *http.Request, body []byte) (*http.Response, error) {
 	d.gotSel = sel
+	d.gotSels = append(d.gotSels, sel)
 	if downstream != nil && downstream.URL != nil {
 		d.gotPath = downstream.URL.Path
 	}
@@ -82,6 +91,24 @@ func (d *fakeUpstreamDoer) Do(_ context.Context, sel scheduler.Selection, downst
 	d.gotBodies = append(d.gotBodies, got)
 
 	model, _ := got["model"].(string)
+	if d.respByCredential != nil {
+		if resp, ok := d.respByCredential[sel.CredentialID]; ok {
+			if resp.err != nil {
+				return nil, resp.err
+			}
+			h := make(http.Header)
+			for k, vs := range resp.header {
+				for _, v := range vs {
+					h.Add(k, v)
+				}
+			}
+			return &http.Response{
+				StatusCode: resp.status,
+				Body:       io.NopCloser(strings.NewReader(resp.body)),
+				Header:     h,
+			}, nil
+		}
+	}
 	if d.respByModel != nil {
 		if resp, ok := d.respByModel[model]; ok {
 			if resp.err != nil {
@@ -158,6 +185,51 @@ func TestRunChannelTest_OpenAI_OK(t *testing.T) {
 		t.Fatalf("missing max_output_tokens")
 	}
 	if len(st.updates) != 1 || st.updates[0].channelID != 1 || !st.updates[0].ok || st.updates[0].latencyMS < 0 {
+		t.Fatalf("unexpected updates: %+v", st.updates)
+	}
+}
+
+func TestRunChannelTest_CodexOAuth_FailoverNextAccount(t *testing.T) {
+	st := &fakeChannelTestStore{
+		endpointsByChannel: map[int64][]store.UpstreamEndpoint{
+			2: {store.UpstreamEndpoint{ID: 20, ChannelID: 2, BaseURL: "https://chatgpt.com/backend-api/codex", Status: 1, Priority: 0}},
+		},
+		accsByEndpoint: map[int64][]store.CodexOAuthAccount{
+			20: {
+				store.CodexOAuthAccount{ID: 201, EndpointID: 20, Status: 1},
+				store.CodexOAuthAccount{ID: 200, EndpointID: 20, Status: 1},
+			},
+		},
+	}
+	doer := &fakeUpstreamDoer{
+		respByCredential: map[int64]struct {
+			status int
+			body   string
+			header http.Header
+			err    error
+		}{
+			201: {status: http.StatusUnauthorized, header: http.Header{"Content-Type": []string{"application/json"}}, body: "{\"error\":{\"message\":\"invalid token\"}}"},
+			200: {status: http.StatusOK, header: http.Header{"Content-Type": []string{"text/event-stream"}}, body: "data: {\"type\":\"response.output_text.delta\",\"delta\":\"pong\"}\n\ndata: [DONE]\n\n"},
+		},
+	}
+
+	msg, err := runChannelTest(context.Background(), st, doer, store.UpstreamChannel{ID: 2, Type: store.UpstreamTypeCodexOAuth}, nil)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if strings.TrimSpace(msg) == "" {
+		t.Fatalf("expected non-empty message")
+	}
+	if len(doer.gotSels) != 2 {
+		t.Fatalf("expected 2 calls (failover), got %d", len(doer.gotSels))
+	}
+	if doer.gotSels[0].CredentialType != scheduler.CredentialTypeCodex || doer.gotSels[0].CredentialID != 201 {
+		t.Fatalf("unexpected first selection: %+v", doer.gotSels[0])
+	}
+	if doer.gotSels[1].CredentialType != scheduler.CredentialTypeCodex || doer.gotSels[1].CredentialID != 200 {
+		t.Fatalf("unexpected second selection: %+v", doer.gotSels[1])
+	}
+	if len(st.updates) != 1 || st.updates[0].channelID != 2 || !st.updates[0].ok || st.updates[0].latencyMS < 0 {
 		t.Fatalf("unexpected updates: %+v", st.updates)
 	}
 }

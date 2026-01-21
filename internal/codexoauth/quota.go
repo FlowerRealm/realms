@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -72,37 +73,75 @@ func (c *Client) FetchQuota(ctx context.Context, baseURL string, accessToken str
 	if strings.TrimSpace(accessToken) == "" {
 		return Quota{}, errors.New("access_token 为空")
 	}
-	usageURL, err := CodexUsageURL(baseURL)
+	usageURLs, err := codexUsageURLCandidates(baseURL)
 	if err != nil {
 		return Quota{}, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, usageURL, nil)
-	if err != nil {
-		return Quota{}, err
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(accessToken))
-	req.Header.Set("User-Agent", "codex_cli_rs/0.50.0 (Mac OS 26.0.1; arm64) Apple_Terminal/464")
-	req.Header.Set("Originator", "codex_cli_rs")
-	if strings.TrimSpace(accountID) != "" {
-		req.Header.Set("Chatgpt-Account-Id", strings.TrimSpace(accountID))
 	}
 
 	hc := *c.http
 	hc.CheckRedirect = func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }
-	resp, err := hc.Do(req)
-	if err != nil {
-		return Quota{}, err
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		msg := strings.TrimSpace(string(body))
-		if len(msg) > 200 {
-			msg = msg[:200] + "..."
+	var lastErr error
+	var resp *http.Response
+	var body []byte
+	for _, usageURL := range usageURLs {
+		resp = nil
+		body = nil
+		lastErr = nil
+
+		for attempt := 0; attempt < 2; attempt++ {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, usageURL, nil)
+			if err != nil {
+				return Quota{}, err
+			}
+			req.Close = true
+			req.Header.Set("Accept", "application/json")
+			req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(accessToken))
+			if strings.TrimSpace(accountID) != "" {
+				req.Header.Set("Chatgpt-Account-Id", strings.TrimSpace(accountID))
+			}
+
+			resp, err = hc.Do(req)
+			if err != nil {
+				lastErr = err
+				if attempt == 0 && ctx.Err() == nil && isRetryableQuotaFetchError(err) {
+					continue
+				}
+				break
+			}
+
+			body, err = io.ReadAll(io.LimitReader(resp.Body, 256<<10))
+			_ = resp.Body.Close()
+			if err != nil {
+				lastErr = fmt.Errorf("读取 codex usage 响应失败: %w", err)
+				if attempt == 0 && ctx.Err() == nil && isRetryableQuotaFetchError(err) {
+					continue
+				}
+				break
+			}
+			break
 		}
-		return Quota{}, &HTTPStatusError{StatusCode: resp.StatusCode, BodySnippet: msg}
+
+		if resp == nil {
+			continue
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			msg := strings.TrimSpace(string(body))
+			if len(msg) > 200 {
+				msg = msg[:200] + "..."
+			}
+			lastErr = &HTTPStatusError{StatusCode: resp.StatusCode, BodySnippet: msg}
+			continue
+		}
+		lastErr = nil
+		break
+	}
+
+	if lastErr != nil {
+		return Quota{}, lastErr
+	}
+	if resp == nil {
+		return Quota{}, errors.New("codex usage 请求失败")
 	}
 
 	var parsed struct {
@@ -164,4 +203,75 @@ func (c *Client) FetchQuota(ctx context.Context, baseURL string, accessToken str
 	}
 
 	return out, nil
+}
+
+func codexUsageURLCandidates(baseURL string) ([]string, error) {
+	primary, err := CodexUsageURL(baseURL)
+	if err != nil {
+		return nil, err
+	}
+	out := []string{primary}
+
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return out, nil
+	}
+	u.RawQuery = ""
+	u.Fragment = ""
+	hasBackendAPI := strings.Contains(u.Path, "/backend-api")
+	if !hasBackendAPI {
+		return out, nil
+	}
+
+	origin := *u
+	origin.Path = ""
+	origin.RawQuery = ""
+	origin.Fragment = ""
+	backend := *u
+	backend.Path = strings.TrimRight(backend.Path, "/")
+	if idx := strings.Index(backend.Path, "/backend-api"); idx >= 0 {
+		backend.Path = backend.Path[:idx+len("/backend-api")]
+	}
+	if alt, err := url.JoinPath(backend.String(), "codex", "usage"); err == nil && alt != "" && alt != primary {
+		out = append(out, alt)
+	}
+	if alt, err := url.JoinPath(origin.String(), "api", "codex", "usage"); err == nil && alt != "" && alt != primary {
+		out = append(out, alt)
+	}
+
+	seen := make(map[string]struct{}, len(out))
+	deduped := make([]string, 0, len(out))
+	for _, u := range out {
+		if _, ok := seen[u]; ok {
+			continue
+		}
+		seen[u] = struct{}{}
+		deduped = append(deduped, u)
+	}
+	return deduped, nil
+}
+
+func isRetryableQuotaFetchError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var ne net.Error
+	if errors.As(err, &ne) {
+		return ne.Timeout() || ne.Temporary()
+	}
+	// 兼容极少数场景：HTTP/2/代理在握手阶段提前断开，net/http 可能包成字符串错误。
+	if strings.Contains(err.Error(), "TLS handshake timeout") {
+		return true
+	}
+	var oe *net.OpError
+	if errors.As(err, &oe) && oe != nil && oe.Op == "dial" {
+		return true
+	}
+	return false
 }

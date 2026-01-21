@@ -148,7 +148,7 @@ func runChannelTest(ctx context.Context, st channelTestStore, exec UpstreamDoer,
 	defer cancel()
 
 	start := time.Now()
-	sel, err := selectChannelTestSelection(ctx, st, ch, start)
+	sels, err := listChannelTestSelections(ctx, st, ch, start)
 	if err != nil {
 		if upErr := st.UpdateUpstreamChannelTest(ctx, ch.ID, false, 0); upErr != nil {
 			return "", upErr
@@ -159,9 +159,12 @@ func runChannelTest(ctx context.Context, st channelTestStore, exec UpstreamDoer,
 	results := make([]channelTestResult, 0, len(candidates))
 	for _, cm := range candidates {
 		perCtx, perCancel := context.WithTimeout(ctx, 20*time.Second)
-		res := runSingleModelSSETest(perCtx, exec, sel, cm.PublicID, cm.UpstreamModel)
+		res, used := runSingleModelSSETestWithFailover(perCtx, exec, sels, cm.PublicID, cm.UpstreamModel)
 		perCancel()
 		results = append(results, res)
+		if res.OK && used > 0 && used < len(sels) {
+			sels[0], sels[used] = sels[used], sels[0]
+		}
 	}
 
 	ok, latencyMS := summarizeChannelTestResults(results, auto)
@@ -244,7 +247,32 @@ func gatherChannelTestModels(ctx context.Context, st channelTestStore, ch store.
 	return []channelTestModel{{PublicID: m, UpstreamModel: m}}, true, nil
 }
 
-func runSingleModelSSETest(ctx context.Context, exec UpstreamDoer, sel scheduler.Selection, publicID string, upstreamModel string) channelTestResult {
+func runSingleModelSSETestWithFailover(ctx context.Context, exec UpstreamDoer, sels []scheduler.Selection, publicID string, upstreamModel string) (channelTestResult, int) {
+	r := channelTestResult{PublicID: publicID, UpstreamModel: upstreamModel}
+	if len(sels) == 0 {
+		r.Err = "未找到可用上游 credential/account"
+		return r, -1
+	}
+
+	lastUsed := -1
+	for i, sel := range sels {
+		lastUsed = i
+		out, retryable := runSingleModelSSETest(ctx, exec, sel, publicID, upstreamModel)
+		if out.OK {
+			return out, i
+		}
+		r = out
+		if !retryable {
+			return out, i
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return r, lastUsed
+}
+
+func runSingleModelSSETest(ctx context.Context, exec UpstreamDoer, sel scheduler.Selection, publicID string, upstreamModel string) (channelTestResult, bool) {
 	start := time.Now()
 	r := channelTestResult{PublicID: publicID, UpstreamModel: upstreamModel}
 
@@ -257,7 +285,7 @@ func runSingleModelSSETest(ctx context.Context, exec UpstreamDoer, sel scheduler
 	body, err := json.Marshal(payload)
 	if err != nil {
 		r.Err = "构造测试请求失败"
-		return r
+		return r, false
 	}
 
 	downstream, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://localhost/v1/responses", http.NoBody)
@@ -268,7 +296,7 @@ func runSingleModelSSETest(ctx context.Context, exec UpstreamDoer, sel scheduler
 	if err != nil {
 		r.TTFTMS = int(time.Since(start).Milliseconds())
 		r.Err = "请求上游失败"
-		return r
+		return r, true
 	}
 	defer resp.Body.Close()
 
@@ -283,7 +311,7 @@ func runSingleModelSSETest(ctx context.Context, exec UpstreamDoer, sel scheduler
 		} else {
 			r.Err = fmt.Sprintf("上游状态码 %d", resp.StatusCode)
 		}
-		return r
+		return r, isRetriableTestStatus(resp.StatusCode)
 	}
 	prefix := newCappedBuffer(256 << 10)
 	ttftMS, sample, err := readSSESample(io.TeeReader(resp.Body, prefix), start)
@@ -295,7 +323,7 @@ func runSingleModelSSETest(ctx context.Context, exec UpstreamDoer, sel scheduler
 	r.Sample = sample
 	if err != nil {
 		r.Err = err.Error()
-		return r
+		return r, true
 	}
 	if strings.TrimSpace(sample) == "" {
 		// 某些上游会返回 SSE 事件体但缺少 Content-Type 头；这里优先按内容尝试解析，解析不到再按 header 判定错误原因。
@@ -305,13 +333,13 @@ func runSingleModelSSETest(ctx context.Context, exec UpstreamDoer, sel scheduler
 			} else {
 				r.Err = fmt.Sprintf("未返回 SSE（Content-Type=%q）", contentType)
 			}
-			return r
+			return r, true
 		}
 		r.Err = "SSE 未收到有效输出"
-		return r
+		return r, true
 	}
 	r.OK = true
-	return r
+	return r, false
 }
 
 func summarizeChannelTestResults(results []channelTestResult, auto bool) (bool, int) {
@@ -582,11 +610,12 @@ func defaultTestModel(channelType string) string {
 	}
 }
 
-func selectChannelTestSelection(ctx context.Context, st channelTestStore, ch store.UpstreamChannel, now time.Time) (scheduler.Selection, error) {
+func listChannelTestSelections(ctx context.Context, st channelTestStore, ch store.UpstreamChannel, now time.Time) ([]scheduler.Selection, error) {
 	endpoints, err := st.ListUpstreamEndpointsByChannel(ctx, ch.ID)
 	if err != nil {
-		return scheduler.Selection{}, err
+		return nil, err
 	}
+	var sels []scheduler.Selection
 	for _, ep := range endpoints {
 		if ep.Status != 1 {
 			continue
@@ -596,25 +625,25 @@ func selectChannelTestSelection(ctx context.Context, st channelTestStore, ch sto
 		case store.UpstreamTypeOpenAICompatible:
 			creds, err := st.ListOpenAICompatibleCredentialsByEndpoint(ctx, ep.ID)
 			if err != nil {
-				return scheduler.Selection{}, err
+				return nil, err
 			}
 			for _, c := range creds {
 				if c.Status != 1 {
 					continue
 				}
-				return scheduler.Selection{
+				sels = append(sels, scheduler.Selection{
 					ChannelID:      ch.ID,
 					ChannelType:    ch.Type,
 					EndpointID:     ep.ID,
 					BaseURL:        ep.BaseURL,
 					CredentialType: scheduler.CredentialTypeOpenAI,
 					CredentialID:   c.ID,
-				}, nil
+				})
 			}
 		case store.UpstreamTypeCodexOAuth:
 			accs, err := st.ListCodexOAuthAccountsByEndpoint(ctx, ep.ID)
 			if err != nil {
-				return scheduler.Selection{}, err
+				return nil, err
 			}
 			for _, a := range accs {
 				if a.Status != 1 {
@@ -623,20 +652,31 @@ func selectChannelTestSelection(ctx context.Context, st channelTestStore, ch sto
 				if a.CooldownUntil != nil && now.Before(*a.CooldownUntil) {
 					continue
 				}
-				return scheduler.Selection{
+				sels = append(sels, scheduler.Selection{
 					ChannelID:      ch.ID,
 					ChannelType:    ch.Type,
 					EndpointID:     ep.ID,
 					BaseURL:        ep.BaseURL,
 					CredentialType: scheduler.CredentialTypeCodex,
 					CredentialID:   a.ID,
-				}, nil
+				})
 			}
 		default:
-			return scheduler.Selection{}, fmt.Errorf("不支持的 channel type: %s", ch.Type)
+			return nil, fmt.Errorf("不支持的 channel type: %s", ch.Type)
 		}
 	}
-	return scheduler.Selection{}, fmt.Errorf("未找到可用 endpoint/credential")
+	if len(sels) == 0 {
+		return nil, fmt.Errorf("未找到可用 endpoint/credential")
+	}
+	return sels, nil
+}
+
+func selectChannelTestSelection(ctx context.Context, st channelTestStore, ch store.UpstreamChannel, now time.Time) (scheduler.Selection, error) {
+	sels, err := listChannelTestSelections(ctx, st, ch, now)
+	if err != nil {
+		return scheduler.Selection{}, err
+	}
+	return sels[0], nil
 }
 
 func summarizeUpstreamErrorBody(b []byte) string {
@@ -673,4 +713,19 @@ func trimSummary(s string) string {
 		s = s[:200] + "..."
 	}
 	return s
+}
+
+func isRetriableTestStatus(code int) bool {
+	switch code {
+	case http.StatusTooManyRequests, http.StatusRequestTimeout, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden:
+		// 很多场景是凭据失效/配额/余额问题，切换 key/账号有意义。
+		return true
+	default:
+		if code >= 500 {
+			return true
+		}
+		return false
+	}
 }
