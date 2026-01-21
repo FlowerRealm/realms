@@ -289,62 +289,19 @@
             </div>
         </div>
 
-        <div class="row g-4">
-            <!-- EPay -->
-            <div class="col-lg-6">
-                <div class="card border-0 shadow-sm h-100">
-                     <div class="card-header bg-transparent border-0 pt-3 d-flex align-items-center justify-content-between">
-                        <h5 class="card-title fw-semibold mb-0">EPay (易支付)</h5>
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" role="switch" id="paymentEPayEnable" name="payment_epay_enable" value="1" {{if .PaymentEPayEnable}}checked{{end}}>
-                        </div>
-                    </div>
-                    <div class="card-body pt-0">
-                        <div class="mb-3">
-                            <label class="form-label fw-medium">Gateway</label>
-                            <input name="payment_epay_gateway" type="text" class="form-control" value="{{.PaymentEPayGateway}}" placeholder="https://epay.example.com" />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label fw-medium">Partner ID</label>
-                            <input name="payment_epay_partner_id" type="text" class="form-control" value="{{.PaymentEPayPartnerID}}" placeholder="10001" />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label fw-medium">Key</label>
-                            <input name="payment_epay_key" type="password" class="form-control" placeholder="留空保持不变" autocomplete="new-password" />
-                            <div class="form-text small text-muted">当前：{{if .PaymentEPayKeySet}}已设置{{else}}未设置{{end}}</div>
-                        </div>
-                    </div>
-                </div>
+        <div class="card border-0 shadow-sm mb-0">
+          <div class="card-header bg-transparent border-0 pt-3 d-flex align-items-center justify-content-between">
+            <div>
+              <h5 class="card-title fw-semibold mb-0">支付渠道</h5>
+              <div class="card-subtitle text-muted small">
+                支付配置以“渠道”为最小单位管理；如需配置 Stripe/EPay，请前往支付渠道页面。
+              </div>
             </div>
-
-            <!-- Stripe -->
-            <div class="col-lg-6">
-                <div class="card border-0 shadow-sm h-100">
-                    <div class="card-header bg-transparent border-0 pt-3 d-flex align-items-center justify-content-between">
-                        <h5 class="card-title fw-semibold mb-0">Stripe</h5>
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" role="switch" id="paymentStripeEnable" name="payment_stripe_enable" value="1" {{if .PaymentStripeEnable}}checked{{end}}>
-                        </div>
-                    </div>
-                    <div class="card-body pt-0">
-                        <div class="mb-3">
-                            <label class="form-label fw-medium">Currency</label>
-                            <input name="payment_stripe_currency" type="text" class="form-control" value="{{.PaymentStripeCurrency}}" placeholder="cny" />
-                        </div>
-                         <div class="mb-3">
-                            <label class="form-label fw-medium">Secret Key</label>
-                            <input name="payment_stripe_secret_key" type="password" class="form-control" placeholder="留空保持不变" autocomplete="new-password" />
-                            <div class="form-text small text-muted">当前：{{if .PaymentStripeSecretKeySet}}已设置{{else}}未设置{{end}}</div>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label fw-medium">Webhook Secret</label>
-                            <input name="payment_stripe_webhook_secret" type="password" class="form-control" placeholder="留空保持不变" autocomplete="new-password" />
-                            <div class="form-text small text-muted">当前：{{if .PaymentStripeWebhookSecretSet}}已设置{{else}}未设置{{end}}</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-	        </div>
+            <a class="btn btn-sm btn-primary" href="/admin/settings/payment-channels">
+              <i class="ri-bank-card-line me-1"></i> 管理支付渠道
+            </a>
+          </div>
+        </div>
 	    </div>
       {{end}}
 	  </div>

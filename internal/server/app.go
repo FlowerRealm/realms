@@ -414,9 +414,27 @@ func (a *App) routes() {
 		a.mux.Handle("GET /admin/orders", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.Orders)))
 		a.mux.Handle("POST /admin/orders/{order_id}/approve", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.ApproveSubscriptionOrder)))
 		a.mux.Handle("POST /admin/orders/{order_id}/reject", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.RejectSubscriptionOrder)))
-		a.mux.Handle("GET /admin/payment-channels", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.PaymentChannels)))
+		a.mux.Handle("GET /admin/settings/payment-channels", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.PaymentChannels)))
+		a.mux.Handle("POST /admin/settings/payment-channels", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.CreatePaymentChannel)))
+		a.mux.Handle("GET /admin/settings/payment-channels/{payment_channel_id}", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.PaymentChannel)))
+		a.mux.Handle("POST /admin/settings/payment-channels/{payment_channel_id}", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.UpdatePaymentChannel)))
+		a.mux.Handle("POST /admin/settings/payment-channels/{payment_channel_id}/delete", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.DeletePaymentChannel)))
+
+		a.mux.Handle("GET /admin/payment-channels", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			target := "/admin/settings/payment-channels"
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, target, http.StatusFound)
+		})))
 		a.mux.Handle("POST /admin/payment-channels", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.CreatePaymentChannel)))
-		a.mux.Handle("GET /admin/payment-channels/{payment_channel_id}", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.PaymentChannel)))
+		a.mux.Handle("GET /admin/payment-channels/{payment_channel_id}", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			target := "/admin/settings/payment-channels/" + strings.TrimSpace(r.PathValue("payment_channel_id"))
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, target, http.StatusFound)
+		})))
 		a.mux.Handle("POST /admin/payment-channels/{payment_channel_id}", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.UpdatePaymentChannel)))
 		a.mux.Handle("POST /admin/payment-channels/{payment_channel_id}/delete", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.DeletePaymentChannel)))
 	}

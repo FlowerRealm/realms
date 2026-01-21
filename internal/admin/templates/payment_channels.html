@@ -1,6 +1,11 @@
 {{define "admin_payment_channels"}}
 <div class="d-flex justify-content-between align-items-center mb-4">
   <div>
+    <div class="text-muted small mb-1">
+      <a class="text-muted" href="/admin/settings"><i class="ri-arrow-left-line me-1"></i>系统设置</a>
+      <span class="mx-1">/</span>
+      <span>支付渠道</span>
+    </div>
     <h2 class="h4 fw-bold mb-1">支付渠道</h2>
     <p class="text-muted small mb-0">以“渠道”为最小单位管理支付配置；每个渠道绑定一个类型并拥有独立配置。</p>
   </div>
@@ -74,10 +79,10 @@
             </td>
             <td class="text-end pe-3">
               <div class="d-inline-flex gap-1">
-                <a class="btn btn-sm btn-light border text-primary" href="/admin/payment-channels/{{.ID}}" title="配置详情">
+                <a class="btn btn-sm btn-light border text-primary" href="/admin/settings/payment-channels/{{.ID}}" title="配置详情">
                   <i class="ri-settings-3-line"></i>
                 </a>
-                <form method="POST" action="/admin/payment-channels/{{.ID}}/delete" data-ajax="1" data-ajax-reload="1" class="d-inline">
+                <form method="POST" action="/admin/settings/payment-channels/{{.ID}}/delete" data-ajax="1" data-ajax-reload="1" class="d-inline">
                   <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
                   <button type="submit" class="btn btn-sm btn-light border text-danger" title="删除渠道" onclick="return confirm('确认删除支付渠道 {{.Name}}? 此操作不可撤销。');">
                     <i class="ri-delete-bin-line"></i>
@@ -107,7 +112,7 @@
         <h5 class="modal-title fw-bold">新建支付渠道</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
       </div>
-      <form method="POST" action="/admin/payment-channels" data-ajax="1" data-ajax-reload="1">
+      <form method="POST" action="/admin/settings/payment-channels" data-ajax="1" data-ajax-reload="1">
         <div class="modal-body">
           <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
           

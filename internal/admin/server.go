@@ -254,7 +254,7 @@ func featureBanGroups(selfMode bool, fs store.FeatureState) []featureBanGroupVie
 		{
 			Title: "计费与支付",
 			Items: []featureBanItemView{
-				b(store.SettingFeatureDisableBilling, "订阅/充值/支付", "隐藏入口，并对 /subscription、/topup、/pay、/admin/subscriptions|orders|payment-channels 及支付回调返回 404；同时数据面进入 free mode（不校验订阅/余额）。", fs.BillingDisabled, selfMode, false),
+				b(store.SettingFeatureDisableBilling, "订阅/充值/支付", "隐藏入口，并对 /subscription、/topup、/pay、/admin/subscriptions|orders|payment-channels|settings/payment-channels 及支付回调返回 404；同时数据面进入 free mode（不校验订阅/余额）。", fs.BillingDisabled, selfMode, false),
 			},
 		},
 		{
@@ -1248,67 +1248,22 @@ func (s *Server) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		epayEnable := strings.TrimSpace(r.FormValue("payment_epay_enable")) != ""
-		if epayEnable == s.paymentDefault.EPay.Enable {
-			if err := s.st.DeleteAppSetting(ctx, store.SettingPaymentEPayEnable); err != nil {
-				if isAjax(r) {
-					ajaxError(w, http.StatusInternalServerError, "保存失败")
-					return
-				}
-				http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
-				return
-			}
-		} else if err := s.st.UpsertBoolAppSetting(ctx, store.SettingPaymentEPayEnable, epayEnable); err != nil {
-			if isAjax(r) {
-				ajaxError(w, http.StatusInternalServerError, "保存失败")
-				return
-			}
-			http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
-			return
-		}
-
-		epayGateway := strings.TrimSpace(r.FormValue("payment_epay_gateway"))
-		if epayGateway == "" || epayGateway == strings.TrimSpace(s.paymentDefault.EPay.Gateway) {
-			if err := s.st.DeleteAppSetting(ctx, store.SettingPaymentEPayGateway); err != nil {
-				if isAjax(r) {
-					ajaxError(w, http.StatusInternalServerError, "保存失败")
-					return
-				}
-				http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
-				return
-			}
-		} else if err := s.st.UpsertStringAppSetting(ctx, store.SettingPaymentEPayGateway, epayGateway); err != nil {
-			if isAjax(r) {
-				ajaxError(w, http.StatusInternalServerError, "保存失败")
-				return
-			}
-			http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
-			return
-		}
-
-		epayPartnerID := strings.TrimSpace(r.FormValue("payment_epay_partner_id"))
-		if epayPartnerID == "" || epayPartnerID == strings.TrimSpace(s.paymentDefault.EPay.PartnerID) {
-			if err := s.st.DeleteAppSetting(ctx, store.SettingPaymentEPayPartnerID); err != nil {
-				if isAjax(r) {
-					ajaxError(w, http.StatusInternalServerError, "保存失败")
-					return
-				}
-				http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
-				return
-			}
-		} else if err := s.st.UpsertStringAppSetting(ctx, store.SettingPaymentEPayPartnerID, epayPartnerID); err != nil {
-			if isAjax(r) {
-				ajaxError(w, http.StatusInternalServerError, "保存失败")
-				return
-			}
-			http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
-			return
-		}
-
-		epayKey := strings.TrimSpace(r.FormValue("payment_epay_key"))
-		if epayKey != "" {
-			if epayKey == strings.TrimSpace(s.paymentDefault.EPay.Key) {
-				if err := s.st.DeleteAppSetting(ctx, store.SettingPaymentEPayKey); err != nil {
+		// 支付渠道配置已迁移到独立页面（/admin/settings/payment-channels）。
+		// 这里保留旧字段的写入逻辑，但仅在表单显式提交这些字段时才处理，
+		// 避免在“系统设置”保存/自动保存时误清空旧支付配置。
+		_, hasPaymentEPayGateway := r.PostForm["payment_epay_gateway"]
+		_, hasPaymentEPayPartnerID := r.PostForm["payment_epay_partner_id"]
+		_, hasPaymentEPayKey := r.PostForm["payment_epay_key"]
+		_, hasPaymentEPayEnable := r.PostForm["payment_epay_enable"]
+		_, hasPaymentStripeCurrency := r.PostForm["payment_stripe_currency"]
+		_, hasPaymentStripeSecretKey := r.PostForm["payment_stripe_secret_key"]
+		_, hasPaymentStripeWebhookSecret := r.PostForm["payment_stripe_webhook_secret"]
+		_, hasPaymentStripeEnable := r.PostForm["payment_stripe_enable"]
+		if hasPaymentEPayGateway || hasPaymentEPayPartnerID || hasPaymentEPayKey || hasPaymentEPayEnable ||
+			hasPaymentStripeCurrency || hasPaymentStripeSecretKey || hasPaymentStripeWebhookSecret || hasPaymentStripeEnable {
+			epayEnable := strings.TrimSpace(r.FormValue("payment_epay_enable")) != ""
+			if epayEnable == s.paymentDefault.EPay.Enable {
+				if err := s.st.DeleteAppSetting(ctx, store.SettingPaymentEPayEnable); err != nil {
 					if isAjax(r) {
 						ajaxError(w, http.StatusInternalServerError, "保存失败")
 						return
@@ -1316,7 +1271,7 @@ func (s *Server) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 					http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
 					return
 				}
-			} else if err := s.st.UpsertStringAppSetting(ctx, store.SettingPaymentEPayKey, epayKey); err != nil {
+			} else if err := s.st.UpsertBoolAppSetting(ctx, store.SettingPaymentEPayEnable, epayEnable); err != nil {
 				if isAjax(r) {
 					ajaxError(w, http.StatusInternalServerError, "保存失败")
 					return
@@ -1324,50 +1279,10 @@ func (s *Server) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 				http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
 				return
 			}
-		}
 
-		stripeEnable := strings.TrimSpace(r.FormValue("payment_stripe_enable")) != ""
-		if stripeEnable == s.paymentDefault.Stripe.Enable {
-			if err := s.st.DeleteAppSetting(ctx, store.SettingPaymentStripeEnable); err != nil {
-				if isAjax(r) {
-					ajaxError(w, http.StatusInternalServerError, "保存失败")
-					return
-				}
-				http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
-				return
-			}
-		} else if err := s.st.UpsertBoolAppSetting(ctx, store.SettingPaymentStripeEnable, stripeEnable); err != nil {
-			if isAjax(r) {
-				ajaxError(w, http.StatusInternalServerError, "保存失败")
-				return
-			}
-			http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
-			return
-		}
-
-		stripeCurrency := strings.TrimSpace(r.FormValue("payment_stripe_currency"))
-		if stripeCurrency == "" || stripeCurrency == strings.TrimSpace(s.paymentDefault.Stripe.Currency) {
-			if err := s.st.DeleteAppSetting(ctx, store.SettingPaymentStripeCurrency); err != nil {
-				if isAjax(r) {
-					ajaxError(w, http.StatusInternalServerError, "保存失败")
-					return
-				}
-				http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
-				return
-			}
-		} else if err := s.st.UpsertStringAppSetting(ctx, store.SettingPaymentStripeCurrency, stripeCurrency); err != nil {
-			if isAjax(r) {
-				ajaxError(w, http.StatusInternalServerError, "保存失败")
-				return
-			}
-			http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
-			return
-		}
-
-		stripeSecret := strings.TrimSpace(r.FormValue("payment_stripe_secret_key"))
-		if stripeSecret != "" {
-			if stripeSecret == strings.TrimSpace(s.paymentDefault.Stripe.SecretKey) {
-				if err := s.st.DeleteAppSetting(ctx, store.SettingPaymentStripeSecretKey); err != nil {
+			epayGateway := strings.TrimSpace(r.FormValue("payment_epay_gateway"))
+			if epayGateway == "" || epayGateway == strings.TrimSpace(s.paymentDefault.EPay.Gateway) {
+				if err := s.st.DeleteAppSetting(ctx, store.SettingPaymentEPayGateway); err != nil {
 					if isAjax(r) {
 						ajaxError(w, http.StatusInternalServerError, "保存失败")
 						return
@@ -1375,7 +1290,7 @@ func (s *Server) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 					http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
 					return
 				}
-			} else if err := s.st.UpsertStringAppSetting(ctx, store.SettingPaymentStripeSecretKey, stripeSecret); err != nil {
+			} else if err := s.st.UpsertStringAppSetting(ctx, store.SettingPaymentEPayGateway, epayGateway); err != nil {
 				if isAjax(r) {
 					ajaxError(w, http.StatusInternalServerError, "保存失败")
 					return
@@ -1383,12 +1298,10 @@ func (s *Server) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 				http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
 				return
 			}
-		}
 
-		stripeWebhookSecret := strings.TrimSpace(r.FormValue("payment_stripe_webhook_secret"))
-		if stripeWebhookSecret != "" {
-			if stripeWebhookSecret == strings.TrimSpace(s.paymentDefault.Stripe.WebhookSecret) {
-				if err := s.st.DeleteAppSetting(ctx, store.SettingPaymentStripeWebhookSecret); err != nil {
+			epayPartnerID := strings.TrimSpace(r.FormValue("payment_epay_partner_id"))
+			if epayPartnerID == "" || epayPartnerID == strings.TrimSpace(s.paymentDefault.EPay.PartnerID) {
+				if err := s.st.DeleteAppSetting(ctx, store.SettingPaymentEPayPartnerID); err != nil {
 					if isAjax(r) {
 						ajaxError(w, http.StatusInternalServerError, "保存失败")
 						return
@@ -1396,13 +1309,114 @@ func (s *Server) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 					http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
 					return
 				}
-			} else if err := s.st.UpsertStringAppSetting(ctx, store.SettingPaymentStripeWebhookSecret, stripeWebhookSecret); err != nil {
+			} else if err := s.st.UpsertStringAppSetting(ctx, store.SettingPaymentEPayPartnerID, epayPartnerID); err != nil {
 				if isAjax(r) {
 					ajaxError(w, http.StatusInternalServerError, "保存失败")
 					return
 				}
 				http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
 				return
+			}
+
+			epayKey := strings.TrimSpace(r.FormValue("payment_epay_key"))
+			if epayKey != "" {
+				if epayKey == strings.TrimSpace(s.paymentDefault.EPay.Key) {
+					if err := s.st.DeleteAppSetting(ctx, store.SettingPaymentEPayKey); err != nil {
+						if isAjax(r) {
+							ajaxError(w, http.StatusInternalServerError, "保存失败")
+							return
+						}
+						http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
+						return
+					}
+				} else if err := s.st.UpsertStringAppSetting(ctx, store.SettingPaymentEPayKey, epayKey); err != nil {
+					if isAjax(r) {
+						ajaxError(w, http.StatusInternalServerError, "保存失败")
+						return
+					}
+					http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
+					return
+				}
+			}
+
+			stripeEnable := strings.TrimSpace(r.FormValue("payment_stripe_enable")) != ""
+			if stripeEnable == s.paymentDefault.Stripe.Enable {
+				if err := s.st.DeleteAppSetting(ctx, store.SettingPaymentStripeEnable); err != nil {
+					if isAjax(r) {
+						ajaxError(w, http.StatusInternalServerError, "保存失败")
+						return
+					}
+					http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
+					return
+				}
+			} else if err := s.st.UpsertBoolAppSetting(ctx, store.SettingPaymentStripeEnable, stripeEnable); err != nil {
+				if isAjax(r) {
+					ajaxError(w, http.StatusInternalServerError, "保存失败")
+					return
+				}
+				http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
+				return
+			}
+
+			stripeCurrency := strings.TrimSpace(r.FormValue("payment_stripe_currency"))
+			if stripeCurrency == "" || stripeCurrency == strings.TrimSpace(s.paymentDefault.Stripe.Currency) {
+				if err := s.st.DeleteAppSetting(ctx, store.SettingPaymentStripeCurrency); err != nil {
+					if isAjax(r) {
+						ajaxError(w, http.StatusInternalServerError, "保存失败")
+						return
+					}
+					http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
+					return
+				}
+			} else if err := s.st.UpsertStringAppSetting(ctx, store.SettingPaymentStripeCurrency, stripeCurrency); err != nil {
+				if isAjax(r) {
+					ajaxError(w, http.StatusInternalServerError, "保存失败")
+					return
+				}
+				http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
+				return
+			}
+
+			stripeSecret := strings.TrimSpace(r.FormValue("payment_stripe_secret_key"))
+			if stripeSecret != "" {
+				if stripeSecret == strings.TrimSpace(s.paymentDefault.Stripe.SecretKey) {
+					if err := s.st.DeleteAppSetting(ctx, store.SettingPaymentStripeSecretKey); err != nil {
+						if isAjax(r) {
+							ajaxError(w, http.StatusInternalServerError, "保存失败")
+							return
+						}
+						http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
+						return
+					}
+				} else if err := s.st.UpsertStringAppSetting(ctx, store.SettingPaymentStripeSecretKey, stripeSecret); err != nil {
+					if isAjax(r) {
+						ajaxError(w, http.StatusInternalServerError, "保存失败")
+						return
+					}
+					http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
+					return
+				}
+			}
+
+			stripeWebhookSecret := strings.TrimSpace(r.FormValue("payment_stripe_webhook_secret"))
+			if stripeWebhookSecret != "" {
+				if stripeWebhookSecret == strings.TrimSpace(s.paymentDefault.Stripe.WebhookSecret) {
+					if err := s.st.DeleteAppSetting(ctx, store.SettingPaymentStripeWebhookSecret); err != nil {
+						if isAjax(r) {
+							ajaxError(w, http.StatusInternalServerError, "保存失败")
+							return
+						}
+						http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
+						return
+					}
+				} else if err := s.st.UpsertStringAppSetting(ctx, store.SettingPaymentStripeWebhookSecret, stripeWebhookSecret); err != nil {
+					if isAjax(r) {
+						ajaxError(w, http.StatusInternalServerError, "保存失败")
+						return
+					}
+					http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("保存失败"), http.StatusFound)
+					return
+				}
 			}
 		}
 

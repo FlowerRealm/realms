@@ -195,7 +195,7 @@ func (s *Server) CreatePaymentChannel(w http.ResponseWriter, r *http.Request) {
 			ajaxError(w, http.StatusBadRequest, "表单解析失败")
 			return
 		}
-		http.Redirect(w, r, "/admin/payment-channels?err="+url.QueryEscape("表单解析失败"), http.StatusFound)
+		http.Redirect(w, r, "/admin/settings/payment-channels?err="+url.QueryEscape("表单解析失败"), http.StatusFound)
 		return
 	}
 
@@ -247,14 +247,14 @@ func (s *Server) CreatePaymentChannel(w http.ResponseWriter, r *http.Request) {
 			ajaxError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		http.Redirect(w, r, "/admin/payment-channels?err="+url.QueryEscape(err.Error()), http.StatusFound)
+		http.Redirect(w, r, "/admin/settings/payment-channels?err="+url.QueryEscape(err.Error()), http.StatusFound)
 		return
 	}
 	if isAjax(r) {
 		ajaxOK(w, fmt.Sprintf("已创建渠道 #%d", id))
 		return
 	}
-	http.Redirect(w, r, "/admin/payment-channels?msg="+url.QueryEscape(fmt.Sprintf("已创建渠道 #%d", id)), http.StatusFound)
+	http.Redirect(w, r, "/admin/settings/payment-channels?msg="+url.QueryEscape(fmt.Sprintf("已创建渠道 #%d", id)), http.StatusFound)
 }
 
 func (s *Server) UpdatePaymentChannel(w http.ResponseWriter, r *http.Request) {
@@ -273,7 +273,7 @@ func (s *Server) UpdatePaymentChannel(w http.ResponseWriter, r *http.Request) {
 			ajaxError(w, http.StatusBadRequest, "表单解析失败")
 			return
 		}
-		http.Redirect(w, r, "/admin/payment-channels/"+strconv.FormatInt(channelID, 10)+"?err="+url.QueryEscape("表单解析失败"), http.StatusFound)
+		http.Redirect(w, r, "/admin/settings/payment-channels/"+strconv.FormatInt(channelID, 10)+"?err="+url.QueryEscape("表单解析失败"), http.StatusFound)
 		return
 	}
 
@@ -353,7 +353,7 @@ func (s *Server) UpdatePaymentChannel(w http.ResponseWriter, r *http.Request) {
 			ajaxError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		http.Redirect(w, r, "/admin/payment-channels/"+strconv.FormatInt(channelID, 10)+"?err="+url.QueryEscape(err.Error()), http.StatusFound)
+		http.Redirect(w, r, "/admin/settings/payment-channels/"+strconv.FormatInt(channelID, 10)+"?err="+url.QueryEscape(err.Error()), http.StatusFound)
 		return
 	}
 
@@ -361,7 +361,7 @@ func (s *Server) UpdatePaymentChannel(w http.ResponseWriter, r *http.Request) {
 		ajaxOK(w, "已保存")
 		return
 	}
-	http.Redirect(w, r, "/admin/payment-channels/"+strconv.FormatInt(channelID, 10)+"?msg="+url.QueryEscape("已保存"), http.StatusFound)
+	http.Redirect(w, r, "/admin/settings/payment-channels/"+strconv.FormatInt(channelID, 10)+"?msg="+url.QueryEscape("已保存"), http.StatusFound)
 }
 
 func (s *Server) DeletePaymentChannel(w http.ResponseWriter, r *http.Request) {
@@ -376,7 +376,7 @@ func (s *Server) DeletePaymentChannel(w http.ResponseWriter, r *http.Request) {
 			ajaxError(w, http.StatusBadRequest, "参数错误")
 			return
 		}
-		http.Redirect(w, r, "/admin/payment-channels?err="+url.QueryEscape("参数错误"), http.StatusFound)
+		http.Redirect(w, r, "/admin/settings/payment-channels?err="+url.QueryEscape("参数错误"), http.StatusFound)
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -384,7 +384,7 @@ func (s *Server) DeletePaymentChannel(w http.ResponseWriter, r *http.Request) {
 			ajaxError(w, http.StatusBadRequest, "表单解析失败")
 			return
 		}
-		http.Redirect(w, r, "/admin/payment-channels?err="+url.QueryEscape("表单解析失败"), http.StatusFound)
+		http.Redirect(w, r, "/admin/settings/payment-channels?err="+url.QueryEscape("表单解析失败"), http.StatusFound)
 		return
 	}
 	if err := s.st.DeletePaymentChannel(r.Context(), channelID); err != nil {
@@ -392,14 +392,14 @@ func (s *Server) DeletePaymentChannel(w http.ResponseWriter, r *http.Request) {
 			ajaxError(w, http.StatusInternalServerError, "删除失败")
 			return
 		}
-		http.Redirect(w, r, "/admin/payment-channels?err="+url.QueryEscape("删除失败"), http.StatusFound)
+		http.Redirect(w, r, "/admin/settings/payment-channels?err="+url.QueryEscape("删除失败"), http.StatusFound)
 		return
 	}
 	if isAjax(r) {
 		ajaxOK(w, "已删除")
 		return
 	}
-	http.Redirect(w, r, "/admin/payment-channels?msg="+url.QueryEscape("已删除"), http.StatusFound)
+	http.Redirect(w, r, "/admin/settings/payment-channels?msg="+url.QueryEscape("已删除"), http.StatusFound)
 }
 
 func boolToInt(v bool) int {
