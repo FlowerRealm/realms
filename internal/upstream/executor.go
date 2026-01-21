@@ -104,6 +104,27 @@ func (e *Executor) Do(ctx context.Context, sel scheduler.Selection, downstream *
 		}
 		return nil, err
 	}
+	// Codex OAuth：部分上游的 path 仍停留在旧版 /responses；也可能反过来只接受 /v1/responses。
+	// 为减少“配置正确但路径不兼容”导致的误报，这里在 404 时做一次互斥形态的兜底重试。
+	if sel.CredentialType == scheduler.CredentialTypeCodex && resp != nil && resp.StatusCode == http.StatusNotFound {
+		altPassthrough := !e.codexRequestPassthrough
+		req2, err2 := e.buildRequestWithCodexPassthrough(ctx, sel, downstream, body, altPassthrough)
+		if err2 == nil {
+			resp2, err2 := e.client.Do(req2)
+			if err2 == nil && resp2 != nil {
+				if resp2.StatusCode != http.StatusNotFound {
+					if resp.Body != nil {
+						_ = resp.Body.Close()
+					}
+					resp = resp2
+				} else if resp2.Body != nil {
+					_ = resp2.Body.Close()
+				}
+			} else if resp2 != nil && resp2.Body != nil {
+				_ = resp2.Body.Close()
+			}
+		}
+	}
 	if cancel != nil && resp != nil && resp.Body != nil {
 		resp.Body = cancelOnClose(resp.Body, cancel)
 	}
@@ -178,6 +199,10 @@ func (c *cancelReadCloser) Close() error {
 }
 
 func (e *Executor) buildRequest(ctx context.Context, sel scheduler.Selection, downstream *http.Request, body []byte) (*http.Request, error) {
+	return e.buildRequestWithCodexPassthrough(ctx, sel, downstream, body, e.codexRequestPassthrough)
+}
+
+func (e *Executor) buildRequestWithCodexPassthrough(ctx context.Context, sel scheduler.Selection, downstream *http.Request, body []byte, codexRequestPassthrough bool) (*http.Request, error) {
 	base, err := security.ValidateBaseURL(sel.BaseURL)
 	if err != nil {
 		return nil, err
@@ -193,7 +218,7 @@ func (e *Executor) buildRequest(ctx context.Context, sel scheduler.Selection, do
 		}
 		// 旧版兼容逻辑：将 /v1/responses 映射到 Codex 后端的 /responses，并对请求体做兼容改写。
 		// 当 request_passthrough=true 时，保持 URL path 与请求体不变，直接透传给上游。
-		if !e.codexRequestPassthrough {
+		if !codexRequestPassthrough {
 			// codex oauth 上游的路径约定为 /backend-api/codex/responses。
 			targetPath = "/responses"
 			body = normalizeCodexRequestBody(body)

@@ -168,3 +168,158 @@ func TestExecutor_CodexOAuthRequestPassthrough_Disabled_RewritesPathAndBody(t *t
 		t.Fatalf("expected max_output_tokens to be stripped after rewrite")
 	}
 }
+
+func TestExecutor_Do_CodexOAuth_Passthrough404_FallsBackToLegacyResponsesPath(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/backend-api/codex/v1/responses":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"detail":"Not Found"}`))
+		case "/backend-api/codex/responses":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"pong\"}\n\ndata: [DONE]\n\n"))
+		default:
+			w.WriteHeader(http.StatusTeapot)
+		}
+	}))
+	defer srv.Close()
+
+	exec := &Executor{
+		st: &fakeUpstreamStore{
+			codexSecret: store.CodexOAuthSecret{
+				AccountID:    "acc",
+				AccessToken:  "at",
+				RefreshToken: "rt",
+			},
+		},
+		client:                 srv.Client(),
+		codexRequestPassthrough: true,
+	}
+
+	body := []byte(`{"model":"gpt-5.2","stream":true,"input":"hi"}`)
+	downstream := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader(body))
+	resp, err := exec.Do(context.Background(), scheduler.Selection{
+		BaseURL:        srv.URL + "/backend-api/codex",
+		CredentialType: scheduler.CredentialTypeCodex,
+		CredentialID:   123,
+	}, downstream, body)
+	if err != nil {
+		t.Fatalf("Do returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d (%s)", resp.StatusCode, string(b))
+	}
+	if len(paths) != 2 || paths[0] != "/backend-api/codex/v1/responses" || paths[1] != "/backend-api/codex/responses" {
+		t.Fatalf("unexpected paths: %#v", paths)
+	}
+}
+
+func TestExecutor_Do_CodexOAuth_Passthrough404_IfFallbackAlso404_ReturnsOriginal(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/backend-api/codex/v1/responses":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte("first"))
+		case "/backend-api/codex/responses":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte("second"))
+		default:
+			w.WriteHeader(http.StatusTeapot)
+		}
+	}))
+	defer srv.Close()
+
+	exec := &Executor{
+		st: &fakeUpstreamStore{
+			codexSecret: store.CodexOAuthSecret{
+				AccountID:    "acc",
+				AccessToken:  "at",
+				RefreshToken: "rt",
+			},
+		},
+		client:                 srv.Client(),
+		codexRequestPassthrough: true,
+	}
+
+	body := []byte(`{"model":"gpt-5.2","stream":true,"input":"hi"}`)
+	downstream := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader(body))
+	resp, err := exec.Do(context.Background(), scheduler.Selection{
+		BaseURL:        srv.URL + "/backend-api/codex",
+		CredentialType: scheduler.CredentialTypeCodex,
+		CredentialID:   123,
+	}, downstream, body)
+	if err != nil {
+		t.Fatalf("Do returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", resp.StatusCode)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	if string(b) != "first" {
+		t.Fatalf("expected original body to be returned, got %q", string(b))
+	}
+	if len(paths) != 2 || paths[0] != "/backend-api/codex/v1/responses" || paths[1] != "/backend-api/codex/responses" {
+		t.Fatalf("unexpected paths: %#v", paths)
+	}
+}
+
+func TestExecutor_Do_CodexOAuth_Legacy404_FallsBackToPassthroughResponsesPath(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/backend-api/codex/responses":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte("legacy"))
+		case "/backend-api/codex/v1/responses":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("data: {}\n\n"))
+		default:
+			w.WriteHeader(http.StatusTeapot)
+		}
+	}))
+	defer srv.Close()
+
+	exec := &Executor{
+		st: &fakeUpstreamStore{
+			codexSecret: store.CodexOAuthSecret{
+				AccountID:    "acc",
+				AccessToken:  "at",
+				RefreshToken: "rt",
+			},
+		},
+		client:                 srv.Client(),
+		codexRequestPassthrough: false,
+	}
+
+	body := []byte(`{"model":"gpt-5.2","stream":true,"input":"hi"}`)
+	downstream := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader(body))
+	resp, err := exec.Do(context.Background(), scheduler.Selection{
+		BaseURL:        srv.URL + "/backend-api/codex",
+		CredentialType: scheduler.CredentialTypeCodex,
+		CredentialID:   123,
+	}, downstream, body)
+	if err != nil {
+		t.Fatalf("Do returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d (%s)", resp.StatusCode, string(b))
+	}
+	if len(paths) != 2 || paths[0] != "/backend-api/codex/responses" || paths[1] != "/backend-api/codex/v1/responses" {
+		t.Fatalf("unexpected paths: %#v", paths)
+	}
+}
