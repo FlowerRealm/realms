@@ -81,7 +81,7 @@ func applyMigration(db *sql.DB, version, sqlText string) error {
 			return fmt.Errorf("执行迁移 %s (stmt %d/%d): %w", version, i+1, len(stmts), err)
 		}
 	}
-	if _, err := tx.Exec(`INSERT INTO schema_migrations(version, applied_at) VALUES(?, NOW())`, version); err != nil {
+	if _, err := tx.Exec(`INSERT INTO schema_migrations(version, applied_at) VALUES(?, CURRENT_TIMESTAMP)`, version); err != nil {
 		return fmt.Errorf("记录迁移 %s: %w", version, err)
 	}
 	if err := tx.Commit(); err != nil {

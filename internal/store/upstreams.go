@@ -82,7 +82,7 @@ func (s *Store) CreateUpstreamChannel(ctx context.Context, typ, name, groups str
 
 	res, err := tx.ExecContext(ctx,
 		"INSERT INTO upstream_channels(type, name, `groups`, status, priority, promotion, limit_sessions, limit_rpm, limit_tpm, created_at, updated_at)\n"+
-			"VALUES(?, ?, ?, 1, ?, ?, ?, ?, ?, NOW(), NOW())\n",
+			"VALUES(?, ?, ?, 1, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)\n",
 		typ, name, groups, priority, p,
 		nullableIntPtr(limitSessions),
 		nullableIntPtr(limitRPM),
@@ -140,7 +140,7 @@ func (s *Store) CreateUpstreamChannel(ctx context.Context, typ, name, groups str
 			}
 			if _, err := tx.ExecContext(ctx, `
 INSERT INTO channel_group_members(parent_group_id, member_channel_id, priority, promotion, created_at, updated_at)
-VALUES(?, ?, ?, ?, NOW(), NOW())
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `, gid, id, priority, p); err != nil {
 				return 0, fmt.Errorf("创建 channel_group_members 失败: %w", err)
 			}
@@ -192,7 +192,7 @@ func (s *Store) UpdateUpstreamChannelLimits(ctx context.Context, channelID int64
 	}
 	_, err := s.db.ExecContext(ctx, `
 UPDATE upstream_channels
-SET limit_sessions=?, limit_rpm=?, limit_tpm=?, updated_at=NOW()
+SET limit_sessions=?, limit_rpm=?, limit_tpm=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, nullableIntPtr(limitSessions), nullableIntPtr(limitRPM), nullableIntPtr(limitTPM), channelID)
 	if err != nil {
@@ -266,23 +266,32 @@ func (s *Store) SetUpstreamChannelGroups(ctx context.Context, channelID int64, g
 			return fmt.Errorf("遍历 channel_groups 失败: %w", err)
 		}
 
+		memberUpsert := `
+INSERT INTO channel_group_members(parent_group_id, member_channel_id, priority, promotion, created_at, updated_at)
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON DUPLICATE KEY UPDATE priority=VALUES(priority), promotion=VALUES(promotion), updated_at=CURRENT_TIMESTAMP
+`
+		if s.dialect == DialectSQLite {
+			memberUpsert = `
+INSERT INTO channel_group_members(parent_group_id, member_channel_id, priority, promotion, created_at, updated_at)
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT(parent_group_id, member_channel_id) DO UPDATE SET priority=excluded.priority, promotion=excluded.promotion, updated_at=CURRENT_TIMESTAMP
+`
+		}
+
 		for _, name := range names {
 			id, ok := idByName[name]
 			if !ok || id == 0 {
 				return fmt.Errorf("分组不存在：%s", name)
 			}
-			_, err := tx.ExecContext(ctx, `
-INSERT INTO channel_group_members(parent_group_id, member_channel_id, priority, promotion, created_at, updated_at)
-VALUES(?, ?, ?, ?, NOW(), NOW())
-ON DUPLICATE KEY UPDATE priority=VALUES(priority), promotion=VALUES(promotion), updated_at=NOW()
-`, id, channelID, chPriority, chPromotion)
+			_, err := tx.ExecContext(ctx, memberUpsert, id, channelID, chPriority, chPromotion)
 			if err != nil {
 				return fmt.Errorf("写入 channel_group_members 失败: %w", err)
 			}
 		}
 	}
 
-	if _, err := tx.ExecContext(ctx, "UPDATE upstream_channels SET `groups`=?, updated_at=NOW() WHERE id=?", groups, channelID); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE upstream_channels SET `groups`=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", groups, channelID); err != nil {
 		return fmt.Errorf("更新 upstream_channel groups 失败: %w", err)
 	}
 
@@ -299,7 +308,7 @@ func (s *Store) UpdateUpstreamChannelTest(ctx context.Context, channelID int64, 
 	}
 	_, err := s.db.ExecContext(ctx, `
 UPDATE upstream_channels
-SET last_test_at=NOW(), last_test_latency_ms=?, last_test_ok=?, updated_at=updated_at
+SET last_test_at=CURRENT_TIMESTAMP, last_test_latency_ms=?, last_test_ok=?, updated_at=updated_at
 WHERE id=?
 `, latencyMS, okInt, channelID)
 	if err != nil {
@@ -365,7 +374,7 @@ func (s *Store) CountUpstreamEndpoints(ctx context.Context) (int64, error) {
 func (s *Store) CreateUpstreamEndpoint(ctx context.Context, channelID int64, baseURL string, priority int) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO upstream_endpoints(channel_id, base_url, status, priority, created_at, updated_at)
-VALUES(?, ?, 1, ?, NOW(), NOW())
+VALUES(?, ?, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `, channelID, baseURL, priority)
 	if err != nil {
 		return 0, fmt.Errorf("创建 upstream_endpoint 失败: %w", err)
@@ -390,7 +399,7 @@ func (s *Store) SetUpstreamEndpointBaseURL(ctx context.Context, channelID int64,
 	}
 	if _, err := s.db.ExecContext(ctx, `
 UPDATE upstream_endpoints
-SET base_url=?, updated_at=NOW()
+SET base_url=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, baseURL, ep.ID); err != nil {
 		return UpstreamEndpoint{}, fmt.Errorf("更新 upstream_endpoint base_url 失败: %w", err)
@@ -464,7 +473,7 @@ func (s *Store) CreateOpenAICompatibleCredential(ctx context.Context, endpointID
 	hint := tokenHint(apiKey)
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO openai_compatible_credentials(endpoint_id, name, api_key_enc, api_key_hint, status, created_at, updated_at)
-VALUES(?, ?, ?, ?, 1, NOW(), NOW())
+VALUES(?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `, endpointID, name, enc, hint)
 	if err != nil {
 		return 0, nil, fmt.Errorf("创建 openai_compatible_credential 失败: %w", err)
@@ -504,7 +513,7 @@ WHERE id=?
 }
 
 func (s *Store) TouchOpenAICompatibleCredential(ctx context.Context, credentialID int64) {
-	_, _ = s.db.ExecContext(ctx, `UPDATE openai_compatible_credentials SET last_used_at=NOW(), updated_at=updated_at WHERE id=?`, credentialID)
+	_, _ = s.db.ExecContext(ctx, `UPDATE openai_compatible_credentials SET last_used_at=CURRENT_TIMESTAMP, updated_at=updated_at WHERE id=?`, credentialID)
 }
 
 func (s *Store) UpdateOpenAICompatibleCredentialLimits(ctx context.Context, credentialID int64, limitSessions, limitRPM, limitTPM *int) error {
@@ -513,7 +522,7 @@ func (s *Store) UpdateOpenAICompatibleCredentialLimits(ctx context.Context, cred
 	}
 	_, err := s.db.ExecContext(ctx, `
 UPDATE openai_compatible_credentials
-SET limit_sessions=?, limit_rpm=?, limit_tpm=?, updated_at=NOW()
+SET limit_sessions=?, limit_rpm=?, limit_tpm=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, nullableIntPtr(limitSessions), nullableIntPtr(limitRPM), nullableIntPtr(limitTPM), credentialID)
 	if err != nil {
@@ -748,7 +757,7 @@ func (s *Store) CreateCodexOAuthAccount(ctx context.Context, endpointID int64, a
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO codex_oauth_accounts(endpoint_id, account_id, email, access_token_enc, refresh_token_enc, id_token_enc,
                                expires_at, last_refresh_at, status, cooldown_until, last_used_at, created_at, updated_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, NULL, 1, NULL, NULL, NOW(), NOW())
+VALUES(?, ?, ?, ?, ?, ?, ?, NULL, 1, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `, endpointID, accountID, email, accessEnc, refreshEnc, nullableBytes(idTokenEnc), expiresAt)
 	if err != nil {
 		return 0, fmt.Errorf("创建 codex_oauth_account 失败: %w", err)
@@ -806,7 +815,7 @@ func (s *Store) UpdateCodexOAuthAccountTokens(ctx context.Context, accountID int
 	}
 	_, err := s.db.ExecContext(ctx, `
 	UPDATE codex_oauth_accounts
-	SET access_token_enc=?, refresh_token_enc=?, id_token_enc=?, expires_at=?, last_refresh_at=NOW(), cooldown_until=NULL, updated_at=NOW()
+	SET access_token_enc=?, refresh_token_enc=?, id_token_enc=?, expires_at=?, last_refresh_at=CURRENT_TIMESTAMP, cooldown_until=NULL, updated_at=CURRENT_TIMESTAMP
 	WHERE id=?
 	`, accessEnc, refreshEnc, nullableBytes(idTokenEnc), expiresAt, accountID)
 	if err != nil {
@@ -821,7 +830,7 @@ func (s *Store) UpdateCodexOAuthAccountLimits(ctx context.Context, accountID int
 	}
 	_, err := s.db.ExecContext(ctx, `
 UPDATE codex_oauth_accounts
-SET limit_sessions=?, limit_rpm=?, limit_tpm=?, updated_at=NOW()
+SET limit_sessions=?, limit_rpm=?, limit_tpm=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, nullableIntPtr(limitSessions), nullableIntPtr(limitRPM), nullableIntPtr(limitTPM), accountID)
 	if err != nil {
@@ -920,7 +929,7 @@ WHERE id=?
 func (s *Store) SetCodexOAuthAccountCooldown(ctx context.Context, accountID int64, cooldownUntil time.Time) error {
 	_, err := s.db.ExecContext(ctx, `
 	UPDATE codex_oauth_accounts
-	SET cooldown_until=?, updated_at=NOW()
+	SET cooldown_until=?, updated_at=CURRENT_TIMESTAMP
 	WHERE id=?
 	`, cooldownUntil, accountID)
 	if err != nil {
@@ -932,7 +941,7 @@ func (s *Store) SetCodexOAuthAccountCooldown(ctx context.Context, accountID int6
 func (s *Store) SetCodexOAuthAccountStatus(ctx context.Context, accountID int64, status int) error {
 	_, err := s.db.ExecContext(ctx, `
 	UPDATE codex_oauth_accounts
-	SET status=?, updated_at=NOW()
+	SET status=?, updated_at=CURRENT_TIMESTAMP
 	WHERE id=?
 	`, status, accountID)
 	if err != nil {
@@ -991,7 +1000,7 @@ func (s *Store) ReorderUpstreamChannels(ctx context.Context, ids []int64) error 
 	count := len(ids)
 	for i, id := range ids {
 		priority := count - i
-		if _, err := tx.ExecContext(ctx, `UPDATE upstream_channels SET priority=?, updated_at=NOW() WHERE id=?`, priority, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE upstream_channels SET priority=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, priority, id); err != nil {
 			return fmt.Errorf("更新 channel(%d) priority 失败: %w", id, err)
 		}
 	}

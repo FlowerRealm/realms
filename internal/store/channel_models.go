@@ -98,7 +98,7 @@ ORDER BY cm.id DESC
 func (s *Store) CreateChannelModel(ctx context.Context, in ChannelModelCreate) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO channel_models(channel_id, public_id, upstream_model, status, created_at, updated_at)
-VALUES(?, ?, ?, ?, NOW(), NOW())
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `, in.ChannelID, in.PublicID, in.UpstreamModel, in.Status)
 	if err != nil {
 		return 0, fmt.Errorf("创建 channel_model 失败: %w", err)
@@ -116,7 +116,7 @@ func (s *Store) UpdateChannelModel(ctx context.Context, in ChannelModelUpdate) e
 	}
 	_, err := s.db.ExecContext(ctx, `
 UPDATE channel_models
-SET channel_id=?, public_id=?, upstream_model=?, status=?, updated_at=NOW()
+SET channel_id=?, public_id=?, upstream_model=?, status=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, in.ChannelID, in.PublicID, in.UpstreamModel, in.Status, in.ID)
 	if err != nil {

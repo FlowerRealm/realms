@@ -70,7 +70,14 @@ type ServerConfig struct {
 }
 
 type DBConfig struct {
+	// Driver 支持 mysql/sqlite；为空时会根据 dsn 自动推断（兼容旧配置）。
+	// - 当 dsn 非空且 driver 为空：推断为 mysql
+	// - 其他情况默认 sqlite
+	Driver string `yaml:"driver"`
+	// DSN 仅用于 MySQL（示例：user:pass@tcp(127.0.0.1:3306)/realms?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci）
 	DSN string `yaml:"dsn"`
+	// SQLitePath 是 SQLite 数据库文件路径（可包含 DSN query，如 ?_busy_timeout=30000）。
+	SQLitePath string `yaml:"sqlite_path"`
 }
 
 type SecurityConfig struct {
@@ -219,8 +226,31 @@ func load(path string, applyEnv bool) (Config, error) {
 	if cfg.Server.Addr == "" {
 		return Config{}, errors.New("server.addr 不能为空")
 	}
-	if cfg.DB.DSN == "" {
-		return Config{}, errors.New("db.dsn 不能为空")
+
+	cfg.DB.Driver = strings.ToLower(strings.TrimSpace(cfg.DB.Driver))
+	cfg.DB.DSN = strings.TrimSpace(cfg.DB.DSN)
+	cfg.DB.SQLitePath = strings.TrimSpace(cfg.DB.SQLitePath)
+
+	// 兼容旧配置：历史仅配置 db.dsn（无 db.driver）。
+	if cfg.DB.Driver == "" {
+		if cfg.DB.DSN != "" {
+			cfg.DB.Driver = "mysql"
+		} else {
+			cfg.DB.Driver = "sqlite"
+		}
+	}
+
+	switch cfg.DB.Driver {
+	case "sqlite":
+		if cfg.DB.SQLitePath == "" {
+			cfg.DB.SQLitePath = "./data/realms.db?_busy_timeout=30000"
+		}
+	case "mysql":
+		if cfg.DB.DSN == "" {
+			return Config{}, errors.New("db.dsn 不能为空（db.driver=mysql）")
+		}
+	default:
+		return Config{}, fmt.Errorf("db.driver 不支持：%s（仅支持 mysql/sqlite）", cfg.DB.Driver)
 	}
 	cfg.Tickets.AttachmentsDir = strings.TrimSpace(cfg.Tickets.AttachmentsDir)
 	if cfg.Tickets.AttachmentsDir == "" {
@@ -370,6 +400,9 @@ func defaultConfig() Config {
 			AllowOpenRegistration: true,
 			TrustProxyHeaders:     false,
 		},
+		DB: DBConfig{
+			SQLitePath: "./data/realms.db?_busy_timeout=30000",
+		},
 		SMTP: SMTPConfig{
 			SMTPPort: 587,
 		},
@@ -415,8 +448,14 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("REALMS_PUBLIC_BASE_URL"); v != "" {
 		cfg.Server.PublicBaseURL = v
 	}
+	if v := os.Getenv("REALMS_DB_DRIVER"); v != "" {
+		cfg.DB.Driver = v
+	}
 	if v := os.Getenv("REALMS_DB_DSN"); v != "" {
 		cfg.DB.DSN = v
+	}
+	if v := os.Getenv("REALMS_SQLITE_PATH"); v != "" {
+		cfg.DB.SQLitePath = v
 	}
 	if v := os.Getenv("REALMS_ALLOW_OPEN_REGISTRATION"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {

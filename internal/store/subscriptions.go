@@ -212,7 +212,7 @@ func (s *Store) PurchaseSubscriptionByPlanID(ctx context.Context, userID int64, 
 	}
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO user_subscriptions(user_id, plan_id, start_at, end_at, status, created_at, updated_at)
-VALUES(?, ?, ?, ?, 1, NOW(), NOW())
+VALUES(?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `, us.UserID, us.PlanID, us.StartAt, us.EndAt)
 	if err != nil {
 		return UserSubscription{}, SubscriptionPlan{}, fmt.Errorf("创建 user_subscription 失败: %w", err)
@@ -226,30 +226,30 @@ VALUES(?, ?, ?, ?, 1, NOW(), NOW())
 }
 
 type SubscriptionPlanCreate struct {
-	Code              string
-	Name              string
-	GroupName         string
-	PriceCNY          decimal.Decimal
-	Limit5HUSD        decimal.Decimal
-	Limit1DUSD        decimal.Decimal
-	Limit7DUSD        decimal.Decimal
-	Limit30DUSD       decimal.Decimal
-	DurationDays      int
-	Status            int
+	Code         string
+	Name         string
+	GroupName    string
+	PriceCNY     decimal.Decimal
+	Limit5HUSD   decimal.Decimal
+	Limit1DUSD   decimal.Decimal
+	Limit7DUSD   decimal.Decimal
+	Limit30DUSD  decimal.Decimal
+	DurationDays int
+	Status       int
 }
 
 type SubscriptionPlanUpdate struct {
-	ID                int64
-	Code              string
-	Name              string
-	GroupName         string
-	PriceCNY          decimal.Decimal
-	Limit5HUSD        decimal.Decimal
-	Limit1DUSD        decimal.Decimal
-	Limit7DUSD        decimal.Decimal
-	Limit30DUSD       decimal.Decimal
-	DurationDays      int
-	Status            int
+	ID           int64
+	Code         string
+	Name         string
+	GroupName    string
+	PriceCNY     decimal.Decimal
+	Limit5HUSD   decimal.Decimal
+	Limit1DUSD   decimal.Decimal
+	Limit7DUSD   decimal.Decimal
+	Limit30DUSD  decimal.Decimal
+	DurationDays int
+	Status       int
 }
 
 func (s *Store) ListAllSubscriptionPlans(ctx context.Context) ([]SubscriptionPlan, error) {
@@ -323,7 +323,7 @@ INSERT INTO subscription_plans(
 ) VALUES(
   ?, ?, ?, ?,
   ?, ?, ?, ?,
-  ?, ?, NOW(), NOW()
+  ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 )
 `, in.Code, in.Name, strings.TrimSpace(in.GroupName), priceCNY, limit5HUSD, limit1DUSD, limit7DUSD, limit30DUSD, in.DurationDays, in.Status)
 	if err != nil {
@@ -363,7 +363,7 @@ func (s *Store) UpdateSubscriptionPlan(ctx context.Context, in SubscriptionPlanU
 UPDATE subscription_plans
 SET code=?, name=?, group_name=?, price_cny=?,
     limit_5h_usd=?, limit_1d_usd=?, limit_7d_usd=?, limit_30d_usd=?,
-    duration_days=?, status=?, updated_at=NOW()
+    duration_days=?, status=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, in.Code, in.Name, strings.TrimSpace(in.GroupName), priceCNY, limit5HUSD, limit1DUSD, limit7DUSD, limit30DUSD, in.DurationDays, in.Status, in.ID)
 	if err != nil {
@@ -384,7 +384,8 @@ func (s *Store) DeleteSubscriptionPlan(ctx context.Context, id int64) (Subscript
 	defer func() { _ = tx.Rollback() }()
 
 	var planID int64
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM subscription_plans WHERE id=? FOR UPDATE`, id).Scan(&planID); err != nil {
+	qPlan := "SELECT id FROM subscription_plans WHERE id=?" + forUpdateClause(s.dialect)
+	if err := tx.QueryRowContext(ctx, qPlan, id).Scan(&planID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return SubscriptionPlanDeleteSummary{}, sql.ErrNoRows
 		}

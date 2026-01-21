@@ -35,4 +35,3 @@ func TestNormalizePaymentChannelType(t *testing.T) {
 		}
 	}
 }
-

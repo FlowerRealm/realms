@@ -36,15 +36,17 @@ func (s *Store) ReserveUsageAndDebitBalance(ctx context.Context, in ReserveUsage
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := tx.ExecContext(ctx, `
-INSERT IGNORE INTO user_balances(user_id, usd, created_at, updated_at)
-VALUES(?, 0, NOW(), NOW())
-`, in.UserID); err != nil {
+	stmtInitBalance := fmt.Sprintf(`
+%s INTO user_balances(user_id, usd, created_at, updated_at)
+VALUES(?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+`, insertIgnoreVerb(s.dialect))
+	if _, err := tx.ExecContext(ctx, stmtInitBalance, in.UserID); err != nil {
 		return 0, fmt.Errorf("初始化余额失败: %w", err)
 	}
 
 	var bal decimal.Decimal
-	if err := tx.QueryRowContext(ctx, `SELECT usd FROM user_balances WHERE user_id=? FOR UPDATE`, in.UserID).Scan(&bal); err != nil {
+	qBalance := "SELECT usd FROM user_balances WHERE user_id=?" + forUpdateClause(s.dialect)
+	if err := tx.QueryRowContext(ctx, qBalance, in.UserID).Scan(&bal); err != nil {
 		return 0, fmt.Errorf("查询余额失败: %w", err)
 	}
 	if bal.LessThan(reservedUSD) {
@@ -52,7 +54,7 @@ VALUES(?, 0, NOW(), NOW())
 	}
 	if _, err := tx.ExecContext(ctx, `
 UPDATE user_balances
-SET usd=usd-?, updated_at=NOW()
+SET usd=usd-?, updated_at=CURRENT_TIMESTAMP
 WHERE user_id=?
 `, reservedUSD, in.UserID); err != nil {
 		return 0, fmt.Errorf("扣减余额失败: %w", err)
@@ -63,8 +65,8 @@ INSERT INTO usage_events(
   time, request_id, user_id, subscription_id, token_id, state, model,
   reserved_usd, committed_usd, reserve_expires_at, created_at, updated_at
 ) VALUES(
-  NOW(), ?, ?, NULL, ?, ?, ?,
-  ?, 0, ?, NOW(), NOW()
+  CURRENT_TIMESTAMP, ?, ?, NULL, ?, ?, ?,
+  ?, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 )
 `, in.RequestID, in.UserID, in.TokenID, UsageStateReserved, in.Model, reservedUSD, in.ReserveExpiresAt)
 	if err != nil {
@@ -99,12 +101,12 @@ func (s *Store) CommitUsageAndRefundBalance(ctx context.Context, in CommitUsageI
 	var state string
 	var reserved decimal.Decimal
 	var subID sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `
+	qUsage := `
 SELECT user_id, subscription_id, state, reserved_usd
 FROM usage_events
 WHERE id=?
-FOR UPDATE
-`, in.UsageEventID).Scan(&userID, &subID, &state, &reserved); err != nil {
+` + forUpdateClause(s.dialect)
+	if err := tx.QueryRowContext(ctx, qUsage, in.UsageEventID).Scan(&userID, &subID, &state, &reserved); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return sql.ErrNoRows
 		}
@@ -129,7 +131,7 @@ FOR UPDATE
 
 	if _, err := tx.ExecContext(ctx, `
 UPDATE usage_events
-SET state=?, upstream_channel_id=?, input_tokens=?, cached_input_tokens=?, output_tokens=?, cached_output_tokens=?, committed_usd=?, updated_at=NOW()
+SET state=?, upstream_channel_id=?, input_tokens=?, cached_input_tokens=?, output_tokens=?, cached_output_tokens=?, committed_usd=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=? AND state=?
 `, UsageStateCommitted, in.UpstreamChannelID, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens, committed, in.UsageEventID, UsageStateReserved); err != nil {
 		return fmt.Errorf("结算 usage_event 失败: %w", err)
@@ -138,7 +140,7 @@ WHERE id=? AND state=?
 	if refund.GreaterThan(decimal.Zero) {
 		if _, err := tx.ExecContext(ctx, `
 UPDATE user_balances
-SET usd=usd+?, updated_at=NOW()
+SET usd=usd+?, updated_at=CURRENT_TIMESTAMP
 WHERE user_id=?
 `, refund, userID); err != nil {
 			return fmt.Errorf("返还余额失败: %w", err)
@@ -166,12 +168,12 @@ func (s *Store) VoidUsageAndRefundBalance(ctx context.Context, usageEventID int6
 	var state string
 	var reserved decimal.Decimal
 	var subID sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `
+	qUsage := `
 SELECT user_id, subscription_id, state, reserved_usd
 FROM usage_events
 WHERE id=?
-FOR UPDATE
-`, usageEventID).Scan(&userID, &subID, &state, &reserved); err != nil {
+` + forUpdateClause(s.dialect)
+	if err := tx.QueryRowContext(ctx, qUsage, usageEventID).Scan(&userID, &subID, &state, &reserved); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -181,7 +183,7 @@ FOR UPDATE
 		// 非按量计费：沿用旧逻辑（仅作废用量事件）
 		if _, err := tx.ExecContext(ctx, `
 UPDATE usage_events
-SET state=?, committed_usd=0, updated_at=NOW()
+SET state=?, committed_usd=0, updated_at=CURRENT_TIMESTAMP
 WHERE id=? AND state=?
 `, UsageStateVoid, usageEventID, UsageStateReserved); err != nil {
 			return fmt.Errorf("作废 usage_event 失败: %w", err)
@@ -197,7 +199,7 @@ WHERE id=? AND state=?
 
 	if _, err := tx.ExecContext(ctx, `
 UPDATE usage_events
-SET state=?, committed_usd=0, updated_at=NOW()
+SET state=?, committed_usd=0, updated_at=CURRENT_TIMESTAMP
 WHERE id=? AND state=?
 	`, UsageStateVoid, usageEventID, UsageStateReserved); err != nil {
 		return fmt.Errorf("作废 usage_event 失败: %w", err)
@@ -205,7 +207,7 @@ WHERE id=? AND state=?
 	if reserved.GreaterThan(decimal.Zero) {
 		if _, err := tx.ExecContext(ctx, `
 UPDATE user_balances
-SET usd=usd+?, updated_at=NOW()
+SET usd=usd+?, updated_at=CURRENT_TIMESTAMP
 WHERE user_id=?
 `, reserved, userID); err != nil {
 			return fmt.Errorf("返还余额失败: %w", err)
@@ -226,12 +228,12 @@ func (s *Store) expireReservedUsageRefundBalances(ctx context.Context, tx *sql.T
 		amt    decimal.Decimal
 	}
 
-	rows, err := tx.QueryContext(ctx, `
+	q := `
 SELECT id, user_id, reserved_usd
 FROM usage_events
 WHERE state=? AND reserve_expires_at < ? AND subscription_id IS NULL
-FOR UPDATE
-`, UsageStateReserved, now)
+` + forUpdateClause(s.dialect)
+	rows, err := tx.QueryContext(ctx, q, UsageStateReserved, now)
 	if err != nil {
 		return 0, fmt.Errorf("查询过期 usage_events 失败: %w", err)
 	}
@@ -261,7 +263,7 @@ FOR UPDATE
 
 	// 标记为 expired
 	var b strings.Builder
-	b.WriteString("UPDATE usage_events SET state=?, committed_usd=0, updated_at=NOW() WHERE id IN (")
+	b.WriteString("UPDATE usage_events SET state=?, committed_usd=0, updated_at=CURRENT_TIMESTAMP WHERE id IN (")
 	args := make([]any, 0, len(ids)+1)
 	args = append(args, UsageStateExpired)
 	for i, id := range ids {
@@ -282,15 +284,16 @@ FOR UPDATE
 		if refundUSD.LessThanOrEqual(decimal.Zero) {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, `
-INSERT IGNORE INTO user_balances(user_id, usd, created_at, updated_at)
-VALUES(?, 0, NOW(), NOW())
-`, userID); err != nil {
+		stmtInitBalance := fmt.Sprintf(`
+%s INTO user_balances(user_id, usd, created_at, updated_at)
+VALUES(?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+`, insertIgnoreVerb(s.dialect))
+		if _, err := tx.ExecContext(ctx, stmtInitBalance, userID); err != nil {
 			return 0, fmt.Errorf("初始化余额失败: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
 UPDATE user_balances
-SET usd=usd+?, updated_at=NOW()
+SET usd=usd+?, updated_at=CURRENT_TIMESTAMP
 WHERE user_id=?
 `, refundUSD, userID); err != nil {
 			return 0, fmt.Errorf("返还余额失败: %w", err)

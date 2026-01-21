@@ -127,16 +127,16 @@ func (s *Store) CreateSubscriptionOrderByPlanID(ctx context.Context, userID int6
 	}
 
 	o := SubscriptionOrder{
-		UserID:       userID,
-		PlanID:       plan.ID,
-		AmountCNY:    plan.PriceCNY.Truncate(CNYScale),
-		Status:       SubscriptionOrderStatusPending,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		UserID:    userID,
+		PlanID:    plan.ID,
+		AmountCNY: plan.PriceCNY.Truncate(CNYScale),
+		Status:    SubscriptionOrderStatusPending,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO subscription_orders(user_id, plan_id, amount_cny, status, created_at, updated_at)
-VALUES(?, ?, ?, ?, NOW(), NOW())
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `, o.UserID, o.PlanID, o.AmountCNY, o.Status)
 	if err != nil {
 		return SubscriptionOrder{}, SubscriptionPlan{}, fmt.Errorf("创建 subscription_order 失败: %w", err)
@@ -364,12 +364,12 @@ func (s *Store) ApproveSubscriptionOrderAndDelete(ctx context.Context, orderID i
 
 	var o SubscriptionOrder
 	var subID sql.NullInt64
-	err = tx.QueryRowContext(ctx, `
+	qOrder := `
 SELECT id, user_id, plan_id, status, subscription_id, created_at, updated_at
 FROM subscription_orders
 WHERE id=?
-FOR UPDATE
-`, orderID).Scan(&o.ID, &o.UserID, &o.PlanID, &o.Status, &subID, &o.CreatedAt, &o.UpdatedAt)
+` + forUpdateClause(s.dialect)
+	err = tx.QueryRowContext(ctx, qOrder, orderID).Scan(&o.ID, &o.UserID, &o.PlanID, &o.Status, &subID, &o.CreatedAt, &o.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, errors.New("订单不存在")
@@ -414,7 +414,7 @@ WHERE id=?
 		}
 		res, err := tx.ExecContext(ctx, `
 INSERT INTO user_subscriptions(user_id, plan_id, start_at, end_at, status, created_at, updated_at)
-VALUES(?, ?, ?, ?, 1, NOW(), NOW())
+VALUES(?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `, us.UserID, us.PlanID, us.StartAt, us.EndAt)
 		if err != nil {
 			return 0, fmt.Errorf("创建 user_subscription 失败: %w", err)
@@ -428,7 +428,7 @@ VALUES(?, ?, ?, ?, 1, NOW(), NOW())
 
 	if _, err := tx.ExecContext(ctx, `
 UPDATE subscription_orders
-SET status=?, approved_at=?, approved_by=?, subscription_id=?, updated_at=NOW()
+SET status=?, approved_at=?, approved_by=?, subscription_id=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, SubscriptionOrderStatusActive, approvedAt, approverUserID, subscriptionID, o.ID); err != nil {
 		return 0, fmt.Errorf("更新订单失败: %w", err)
@@ -461,12 +461,12 @@ func (s *Store) RejectSubscriptionOrderAndDelete(ctx context.Context, orderID in
 
 	var status int
 	var subID sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `
+	q := `
 SELECT status, subscription_id
 FROM subscription_orders
 WHERE id=?
-FOR UPDATE
-`, orderID).Scan(&status, &subID); err != nil {
+` + forUpdateClause(s.dialect)
+	if err := tx.QueryRowContext(ctx, q, orderID).Scan(&status, &subID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return errors.New("订单不存在")
 		}
@@ -477,7 +477,7 @@ FOR UPDATE
 	}
 	if _, err := tx.ExecContext(ctx, `
 UPDATE subscription_orders
-SET status=?, updated_at=NOW()
+SET status=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, SubscriptionOrderStatusCanceled, orderID); err != nil {
 		return fmt.Errorf("更新订单失败: %w", err)
@@ -505,12 +505,12 @@ func (s *Store) MarkSubscriptionOrderPaidAndActivate(ctx context.Context, orderI
 	var o SubscriptionOrder
 	var subID sql.NullInt64
 	var existingPaidChannelID sql.NullInt64
-	err = tx.QueryRowContext(ctx, `
+	qOrder := `
 SELECT id, user_id, plan_id, status, subscription_id, paid_channel_id, created_at, updated_at
 FROM subscription_orders
 WHERE id=?
-FOR UPDATE
-`, orderID).Scan(&o.ID, &o.UserID, &o.PlanID, &o.Status, &subID, &existingPaidChannelID, &o.CreatedAt, &o.UpdatedAt)
+` + forUpdateClause(s.dialect)
+	err = tx.QueryRowContext(ctx, qOrder, orderID).Scan(&o.ID, &o.UserID, &o.PlanID, &o.Status, &subID, &existingPaidChannelID, &o.CreatedAt, &o.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, false, nil
@@ -527,7 +527,7 @@ SET paid_at=COALESCE(paid_at, ?),
     paid_ref=COALESCE(paid_ref, ?),
     paid_channel_id=COALESCE(paid_channel_id, ?),
     note=COALESCE(note, ?),
-    updated_at=NOW()
+    updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, paidAt, paidMethod, paidRef, paidChannelID, note, o.ID); err != nil {
 			return 0, true, fmt.Errorf("更新订单失败: %w", err)
@@ -593,7 +593,7 @@ WHERE id=?
 		}
 		res, err := tx.ExecContext(ctx, `
 INSERT INTO user_subscriptions(user_id, plan_id, start_at, end_at, status, created_at, updated_at)
-VALUES(?, ?, ?, ?, 1, NOW(), NOW())
+VALUES(?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `, us.UserID, us.PlanID, us.StartAt, us.EndAt)
 		if err != nil {
 			return 0, true, fmt.Errorf("创建 user_subscription 失败: %w", err)
@@ -607,7 +607,7 @@ VALUES(?, ?, ?, ?, 1, NOW(), NOW())
 
 	if _, err := tx.ExecContext(ctx, `
 UPDATE subscription_orders
-SET status=?, paid_at=?, paid_method=?, paid_ref=?, paid_channel_id=COALESCE(paid_channel_id, ?), subscription_id=?, updated_at=NOW()
+SET status=?, paid_at=?, paid_method=?, paid_ref=?, paid_channel_id=COALESCE(paid_channel_id, ?), subscription_id=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, SubscriptionOrderStatusActive, paidAt, paidMethod, paidRef, paidChannelID, subscriptionID, o.ID); err != nil {
 		return 0, true, fmt.Errorf("更新订单失败: %w", err)
@@ -634,12 +634,12 @@ func (s *Store) CancelSubscriptionOrderByUser(ctx context.Context, userID int64,
 	defer func() { _ = tx.Rollback() }()
 
 	var status int
-	if err := tx.QueryRowContext(ctx, `
+	q := `
 SELECT status
 FROM subscription_orders
 WHERE id=? AND user_id=?
-FOR UPDATE
-`, orderID, userID).Scan(&status); err != nil {
+` + forUpdateClause(s.dialect)
+	if err := tx.QueryRowContext(ctx, q, orderID, userID).Scan(&status); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return sql.ErrNoRows
 		}
@@ -651,7 +651,7 @@ FOR UPDATE
 		note := "用户关闭订单"
 		if _, err := tx.ExecContext(ctx, `
 UPDATE subscription_orders
-SET status=?, note=COALESCE(note, ?), updated_at=NOW()
+SET status=?, note=COALESCE(note, ?), updated_at=CURRENT_TIMESTAMP
 WHERE id=? AND user_id=?
 `, SubscriptionOrderStatusCanceled, note, orderID, userID); err != nil {
 			return fmt.Errorf("更新订单失败: %w", err)

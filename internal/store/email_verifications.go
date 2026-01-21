@@ -22,7 +22,7 @@ func (s *Store) UpsertEmailVerification(ctx context.Context, userID *int64, emai
 
 	res, err := tx.ExecContext(ctx, `
 INSERT INTO email_verifications(user_id, email, code_hash, expires_at, verified_at, created_at)
-VALUES(?, ?, ?, ?, NULL, NOW())
+VALUES(?, ?, ?, ?, NULL, CURRENT_TIMESTAMP)
 `, userID, email, codeHash, expiresAt)
 	if err != nil {
 		return 0, fmt.Errorf("写入验证码失败: %w", err)
@@ -41,7 +41,7 @@ VALUES(?, ?, ?, ?, NULL, NOW())
 func (s *Store) ConsumeEmailVerification(ctx context.Context, email string, codeHash []byte) (bool, error) {
 	res, err := s.db.ExecContext(ctx, `
 DELETE FROM email_verifications
-WHERE email=? AND code_hash=? AND verified_at IS NULL AND expires_at >= NOW()
+WHERE email=? AND code_hash=? AND verified_at IS NULL AND expires_at >= CURRENT_TIMESTAMP
 `, email, codeHash)
 	if err != nil {
 		return false, fmt.Errorf("校验验证码失败: %w", err)
@@ -54,7 +54,7 @@ WHERE email=? AND code_hash=? AND verified_at IS NULL AND expires_at >= NOW()
 }
 
 func (s *Store) DeleteExpiredEmailVerifications(ctx context.Context) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM email_verifications WHERE expires_at < NOW() OR verified_at IS NOT NULL`)
+	res, err := s.db.ExecContext(ctx, `DELETE FROM email_verifications WHERE expires_at < CURRENT_TIMESTAMP OR verified_at IS NOT NULL`)
 	if err != nil {
 		return 0, fmt.Errorf("清理过期验证码失败: %w", err)
 	}

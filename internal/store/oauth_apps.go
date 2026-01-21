@@ -95,7 +95,7 @@ func (s *Store) CreateOAuthApp(ctx context.Context, clientID string, name string
 
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO oauth_apps(client_id, name, client_secret_hash, status, created_at, updated_at)
-VALUES(?, ?, ?, ?, NOW(), NOW())
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `, clientID, name, nullableBytes(clientSecretHash), status)
 	if err != nil {
 		return 0, fmt.Errorf("创建 oauth_apps 失败: %w", err)
@@ -123,7 +123,7 @@ func (s *Store) UpdateOAuthApp(ctx context.Context, appID int64, name string, st
 	}
 	_, err := s.db.ExecContext(ctx, `
 UPDATE oauth_apps
-SET name=?, status=?, updated_at=NOW()
+SET name=?, status=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, name, status, appID)
 	if err != nil {
@@ -144,7 +144,7 @@ func (s *Store) UpdateOAuthAppSecretHash(ctx context.Context, appID int64, clien
 	}
 	_, err := s.db.ExecContext(ctx, `
 UPDATE oauth_apps
-SET client_secret_hash=?, updated_at=NOW()
+SET client_secret_hash=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, clientSecretHash, appID)
 	if err != nil {
@@ -259,7 +259,7 @@ func (s *Store) ReplaceOAuthAppRedirectURIs(ctx context.Context, appID int64, re
 		h := crypto.TokenHash(u)
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO oauth_app_redirect_uris(app_id, redirect_uri, redirect_uri_hash, created_at)
-VALUES(?, ?, ?, NOW())
+VALUES(?, ?, ?, CURRENT_TIMESTAMP)
 `, appID, u, h); err != nil {
 			return fmt.Errorf("写入 redirect_uri 失败: %w", err)
 		}
@@ -338,11 +338,19 @@ func (s *Store) UpsertOAuthUserGrant(ctx context.Context, userID int64, appID in
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `
+	stmt := `
 INSERT INTO oauth_user_grants(user_id, app_id, scope, created_at, updated_at)
-VALUES(?, ?, ?, NOW(), NOW())
-ON DUPLICATE KEY UPDATE scope=VALUES(scope), updated_at=NOW()
-`, userID, appID, scope)
+VALUES(?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON DUPLICATE KEY UPDATE scope=VALUES(scope), updated_at=CURRENT_TIMESTAMP
+`
+	if s.dialect == DialectSQLite {
+		stmt = `
+INSERT INTO oauth_user_grants(user_id, app_id, scope, created_at, updated_at)
+VALUES(?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT(user_id, app_id) DO UPDATE SET scope=excluded.scope, updated_at=CURRENT_TIMESTAMP
+`
+	}
+	_, err = s.db.ExecContext(ctx, stmt, userID, appID, scope)
 	if err != nil {
 		return fmt.Errorf("写入 oauth_user_grants 失败: %w", err)
 	}
@@ -391,7 +399,7 @@ func (s *Store) InsertOAuthAuthCode(ctx context.Context, codeHash []byte, appID 
 	}
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO oauth_auth_codes(code_hash, app_id, user_id, redirect_uri, scope, code_challenge, code_challenge_method, expires_at, consumed_at, created_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULL, NOW())
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP)
 `, codeHash, appID, userID, redirectURI, scope, nullableString(codeChallenge), nullableString(codeChallengeMethod), expiresAt)
 	if err != nil {
 		return 0, fmt.Errorf("写入 oauth_auth_codes 失败: %w", err)
@@ -428,8 +436,8 @@ func (s *Store) ConsumeOAuthAuthCode(ctx context.Context, code string, appID int
 
 	res, err := tx.ExecContext(ctx, `
 UPDATE oauth_auth_codes
-SET consumed_at=NOW()
-WHERE code_hash=? AND app_id=? AND redirect_uri=? AND consumed_at IS NULL AND expires_at >= NOW()
+SET consumed_at=CURRENT_TIMESTAMP
+WHERE code_hash=? AND app_id=? AND redirect_uri=? AND consumed_at IS NULL AND expires_at >= CURRENT_TIMESTAMP
 `, codeHash, appID, redirectURI)
 	if err != nil {
 		return OAuthAuthCode{}, false, fmt.Errorf("消费授权码失败: %w", err)
@@ -501,7 +509,7 @@ func (s *Store) CreateOAuthAppToken(ctx context.Context, appID int64, userID int
 	}
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO oauth_app_tokens(app_id, user_id, token_id, scope, created_at)
-VALUES(?, ?, ?, ?, NOW())
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP)
 `, appID, userID, tokenID, scope)
 	if err != nil {
 		return fmt.Errorf("写入 oauth_app_tokens 失败: %w", err)

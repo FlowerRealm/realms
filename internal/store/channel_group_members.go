@@ -13,9 +13,9 @@ type ChannelGroupMemberDetail struct {
 	MemberID      int64
 	ParentGroupID int64
 
-	MemberGroupID   *int64
-	MemberGroupName *string
-	MemberGroupStatus *int
+	MemberGroupID          *int64
+	MemberGroupName        *string
+	MemberGroupStatus      *int
 	MemberGroupMaxAttempts *int
 
 	MemberChannelID     *int64
@@ -211,11 +211,19 @@ func (s *Store) AddChannelGroupMemberGroup(ctx context.Context, parentGroupID in
 	if promotion {
 		p = 1
 	}
-	_, err = tx.ExecContext(ctx, `
+	stmt := `
 INSERT INTO channel_group_members(parent_group_id, member_group_id, priority, promotion, created_at, updated_at)
-VALUES(?, ?, ?, ?, NOW(), NOW())
-ON DUPLICATE KEY UPDATE priority=VALUES(priority), promotion=VALUES(promotion), updated_at=NOW()
-`, parentGroupID, memberGroupID, priority, p)
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON DUPLICATE KEY UPDATE priority=VALUES(priority), promotion=VALUES(promotion), updated_at=CURRENT_TIMESTAMP
+`
+	if s.dialect == DialectSQLite {
+		stmt = `
+INSERT INTO channel_group_members(parent_group_id, member_group_id, priority, promotion, created_at, updated_at)
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT(parent_group_id, member_group_id) DO UPDATE SET priority=excluded.priority, promotion=excluded.promotion, updated_at=CURRENT_TIMESTAMP
+`
+	}
+	_, err = tx.ExecContext(ctx, stmt, parentGroupID, memberGroupID, priority, p)
 	if err != nil {
 		return fmt.Errorf("写入子组成员失败: %w", err)
 	}
@@ -251,11 +259,19 @@ func (s *Store) AddChannelGroupMemberChannel(ctx context.Context, parentGroupID 
 	if promotion {
 		p = 1
 	}
-	_, err = tx.ExecContext(ctx, `
+	stmt := `
 INSERT INTO channel_group_members(parent_group_id, member_channel_id, priority, promotion, created_at, updated_at)
-VALUES(?, ?, ?, ?, NOW(), NOW())
-ON DUPLICATE KEY UPDATE priority=VALUES(priority), promotion=VALUES(promotion), updated_at=NOW()
-`, parentGroupID, channelID, priority, p)
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON DUPLICATE KEY UPDATE priority=VALUES(priority), promotion=VALUES(promotion), updated_at=CURRENT_TIMESTAMP
+`
+	if s.dialect == DialectSQLite {
+		stmt = `
+INSERT INTO channel_group_members(parent_group_id, member_channel_id, priority, promotion, created_at, updated_at)
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT(parent_group_id, member_channel_id) DO UPDATE SET priority=excluded.priority, promotion=excluded.promotion, updated_at=CURRENT_TIMESTAMP
+`
+	}
+	_, err = tx.ExecContext(ctx, stmt, parentGroupID, channelID, priority, p)
 	if err != nil {
 		return fmt.Errorf("写入渠道成员失败: %w", err)
 	}
@@ -331,7 +347,7 @@ func (s *Store) ReorderChannelGroupMembers(ctx context.Context, parentGroupID in
 			continue
 		}
 		priority := count - i
-		res, err := tx.ExecContext(ctx, `UPDATE channel_group_members SET priority=?, updated_at=NOW() WHERE id=? AND parent_group_id=?`, priority, id, parentGroupID)
+		res, err := tx.ExecContext(ctx, `UPDATE channel_group_members SET priority=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND parent_group_id=?`, priority, id, parentGroupID)
 		if err != nil {
 			return fmt.Errorf("更新成员(%d) priority 失败: %w", id, err)
 		}
@@ -389,15 +405,16 @@ ORDER BY (cg.name='default') DESC, cg.name ASC, cg.id DESC
 
 		var defaultGroupID int64
 		if err := tx.QueryRowContext(ctx, `SELECT id FROM channel_groups WHERE name='default' LIMIT 1`).Scan(&defaultGroupID); err == nil && defaultGroupID > 0 {
-			_, _ = tx.ExecContext(ctx, `
-INSERT IGNORE INTO channel_group_members(parent_group_id, member_channel_id, priority, promotion, created_at, updated_at)
-VALUES(?, ?, 0, 0, NOW(), NOW())
-`, defaultGroupID, channelID)
+			stmt := fmt.Sprintf(`
+%s INTO channel_group_members(parent_group_id, member_channel_id, priority, promotion, created_at, updated_at)
+VALUES(?, ?, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+`, insertIgnoreVerb(s.dialect))
+			_, _ = tx.ExecContext(ctx, stmt, defaultGroupID, channelID)
 		}
 	}
 
 	csv := strings.Join(names, ",")
-	if _, err := tx.ExecContext(ctx, "UPDATE upstream_channels SET `groups`=?, updated_at=NOW() WHERE id=?", csv, channelID); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE upstream_channels SET `groups`=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", csv, channelID); err != nil {
 		return fmt.Errorf("回填 upstream_channels.groups 失败: %w", err)
 	}
 	return nil

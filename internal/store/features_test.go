@@ -26,4 +26,3 @@ func TestFeatureStateEffective_SelfModeForcesBillingAndTickets(t *testing.T) {
 		t.Fatalf("FeatureStateEffective(selfMode=false).TicketsDisabled = true, want false")
 	}
 }
-

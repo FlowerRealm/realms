@@ -48,8 +48,8 @@ INSERT INTO usage_events(
   time, request_id, user_id, subscription_id, token_id, state, model,
   reserved_usd, committed_usd, reserve_expires_at, created_at, updated_at
 ) VALUES(
-  NOW(), ?, ?, ?, ?, ?, ?,
-  ?, 0, ?, NOW(), NOW()
+  CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?,
+  ?, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 )
 `, in.RequestID, in.UserID, in.SubscriptionID, in.TokenID, UsageStateReserved, in.Model, reservedUSD, in.ReserveExpiresAt)
 	if err != nil {
@@ -82,7 +82,7 @@ func (s *Store) CommitUsage(ctx context.Context, in CommitUsageInput) error {
 	committedUSD := in.CommittedUSD.Truncate(USDScale)
 	res, err := s.db.ExecContext(ctx, `
 UPDATE usage_events
-SET state=?, upstream_channel_id=?, input_tokens=?, cached_input_tokens=?, output_tokens=?, cached_output_tokens=?, committed_usd=?, updated_at=NOW()
+SET state=?, upstream_channel_id=?, input_tokens=?, cached_input_tokens=?, output_tokens=?, cached_output_tokens=?, committed_usd=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=? AND state=?
 `, UsageStateCommitted, in.UpstreamChannelID, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens, committedUSD, in.UsageEventID, UsageStateReserved)
 	if err != nil {
@@ -181,7 +181,7 @@ func (s *Store) FinalizeUsageEvent(ctx context.Context, in FinalizeUsageEventInp
 UPDATE usage_events
 SET endpoint=?, method=?, status_code=?, latency_ms=?, error_class=?, error_message=?,
     upstream_channel_id=?, upstream_endpoint_id=?, upstream_credential_id=?,
-    is_stream=?, request_bytes=?, response_bytes=?, updated_at=NOW()
+    is_stream=?, request_bytes=?, response_bytes=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, endpointAny, methodAny, statusCode, latencyMS, errClassPtr, errMsgPtr,
 		in.UpstreamChannelID, in.UpstreamEndpointID, in.UpstreamCredID,
@@ -195,7 +195,7 @@ WHERE id=?
 func (s *Store) VoidUsage(ctx context.Context, usageEventID int64) error {
 	res, err := s.db.ExecContext(ctx, `
 UPDATE usage_events
-SET state=?, committed_usd=0, updated_at=NOW()
+SET state=?, committed_usd=0, updated_at=CURRENT_TIMESTAMP
 WHERE id=? AND state=?
 `, UsageStateVoid, usageEventID, UsageStateReserved)
 	if err != nil {
@@ -221,7 +221,7 @@ func (s *Store) ExpireReservedUsage(ctx context.Context, now time.Time) (int64, 
 	// 再处理剩余预留（订阅等）：仅标记过期。
 	res, err := tx.ExecContext(ctx, `
 UPDATE usage_events
-SET state=?, committed_usd=0, updated_at=NOW()
+SET state=?, committed_usd=0, updated_at=CURRENT_TIMESTAMP
 WHERE state=? AND reserve_expires_at < ?
 `, UsageStateExpired, UsageStateReserved, now)
 	if err != nil {

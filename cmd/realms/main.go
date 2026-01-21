@@ -36,15 +36,26 @@ func main() {
 	logger := obs.NewLogger(cfg.Env)
 	slog.SetDefault(logger)
 
-	db, err := store.OpenMySQL(cfg.Env, cfg.DB.DSN)
+	db, dialect, err := store.OpenDB(cfg.Env, cfg.DB.Driver, cfg.DB.DSN, cfg.DB.SQLitePath)
 	if err != nil {
 		slog.Error("连接数据库失败", "err", err)
 		os.Exit(1)
 	}
 	defer db.Close()
 
-	if err := store.ApplyMigrations(db); err != nil {
-		slog.Error("执行数据库迁移失败", "err", err)
+	switch dialect {
+	case store.DialectMySQL:
+		if err := store.ApplyMigrations(db); err != nil {
+			slog.Error("执行数据库迁移失败", "err", err)
+			os.Exit(1)
+		}
+	case store.DialectSQLite:
+		if err := store.EnsureSQLiteSchema(db); err != nil {
+			slog.Error("初始化 SQLite schema 失败", "err", err)
+			os.Exit(1)
+		}
+	default:
+		slog.Error("未知数据库方言", "dialect", dialect)
 		os.Exit(1)
 	}
 

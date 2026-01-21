@@ -9,4 +9,3 @@ const (
 )
 
 var DefaultGroupPriceMultiplier = decimal.NewFromInt(1)
-
