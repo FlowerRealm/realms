@@ -1,0 +1,40 @@
+// Package auth 提供统一的主体信息（token/session）与密码/随机数工具，便于鉴权与审计。
+package auth
+
+import (
+	"context"
+)
+
+type ActorType string
+
+const (
+	ActorTypeToken   ActorType = "token"
+	ActorTypeSession ActorType = "session"
+)
+
+type Principal struct {
+	ActorType ActorType
+	UserID    int64
+	TokenID   *int64
+	Role      string
+	// Groups 用于上游调度分组；数据面与控制台会话均从 user_groups 读取。
+	Groups    []string
+	CSRFToken *string
+}
+
+type ctxKey int
+
+const principalKey ctxKey = 1
+
+func WithPrincipal(ctx context.Context, p Principal) context.Context {
+	return context.WithValue(ctx, principalKey, p)
+}
+
+func PrincipalFromContext(ctx context.Context) (Principal, bool) {
+	v := ctx.Value(principalKey)
+	if v == nil {
+		return Principal{}, false
+	}
+	p, ok := v.(Principal)
+	return p, ok
+}

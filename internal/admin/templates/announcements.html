@@ -1,0 +1,132 @@
+{{define "admin_announcements"}}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h2 class="h4 fw-bold mb-0">公告</h2>
+    <p class="text-muted small mb-0">发布后，用户可在控制台看到未读数量提示，并在“公告”页查看未读内容。</p>
+  </div>
+  <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createAnnouncementModal">
+    <i class="ri-megaphone-line me-1"></i> 新建公告
+  </button>
+</div>
+
+{{if .Error}}
+<div class="alert alert-danger mb-4">
+  <i class="ri-alert-line me-2"></i>{{.Error}}
+</div>
+{{end}}
+{{if .Notice}}
+<div class="alert alert-success mb-4">
+  <i class="ri-checkbox-circle-line me-2"></i>{{.Notice}}
+</div>
+{{end}}
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="bg-light">
+        <tr>
+          <th class="ps-4">标题</th>
+          <th style="width: 120px;">状态</th>
+          <th style="width: 170px;">创建时间</th>
+          <th style="width: 170px;">更新时间</th>
+          <th style="min-width: 220px;" class="text-end pe-4">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{if .Announcements}}
+          {{range .Announcements}}
+          <tr>
+            <td class="ps-4 fw-semibold text-dark">{{.Title}}</td>
+            <td>
+              {{if eq .Status 1}}
+                <span class="badge rounded-pill bg-success bg-opacity-10 text-success px-2">
+                  <i class="ri-checkbox-circle-line me-1"></i>已发布
+                </span>
+              {{else}}
+                <span class="badge rounded-pill bg-secondary bg-opacity-10 text-secondary px-2">
+                  <i class="ri-file-text-line me-1"></i>草稿
+                </span>
+              {{end}}
+            </td>
+            <td class="small text-muted">{{.CreatedAt}}</td>
+            <td class="small text-muted">{{.UpdatedAt}}</td>
+            <td class="text-end pe-4">
+              <div class="d-inline-flex gap-1">
+                <form method="POST" action="/admin/announcements/{{.ID}}" data-ajax="1" data-ajax-reload="1">
+                  <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+                  {{if eq .Status 1}}
+                    <input type="hidden" name="status" value="0" />
+                    <button class="btn btn-sm btn-light border text-warning" type="submit" title="撤回">
+                      <i class="ri-eye-off-line"></i>
+                    </button>
+                  {{else}}
+                    <input type="hidden" name="status" value="1" />
+                    <button class="btn btn-sm btn-light border text-success" type="submit" title="发布">
+                      <i class="ri-send-plane-line"></i>
+                    </button>
+                  {{end}}
+                </form>
+                <form method="POST" action="/admin/announcements/{{.ID}}/delete" data-ajax="1" data-ajax-reload="1" onsubmit="return confirm('确认删除该公告？此操作不可恢复。')">
+                  <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+                  <button class="btn btn-sm btn-light border text-danger" type="submit" title="删除">
+                    <i class="ri-delete-bin-line"></i>
+                  </button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {{end}}
+        {{else}}
+          <tr>
+            <td colspan="5" class="text-center py-5 text-muted">
+              <i class="ri-inbox-2-line fs-1 d-block mb-2"></i>
+              暂无公告
+            </td>
+          </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 新建公告弹窗 -->
+<div class="modal fade" id="createAnnouncementModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content border-0 shadow">
+      <div class="modal-header">
+        <h5 class="modal-title fw-bold">新建公告</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <form method="POST" action="/admin/announcements" data-ajax="1" data-ajax-reload="1">
+        <div class="modal-body">
+          <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
+
+          <div class="mb-3">
+            <label class="form-label">标题</label>
+            <input name="title" type="text" class="form-control" maxlength="200" required />
+            <div class="form-text">最多 200 字。</div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">内容</label>
+            <textarea name="body" class="form-control" rows="8" required></textarea>
+            <div class="form-text">支持换行；最多 8000 字。</div>
+          </div>
+
+          <div class="mb-1">
+            <label class="form-label">状态</label>
+            <select name="status" class="form-select">
+              <option value="1" selected>发布</option>
+              <option value="0">草稿</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer border-top-0">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-primary">提交</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{{end}}

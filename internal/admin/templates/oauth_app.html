@@ -1,0 +1,64 @@
+{{define "admin_oauth_app"}}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h2 class="h4 fw-bold mb-1">OAuth App</h2>
+    <p class="text-muted small mb-0">管理外部客户端授权登录（Authorization Code → `rlm_...`）。</p>
+  </div>
+  <a href="/admin/oauth-apps" class="btn btn-sm btn-outline-secondary">
+    <i class="ri-arrow-left-line me-1"></i> 返回列表
+  </a>
+</div>
+
+{{if .Notice}}
+<div class="alert alert-success alert-dismissible fade show mb-4" role="alert">
+  <i class="ri-checkbox-circle-line me-2"></i>{{.Notice}}
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="关闭"></button>
+</div>
+{{end}}
+
+{{if .Error}}
+<div class="alert alert-danger alert-dismissible fade show mb-4" role="alert">
+  <i class="ri-alert-line me-2"></i>{{.Error}}
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="关闭"></button>
+</div>
+{{end}}
+
+<div class="card border-0 shadow-sm">
+  <form method="POST" action="/admin/oauth-apps/{{.OAuthApp.ID}}">
+    <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+
+    <label>应用名称</label>
+    <input type="text" name="name" value="{{.OAuthApp.Name}}" required>
+
+    <label>Client ID（只读）</label>
+    <div class="mb-3"><code class="user-select-all">{{.OAuthApp.ClientID}}</code></div>
+
+    <label>状态</label>
+    <select name="status">
+      <option value="1" {{if eq .OAuthApp.Status 1}}selected{{end}}>启用</option>
+      <option value="0" {{if eq .OAuthApp.Status 0}}selected{{end}}>停用</option>
+    </select>
+
+    <label>回调地址白名单（redirect_uri，一行一个，精确匹配）</label>
+    <textarea name="redirect_uris" rows="6" placeholder="https://example.com/oauth/callback&#10;http://localhost:3000/callback" required>{{.OAuthApp.RedirectURIsText}}</textarea>
+
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-primary">保存</button>
+    </div>
+  </form>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <h5 class="h6 fw-bold mb-3">Client Secret</h5>
+  <p class="text-muted small mb-3">
+    Secret 仅在生成时显示一次，请妥善保存。服务端只保存 hash，不可恢复。
+  </p>
+  <form method="POST" action="/admin/oauth-apps/{{.OAuthApp.ID}}/rotate-secret">
+    <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+    <button type="submit" class="btn btn-outline-secondary">
+      <i class="ri-refresh-line me-1"></i> 生成/轮换 Secret
+    </button>
+  </form>
+</div>
+{{end}}
+

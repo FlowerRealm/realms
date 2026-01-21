@@ -1,0 +1,21 @@
+.tmp/
+
+# Go
+bin/
+dist/
+*.exe
+*.test
+*.out
+/vendor/
+/coverage.out
+
+# 根目录本地编译产物
+/main
+/realms
+
+# 本地配置与密钥
+config.yaml
+*.local.yaml
+.env
+
+helloagents/

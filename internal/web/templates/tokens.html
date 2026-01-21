@@ -1,0 +1,176 @@
+{{define "page_tokens"}}
+<div class="row g-4">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-body d-flex flex-column flex-md-row justify-content-between align-items-center">
+        <div class="d-flex align-items-center mb-3 mb-md-0">
+          <div class="bg-primary bg-opacity-10 text-primary rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 48px; height: 48px;">
+            <i class="bi bi-key-fill fs-4"></i>
+          </div>
+          <div>
+            <h5 class="mb-1 fw-semibold">我的 API 令牌</h5>
+            <p class="mb-0 text-muted small">令牌仅在创建/重新生成后展示一次；需要再次复制请重新生成。</p>
+          </div>
+        </div>
+        <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createTokenModal">
+          <i class="bi bi-plus-lg me-1"></i> 创建令牌
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 令牌列表 -->
+  <div class="col-lg-8">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table table-hover align-middle">
+            <thead class="text-muted small text-uppercase">
+              <tr>
+                <th scope="col" class="fw-medium ps-3">名称</th>
+                <th scope="col" class="fw-medium">预览</th>
+                <th scope="col" class="fw-medium">状态</th>
+                <th scope="col" class="fw-medium text-end pe-3">操作</th>
+              </tr>
+            </thead>
+            <tbody class="border-top-0">
+              {{range .Tokens}}
+              <tr>
+                <td class="ps-3">
+                  {{if .Name}}
+                    <span class="fw-medium text-dark">{{.Name}}</span>
+                  {{else}}
+                    <span class="text-muted small fst-italic">无备注</span>
+                  {{end}}
+                </td>
+                <td>
+                  {{if .TokenHint}}
+                    <code class="bg-light px-2 py-1 rounded text-muted border user-select-all">rlm_…{{.TokenHint}}</code>
+                  {{else}}
+                    <span class="text-muted small">-</span>
+                  {{end}}
+                </td>
+                <td>
+                  {{if eq .Status 1}}
+                    <span class="badge bg-success bg-opacity-10 text-success rounded-pill px-2">活跃</span>
+                  {{else}}
+                    <span class="badge bg-secondary bg-opacity-10 text-secondary rounded-pill px-2">已撤销</span>
+                  {{end}}
+                </td>
+                <td class="text-end pe-3">
+                  <form method="POST" action="/tokens/rotate" class="d-inline">
+                    <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+                    <input type="hidden" name="token_id" value="{{.ID}}" />
+                    <button class="btn btn-link text-primary p-0 text-decoration-none small" type="submit">
+                      重新生成
+                    </button>
+                  </form>
+                  {{if eq .Status 1}}
+                    <span class="text-muted small mx-2">|</span>
+                    <form method="POST" action="/tokens/revoke" class="d-inline">
+                      <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+                      <input type="hidden" name="token_id" value="{{.ID}}" />
+                      <button class="btn btn-link text-danger p-0 text-decoration-none small" type="submit">
+                        撤销
+                      </button>
+                    </form>
+                  {{else}}
+                    <span class="text-muted small mx-2">|</span>
+                    <form method="POST" action="/tokens/delete" class="d-inline">
+                      <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+                      <input type="hidden" name="token_id" value="{{.ID}}" />
+                      <button class="btn btn-link text-danger p-0 text-decoration-none small" type="submit">
+                        删除
+                      </button>
+                    </form>
+                  {{end}}
+                </td>
+              </tr>
+              {{else}}
+              <tr>
+                <td colspan="4" class="text-center py-5 text-muted">
+                  <div class="mb-2"><i class="bi bi-inbox fs-3 text-light-emphasis"></i></div>
+                  暂无令牌，点击右上角按钮创建一个。
+                </td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 使用指引 -->
+	  <div class="col-lg-4">
+	    <div class="card h-100 bg-primary bg-opacity-10 border-0">
+	      <div class="card-body">
+	        <h5 class="mb-3 fw-semibold text-primary"><i class="bi bi-terminal me-2"></i>使用方式</h5>
+		        <p class="text-muted small mb-3">推荐：配置 <code>OPENAI_BASE_URL</code>/<code>OPENAI_API_KEY</code>，并在 Codex CLI 中将 <code>model_provider</code> 设置为 <code>realms</code>。</p>
+
+	        <div class="bg-dark rounded-3 p-3 mb-3 shadow-sm position-relative overflow-hidden">
+	          <div class="d-flex justify-content-between align-items-center mb-2">
+	            <small class="text-secondary text-uppercase fw-bold" style="font-size: 0.65rem;">终端</small>
+	            <div class="d-flex gap-1">
+	              <div class="rounded-circle bg-danger" style="width: 8px; height: 8px;"></div>
+	              <div class="rounded-circle bg-warning" style="width: 8px; height: 8px;"></div>
+	              <div class="rounded-circle bg-success" style="width: 8px; height: 8px;"></div>
+	            </div>
+	          </div>
+	          <pre class="mb-0 text-light small overflow-auto" style="font-family: 'Menlo', monospace; font-size: 0.75rem; white-space: pre-wrap;"><code># Linux/macOS（bash/zsh）
+export OPENAI_BASE_URL="{{.BaseURL}}/v1"
+export OPENAI_API_KEY="<span class="text-warning">rlm_...</span>"
+
+# Windows（PowerShell）
+$env:OPENAI_BASE_URL = "{{.BaseURL}}/v1"
+$env:OPENAI_API_KEY = "<span class="text-warning">rlm_...</span>"
+
+# ~/.codex/config.toml（Windows: %USERPROFILE%\\.codex\\config.toml）
+model_provider = "realms"
+
+[model_providers.realms]
+name = "Realms"
+base_url = "{{.BaseURL}}/v1"
+wire_api = "responses"
+requires_openai_auth = true</code></pre>
+	        </div>
+
+	        <div class="d-flex align-items-start small text-muted">
+	          <i class="bi bi-info-circle-fill me-2 mt-1 text-primary"></i>
+	          <div>API 基础地址：<br><strong class="text-dark user-select-all">{{.BaseURL}}/v1</strong></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 创建令牌弹窗 -->
+<div class="modal fade" id="createTokenModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content border-0 shadow">
+      <div class="modal-header border-bottom-0 pb-0">
+        <h5 class="modal-title fw-bold">创建新 API 令牌</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <form method="POST" action="/tokens/new">
+        <div class="modal-body pt-4">
+          <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
+          <div class="mb-3">
+            <label class="form-label fw-medium text-dark">备注名称</label>
+            <input name="name" type="text" class="form-control" placeholder="例如：我的项目、笔记本 CLI…" autofocus />
+            <div class="form-text text-muted">给令牌起个名字，方便日后管理。</div>
+          </div>
+          <div class="alert alert-light border mb-0 d-flex align-items-start small">
+             <i class="bi bi-info-circle-fill text-primary me-2 mt-1"></i>
+             <div>令牌创建成功后只会显示一次；如需再次复制，请在列表中点击“重新生成”。</div>
+          </div>
+        </div>
+        <div class="modal-footer border-top-0">
+          <button type="button" class="btn btn-light text-muted" data-bs-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-primary px-4">创建</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{{end}}

@@ -1,0 +1,443 @@
+{{define "admin_channels"}}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h2 class="h4 fw-bold mb-1">上游渠道管理</h2>
+    <p class="text-muted small mb-0">管理模型转发渠道。支持拖拽排序调整优先级（越靠前优先级越高）。</p>
+  </div>
+  <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createChannelModal">
+    <i class="ri-add-line me-1"></i> 新建渠道
+  </button>
+</div>
+
+<form class="row g-2 align-items-end mb-4" method="GET" action="/admin/channels">
+  <div class="col-auto">
+    <label class="form-label small text-muted mb-1">开始日期（{{.AdminTimeZoneEffective}}）</label>
+    <input type="date" name="start" class="form-control form-control-sm" value="{{.UsageStart}}">
+  </div>
+  <div class="col-auto">
+    <label class="form-label small text-muted mb-1">结束日期（{{.AdminTimeZoneEffective}}）</label>
+    <input type="date" name="end" class="form-control form-control-sm" value="{{.UsageEnd}}">
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-sm btn-primary">查询统计</button>
+  </div>
+</form>
+
+{{if .Notice}}
+<div class="alert alert-success alert-dismissible fade show mb-4" role="alert">
+  <i class="ri-checkbox-circle-line me-2"></i>{{.Notice}}
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="关闭"></button>
+</div>
+{{end}}
+
+{{if .Error}}
+<div class="alert alert-danger alert-dismissible fade show mb-4" role="alert">
+  <i class="ri-alert-line me-2"></i>{{.Error}}
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="关闭"></button>
+</div>
+{{end}}
+
+<div class="card border-0 shadow-sm overflow-hidden">
+  <div class="bg-dark py-3 px-4 d-flex justify-content-between align-items-center">
+    <div>
+      <span class="text-white fw-bold text-uppercase small">渠道列表</span>
+    </div>
+    <div class="text-white-50 smaller">
+      <i class="ri-drag-move-2-line me-1"></i> 支持拖拽排序
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="bg-light">
+        <tr>
+          <th style="width: 5%;"></th> <!-- 拖拽把手 -->
+          <th style="width: 26%;">渠道详情</th>
+          <th style="width: 18%;">统计（区间）</th>
+          <th style="width: 10%;">状态</th>
+          <th style="width: 11%;">属性</th>
+          <th style="width: 15%;">健康状况</th>
+          <th class="text-end" style="width: 15%;">操作</th>
+        </tr>
+      </thead>
+      <tbody id="channels-table-body">
+        {{range .ChannelViews}}
+        <tr data-id="{{.Channel.ID}}">
+          <td class="text-center text-muted drag-handle-cell" style="cursor: move; width: 60px;" title="拖动排序">
+            <i class="ri-drag-move-2-line fs-5"></i>
+          </td>
+          <td>
+            <div class="d-flex flex-column">
+              <div class="d-flex align-items-center mb-1">
+                <span class="fw-bold text-dark me-2">{{.Channel.Name}}</span>
+                <span class="badge rounded-pill bg-light text-secondary border small" style="font-size: 0.7em;">{{.Channel.Type}}</span>
+	              </div>
+	              <div class="d-flex align-items-center text-muted small">
+	                {{if eq .Channel.Type "codex_oauth"}}
+	                  <span class="text-muted">内置（无需配置基础地址）</span>
+	                {{else if .Endpoint.BaseURL}}
+	                  <code class="text-primary bg-light border px-1" style="font-size: 0.8em; max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{.Endpoint.BaseURL}}</code>
+	                {{else}}
+	                  <span class="text-muted">-</span>
+	                {{end}}
+	              </div>
+	              <div class="d-flex align-items-center text-muted small mt-1">
+	                <span class="me-1">分组:</span>
+                  <a href="#" class="text-decoration-none" data-bs-toggle="modal" data-bs-target="#editGroupsModal-{{.Channel.ID}}">
+	                  <code class="bg-light px-1 border text-primary" style="font-size: 0.8em; max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;" title="点击修改分组">{{.Channel.Groups}}</code>
+                  </a>
+	              </div>
+                <div class="d-flex align-items-center text-muted small mt-1">
+                  <span class="me-1">限额:</span>
+                  <a href="#" class="text-decoration-none" data-bs-toggle="modal" data-bs-target="#editLimitsModal-{{.Channel.ID}}">
+                    <code class="bg-light px-1 border text-primary" style="font-size: 0.8em; max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;" title="点击配置限额">
+                      sessions={{if .Channel.LimitSessions}}{{formatOptionalInt .Channel.LimitSessions}}{{else}}-{{end}},
+                      rpm={{if .Channel.LimitRPM}}{{formatOptionalInt .Channel.LimitRPM}}{{else}}-{{end}},
+                      tpm={{if .Channel.LimitTPM}}{{formatOptionalInt .Channel.LimitTPM}}{{else}}-{{end}}
+                    </code>
+                  </a>
+                </div>
+            </div>
+          </td>
+          <td>
+            <div class="small">
+              <div class="text-muted" style="font-size: 0.75rem;">总消耗（USD）</div>
+              <div class="font-monospace fw-bold text-dark">{{.Usage.CommittedUSD}}</div>
+              <div class="text-muted mt-2" style="font-size: 0.75rem;">总 Token</div>
+              <div class="fw-medium text-dark">{{.Usage.Tokens}}</div>
+              <div class="text-muted mt-2" style="font-size: 0.75rem;">缓存命中率</div>
+              <div class="fw-medium text-success">{{.Usage.CacheRatio}}</div>
+            </div>
+          </td>
+          <td>
+            {{if eq .Channel.Status 1}}
+              <span class="badge rounded-pill bg-success bg-opacity-10 text-success px-2">
+                <i class="ri-checkbox-circle-fill me-1"></i>已启用
+              </span>
+            {{else}}
+              <span class="badge rounded-pill bg-secondary bg-opacity-10 text-secondary px-2">
+                <i class="ri-close-circle-fill me-1"></i>已禁用
+              </span>
+            {{end}}
+          </td>
+          <td>
+            <div class="d-flex align-items-center">
+              {{if .Channel.Promotion}}
+              <div class="d-flex flex-column" title="推荐渠道">
+                 <span class="small text-muted text-uppercase" style="font-size: 0.7em;">推荐</span>
+                 <i class="ri-star-fill text-warning"></i>
+              </div>
+              {{else}}
+              <span class="text-muted small">-</span>
+              {{end}}
+            </div>
+          </td>
+          <td>
+	            {{if .Channel.LastTestAt}}
+	              <div class="d-flex flex-column">
+	                <div class="mb-1">
+	                  {{if .Channel.LastTestOK}}
+	                    <span class="badge rounded-pill bg-success bg-opacity-10 text-success px-2">正常</span>
+	                    <span class="small ms-1 fw-medium text-dark">{{.Channel.LastTestLatencyMS}} 毫秒</span>
+	                  {{else}}
+	                    <span class="badge rounded-pill bg-danger bg-opacity-10 text-danger px-2">失败</span>
+	                  {{end}}
+	                </div>
+                <small class="text-muted" style="font-size: 0.75em;" title="{{.Channel.LastTestAt.Format "2006-01-02 15:04:05"}}">
+                  {{.Channel.LastTestAt.Format "15:04"}} 已检查
+                </small>
+              </div>
+            {{else}}
+              <span class="text-muted small">未测试</span>
+            {{end}}
+          </td>
+	          <td class="text-end">
+	            <div class="d-flex justify-content-end align-items-center gap-1">
+	              <!-- 快速测试 -->
+              <form method="POST" action="/admin/channels/test" data-ajax="1" data-ajax-reload="1" class="d-inline">
+                <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+                <input type="hidden" name="_intent" value="test_channel" />
+                <input type="hidden" name="channel_id" value="{{.Channel.ID}}" />
+                <button class="btn btn-sm btn-light border text-primary" type="submit" data-bs-toggle="tooltip" title="测试连接">
+                  <i class="ri-flashlight-line"></i>
+                </button>
+              </form>
+              
+	              <!-- 主要操作 -->
+              <button class="btn btn-sm btn-light border text-secondary" data-bs-toggle="modal" data-bs-target="#editGroupsModal-{{.Channel.ID}}" title="管理分组">
+                <i class="ri-folder-settings-line"></i>
+              </button>
+              <button class="btn btn-sm btn-light border text-secondary" data-bs-toggle="modal" data-bs-target="#editLimitsModal-{{.Channel.ID}}" title="配置限额">
+                <i class="ri-speed-line"></i>
+              </button>
+              <a href="/admin/channels/{{.Channel.ID}}/endpoints" class="btn btn-sm btn-light border text-secondary" data-bs-toggle="tooltip" title="配置端点">
+                <i class="ri-settings-3-line"></i>
+              </a>
+              {{if not $.Features.ModelsDisabled}}
+              <a href="/admin/channels/{{.Channel.ID}}/models" class="btn btn-sm btn-light border text-secondary" data-bs-toggle="tooltip" title="模型管理">
+                <i class="ri-function-line"></i>
+              </a>
+              {{end}}
+
+	              <!-- 更多操作 -->
+              <div class="dropdown">
+                <button class="btn btn-sm btn-light border text-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                  更多
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0">
+	                  {{if and (ne .Channel.Type "codex_oauth") (gt .Endpoint.ID 0)}}
+	                  <li>
+	                    <a class="dropdown-item" href="/admin/channels/{{.Channel.ID}}/endpoints#keys">
+	                      <i class="ri-key-2-line me-2 text-muted"></i>管理密钥
+	                    </a>
+	                  </li>
+	                  {{end}}
+                  {{if and (eq .Channel.Type "codex_oauth") (gt .Endpoint.ID 0)}}
+                  <li>
+                    <a class="dropdown-item" href="/admin/channels/{{.Channel.ID}}/endpoints#accounts">
+                      <i class="ri-id-card-line me-2 text-muted"></i>管理授权
+                    </a>
+                  </li>
+                  {{end}}
+                  <li><hr class="dropdown-divider"></li>
+	                  {{if ne .Channel.Type "codex_oauth"}}
+	                  <li>
+		                    <form method="POST" action="/admin/channels/{{.Channel.ID}}/delete" data-ajax="1" data-ajax-reload="1" onsubmit="return confirm('确认删除渠道 {{.Channel.Name}}? 此操作不可撤销。')" class="d-inline">
+		                      <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+		                      <button class="dropdown-item text-danger" type="submit">
+		                        <i class="ri-delete-bin-line me-2"></i>删除渠道
+		                      </button>
+		                    </form>
+                  </li>
+                  {{else}}
+                  <li>
+                     <span class="dropdown-item text-muted small">内置渠道不可删除</span>
+                  </li>
+                  {{end}}
+                </ul>
+              </div>
+            </div>
+          </td>
+        </tr>
+
+        <!-- 修改分组弹窗 -->
+        <div class="modal fade" id="editGroupsModal-{{.Channel.ID}}" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-sm">
+            <div class="modal-content border-0 shadow">
+              <div class="modal-header">
+                <h5 class="modal-title fw-bold">修改分组</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+              </div>
+              <form method="POST" action="/admin/channels/{{.Channel.ID}}" data-ajax="1" data-ajax-reload="1">
+                <div class="modal-body">
+                  <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+                  <input type="hidden" name="_intent" value="update_channel_groups" />
+                  <input type="hidden" name="channel_id" value="{{.Channel.ID}}" />
+                  <label class="form-label small text-muted">所属渠道：{{.Channel.Name}}</label>
+                  <div class="card p-2" style="max-height: 250px; overflow-y: auto;">
+                    {{$ch := .Channel}}
+                    {{range $.ChannelGroups}}
+                      {{$selected := csvHasGroup $ch.Groups .Name}}
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="groups" value="{{.Name}}" id="group_edit_{{$ch.ID}}_{{.Name}}"
+                               {{if $selected}}checked{{end}}
+                               {{if and (ne .Status 1) (not $selected)}}disabled{{end}}>
+                        <label class="form-check-label w-100" for="group_edit_{{$ch.ID}}_{{.Name}}">
+                           {{.Name}}{{if ne .Status 1}} <span class="badge bg-secondary ms-1" style="font-size: 0.7em;">禁用</span>{{end}}
+                        </label>
+                      </div>
+                    {{end}}
+                  </div>
+                  <div class="form-text smaller">用于上游调度选择渠道。</div>
+                </div>
+                <div class="modal-footer border-top-0 pt-0">
+                  <button type="submit" class="btn btn-primary w-100">保存分组</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <!-- 配置限额弹窗 -->
+        <div class="modal fade" id="editLimitsModal-{{.Channel.ID}}" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-sm">
+            <div class="modal-content border-0 shadow">
+              <div class="modal-header">
+                <h5 class="modal-title fw-bold">配置限额</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+              </div>
+              <form method="POST" action="/admin/channels/{{.Channel.ID}}/limits" data-ajax="1" data-ajax-reload="1">
+                <div class="modal-body">
+                  <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+                  <input type="hidden" name="return_to" value="/admin/channels" />
+                  <label class="form-label small text-muted">所属渠道：{{.Channel.Name}}</label>
+
+                  <div class="row g-2">
+                    <div class="col-6">
+                      <label class="form-label small text-muted mb-1">Sessions</label>
+                      <input name="limit_sessions" type="number" min="1" class="form-control form-control-sm" value="{{formatOptionalInt .Channel.LimitSessions}}" placeholder="无限制" />
+                    </div>
+                    <div class="col-6">
+                      <label class="form-label small text-muted mb-1">RPM</label>
+                      <input name="limit_rpm" type="number" min="1" class="form-control form-control-sm" value="{{formatOptionalInt .Channel.LimitRPM}}" placeholder="无限制" />
+                    </div>
+                    <div class="col-6">
+                      <label class="form-label small text-muted mb-1">TPM</label>
+                      <input name="limit_tpm" type="number" min="1" class="form-control form-control-sm" value="{{formatOptionalInt .Channel.LimitTPM}}" placeholder="无限制" />
+                    </div>
+                  </div>
+                  <div class="form-text smaller mt-2">
+                    留空表示无限制。最终生效以账号（key/授权账号）限额为准。
+                  </div>
+                </div>
+                <div class="modal-footer border-top-0 pt-0">
+                  <button type="submit" class="btn btn-primary w-100">保存限额</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 创建渠道弹窗 -->
+<div class="modal fade" id="createChannelModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content border-0 shadow">
+      <div class="modal-header border-bottom-0 pb-0">
+        <h5 class="modal-title fw-bold">创建新渠道</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <form method="POST" action="/admin/channels" data-ajax="1" data-ajax-reload="1">
+        <div class="modal-body pt-4">
+          <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
+          
+          <div class="mb-3">
+            <label class="form-label fw-medium">渠道名称</label>
+            <input name="name" type="text" class="form-control" required placeholder="例如：OpenAI 官方" />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-medium">渠道类型</label>
+            <input class="form-control bg-light" value="openai_compatible" disabled />
+            <input type="hidden" name="type" value="openai_compatible" />
+            <div class="form-text small text-muted"><i class="ri-information-line me-1"></i>标准 OpenAI 兼容接口。</div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-medium">分组</label>
+            <div class="card p-2" style="max-height: 200px; overflow-y: auto;">
+              {{range .ChannelGroups}}
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="groups" value="{{.Name}}" id="group_create_{{.Name}}" 
+                        {{if eq .Name "default"}}checked{{end}} 
+                        {{if ne .Status 1}}disabled{{end}}>
+                  <label class="form-check-label w-100" for="group_create_{{.Name}}">
+                    {{.Name}} {{if ne .Status 1}}<span class="badge bg-secondary ms-1" style="font-size: 0.7em;">禁用</span>{{end}}
+                  </label>
+                </div>
+              {{end}}
+            </div>
+            <div class="form-text small text-muted">渠道可属于多个分组。</div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-medium">接口基础地址</label>
+            <input name="base_url" type="url" class="form-control" required placeholder="https://api.openai.com" />
+            <div class="form-text small text-muted">必须是有效的公开 URL。默认禁止私有网络地址。</div>
+          </div>
+
+          <div class="row g-3">
+            <div class="col-6">
+              <label class="form-label fw-medium">优先级</label>
+              <input name="priority" type="number" class="form-control" value="0" />
+            </div>
+            <div class="col-6">
+              <label class="form-label fw-medium">推荐状态</label>
+              <select name="promotion" class="form-select">
+                <option value="0">普通</option>
+                <option value="1">推荐</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="mt-3">
+            <label class="form-label fw-medium mb-1">限额（可选）</label>
+            <div class="row g-3">
+              <div class="col-6">
+                <label class="form-label small text-muted mb-1">Sessions</label>
+                <input name="limit_sessions" type="number" min="1" class="form-control" placeholder="无限制" />
+              </div>
+              <div class="col-6">
+                <label class="form-label small text-muted mb-1">RPM</label>
+                <input name="limit_rpm" type="number" min="1" class="form-control" placeholder="无限制" />
+              </div>
+              <div class="col-6">
+                <label class="form-label small text-muted mb-1">TPM</label>
+                <input name="limit_tpm" type="number" min="1" class="form-control" placeholder="无限制" />
+              </div>
+            </div>
+            <div class="form-text small text-muted">留空表示无限制。最终生效以账号（key/授权账号）限额为准。</div>
+          </div>
+        </div>
+        <div class="modal-footer border-top-0 pt-0 pb-4 pe-4">
+          <button type="button" class="btn btn-light text-muted" data-bs-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-primary px-4">创建渠道</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    // 初始化 Tooltip
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+      return new bootstrap.Tooltip(tooltipTriggerEl)
+    })
+
+    // 初始化 Sortable
+    var el = document.getElementById('channels-table-body');
+    if (el) {
+        Sortable.create(el, {
+            handle: '.drag-handle-cell',
+            animation: 150,
+            ghostClass: 'bg-light',
+            onEnd: function (evt) {
+                var ids = [];
+                el.querySelectorAll('tr').forEach(function (row) {
+                    var id = row.getAttribute('data-id');
+                    if (id) {
+                        ids.push(parseInt(id));
+                    }
+                });
+
+                // 将新顺序提交到服务端
+                fetch('/admin/channels/reorder', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': '{{$.CSRFToken}}'
+                    },
+                    body: JSON.stringify(ids)
+                }).then(response => {
+                    if (response.ok) {
+                        // 刷新页面以展示新的优先级顺序
+                        window.location.reload();
+                    } else {
+                        alert('保存排序失败，请重试');
+                    }
+                }).catch(err => {
+                    console.error('错误:', err);
+                    alert('网络请求失败');
+                });
+            }
+        });
+    }
+  });
+</script>
+{{end}}

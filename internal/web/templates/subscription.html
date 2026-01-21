@@ -1,0 +1,232 @@
+{{define "page_subscription"}}
+<div class="row g-4">
+  
+  {{if .Notice}}
+  <div class="col-12">
+    <div class="alert alert-success d-flex align-items-center" role="alert">
+      <i class="bi bi-check-circle-fill me-2"></i>
+      <div>{{.Notice}}</div>
+    </div>
+  </div>
+  {{end}}
+
+  {{if .Error}}
+  <div class="col-12">
+    <div class="alert alert-danger d-flex align-items-center" role="alert">
+      <i class="bi bi-exclamation-triangle-fill me-2"></i>
+      <div>{{.Error}}</div>
+    </div>
+  </div>
+  {{end}}
+
+  <!-- 我的订单 -->
+  <div class="col-12 mt-4">
+    <div class="d-flex align-items-center mb-3">
+      <h4 class="mb-0 fw-bold">我的订单</h4>
+    </div>
+
+    <div class="card shadow-sm border-0 overflow-hidden">
+      {{if .SubscriptionOrders}}
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>订单号</th>
+              <th>套餐</th>
+              <th>金额</th>
+              <th>状态</th>
+              <th>创建时间</th>
+              <th>支付时间</th>
+              <th>批准时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .SubscriptionOrders}}
+            <tr data-href="/pay/subscription/{{.ID}}" style="cursor: pointer;">
+              <td class="font-monospace"><a class="link-primary text-decoration-none" href="/pay/subscription/{{.ID}}">#{{.ID}}</a></td>
+              <td>{{.PlanName}}</td>
+              <td class="fw-semibold">{{.AmountCNY}}</td>
+              <td>
+                {{if eq .Status "已生效"}}
+                  <span class="badge bg-success bg-opacity-10 text-success">已生效</span>
+                {{else if eq .Status "待支付"}}
+                  <span class="badge bg-warning bg-opacity-10 text-warning">待支付</span>
+                {{else if eq .Status "已取消"}}
+                  <span class="badge bg-secondary bg-opacity-10 text-secondary">已取消</span>
+                {{else}}
+                  <span class="badge bg-secondary bg-opacity-10 text-secondary">{{.Status}}</span>
+                {{end}}
+              </td>
+              <td class="text-muted small">{{.CreatedAt}}</td>
+              <td class="text-muted small">{{if .PaidAt}}{{.PaidAt}}{{else}}-{{end}}</td>
+              <td class="text-muted small">{{if .ApprovedAt}}{{.ApprovedAt}}{{else}}-{{end}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}
+      <div class="card-body p-4 text-muted">
+        暂无订单。购买订阅后会先创建订单，支付后自动生效。
+      </div>
+      {{end}}
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      function isInteractiveTarget(el) {
+        return !!(el && el.closest && el.closest('a, button, input, select, textarea, label, form'));
+      }
+      document.addEventListener("click", function (e) {
+        try {
+          const tr = e.target && e.target.closest ? e.target.closest("tr[data-href]") : null;
+          if (!tr || isInteractiveTarget(e.target)) return;
+          const href = (tr.getAttribute("data-href") || "").trim();
+          if (!href) return;
+          if (e.metaKey || e.ctrlKey) return void window.open(href, "_blank", "noopener");
+          window.location.href = href;
+        } catch (err) {}
+      }, false);
+    })();
+  </script>
+
+  <!-- 当前订阅概览 -->
+  <div class="col-12">
+    <div class="d-flex align-items-center mb-3">
+      <h4 class="mb-0 fw-bold">我的订阅</h4>
+      {{if .Subscription}}
+      <span class="badge bg-success ms-2">活跃</span>
+      {{else if .Subscriptions}}
+      <span class="badge bg-primary ms-2">待生效</span>
+      {{else}}
+      <span class="badge bg-secondary ms-2">无活跃订阅</span>
+      {{end}}
+	  </div>
+	    {{if .Subscription}}
+	    <div class="text-muted small">当前订阅：<strong>{{.Subscription.PlanName}}</strong>（{{.Subscription.StartAt}} 至 {{.Subscription.EndAt}}）｜组：<code>{{.Subscription.GroupName}}</code></div>
+	    {{else if .Subscriptions}}
+	    <div class="text-muted small">已购买 {{len .Subscriptions}} 个订阅（当前无活跃订阅）。</div>
+	    {{end}}
+	  </div>
+
+  {{if .Subscriptions}}
+    {{range .Subscriptions}}
+    <div class="col-md-6 col-xl-4">
+      <div class="card shadow-sm border-0 h-100 overflow-hidden">
+        <div class="card-header bg-white border-0 pt-4 px-4 pb-0">
+          <div class="d-flex justify-content-between align-items-center">
+            <h5 class="fw-bold mb-0">{{.PlanName}}</h5>
+            <span class="text-primary font-monospace fw-bold">{{.PriceCNY}}</span>
+          </div>
+	        </div>
+	        <div class="card-body p-4">
+	          <div class="mb-4">
+	            <div class="text-muted small mb-1"><i class="bi bi-diagram-3 me-2"></i>组</div>
+	            <div class="small fw-medium"><code>{{.GroupName}}</code></div>
+	          </div>
+	          <div class="mb-4">
+	            <div class="text-muted small mb-1"><i class="bi bi-calendar3 me-2"></i>有效期</div>
+	            <div class="small fw-medium">{{.StartAt}} 至</div>
+	            <div class="small fw-medium">{{.EndAt}}</div>
+	          </div>
+
+          {{if .UsageWindows}}
+          <div class="usage-bars mb-4">
+            {{range .UsageWindows}}
+            <div class="mb-3">
+              <div class="d-flex justify-content-between mb-1">
+                <span class="text-muted smaller fw-bold">{{.Window}}</span>
+                <span class="smaller fw-bold">{{.UsedPercent}}%</span>
+              </div>
+              <div class="progress" style="height: 6px;">
+                <div class="progress-bar {{if gt .UsedPercent 90}}bg-danger{{else if gt .UsedPercent 70}}bg-warning{{else}}bg-primary{{end}}" 
+                     role="progressbar" 
+                     style="width: {{.UsedPercent}}%" 
+                     aria-valuenow="{{.UsedPercent}}" 
+                     aria-valuemin="0" 
+                     aria-valuemax="100"></div>
+              </div>
+              <div class="d-flex justify-content-between mt-1">
+                <span class="smaller text-muted">{{.UsedUSD}}</span>
+                <span class="smaller text-muted">/ {{.LimitUSD}}</span>
+              </div>
+            </div>
+            {{end}}
+          </div>
+          {{end}}
+
+          {{if .Active}}
+          <div class="d-flex align-items-center text-success small">
+            <i class="bi bi-check-circle-fill me-2"></i> 订阅生效中
+          </div>
+          {{else}}
+          <div class="d-flex align-items-center text-primary small">
+            <i class="bi bi-clock-fill me-2"></i> 待生效
+          </div>
+          {{end}}
+        </div>
+      </div>
+    </div>
+    {{end}}
+  {{else}}
+  <div class="col-12">
+    <div class="card shadow-sm border-0 bg-light">
+      <div class="card-body p-5 text-center">
+        <div class="mb-3"><i class="bi bi-credit-card-2-back fs-1 text-muted"></i></div>
+        <h5>尚未购买任何订阅</h5>
+        <p class="text-muted">下单并完成支付后即可获得 API 访问限额。</p>
+        <a href="#plans" class="btn btn-primary mt-2">浏览订阅</a>
+      </div>
+    </div>
+  </div>
+  {{end}}
+
+  <!-- 套餐列表 -->
+  <div class="col-12 mt-5" id="plans">
+    <h4 class="mb-4 fw-bold">购买新订阅</h4>
+    <div class="row g-4">
+      {{range .Plans}}
+      <div class="col-md-6 col-xl-3">
+        <div class="card shadow-sm border-0 h-100 hover-shadow transition-all">
+          <div class="card-body p-4 d-flex flex-column">
+            <div class="mb-3">
+              <h5 class="fw-bold mb-1">{{.Name}}</h5>
+              <div class="d-flex gap-2 flex-wrap">
+                <div class="badge bg-primary bg-opacity-10 text-primary">{{.DurationDays}} 天有效期</div>
+                <div class="badge bg-secondary bg-opacity-10 text-secondary">组：{{.GroupName}}</div>
+              </div>
+            </div>
+            
+            <div class="my-3">
+              <div class="display-6 fw-bold text-dark">{{.PriceCNY}}</div>
+              <div class="text-muted small">单次购买</div>
+            </div>
+
+            <ul class="list-unstyled mb-4 small flex-grow-1">
+              <li class="mb-2"><i class="bi bi-check2 text-success me-2"></i>30天限额: <strong>{{.Limit30D}}</strong></li>
+              <li class="mb-2"><i class="bi bi-check2 text-success me-2"></i>7天限额: <strong>{{.Limit7D}}</strong></li>
+              <li class="mb-2"><i class="bi bi-check2 text-success me-2"></i>1天限额: <strong>{{.Limit1D}}</strong></li>
+              <li class="mb-2"><i class="bi bi-check2 text-success me-2"></i>5小时限额: <strong>{{.Limit5H}}</strong></li>
+            </ul>
+
+            <form method="POST" action="/subscription/purchase">
+              <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+              <input type="hidden" name="plan_id" value="{{.ID}}" />
+              <button type="submit" class="btn btn-outline-primary w-100 fw-bold">下单</button>
+            </form>
+          </div>
+        </div>
+      </div>
+      {{end}}
+    </div>
+  </div>
+
+</div>
+
+<style>
+  .hover-shadow:hover { transform: translateY(-5px); box-shadow: 0 1rem 3rem rgba(0,0,0,.1) !important; }
+  .transition-all { transition: all 0.3s ease; }
+  .smaller { font-size: 0.75rem; }
+</style>
+{{end}}

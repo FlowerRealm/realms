@@ -1,0 +1,293 @@
+{{define "admin_subscriptions"}}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h2 class="h4 fw-bold mb-0">订阅套餐</h2>
+    <p class="text-muted small mb-0">用于用户侧购买与额度校验。额度按 USD 成本估算（基于模型定价），留空表示该窗口不限额。</p>
+  </div>
+  <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createSubPlanModal">
+    <i class="ri-add-line me-1"></i> 新增套餐
+  </button>
+</div>
+
+{{if .Notice}}
+<div class="alert alert-success mb-4">
+  <i class="ri-checkbox-circle-line me-2"></i>{{.Notice}}
+</div>
+{{end}}
+
+{{if .Error}}
+<div class="alert alert-danger mb-4">
+  <i class="ri-alert-line me-2"></i>{{.Error}}
+</div>
+{{end}}
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="bg-light">
+        <tr>
+          <th class="ps-4">名称</th>
+          <th>组</th>
+          <th>价格</th>
+          <th>有效期</th>
+          <th>额度窗口（USD）</th>
+          <th>状态</th>
+          <th class="text-end pe-4">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .SubscriptionPlans}}
+        <tr>
+          <td class="ps-4 fw-bold text-dark">{{.Name}}</td>
+          <td><span class="badge bg-light text-secondary border fw-normal">{{.GroupName}}</span></td>
+          <td class="fw-bold text-dark">¥{{.PriceCNY}}</td>
+          <td class="text-muted small">{{.DurationDays}} 天</td>
+          <td class="text-muted small">
+            <div class="d-flex flex-wrap gap-2">
+              <span title="30天限额"><span class="text-muted opacity-50">30d:</span> {{if .Limit30D}}${{.Limit30D}}{{else}}不限{{end}}</span>
+              <span title="7天限额"><span class="text-muted opacity-50">7d:</span> {{if .Limit7D}}${{.Limit7D}}{{else}}不限{{end}}</span>
+              <span title="1天限额"><span class="text-muted opacity-50">1d:</span> {{if .Limit1D}}${{.Limit1D}}{{else}}不限{{end}}</span>
+              <span title="5小时限额"><span class="text-muted opacity-50">5h:</span> {{if .Limit5H}}${{.Limit5H}}{{else}}不限{{end}}</span>
+            </div>
+          </td>
+          <td>
+            {{if eq .Status 1}}
+              <span class="badge rounded-pill bg-success bg-opacity-10 text-success px-2">
+                <i class="ri-checkbox-circle-line me-1"></i>启用
+              </span>
+            {{else}}
+              <span class="badge rounded-pill bg-secondary bg-opacity-10 text-secondary px-2">
+                <i class="ri-close-circle-line me-1"></i>禁用
+              </span>
+            {{end}}
+          </td>
+          <td class="text-end pe-4">
+            <div class="d-inline-flex gap-1">
+              <a href="/admin/subscriptions/{{.ID}}" class="btn btn-sm btn-light border text-primary" title="编辑套餐">
+                <i class="ri-settings-3-line"></i>
+              </a>
+              <form method="POST" action="/admin/subscriptions/{{.ID}}/delete" data-ajax="1" data-ajax-reload="1" class="d-inline">
+                <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+                <button type="submit" class="btn btn-sm btn-light border text-danger" title="删除套餐" onclick="return confirm('确认删除该套餐？将同时删除该套餐下的订阅/订单记录，此操作不可恢复。');">
+                  <i class="ri-delete-bin-line"></i>
+                </button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  {{if not .SubscriptionPlans}}
+  <div class="text-center py-5 text-muted">
+    <i class="ri-inbox-2-line fs-1 d-block mb-3"></i>
+    暂无套餐，请先新增套餐后再允许用户购买。
+  </div>
+  {{end}}
+</div>
+
+<!-- 新增订阅套餐弹窗 -->
+<div class="modal fade" id="createSubPlanModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content border-0 shadow">
+      <div class="modal-header">
+        <h5 class="modal-title fw-bold">新增套餐</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <form method="POST" action="/admin/subscriptions" data-ajax="1" data-ajax-reload="1">
+        <div class="modal-body">
+          <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
+
+          <div class="row">
+            <div class="col-md-6">
+              <label class="form-label">名称</label>
+              <input name="name" type="text" class="form-control" required placeholder="例如：基础订阅" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">状态</label>
+              <select name="status" class="form-select">
+                <option value="1" selected>启用</option>
+                <option value="0">禁用</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="row mt-3">
+            <div class="col-md-6">
+              <label class="form-label">组</label>
+              <select name="group_name" class="form-select">
+                {{range .ChannelGroups}}
+                  <option value="{{.Name}}" {{if eq .Name "default"}}selected{{end}} {{if ne .Status 1}}disabled{{end}}>
+                    {{.Name}}{{if ne .Status 1}}（已禁用）{{end}}
+                  </option>
+                {{end}}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">价格（CNY）</label>
+              <div class="input-group">
+                <span class="input-group-text">¥</span>
+                <input name="price_cny" type="number" step="0.01" min="0" class="form-control" required value="12" />
+              </div>
+            </div>
+          </div>
+
+          <div class="row mt-3">
+            <div class="col-md-6">
+              <label class="form-label">有效期（天）</label>
+              <input name="duration_days" type="number" step="1" min="1" class="form-control" required value="30" />
+            </div>
+          </div>
+
+          <div class="row mt-3">
+            <div class="col-md-3">
+              <label class="form-label">30d 限额（USD）</label>
+              <div class="input-group">
+                <span class="input-group-text">$</span>
+                <input name="limit_30d" type="number" step="0.000001" min="0" class="form-control" placeholder="留空=不限" />
+              </div>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">7d 限额（USD）</label>
+              <div class="input-group">
+                <span class="input-group-text">$</span>
+                <input name="limit_7d" type="number" step="0.000001" min="0" class="form-control" placeholder="留空=不限" />
+              </div>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">1d 限额（USD）</label>
+              <div class="input-group">
+                <span class="input-group-text">$</span>
+                <input name="limit_1d" type="number" step="0.000001" min="0" class="form-control" placeholder="留空=不限" />
+              </div>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">5h 限额（USD）</label>
+              <div class="input-group">
+                <span class="input-group-text">$</span>
+                <input name="limit_5h" type="number" step="0.000001" min="0" class="form-control" placeholder="留空=不限" />
+              </div>
+            </div>
+          </div>
+
+          <div class="form-text small mt-2">额度单位为 USD（最多 6 位小数）。额度按模型定价估算成本后扣减。</div>
+        </div>
+        <div class="modal-footer border-top-0">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-primary">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "admin_subscription_edit"}}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h2 class="h4 fw-bold mb-0">编辑套餐</h2>
+  </div>
+  <a href="/admin/subscriptions" class="btn btn-light border">
+    <i class="ri-arrow-left-line me-1"></i>返回列表
+  </a>
+</div>
+
+{{if .Notice}}
+<div class="alert alert-success mb-4">
+  <i class="ri-checkbox-circle-line me-2"></i>{{.Notice}}
+</div>
+{{end}}
+
+{{if .Error}}
+<div class="alert alert-danger mb-4">
+  <i class="ri-alert-line me-2"></i>{{.Error}}
+</div>
+{{end}}
+
+<div class="card">
+  <form method="POST" action="/admin/subscriptions/{{.SubscriptionPlan.ID}}" data-ajax="1">
+    <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
+
+    <div class="row">
+      <div class="col-md-6">
+        <label class="form-label">名称</label>
+        <input name="name" type="text" class="form-control" required value="{{.SubscriptionPlan.Name}}" />
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">状态</label>
+        <select name="status" class="form-select">
+          <option value="1" {{if eq .SubscriptionPlan.Status 1}}selected{{end}}>启用</option>
+          <option value="0" {{if eq .SubscriptionPlan.Status 0}}selected{{end}}>禁用</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row mt-3">
+      <div class="col-md-6">
+        <label class="form-label">组</label>
+        <select name="group_name" class="form-select">
+          {{range .ChannelGroups}}
+            <option value="{{.Name}}" {{if eq $.SubscriptionPlan.GroupName .Name}}selected{{end}} {{if ne .Status 1}}disabled{{end}}>
+              {{.Name}}{{if ne .Status 1}}（已禁用）{{end}}
+            </option>
+          {{end}}
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">价格（CNY）</label>
+        <div class="input-group">
+          <span class="input-group-text">¥</span>
+          <input name="price_cny" type="number" step="0.01" min="0" class="form-control" required value="{{.SubscriptionPlan.PriceCNY}}" />
+        </div>
+      </div>
+    </div>
+
+    <div class="row mt-3">
+      <div class="col-md-6">
+        <label class="form-label">有效期（天）</label>
+        <input name="duration_days" type="number" step="1" min="1" class="form-control" required value="{{.SubscriptionPlan.DurationDays}}" />
+      </div>
+    </div>
+
+    <div class="row mt-3">
+      <div class="col-md-3">
+        <label class="form-label">30d 限额（USD）</label>
+        <div class="input-group">
+          <span class="input-group-text">$</span>
+          <input name="limit_30d" type="number" step="0.000001" min="0" class="form-control" value="{{.SubscriptionPlan.Limit30D}}" placeholder="留空=不限" />
+        </div>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">7d 限额（USD）</label>
+        <div class="input-group">
+          <span class="input-group-text">$</span>
+          <input name="limit_7d" type="number" step="0.000001" min="0" class="form-control" value="{{.SubscriptionPlan.Limit7D}}" placeholder="留空=不限" />
+        </div>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">1d 限额（USD）</label>
+        <div class="input-group">
+          <span class="input-group-text">$</span>
+          <input name="limit_1d" type="number" step="0.000001" min="0" class="form-control" value="{{.SubscriptionPlan.Limit1D}}" placeholder="留空=不限" />
+        </div>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">5h 限额（USD）</label>
+        <div class="input-group">
+          <span class="input-group-text">$</span>
+          <input name="limit_5h" type="number" step="0.000001" min="0" class="form-control" value="{{.SubscriptionPlan.Limit5H}}" placeholder="留空=不限" />
+        </div>
+      </div>
+    </div>
+    <div class="form-text small mt-2">留空表示该窗口不限额。</div>
+
+    <div class="d-flex justify-content-end mt-4">
+      <button type="submit" class="btn btn-primary">
+        <i class="ri-save-line me-1"></i>保存
+      </button>
+    </div>
+  </form>
+</div>
+{{end}}

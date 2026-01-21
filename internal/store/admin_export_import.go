@@ -1,0 +1,662 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/shopspring/decimal"
+)
+
+const AdminConfigExportVersion = 1
+
+type AdminConfigExport struct {
+	Version    int       `json:"version"`
+	ExportedAt time.Time `json:"exported_at"`
+
+	ChannelGroups       []AdminConfigChannelGroup       `json:"channel_groups"`
+	ChannelGroupMembers []AdminConfigChannelGroupMember `json:"channel_group_members"`
+
+	UpstreamChannels  []AdminConfigUpstreamChannel  `json:"upstream_channels"`
+	UpstreamEndpoints []AdminConfigUpstreamEndpoint `json:"upstream_endpoints"`
+
+	ManagedModels []AdminConfigManagedModel `json:"managed_models"`
+	ChannelModels []AdminConfigChannelModel `json:"channel_models"`
+}
+
+type AdminConfigChannelGroup struct {
+	Name            string           `json:"name"`
+	Description     *string          `json:"description,omitempty"`
+	PriceMultiplier decimal.Decimal  `json:"price_multiplier"`
+	MaxAttempts     int              `json:"max_attempts"`
+	Status          int              `json:"status"`
+}
+
+type AdminConfigChannelGroupMember struct {
+	ParentGroup string `json:"parent_group"`
+
+	MemberGroup *string `json:"member_group,omitempty"`
+
+	MemberChannelType *string `json:"member_channel_type,omitempty"`
+	MemberChannelName *string `json:"member_channel_name,omitempty"`
+
+	Priority  int  `json:"priority"`
+	Promotion bool `json:"promotion"`
+}
+
+type AdminConfigUpstreamChannel struct {
+	Type     string `json:"type"`
+	Name     string `json:"name"`
+	Groups   string `json:"groups,omitempty"`
+	Status   int    `json:"status"`
+	Priority int    `json:"priority"`
+
+	Promotion bool `json:"promotion"`
+
+	LimitSessions *int `json:"limit_sessions,omitempty"`
+	LimitRPM      *int `json:"limit_rpm,omitempty"`
+	LimitTPM      *int `json:"limit_tpm,omitempty"`
+}
+
+type AdminConfigUpstreamEndpoint struct {
+	ChannelType string `json:"channel_type"`
+	ChannelName string `json:"channel_name"`
+
+	BaseURL   string `json:"base_url"`
+	Status   int    `json:"status"`
+	Priority int    `json:"priority"`
+}
+
+type AdminConfigManagedModel struct {
+	PublicID      string          `json:"public_id"`
+	UpstreamModel *string         `json:"upstream_model,omitempty"`
+	OwnedBy       *string         `json:"owned_by,omitempty"`
+	InputUSDPer1M decimal.Decimal `json:"input_usd_per_1m"`
+	OutputUSDPer1M decimal.Decimal `json:"output_usd_per_1m"`
+	CacheUSDPer1M decimal.Decimal `json:"cache_usd_per_1m"`
+	Status        int             `json:"status"`
+}
+
+type AdminConfigChannelModel struct {
+	ChannelType string `json:"channel_type"`
+	ChannelName string `json:"channel_name"`
+
+	PublicID      string `json:"public_id"`
+	UpstreamModel string `json:"upstream_model"`
+	Status        int    `json:"status"`
+}
+
+type AdminConfigImportReport struct {
+	ChannelGroups       int `json:"channel_groups"`
+	ChannelGroupMembers int `json:"channel_group_members"`
+	UpstreamChannels    int `json:"upstream_channels"`
+	UpstreamEndpoints   int `json:"upstream_endpoints"`
+	ManagedModels       int `json:"managed_models"`
+	ChannelModels       int `json:"channel_models"`
+}
+
+func (s *Store) ExportAdminConfig(ctx context.Context) (AdminConfigExport, error) {
+	if s == nil || s.db == nil {
+		return AdminConfigExport{}, errors.New("数据库未初始化")
+	}
+
+	out := AdminConfigExport{
+		Version:    AdminConfigExportVersion,
+		ExportedAt: time.Now(),
+	}
+
+	groups, err := s.ListChannelGroups(ctx)
+	if err != nil {
+		return AdminConfigExport{}, err
+	}
+	out.ChannelGroups = make([]AdminConfigChannelGroup, 0, len(groups))
+	for _, g := range groups {
+		out.ChannelGroups = append(out.ChannelGroups, AdminConfigChannelGroup{
+			Name:            strings.TrimSpace(g.Name),
+			Description:     g.Description,
+			PriceMultiplier: g.PriceMultiplier,
+			MaxAttempts:     g.MaxAttempts,
+			Status:          g.Status,
+		})
+	}
+
+	for _, g := range groups {
+		ms, err := s.ListChannelGroupMembers(ctx, g.ID)
+		if err != nil {
+			return AdminConfigExport{}, err
+		}
+		for _, m := range ms {
+			row := AdminConfigChannelGroupMember{
+				ParentGroup: strings.TrimSpace(g.Name),
+				Priority:    m.Priority,
+				Promotion:   m.Promotion,
+			}
+			if m.MemberGroupName != nil && strings.TrimSpace(*m.MemberGroupName) != "" {
+				v := strings.TrimSpace(*m.MemberGroupName)
+				row.MemberGroup = &v
+			}
+			if m.MemberChannelType != nil && strings.TrimSpace(*m.MemberChannelType) != "" {
+				v := strings.TrimSpace(*m.MemberChannelType)
+				row.MemberChannelType = &v
+			}
+			if m.MemberChannelName != nil && strings.TrimSpace(*m.MemberChannelName) != "" {
+				v := strings.TrimSpace(*m.MemberChannelName)
+				row.MemberChannelName = &v
+			}
+			// 忽略脏数据：必须且只能存在一种成员类型。
+			if row.MemberGroup != nil && row.MemberChannelName != nil {
+				continue
+			}
+			if row.MemberGroup == nil && row.MemberChannelName == nil {
+				continue
+			}
+			out.ChannelGroupMembers = append(out.ChannelGroupMembers, row)
+		}
+	}
+
+	channels, err := s.ListUpstreamChannels(ctx)
+	if err != nil {
+		return AdminConfigExport{}, err
+	}
+	out.UpstreamChannels = make([]AdminConfigUpstreamChannel, 0, len(channels))
+	out.UpstreamEndpoints = make([]AdminConfigUpstreamEndpoint, 0, len(channels))
+	out.ChannelModels = make([]AdminConfigChannelModel, 0, len(channels))
+	for _, ch := range channels {
+		out.UpstreamChannels = append(out.UpstreamChannels, AdminConfigUpstreamChannel{
+			Type:          strings.TrimSpace(ch.Type),
+			Name:          strings.TrimSpace(ch.Name),
+			Groups:        strings.TrimSpace(ch.Groups),
+			Status:        ch.Status,
+			Priority:      ch.Priority,
+			Promotion:     ch.Promotion,
+			LimitSessions: ch.LimitSessions,
+			LimitRPM:      ch.LimitRPM,
+			LimitTPM:      ch.LimitTPM,
+		})
+
+		ep, err := s.GetUpstreamEndpointByChannelID(ctx, ch.ID)
+		if err == nil && strings.TrimSpace(ep.BaseURL) != "" {
+			out.UpstreamEndpoints = append(out.UpstreamEndpoints, AdminConfigUpstreamEndpoint{
+				ChannelType: strings.TrimSpace(ch.Type),
+				ChannelName: strings.TrimSpace(ch.Name),
+				BaseURL:     strings.TrimSpace(ep.BaseURL),
+				Status:      ep.Status,
+				Priority:    ep.Priority,
+			})
+		}
+
+		models, err := s.ListChannelModelsByChannelID(ctx, ch.ID)
+		if err != nil {
+			return AdminConfigExport{}, err
+		}
+		for _, m := range models {
+			out.ChannelModels = append(out.ChannelModels, AdminConfigChannelModel{
+				ChannelType:   strings.TrimSpace(ch.Type),
+				ChannelName:   strings.TrimSpace(ch.Name),
+				PublicID:      strings.TrimSpace(m.PublicID),
+				UpstreamModel: strings.TrimSpace(m.UpstreamModel),
+				Status:        m.Status,
+			})
+		}
+	}
+
+	managed, err := s.ListManagedModels(ctx)
+	if err != nil {
+		return AdminConfigExport{}, err
+	}
+	out.ManagedModels = make([]AdminConfigManagedModel, 0, len(managed))
+	for _, m := range managed {
+		out.ManagedModels = append(out.ManagedModels, AdminConfigManagedModel{
+			PublicID:       strings.TrimSpace(m.PublicID),
+			UpstreamModel:  m.UpstreamModel,
+			OwnedBy:        m.OwnedBy,
+			InputUSDPer1M:  m.InputUSDPer1M,
+			OutputUSDPer1M: m.OutputUSDPer1M,
+			CacheUSDPer1M:  m.CacheUSDPer1M,
+			Status:         m.Status,
+		})
+	}
+
+	return out, nil
+}
+
+func (s *Store) ImportAdminConfig(ctx context.Context, in AdminConfigExport) (AdminConfigImportReport, error) {
+	if s == nil || s.db == nil {
+		return AdminConfigImportReport{}, errors.New("数据库未初始化")
+	}
+	if in.Version != AdminConfigExportVersion {
+		return AdminConfigImportReport{}, fmt.Errorf("不支持的导入版本: %d", in.Version)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return AdminConfigImportReport{}, fmt.Errorf("开始事务失败: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	groupNames := make(map[string]struct{})
+	groupNames[DefaultGroupName] = struct{}{}
+	for _, g := range in.ChannelGroups {
+		n := strings.TrimSpace(g.Name)
+		if n == "" {
+			continue
+		}
+		groupNames[n] = struct{}{}
+	}
+	for _, m := range in.ChannelGroupMembers {
+		p := strings.TrimSpace(m.ParentGroup)
+		if p != "" {
+			groupNames[p] = struct{}{}
+		}
+		if m.MemberGroup != nil {
+			n := strings.TrimSpace(*m.MemberGroup)
+			if n != "" {
+				groupNames[n] = struct{}{}
+			}
+		}
+	}
+
+	for _, g := range in.ChannelGroups {
+		name := strings.TrimSpace(g.Name)
+		if name == "" {
+			continue
+		}
+		desc := any(nil)
+		if g.Description != nil && strings.TrimSpace(*g.Description) != "" {
+			v := strings.TrimSpace(*g.Description)
+			if len(v) > 255 {
+				v = v[:255]
+			}
+			desc = v
+		}
+		pm := g.PriceMultiplier.Truncate(PriceMultiplierScale)
+		if pm.IsNegative() {
+			pm = DefaultGroupPriceMultiplier
+		}
+		maxAttempts := g.MaxAttempts
+		if maxAttempts <= 0 {
+			maxAttempts = 5
+		}
+		status := g.Status
+		if status != 0 && status != 1 {
+			status = 1
+		}
+
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO channel_groups(name, description, price_multiplier, max_attempts, status, created_at, updated_at)
+VALUES(?, ?, ?, ?, ?, NOW(), NOW())
+ON DUPLICATE KEY UPDATE
+  description=VALUES(description),
+  price_multiplier=VALUES(price_multiplier),
+  max_attempts=VALUES(max_attempts),
+  status=VALUES(status),
+  updated_at=NOW()
+`, name, desc, pm, maxAttempts, status); err != nil {
+			return AdminConfigImportReport{}, fmt.Errorf("导入 channel_groups 失败: %w", err)
+		}
+	}
+
+	groupIDByName := make(map[string]int64)
+	if len(groupNames) > 0 {
+		names := make([]string, 0, len(groupNames))
+		for n := range groupNames {
+			names = append(names, n)
+		}
+		placeholders := strings.Repeat("?,", len(names))
+		placeholders = strings.TrimSuffix(placeholders, ",")
+		args := make([]any, 0, len(names))
+		for _, n := range names {
+			args = append(args, n)
+		}
+		rows, err := tx.QueryContext(ctx, "SELECT id, name FROM channel_groups WHERE name IN ("+placeholders+")", args...)
+		if err != nil {
+			return AdminConfigImportReport{}, fmt.Errorf("查询 channel_groups 失败: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id int64
+			var name string
+			if err := rows.Scan(&id, &name); err != nil {
+				return AdminConfigImportReport{}, fmt.Errorf("扫描 channel_groups 失败: %w", err)
+			}
+			name = strings.TrimSpace(name)
+			if id > 0 && name != "" {
+				groupIDByName[name] = id
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return AdminConfigImportReport{}, fmt.Errorf("遍历 channel_groups 失败: %w", err)
+		}
+	}
+
+	ensureGroupID := func(name string) (int64, error) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return 0, errors.New("group name 不能为空")
+		}
+		id, ok := groupIDByName[name]
+		if !ok || id == 0 {
+			return 0, fmt.Errorf("分组不存在: %s", name)
+		}
+		return id, nil
+	}
+
+	channelIDByKey := make(map[string]int64)
+
+	channelKey := func(typ, name string) string {
+		typ = strings.TrimSpace(typ)
+		if typ == UpstreamTypeCodexOAuth {
+			return typ
+		}
+		return typ + ":" + strings.TrimSpace(name)
+	}
+
+	findChannelID := func(typ, name string) (int64, error) {
+		typ = strings.TrimSpace(typ)
+		name = strings.TrimSpace(name)
+		switch typ {
+		case "":
+			return 0, errors.New("channel_type 不能为空")
+		case UpstreamTypeCodexOAuth:
+			var ids []int64
+			rows, err := tx.QueryContext(ctx, `SELECT id FROM upstream_channels WHERE type=?`, typ)
+			if err != nil {
+				return 0, fmt.Errorf("查询 codex_oauth channel 失败: %w", err)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var id int64
+				if err := rows.Scan(&id); err != nil {
+					return 0, fmt.Errorf("扫描 codex_oauth channel 失败: %w", err)
+				}
+				ids = append(ids, id)
+				if len(ids) > 1 {
+					break
+				}
+			}
+			if err := rows.Err(); err != nil {
+				return 0, fmt.Errorf("遍历 codex_oauth channel 失败: %w", err)
+			}
+			if len(ids) == 0 || ids[0] == 0 {
+				return 0, errors.New("内置 codex_oauth channel 不存在（请确认已运行迁移）")
+			}
+			if len(ids) > 1 {
+				return 0, errors.New("存在多个 codex_oauth channel，请先清理重复记录")
+			}
+			return ids[0], nil
+		default:
+			var ids []int64
+			rows, err := tx.QueryContext(ctx, `SELECT id FROM upstream_channels WHERE type=? AND name=?`, typ, name)
+			if err != nil {
+				return 0, fmt.Errorf("查询 upstream_channels 失败: %w", err)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var id int64
+				if err := rows.Scan(&id); err != nil {
+					return 0, fmt.Errorf("扫描 upstream_channels 失败: %w", err)
+				}
+				ids = append(ids, id)
+				if len(ids) > 1 {
+					break
+				}
+			}
+			if err := rows.Err(); err != nil {
+				return 0, fmt.Errorf("遍历 upstream_channels 失败: %w", err)
+			}
+			if len(ids) == 0 {
+				return 0,  sql.ErrNoRows
+			}
+			if len(ids) > 1 {
+				return 0, fmt.Errorf("存在多个同名 channel（type=%s, name=%s），请先清理重复记录", typ, name)
+			}
+			return ids[0], nil
+		}
+	}
+
+	upsertChannel := func(ch AdminConfigUpstreamChannel) (int64, error) {
+		typ := strings.TrimSpace(ch.Type)
+		name := strings.TrimSpace(ch.Name)
+		if typ == "" {
+			return 0, errors.New("type 不能为空")
+		}
+		if typ != UpstreamTypeCodexOAuth && name == "" {
+			return 0, errors.New("name 不能为空")
+		}
+
+		id, err := findChannelID(typ, name)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				p := 0
+				if ch.Promotion {
+					p = 1
+				}
+				res, err := tx.ExecContext(ctx, `
+INSERT INTO upstream_channels(type, name, `+"`groups`"+`, status, priority, promotion, limit_sessions, limit_rpm, limit_tpm, created_at, updated_at)
+VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, NOW(), NOW())
+`, typ, name, ch.Status, ch.Priority, p, nullableIntPtr(ch.LimitSessions), nullableIntPtr(ch.LimitRPM), nullableIntPtr(ch.LimitTPM))
+				if err != nil {
+					return 0, fmt.Errorf("创建 upstream_channel 失败: %w", err)
+				}
+				id, err = res.LastInsertId()
+				if err != nil {
+					return 0, fmt.Errorf("获取 upstream_channel id 失败: %w", err)
+				}
+			} else {
+				return 0, err
+			}
+		} else {
+			p := 0
+			if ch.Promotion {
+				p = 1
+			}
+			if _, err := tx.ExecContext(ctx, `
+UPDATE upstream_channels
+SET name=COALESCE(NULLIF(?, ''), name),
+    status=?, priority=?, promotion=?,
+    limit_sessions=?, limit_rpm=?, limit_tpm=?,
+    updated_at=NOW()
+WHERE id=?
+`, name, ch.Status, ch.Priority, p, nullableIntPtr(ch.LimitSessions), nullableIntPtr(ch.LimitRPM), nullableIntPtr(ch.LimitTPM), id); err != nil {
+				return 0, fmt.Errorf("更新 upstream_channel 失败: %w", err)
+			}
+		}
+
+		key := channelKey(typ, name)
+		channelIDByKey[key] = id
+		return id, nil
+	}
+
+	for _, ch := range in.UpstreamChannels {
+		if _, err := upsertChannel(ch); err != nil {
+			return AdminConfigImportReport{}, err
+		}
+	}
+
+	resolveChannelID := func(typ, name string) (int64, error) {
+		key := channelKey(typ, name)
+		if id, ok := channelIDByKey[key]; ok && id > 0 {
+			return id, nil
+		}
+		// 兼容：channel 未出现在 upstream_channels 列表，但被成员关系/绑定引用。
+		id, err := findChannelID(typ, name)
+		if err != nil {
+			return 0, err
+		}
+		channelIDByKey[key] = id
+		return id, nil
+	}
+
+	for _, ep := range in.UpstreamEndpoints {
+		typ := strings.TrimSpace(ep.ChannelType)
+		name := strings.TrimSpace(ep.ChannelName)
+		channelID, err := resolveChannelID(typ, name)
+		if err != nil {
+			return AdminConfigImportReport{}, err
+		}
+		baseURL := strings.TrimSpace(ep.BaseURL)
+		if baseURL == "" {
+			continue
+		}
+		p := ep.Priority
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO upstream_endpoints(channel_id, base_url, status, priority, created_at, updated_at)
+VALUES(?, ?, ?, ?, NOW(), NOW())
+ON DUPLICATE KEY UPDATE
+  base_url=VALUES(base_url),
+  status=VALUES(status),
+  priority=VALUES(priority),
+  updated_at=NOW()
+`, channelID, baseURL, ep.Status, p); err != nil {
+			return AdminConfigImportReport{}, fmt.Errorf("导入 upstream_endpoints 失败: %w", err)
+		}
+	}
+
+	for _, m := range in.ManagedModels {
+		publicID := strings.TrimSpace(m.PublicID)
+		if publicID == "" {
+			continue
+		}
+		inUSD := m.InputUSDPer1M.Truncate(USDScale)
+		outUSD := m.OutputUSDPer1M.Truncate(USDScale)
+		cacheUSD := m.CacheUSDPer1M.Truncate(USDScale)
+		if inUSD.IsNegative() || outUSD.IsNegative() || cacheUSD.IsNegative() {
+			return AdminConfigImportReport{}, fmt.Errorf("managed_models[%s] 定价不合法", publicID)
+		}
+		status := m.Status
+		if status != 0 && status != 1 {
+			status = 1
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO managed_models(public_id, upstream_model, owned_by, input_usd_per_1m, output_usd_per_1m, cache_usd_per_1m, status, created_at)
+VALUES(?, ?, ?, ?, ?, ?, ?, NOW())
+ON DUPLICATE KEY UPDATE
+  upstream_model=VALUES(upstream_model),
+  owned_by=VALUES(owned_by),
+  input_usd_per_1m=VALUES(input_usd_per_1m),
+  output_usd_per_1m=VALUES(output_usd_per_1m),
+  cache_usd_per_1m=VALUES(cache_usd_per_1m),
+  status=VALUES(status)
+`, publicID, m.UpstreamModel, m.OwnedBy, inUSD, outUSD, cacheUSD, status); err != nil {
+			return AdminConfigImportReport{}, fmt.Errorf("导入 managed_models 失败: %w", err)
+		}
+	}
+
+	for _, m := range in.ChannelModels {
+		typ := strings.TrimSpace(m.ChannelType)
+		name := strings.TrimSpace(m.ChannelName)
+		channelID, err := resolveChannelID(typ, name)
+		if err != nil {
+			return AdminConfigImportReport{}, err
+		}
+		publicID := strings.TrimSpace(m.PublicID)
+		upstreamModel := strings.TrimSpace(m.UpstreamModel)
+		if publicID == "" || upstreamModel == "" {
+			continue
+		}
+		status := m.Status
+		if status != 0 && status != 1 {
+			status = 1
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO channel_models(channel_id, public_id, upstream_model, status, created_at, updated_at)
+VALUES(?, ?, ?, ?, NOW(), NOW())
+ON DUPLICATE KEY UPDATE
+  upstream_model=VALUES(upstream_model),
+  status=VALUES(status),
+  updated_at=NOW()
+`, channelID, publicID, upstreamModel, status); err != nil {
+			return AdminConfigImportReport{}, fmt.Errorf("导入 channel_models 失败: %w", err)
+		}
+	}
+
+	for _, m := range in.ChannelGroupMembers {
+		parentName := strings.TrimSpace(m.ParentGroup)
+		if parentName == "" {
+			continue
+		}
+		parentID, err := ensureGroupID(parentName)
+		if err != nil {
+			return AdminConfigImportReport{}, err
+		}
+
+		p := 0
+		if m.Promotion {
+			p = 1
+		}
+
+		switch {
+		case m.MemberGroup != nil && strings.TrimSpace(*m.MemberGroup) != "":
+			childName := strings.TrimSpace(*m.MemberGroup)
+			childID, err := ensureGroupID(childName)
+			if err != nil {
+				return AdminConfigImportReport{}, err
+			}
+			if _, err := tx.ExecContext(ctx, `
+INSERT INTO channel_group_members(parent_group_id, member_group_id, member_channel_id, priority, promotion, created_at, updated_at)
+VALUES(?, ?, NULL, ?, ?, NOW(), NOW())
+ON DUPLICATE KEY UPDATE
+  parent_group_id=VALUES(parent_group_id),
+  priority=VALUES(priority),
+  promotion=VALUES(promotion),
+  updated_at=NOW()
+`, parentID, childID, m.Priority, p); err != nil {
+				return AdminConfigImportReport{}, fmt.Errorf("导入 channel_group_members(group) 失败: %w", err)
+			}
+		case m.MemberChannelType != nil && m.MemberChannelName != nil && strings.TrimSpace(*m.MemberChannelType) != "" && strings.TrimSpace(*m.MemberChannelName) != "":
+			chType := strings.TrimSpace(*m.MemberChannelType)
+			chName := strings.TrimSpace(*m.MemberChannelName)
+			channelID, err := resolveChannelID(chType, chName)
+			if err != nil {
+				return AdminConfigImportReport{}, err
+			}
+			if _, err := tx.ExecContext(ctx, `
+INSERT INTO channel_group_members(parent_group_id, member_group_id, member_channel_id, priority, promotion, created_at, updated_at)
+VALUES(?, NULL, ?, ?, ?, NOW(), NOW())
+ON DUPLICATE KEY UPDATE
+  priority=VALUES(priority),
+  promotion=VALUES(promotion),
+  updated_at=NOW()
+`, parentID, channelID, m.Priority, p); err != nil {
+				return AdminConfigImportReport{}, fmt.Errorf("导入 channel_group_members(channel) 失败: %w", err)
+			}
+		default:
+			continue
+		}
+	}
+
+	// 以成员关系为 SSOT，回填 upstream_channels.groups 兼容缓存。
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM upstream_channels`)
+	if err != nil {
+		return AdminConfigImportReport{}, fmt.Errorf("查询 upstream_channels 失败: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return AdminConfigImportReport{}, fmt.Errorf("扫描 upstream_channels 失败: %w", err)
+		}
+		if err := s.syncUpstreamChannelGroupsCacheTx(ctx, tx, id); err != nil {
+			return AdminConfigImportReport{}, err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return AdminConfigImportReport{}, fmt.Errorf("遍历 upstream_channels 失败: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return AdminConfigImportReport{}, fmt.Errorf("提交事务失败: %w", err)
+	}
+
+	return AdminConfigImportReport{
+		ChannelGroups:       len(in.ChannelGroups),
+		ChannelGroupMembers: len(in.ChannelGroupMembers),
+		UpstreamChannels:    len(in.UpstreamChannels),
+		UpstreamEndpoints:   len(in.UpstreamEndpoints),
+		ManagedModels:       len(in.ManagedModels),
+		ChannelModels:       len(in.ChannelModels),
+	}, nil
+}

@@ -1,0 +1,611 @@
+{{define "admin_base"}}
+<!doctype html>
+<html lang="zh-CN" class="h-100">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{.Title}}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.1.0/fonts/remixicon.css" rel="stylesheet">
+    <style>
+      :root {
+        --bs-font-sans-serif: 'Fira Code', 'Noto Sans SC', monospace, system-ui, -apple-system, sans-serif;
+        --bs-font-monospace: 'Fira Code', 'Noto Sans SC', monospace;
+        --bs-primary: #6366f1;
+        --bs-primary-rgb: 99, 102, 241;
+        --bs-body-bg: #f8fafc;
+        --bs-body-color: #1e293b;
+        --bs-border-color: #e2e8f0;
+      }
+      body {
+        font-family: var(--bs-font-sans-serif);
+        color: var(--bs-body-color);
+        background-color: var(--bs-body-bg);
+      }
+
+      /* 模型图标（LobeHub icons-static-svg，CDN 引用） */
+      .rlm-model-icon {
+        width: 18px;
+        height: 18px;
+        object-fit: contain;
+        display: inline-block;
+        flex: 0 0 auto;
+      }
+      
+      /* 侧边栏 */
+      .sidebar { width: 260px; height: 100vh; overflow: hidden; background-color: #fff; border-right: 1px solid #f3f4f6; }
+      .sidebar-link { display: flex; align-items: center; padding: 0.75rem 1rem; color: #4b5563; text-decoration: none; border-radius: 0.5rem; margin-bottom: 0.25rem; font-weight: 500; transition: all 0.2s; }
+      .sidebar-link:hover { background-color: #f3f4f6; color: #111827; }
+      .sidebar-link.active { background-color: #eef2ff; color: var(--bs-primary); }
+      .sidebar-link i { font-size: 1.1rem; margin-right: 0.75rem; }
+      .sidebar-nav { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; flex-wrap: nowrap; }
+      
+      /* 主内容区域 */
+      .main-wrapper { flex: 1; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+      .top-header { height: 64px; background-color: rgba(255,255,255,0.8); backdrop-filter: blur(8px); border-bottom: 1px solid rgba(0,0,0,0.03); padding: 0 1.5rem; display: flex; align-items: center; justify-content: space-between; }
+      .content-scrollable { flex: 1; overflow-y: auto; padding: 2rem; }
+
+      /* 管理后台样式微调 */
+      .card { border: none; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px -1px rgba(0, 0, 0, 0.02); border-radius: 1rem; background-color: #fff; padding: 1.5rem; margin-bottom: 1.5rem; }
+      
+      table { width: 100%; margin-bottom: 1rem; color: #212529; border-collapse: separate; border-spacing: 0; }
+      th, td { padding: 0.85rem 1rem; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
+      th { border-bottom: 2px solid #e5e7eb; font-weight: 600; text-align: left; color: #6b7280; font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.025em; }
+      
+      /* 表单输入统一样式（覆盖未显式声明 type 的 input） */
+      input:not([type]), input[type="text"], input[type="password"], input[type="email"], input[type="number"], input[type="url"], select, textarea { 
+        display: block; width: 100%; 
+        padding: 0.625rem 0.875rem; 
+        font-size: 0.95rem; font-family: inherit;
+        color: #111827; 
+        background-color: #f9fafb; /* 浅灰 */
+        border: 1px solid #e5e7eb; 
+        border-radius: 0.5rem; 
+        margin-bottom: 1rem; 
+        transition: all 0.2s ease-in-out; 
+      }
+      input:not([type]):focus, input[type="text"]:focus, input[type="password"]:focus, input[type="email"]:focus, input[type="number"]:focus, input[type="url"]:focus, select:focus, textarea:focus { 
+        background-color: #fff;
+        border-color: var(--bs-primary); 
+        outline: 0; 
+        box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15); 
+      }
+      
+      /* 修复 input-group 对齐 */
+      .input-group { margin-bottom: 1rem; }
+      .input-group input { margin-bottom: 0 !important; }
+      .input-group-text { background-color: #f9fafb; border: 1px solid #e5e7eb; padding: 0.625rem 0.875rem; color: #6b7280; }
+      .input-group-text i { font-size: 1.1rem; line-height: 1; }
+      .input-group > :not(:first-child) { border-top-left-radius: 0 !important; border-bottom-left-radius: 0 !important; }
+      .input-group > :not(:last-child) { border-top-right-radius: 0 !important; border-bottom-right-radius: 0 !important; }
+      
+      /* 按钮 */
+      button { 
+        display: inline-block; font-weight: 500; text-align: center; vertical-align: middle; user-select: none; 
+        padding: 0.5rem 1rem; font-size: 0.95rem; border-radius: 0.5rem; 
+        transition: all .15s ease-in-out; cursor: pointer; 
+        background-color: var(--bs-primary); color: #fff; border: 1px solid transparent; 
+      }
+      button:hover { background-color: #4f46e5; }
+      button.secondary { background-color: #fff; border-color: #e5e7eb; color: #374151; }
+      button.secondary:hover { background-color: #f9fafb; border-color: #d1d5db; }
+      
+      code { font-family: 'Fira Code', 'Menlo', 'Monaco', 'Courier New', monospace; color: #db2777; background: #fdf2f8; padding: 2px 6px; border-radius: 4px; font-size: 0.875em; }
+      .muted { color: #9ca3af; }
+      .danger { color: #dc2626; }
+      label { margin-bottom: 0.5rem; display: inline-block; font-weight: 500; font-size: 0.9rem; color: #374151; }
+      a { color: var(--bs-primary); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+
+      /* Utility classes from usage.html */
+      .smaller { font-size: 0.75rem; }
+      .metric-card { background: #fff; transition: all 0.2s; }
+      .metric-card:hover { border-color: var(--bs-primary) !important; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+      
+      @media (max-width: 768px) {
+        .sidebar { position: fixed; height: 100%; z-index: 1040; transform: translateX(-100%); transition: transform 0.3s ease; }
+        .sidebar.show { transform: translateX(0); }
+        .content-scrollable { padding: 1rem; }
+      }
+    </style>
+  </head>
+  <body class="h-100">
+    
+    <div class="d-flex h-100">
+      
+      <!-- 侧边栏 -->
+      <aside class="sidebar d-flex flex-column flex-shrink-0 p-3 shadow-sm" id="sidebarMenu">
+        <a href="/admin" class="d-flex align-items-center mb-4 mb-md-0 me-md-auto text-decoration-none px-2 mt-2">
+          <i class="ri-shield-keyhole-line text-primary fs-4 me-2"></i>
+          <span class="fs-5 fw-bold text-dark tracking-tight">管理后台</span>
+        </a>
+        <hr class="text-secondary opacity-10 my-3">
+        
+        <ul class="nav nav-pills flex-column sidebar-nav mb-0">
+          <li class="nav-item">
+            <a href="/admin" class="sidebar-link">
+              <i class="ri-dashboard-line"></i> 概览
+            </a>
+          </li>
+          {{if not .Features.AdminChannelsDisabled}}
+          <li>
+            <a href="/admin/channels" class="sidebar-link">
+              <i class="ri-git-merge-line"></i> 上游渠道
+            </a>
+          </li>
+          {{end}}
+          {{if not .Features.AdminChannelGroupsDisabled}}
+          <li>
+            <a href="/admin/channel-groups" class="sidebar-link">
+              <i class="ri-folder-settings-line"></i> 分组
+            </a>
+          </li>
+          {{end}}
+          {{if not .Features.ModelsDisabled}}
+          <li>
+            <a href="/admin/models" class="sidebar-link">
+              <i class="ri-function-line"></i> 模型管理
+            </a>
+          </li>
+          {{end}}
+          {{if not .Features.AdminUsersDisabled}}
+          <li>
+            <a href="/admin/users" class="sidebar-link">
+              <i class="ri-user-settings-line"></i> 用户管理
+            </a>
+          </li>
+          {{end}}
+          {{if not .Features.BillingDisabled}}
+	          <li>
+	            <a href="/admin/subscriptions" class="sidebar-link">
+	              <i class="ri-vip-crown-line"></i> 订阅套餐
+	            </a>
+	          </li>
+	          <li>
+	            <a href="/admin/orders" class="sidebar-link">
+	              <i class="ri-bill-line"></i> 订单
+	            </a>
+	          </li>
+	          <li>
+	            <a href="/admin/payment-channels" class="sidebar-link">
+	              <i class="ri-bank-card-line"></i> 支付渠道
+	            </a>
+	          </li>
+	          {{end}}
+	          {{if not .Features.AdminUsageDisabled}}
+		          <li>
+		            <a href="/admin/usage" class="sidebar-link">
+		              <i class="ri-line-chart-line"></i> 用量统计
+		            </a>
+		          </li>
+		          {{end}}
+		          {{if not .Features.TicketsDisabled}}
+		          <li>
+		            <a href="/admin/tickets" class="sidebar-link">
+		              <i class="ri-customer-service-2-line"></i> 工单
+	            </a>
+	          </li>
+	          {{end}}
+	          {{if not .Features.AdminAnnouncementsDisabled}}
+	          <li>
+	            <a href="/admin/announcements" class="sidebar-link">
+	              <i class="ri-megaphone-line"></i> 公告
+	            </a>
+	          </li>
+	          {{end}}
+		          <li>
+		            <a href="/admin/oauth-apps" class="sidebar-link">
+		              <i class="ri-apps-2-line"></i> OAuth Apps
+		            </a>
+		          </li>
+		          <li>
+		            <a href="/admin/backup" class="sidebar-link">
+		              <i class="ri-database-2-line"></i> 导出/导入
+		            </a>
+		          </li>
+		          <li>
+		            <a href="/admin/settings" class="sidebar-link">
+		              <i class="ri-settings-3-line"></i> 系统设置
+		            </a>
+		          </li>
+          <li class="mt-4 mb-1 ms-2 text-uppercase text-muted" style="font-size: 0.75rem; letter-spacing: 0.05em; font-weight: 600;">应用</li>
+          <li>
+            <a href="/dashboard" class="sidebar-link">
+              <i class="ri-external-link-line"></i> 用户控制台
+            </a>
+          </li>
+        </ul>
+
+        <div class="mt-auto px-2 pb-2">
+           <span class="text-muted small">Realms 管理后台</span>
+        </div>
+      </aside>
+
+      <!-- 主内容 -->
+      <div class="main-wrapper">
+        <header class="top-header">
+          <button class="btn btn-link text-dark d-md-none p-0" type="button" data-bs-toggle="collapse" data-bs-target="#sidebarMenu">
+            <i class="ri-menu-line fs-4"></i>
+          </button>
+          
+          <div class="ms-auto">
+             <span class="text-muted small me-2">当前登录</span>
+             <span class="fw-bold small text-dark">{{.User.Email}}</span>
+          </div>
+        </header>
+
+        <main class="content-scrollable">
+          <div class="container-fluid">
+            <div id="rlmAjaxAlertHost"></div>
+            {{.ContentHTML}}
+            
+            <footer class="mt-5 text-center text-muted small pb-4">
+              管理面板 &copy; 2026
+            </footer>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      (function () {
+        try {
+          if (typeof window === "undefined") return;
+          window.alert = function () {};
+          window.confirm = function () { return true; };
+          window.prompt = function () { return null; };
+        } catch (e) {}
+      })();
+
+      document.addEventListener("DOMContentLoaded", function() {
+        try {
+          const url = new URL(window.location.href);
+          if (url.searchParams.has("msg") || url.searchParams.has("err")) {
+            url.searchParams.delete("msg");
+            url.searchParams.delete("err");
+            const clean = url.pathname + url.search + url.hash;
+            window.history.replaceState({}, "", clean);
+          }
+        } catch (e) {}
+
+        function persistAjaxAlert(kind, message) {
+          try {
+            const payload = {
+              kind: (kind || "").toString(),
+              message: (message || "").toString(),
+              t: Date.now(),
+            };
+            sessionStorage.setItem("realms_ajax_alert", JSON.stringify(payload));
+          } catch (e) {}
+        }
+
+        function showAjaxAlert(kind, message) {
+          try {
+            const host = document.getElementById("rlmAjaxAlertHost");
+            if (!host) return;
+            host.textContent = "";
+
+            const alert = document.createElement("div");
+            const cls = kind === "success" ? "success" : "danger";
+            alert.className = "alert alert-" + cls + " alert-dismissible fade show shadow-sm mb-4";
+            alert.setAttribute("role", "alert");
+
+            const text = document.createElement("span");
+            text.textContent = (message || "").toString();
+            alert.appendChild(text);
+
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "btn-close";
+            btn.setAttribute("data-bs-dismiss", "alert");
+            btn.setAttribute("aria-label", "Close");
+            alert.appendChild(btn);
+
+            host.appendChild(alert);
+            host.scrollIntoView({ block: "start", behavior: "smooth" });
+          } catch (e) {}
+        }
+
+        function normalizeAlertMessage(message, maxLen) {
+          try {
+            let s = (message || "").toString();
+            s = s.replace(/[\r\n]+/g, " ");
+            s = s.replace(/\s+/g, " ").trim();
+            const lim = (Number.isFinite(maxLen) && maxLen > 0) ? maxLen : 160;
+            if (s.length > lim) s = s.slice(0, lim) + "...";
+            return s;
+          } catch (e) {}
+          return "";
+        }
+
+        try {
+          const raw = sessionStorage.getItem("realms_ajax_alert") || "";
+          if (raw.trim() !== "") {
+            sessionStorage.removeItem("realms_ajax_alert");
+            const data = JSON.parse(raw);
+            if (data && data.kind && data.message) {
+              showAjaxAlert(data.kind, data.message);
+            }
+          }
+        } catch (e) {}
+
+        async function submitAjaxForm(form, submitter, opts) {
+          opts = opts || {};
+          const csrf = (form.querySelector('input[name="_csrf"]') || {}).value || "";
+          const headers = {
+            "Accept": "application/json",
+            "X-Realms-Ajax": "1",
+          };
+          if (csrf.trim() !== "") headers["X-CSRF-Token"] = csrf.trim();
+
+          const enctype = (form.enctype || "").toLowerCase();
+          const hasFile = !!form.querySelector('input[type="file"]');
+          const useFormData = hasFile || enctype.indexOf("multipart/form-data") !== -1;
+
+          let body;
+          if (useFormData) {
+            body = new FormData(form);
+            if (submitter && submitter.name) body.append(submitter.name, submitter.value || "");
+          } else {
+            const fd = new FormData(form);
+            const params = new URLSearchParams();
+            for (const [k, v] of fd.entries()) {
+              if (typeof v === "string") params.append(k, v);
+            }
+            if (submitter && submitter.name) params.append(submitter.name, submitter.value || "");
+            headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8";
+            body = params;
+          }
+
+          // 注意：HTMLFormElement 是 legacy platform object；当存在 name="action" 的控件时，
+          // 直接访问 form.action 可能返回 RadioNodeList 而不是 form 的 action URL。
+          let method = ((form.getAttribute("method") || "POST").trim() || "POST").toUpperCase();
+          if (submitter && submitter.getAttribute) {
+            const m = (submitter.getAttribute("formmethod") || "").trim();
+            if (m !== "") method = m.toUpperCase();
+          }
+
+          let url = "";
+          if (submitter && submitter.getAttribute) {
+            url = (submitter.getAttribute("formaction") || "").trim();
+            if (url === "" && submitter.formAction) url = submitter.formAction.toString().trim();
+          }
+          if (url === "") url = (form.getAttribute("action") || "").trim();
+          if (url === "") url = window.location.href;
+
+          let reload = ((form.getAttribute("data-ajax-reload") || "").trim() === "1");
+          if (submitter && submitter.getAttribute) {
+            const overrideReload = (submitter.getAttribute("data-ajax-reload") || "").trim();
+            if (overrideReload !== "") reload = (overrideReload === "1");
+          }
+          if (typeof opts.reload === "boolean") reload = opts.reload;
+
+          const buttons = Array.from(form.querySelectorAll('button[type="submit"], input[type="submit"]'));
+          const prev = buttons.map(b => ({ b, disabled: b.disabled }));
+          prev.forEach(({ b }) => { b.disabled = true; });
+
+          try {
+            const resp = await fetch(url, {
+              method,
+              headers,
+              body,
+              credentials: "same-origin",
+            });
+            const ct = (resp.headers.get("Content-Type") || "").toLowerCase();
+            if (ct.indexOf("application/json") === -1) {
+              if (resp.url && resp.url.indexOf("/login") !== -1) {
+                window.location.href = resp.url;
+                return;
+              }
+              const txt = (await resp.text()) || "";
+              const rawMsg = normalizeAlertMessage(txt, 200);
+              const looksLikeHTML = ct.indexOf("text/html") !== -1 || /<!doctype|<html|<head|<body/i.test(txt);
+              const msg = looksLikeHTML ? "" : normalizeAlertMessage(rawMsg, 120);
+              showAjaxAlert("danger", msg || ("请求失败（HTTP " + resp.status + "）"));
+              return;
+            }
+            const payload = await resp.json();
+            if (payload && payload.ok) {
+              const okMsg = normalizeAlertMessage(payload.notice || "", 120) || "操作成功";
+              if (typeof opts.onSuccess === "function") {
+                try { opts.onSuccess(okMsg, payload); } catch (e) {}
+              }
+              if (reload) {
+                persistAjaxAlert("success", okMsg);
+                window.location.reload();
+                return;
+              }
+              if (!opts.silentOK) showAjaxAlert("success", okMsg);
+              return;
+            }
+            const errMsg = normalizeAlertMessage((payload && payload.error ? payload.error : "") || "", 120) || "请求失败";
+            if (typeof opts.onError === "function") {
+              try { opts.onError(errMsg, payload); } catch (e) {}
+            }
+            showAjaxAlert("danger", errMsg);
+          } catch (e) {
+            if (typeof opts.onError === "function") {
+              try { opts.onError("请求失败，请稍后重试。", null); } catch (e) {}
+            }
+            showAjaxAlert("danger", "请求失败，请稍后重试。");
+          } finally {
+            prev.forEach(({ b, disabled }) => { b.disabled = disabled; });
+          }
+        }
+
+        document.addEventListener("submit", function (event) {
+          try {
+            const form = event.target;
+            if (!(form instanceof HTMLFormElement)) return;
+            if ((form.getAttribute("data-ajax") || "").trim() !== "1") return;
+            if (event.defaultPrevented) return;
+            event.preventDefault();
+            submitAjaxForm(form, event.submitter);
+          } catch (e) {}
+        }, false);
+
+        function setupAjaxAutosave(form) {
+          if (!form) return;
+          if ((form.getAttribute("data-ajax") || "").trim() !== "1") return;
+          if ((form.getAttribute("data-ajax-autosave") || "").trim() !== "1") return;
+
+          const debounceRaw = (form.getAttribute("data-ajax-autosave-debounce") || "").trim();
+          let debounce = parseInt(debounceRaw || "800", 10);
+          if (!Number.isFinite(debounce) || debounce < 200) debounce = 800;
+
+          const statusID = (form.getAttribute("data-ajax-autosave-status") || "").trim();
+          const statusEl = statusID !== "" ? document.getElementById(statusID) : null;
+
+          let timer = null;
+          let inFlight = false;
+          let pending = false;
+          let lastOKAt = 0;
+
+          function setStatus(msg) {
+            if (!statusEl) return;
+            statusEl.textContent = (msg || "").toString();
+          }
+
+          async function run() {
+            if (inFlight) {
+              pending = true;
+              return;
+            }
+            inFlight = true;
+            pending = false;
+            setStatus("正在保存…");
+            await submitAjaxForm(form, null, {
+              reload: false,
+              silentOK: true,
+              onSuccess: function () {
+                lastOKAt = Date.now();
+                setStatus("已保存");
+                window.setTimeout(function () {
+                  if (Date.now() - lastOKAt >= 1200) setStatus("");
+                }, 1500);
+              },
+              onError: function () {
+                setStatus("保存失败");
+              },
+            });
+            inFlight = false;
+            if (pending) schedule();
+          }
+
+          function schedule() {
+            if (timer) window.clearTimeout(timer);
+            timer = window.setTimeout(run, debounce);
+          }
+
+          function shouldIgnore(target) {
+            try {
+              if (!target) return true;
+              if (target.closest && target.closest('[data-ajax-autosave-ignore="1"]')) return true;
+              const tag = (target.tagName || "").toLowerCase();
+              if (tag === "button") return true;
+              if (tag === "input") {
+                const t = (target.getAttribute("type") || "").toLowerCase();
+                if (t === "hidden" || t === "submit") return true;
+              }
+            } catch (e) {}
+            return false;
+          }
+
+          form.addEventListener("input", function (e) {
+            try {
+              if (shouldIgnore(e.target)) return;
+              setStatus("已修改");
+              schedule();
+            } catch (e) {}
+          }, true);
+
+          form.addEventListener("change", function (e) {
+            try {
+              if (shouldIgnore(e.target)) return;
+              setStatus("已修改");
+              schedule();
+            } catch (e) {}
+          }, true);
+
+          form.addEventListener("submit", function () {
+            try {
+              if (timer) window.clearTimeout(timer);
+              timer = null;
+            } catch (e) {}
+          }, true);
+        }
+
+        document.querySelectorAll('form[data-ajax="1"][data-ajax-autosave="1"]').forEach(setupAjaxAutosave);
+
+        const path = window.location.pathname;
+        const links = document.querySelectorAll('.sidebar-link');
+        links.forEach(link => {
+          const href = link.getAttribute('href');
+          if (path === href || (href !== '/admin' && path.startsWith(href))) {
+            link.classList.add('active');
+          }
+        });
+
+        function applyCodexOAuthCallback(data) {
+          if (!data || data.type !== 'realms_codex_oauth_callback') return;
+
+          let target = '';
+          if (typeof data.redirectPath === 'string' && data.redirectPath.trim() !== '') {
+            target = data.redirectPath.trim();
+          } else if (typeof data.redirectURL === 'string' && data.redirectURL.trim() !== '') {
+            const u = new URL(data.redirectURL, window.location.origin);
+            target = u.pathname + u.search + u.hash;
+          } else {
+            return;
+          }
+          if (!target.startsWith('/admin')) return;
+
+          const current = window.location.pathname + window.location.search + window.location.hash;
+          if (target === current) {
+            window.location.reload();
+            return;
+          }
+          window.location.href = target;
+        }
+
+        window.addEventListener('message', function (event) {
+          try { applyCodexOAuthCallback(event.data); } catch (e) {}
+        });
+
+        // OpenAI OAuth 页面会设置 COOP=same-origin，导致回调窗口无法再访问 window.opener。
+        // 使用 localStorage 作为兜底“广播”通道：回调窗口跳转回 /admin 后写入 localStorage，原页面收到 storage 事件后刷新。
+        window.addEventListener('storage', function (event) {
+          try {
+            if (event.key !== 'realms_codex_oauth_callback' || !event.newValue) return;
+            const data = JSON.parse(event.newValue);
+            applyCodexOAuthCallback(data);
+          } catch (e) {}
+        });
+
+        try {
+          const params = new URLSearchParams(window.location.search);
+          const oauth = (params.get('oauth') || '').trim();
+          const isPopupReturn = (window.name || '') === 'realms_codex_oauth_popup';
+          if ((oauth === 'ok' || oauth === 'error') && isPopupReturn) {
+            localStorage.setItem('realms_codex_oauth_callback', JSON.stringify({
+              type: 'realms_codex_oauth_callback',
+              redirectPath: window.location.pathname + window.location.search + window.location.hash,
+              t: Date.now()
+            }));
+
+            // 避免该窗口后续误判为回调窗口
+            try { window.name = ''; } catch (e) {}
+            setTimeout(function () {
+              try { window.close(); } catch (e) {}
+            }, 150);
+          }
+        } catch (e) {}
+      });
+    </script>
+  </body>
+</html>
+{{end}}

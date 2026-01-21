@@ -1,0 +1,480 @@
+{{define "base"}}
+<!doctype html>
+<html lang="zh-CN" class="h-100">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{.Title}}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+      :root {
+        --bs-font-sans-serif: 'Fira Code', 'Noto Sans SC', monospace, system-ui, -apple-system, sans-serif;
+        --bs-font-monospace: 'Fira Code', 'Noto Sans SC', monospace;
+        --bs-primary: #6366f1;
+        --bs-primary-rgb: 99, 102, 241;
+        --bs-body-bg: #f8fafc;
+        --bs-body-color: #1e293b;
+      }
+      body {
+        font-family: var(--bs-font-sans-serif);
+        color: var(--bs-body-color);
+        background-color: var(--bs-body-bg);
+      }
+
+      /* 模型图标（LobeHub icons-static-svg，CDN 引用） */
+      .rlm-model-icon {
+        width: 18px;
+        height: 18px;
+        object-fit: contain;
+        display: inline-block;
+        flex: 0 0 auto;
+      }
+      
+      /* 侧边栏 */
+      .sidebar {
+        width: 260px;
+        background-color: #fff;
+        border-right: 1px solid #f3f4f6;
+        min-height: 100vh;
+        z-index: 100;
+        transition: transform 0.3s ease;
+      }
+      .sidebar-link {
+        display: flex;
+        align-items: center;
+        padding: 0.75rem 1rem;
+        color: #4b5563;
+        text-decoration: none;
+        border-radius: 0.5rem;
+        margin-bottom: 0.25rem;
+        font-weight: 500;
+        transition: all 0.2s;
+      }
+      .sidebar-link:hover {
+        background-color: #f3f4f6;
+        color: #111827;
+      }
+      .sidebar-link.active {
+        background-color: #eef2ff;
+        color: var(--bs-primary);
+      }
+      .sidebar-link i {
+        font-size: 1.1rem;
+        margin-right: 0.75rem;
+      }
+      
+      /* 主内容区域 */
+      .main-wrapper {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0; /* 防止内容撑爆 flex 容器 */
+      }
+      .top-header {
+        height: 64px;
+        background-color: rgba(255,255,255,0.8);
+        backdrop-filter: blur(8px);
+        border-bottom: 1px solid rgba(0,0,0,0.03);
+        padding: 0 1.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        position: sticky;
+        top: 0;
+        z-index: 99;
+      }
+      .content-scrollable {
+        flex: 1;
+        padding: 2rem;
+      }
+
+      /* 登录页布局覆盖 */
+      .simple-header {
+        background: transparent;
+        padding: 1rem 0;
+      }
+
+      /* 通用组件 */
+      .card { 
+        border: none; 
+        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02), 0 2px 4px -1px rgba(0,0,0,0.02); 
+        border-radius: 1rem; 
+        background: #fff; 
+      }
+      
+      /* 表单输入 */
+      .form-control, .form-select { 
+        border-radius: 0.5rem; 
+        padding: 0.625rem 0.875rem; 
+        border: 1px solid #e5e7eb; 
+        background-color: #f9fafb; /* 默认浅灰背景 */
+        font-size: 0.95rem;
+        color: #111827;
+        transition: all 0.2s ease-in-out;
+      }
+      .form-control:focus, .form-select:focus { 
+        background-color: #fff;
+        border-color: var(--bs-primary); 
+        box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15); 
+      }
+      .form-control::placeholder {
+        color: #9ca3af;
+      }
+
+      /* 按钮样式 */
+      .btn { 
+        border-radius: 0.5rem; 
+        padding: 0.5rem 1rem; 
+        font-weight: 500; 
+        transition: all 0.2s;
+      }
+      .btn-primary {
+        background-color: var(--bs-primary);
+        border-color: var(--bs-primary);
+      }
+      .btn-primary:hover {
+        background-color: #4f46e5;
+        border-color: #4f46e5;
+      }
+
+      /* 移动端侧栏 */
+      @media (max-width: 768px) {
+        .sidebar:not(.no-fixed) { 
+          position: fixed; 
+          top: 0; 
+          bottom: 0; 
+          left: 0;
+          height: 100%; 
+          z-index: 1040; 
+          transform: translateX(-100%); 
+          overflow-y: auto;
+        }
+        .sidebar.show { 
+          transform: translateX(0); 
+        }
+        .content-scrollable { padding: 1rem; }
+      }
+    </style>
+  </head>
+  <body class="min-vh-100 d-flex flex-column">
+    
+    {{if .User}}
+    <!-- 应用布局 -->
+    <div class="d-flex flex-grow-1">
+      
+      <!-- 侧边栏 -->
+      <aside class="sidebar d-flex flex-column flex-shrink-0 p-3 shadow-sm" id="sidebarMenu">
+        <a href="/" class="d-flex align-items-center mb-4 mb-md-0 me-md-auto text-decoration-none px-2 mt-2">
+          <i class="bi bi-box-seam text-primary fs-4 me-2"></i>
+          <span class="fs-5 fw-bold text-dark tracking-tight">Realms</span>
+        </a>
+        <hr class="text-secondary opacity-10 my-3">
+        
+        <ul class="nav nav-pills flex-column mb-auto">
+          <li class="nav-item">
+            <a href="/dashboard" class="sidebar-link">
+              <i class="bi bi-speedometer2"></i> 控制台
+            </a>
+          </li>
+          {{if not .Features.WebAnnouncementsDisabled}}
+          <li>
+            <a href="/announcements" class="sidebar-link">
+              <i class="bi bi-megaphone"></i> 公告
+            </a>
+          </li>
+          {{end}}
+          {{if not .Features.WebTokensDisabled}}
+          <li>
+            <a href="/tokens" class="sidebar-link">
+              <i class="bi bi-key"></i> API 令牌
+            </a>
+          </li>
+          {{end}}
+          {{if not .Features.ModelsDisabled}}
+          <li>
+            <a href="/models" class="sidebar-link">
+              <i class="bi bi-robot"></i> 模型列表
+            </a>
+          </li>
+          {{end}}
+	          {{if not .Features.BillingDisabled}}
+	          <li>
+	            <a href="/subscription" class="sidebar-link">
+	              <i class="bi bi-credit-card"></i> 订阅管理
+	            </a>
+	          </li>
+	          <li>
+	            <a href="/topup" class="sidebar-link">
+	              <i class="bi bi-wallet2"></i> 余额充值
+	            </a>
+	          </li>
+	          {{end}}
+	          {{if not .Features.WebUsageDisabled}}
+	          <li>
+	            <a href="/usage" class="sidebar-link">
+	              <i class="bi bi-graph-up"></i> 用量统计
+	            </a>
+	          </li>
+	          {{end}}
+	          {{if not .Features.TicketsDisabled}}
+	          <li>
+	            <a href="/tickets" class="sidebar-link">
+	              <i class="bi bi-life-preserver"></i> 工单
+	            </a>
+	          </li>
+	          {{end}}
+	          <li>
+	            <a href="/account" class="sidebar-link">
+	              <i class="bi bi-person-gear"></i> 账号设置
+	            </a>
+	          </li>
+          
+          {{if eq .User.Role "root"}}
+          <li class="mt-3 mb-1 ms-2 text-uppercase text-muted" style="font-size: 0.75rem; letter-spacing: 0.05em; font-weight: 600;">管理</li>
+          <li>
+            <a href="/admin" class="sidebar-link">
+              <i class="bi bi-shield-lock"></i> 管理后台
+            </a>
+          </li>
+          {{end}}
+        </ul>
+
+        <div class="mt-auto px-2 pb-2">
+           <span class="text-muted small">v1.0.0</span>
+        </div>
+      </aside>
+
+      <!-- 主内容 -->
+      <div class="main-wrapper">
+        <header class="top-header">
+          <button class="btn btn-link text-dark d-md-none p-0" type="button" data-bs-toggle="collapse" data-bs-target="#sidebarMenu">
+            <i class="bi bi-list fs-4"></i>
+          </button>
+          
+          <div class="ms-auto d-flex align-items-center">
+             <div class="dropdown">
+                <a href="#" class="d-flex align-items-center text-dark text-decoration-none dropdown-toggle" id="dropdownUser1" data-bs-toggle="dropdown" aria-expanded="false">
+                  <div class="bg-primary bg-opacity-10 text-primary rounded-circle d-flex align-items-center justify-content-center me-2" style="width: 36px; height: 36px;">
+                     {{printf "%.1s" .User.Email}}
+                  </div>
+                  <span class="d-none d-sm-inline fw-medium small">{{.User.Email}}</span>
+                </a>
+                <ul class="dropdown-menu dropdown-menu-end border-0 shadow-lg mt-2 p-2 rounded-3" aria-labelledby="dropdownUser1">
+                  <li><div class="dropdown-header">角色: {{.User.Role}}</div></li>
+                  <li><hr class="dropdown-divider"></li>
+                  <li>
+                    <a class="dropdown-item rounded-2" href="/account">
+                      <i class="bi bi-person-gear me-2"></i>账号设置
+                    </a>
+                  </li>
+                  <li><hr class="dropdown-divider"></li>
+                  <li>
+                    <form method="POST" action="/logout">
+                       <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
+                       <button class="dropdown-item rounded-2 text-danger" type="submit">
+                         <i class="bi bi-box-arrow-right me-2"></i>退出登录
+                       </button>
+                    </form>
+                  </li>
+                </ul>
+             </div>
+          </div>
+        </header>
+
+        <main class="content-scrollable">
+          <div class="container-fluid" style="max-width: 1200px;">
+            <div id="rlmAjaxAlertHost"></div>
+            {{.ContentHTML}}
+            
+            <footer class="mt-5 text-center text-muted small pb-4">
+              Realms 中转服务 &copy; 2026
+            </footer>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    {{else}}
+    <!-- 公共布局（登录/注册） -->
+    <div class="container d-flex flex-column min-vh-100">
+      <header class="simple-header d-flex flex-wrap justify-content-center py-3 mb-4 border-bottom">
+        <a href="/" class="d-flex align-items-center mb-3 mb-md-0 me-md-auto text-dark text-decoration-none">
+          <i class="bi bi-box-seam text-primary fs-3 me-2"></i>
+          <span class="fs-4 fw-bold">Realms</span>
+        </a>
+        <ul class="nav nav-pills">
+          <li class="nav-item"><a href="/login" class="nav-link">登录</a></li>
+          {{if .AllowRegister}}
+          <li class="nav-item"><a href="/register" class="nav-link active">注册</a></li>
+          {{end}}
+        </ul>
+      </header>
+      
+      <main class="flex-fill">
+        <div id="rlmAjaxAlertHost"></div>
+        {{.ContentHTML}}
+      </main>
+
+      <footer class="py-3 my-4 border-top text-center text-muted small">
+         &copy; 2026 Realms 服务
+      </footer>
+    </div>
+    {{end}}
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      // 简单高亮当前侧边栏链接
+      document.addEventListener("DOMContentLoaded", function() {
+        try {
+          const url = new URL(window.location.href);
+          if (url.searchParams.has("msg") || url.searchParams.has("err")) {
+            url.searchParams.delete("msg");
+            url.searchParams.delete("err");
+            const clean = url.pathname + url.search + url.hash;
+            window.history.replaceState({}, "", clean);
+          }
+        } catch (e) {}
+
+        function persistAjaxAlert(kind, message) {
+          try {
+            const payload = {
+              kind: (kind || "").toString(),
+              message: (message || "").toString(),
+              t: Date.now(),
+            };
+            sessionStorage.setItem("realms_ajax_alert", JSON.stringify(payload));
+          } catch (e) {}
+        }
+
+        function showAjaxAlert(kind, message) {
+          try {
+            const host = document.getElementById("rlmAjaxAlertHost");
+            if (!host) return;
+            host.textContent = "";
+
+            const alert = document.createElement("div");
+            const cls = kind === "success" ? "success" : "danger";
+            alert.className = "alert alert-" + cls + " alert-dismissible fade show shadow-sm mb-4";
+            alert.setAttribute("role", "alert");
+
+            const text = document.createElement("span");
+            text.textContent = (message || "").toString();
+            alert.appendChild(text);
+
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "btn-close";
+            btn.setAttribute("data-bs-dismiss", "alert");
+            btn.setAttribute("aria-label", "Close");
+            alert.appendChild(btn);
+
+            host.appendChild(alert);
+            host.scrollIntoView({ block: "start", behavior: "smooth" });
+          } catch (e) {}
+        }
+
+        try {
+          const raw = sessionStorage.getItem("realms_ajax_alert") || "";
+          if (raw.trim() !== "") {
+            sessionStorage.removeItem("realms_ajax_alert");
+            const data = JSON.parse(raw);
+            if (data && data.kind && data.message) {
+              showAjaxAlert(data.kind, data.message);
+            }
+          }
+        } catch (e) {}
+
+        async function submitAjaxForm(form, submitter) {
+          const csrf = (form.querySelector('input[name="_csrf"]') || {}).value || "";
+          const headers = {
+            "Accept": "application/json",
+            "X-Realms-Ajax": "1",
+          };
+          if (csrf.trim() !== "") headers["X-CSRF-Token"] = csrf.trim();
+
+          const enctype = (form.enctype || "").toLowerCase();
+          const hasFile = !!form.querySelector('input[type="file"]');
+          const useFormData = hasFile || enctype.indexOf("multipart/form-data") !== -1;
+
+          let body;
+          if (useFormData) {
+            body = new FormData(form);
+            if (submitter && submitter.name) body.append(submitter.name, submitter.value || "");
+          } else {
+            const fd = new FormData(form);
+            const params = new URLSearchParams();
+            for (const [k, v] of fd.entries()) {
+              if (typeof v === "string") params.append(k, v);
+            }
+            if (submitter && submitter.name) params.append(submitter.name, submitter.value || "");
+            headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8";
+            body = params;
+          }
+
+          const method = (form.method || "POST").toUpperCase();
+          const url = form.action || window.location.href;
+
+          const buttons = Array.from(form.querySelectorAll('button[type="submit"], input[type="submit"]'));
+          const prev = buttons.map(b => ({ b, disabled: b.disabled }));
+          prev.forEach(({ b }) => { b.disabled = true; });
+
+          try {
+            const resp = await fetch(url, {
+              method,
+              headers,
+              body,
+              credentials: "same-origin",
+            });
+            const ct = (resp.headers.get("Content-Type") || "").toLowerCase();
+            if (ct.indexOf("application/json") === -1) {
+              const txt = (await resp.text()) || "";
+              showAjaxAlert("danger", txt.trim() || ("请求失败（HTTP " + resp.status + "）"));
+              return;
+            }
+            const payload = await resp.json();
+            if (payload && payload.ok) {
+              const okMsg = (payload.notice || "").trim() || "操作成功";
+              if ((form.getAttribute("data-ajax-reload") || "").trim() === "1") {
+                persistAjaxAlert("success", okMsg);
+                window.location.reload();
+                return;
+              }
+              showAjaxAlert("success", okMsg);
+              return;
+            }
+            showAjaxAlert("danger", (payload && payload.error ? payload.error : "").trim() || "请求失败");
+          } catch (e) {
+            showAjaxAlert("danger", "请求失败，请稍后重试。");
+          } finally {
+            prev.forEach(({ b, disabled }) => { b.disabled = disabled; });
+          }
+        }
+
+        document.addEventListener("submit", function (event) {
+          try {
+            const form = event.target;
+            if (!(form instanceof HTMLFormElement)) return;
+            if ((form.getAttribute("data-ajax") || "").trim() !== "1") return;
+            if (event.defaultPrevented) return;
+            event.preventDefault();
+            submitAjaxForm(form, event.submitter);
+          } catch (e) {}
+        }, false);
+
+        const path = window.location.pathname;
+        const links = document.querySelectorAll('.sidebar-link');
+        links.forEach(link => {
+          const href = link.getAttribute('href');
+          if (path === href || (href !== '/' && path.startsWith(href))) {
+            link.classList.add('active');
+          }
+        });
+      });
+    </script>
+  </body>
+</html>
+{{end}}

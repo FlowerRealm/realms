@@ -1,0 +1,60 @@
+{{define "admin_backup"}}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h2 class="h4 fw-bold mb-1">导出 / 导入</h2>
+    <p class="text-muted small mb-0">用于迁移/备份上游与模型配置（默认不包含敏感字段）。</p>
+  </div>
+</div>
+
+{{if .Notice}}
+<div class="alert alert-success alert-dismissible fade show mb-4" role="alert">
+  <i class="ri-checkbox-circle-line me-2"></i>{{.Notice}}
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="关闭"></button>
+</div>
+{{end}}
+
+{{if .Error}}
+<div class="alert alert-danger alert-dismissible fade show mb-4" role="alert">
+  <i class="ri-alert-line me-2"></i>{{.Error}}
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="关闭"></button>
+</div>
+{{end}}
+
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <h5 class="fw-bold mb-2"><i class="ri-download-2-line me-2"></i>导出配置</h5>
+      <p class="text-muted small mb-3">
+        导出内容：渠道分组/成员、上游渠道/端点、模型目录与绑定。<br>
+        不包含：OpenAI API Key、Codex OAuth Token/Secret、支付密钥等敏感信息。
+      </p>
+      <a class="btn btn-primary w-100" href="/admin/export">
+        <i class="ri-download-2-line me-1"></i>下载 JSON
+      </a>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <h5 class="fw-bold mb-2"><i class="ri-upload-2-line me-2"></i>导入配置</h5>
+      <p class="text-muted small mb-3">
+        导入策略：upsert（创建或更新），不会删除当前数据库中已有但未出现在导入文件里的数据。<br>
+        建议在新数据库中导入以获得完全一致结果。
+      </p>
+      <form method="POST" action="/admin/import" enctype="multipart/form-data">
+        <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
+        <input type="file" name="file" class="form-control mb-3" accept="application/json" required />
+        <button type="submit" class="btn btn-primary w-100">
+          <i class="ri-upload-2-line me-1"></i>开始导入
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="alert alert-warning mt-4" role="alert">
+  <i class="ri-alert-line me-2"></i>
+  导入后如需启用上游：请在目标环境中重新录入 OpenAI API Key，并对 Codex OAuth 账号重新授权/刷新。
+</div>
+{{end}}
+

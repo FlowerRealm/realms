@@ -1,0 +1,767 @@
+{{define "admin_endpoints"}}
+<div class="d-flex justify-content-between align-items-center mb-4">
+	  <div>
+	    <h2 class="h4 fw-bold mb-1">端点与授权管理</h2>
+	    <p class="text-muted small mb-0">
+	      渠道：<span class="fw-bold text-dark">{{.Channel.Name}}</span>
+	      <span class="mx-2 text-light">|</span>
+	      类型：<span class="badge bg-light text-secondary border fw-normal">{{.Channel.Type}}</span>
+        {{if eq .Channel.Type "codex_oauth"}}
+          <span class="ms-2 text-success small"><i class="ri-checkbox-circle-line me-1"></i>内置服务已就绪</span>
+        {{end}}
+        {{if .ChannelRuntime.Available}}
+          <span class="ms-2 badge bg-light text-dark border fw-normal">失败计分: {{.ChannelRuntime.FailScore}}</span>
+          {{if .ChannelRuntime.BannedActive}}
+            <span class="ms-1 badge bg-warning-subtle text-warning-emphasis border fw-normal">封禁至 {{.ChannelRuntime.BannedUntil}}（连续={{.ChannelRuntime.BanStreak}}）</span>
+          {{end}}
+        {{end}}
+	    </p>
+	  </div>
+</div>
+
+{{if .Error}}
+<div class="alert alert-danger mb-4">
+  <i class="ri-alert-line me-2"></i>{{.Error}}
+</div>
+{{end}}
+{{if .Notice}}
+<div class="alert alert-success mb-4">
+  <i class="ri-checkbox-circle-line me-2"></i>{{.Notice}}
+</div>
+{{end}}
+
+  <div class="row g-3">
+    {{if ne .Channel.Type "codex_oauth"}}
+    <div class="col-md-7">
+      <div class="card h-100">
+        <h5 class="fw-bold mb-3"><i class="ri-link me-2"></i>接口基础地址</h5>
+        <form method="POST" action="/admin/channels/{{.Channel.ID}}/endpoints">
+          <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
+
+	          <div class="mb-3">
+	            <label class="form-label">基础地址</label>
+	            <input name="base_url" type="url" class="form-control" required value="{{.Endpoint.BaseURL}}" placeholder="https://api.openai.com" />
+	            <div class="form-text">仅支持 http/https URL（示例：https://api.openai.com）。</div>
+	          </div>
+
+          <button type="submit" class="btn btn-primary w-100">
+            <i class="ri-save-line me-1"></i>保存基础地址
+          </button>
+        </form>
+      </div>
+    </div>
+    {{end}}
+
+    <div class="{{if ne .Channel.Type "codex_oauth"}}col-md-5{{else}}col-12{{end}}">
+      {{if ne .Channel.Type "codex_oauth"}}
+      <div class="card h-100" id="keys">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h5 class="fw-bold mb-0"><i class="ri-key-2-line me-2"></i>密钥</h5>
+          <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addCredentialModal">
+            <i class="ri-add-line me-1"></i>添加
+          </button>
+        </div>
+        <p class="text-muted small mb-3">密钥将以明文存储，仅展示提示。</p>
+
+        <div class="table-responsive">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="bg-light">
+              <tr>
+                <th>名称</th>
+                <th>密钥提示</th>
+                <th>限额</th>
+                <th>状态</th>
+                <th class="text-end">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{if .Credentials}}
+                {{range .Credentials}}
+                <tr>
+                  <td>
+                    {{if .Name}}
+                      <span class="fw-semibold text-dark">{{.Name}}</span>
+                    {{else}}
+                      <span class="text-muted small">-</span>
+                    {{end}}
+                  </td>
+                  <td>
+                    {{if .APIKeyHint}}
+                      <code class="text-secondary bg-light border px-1" style="font-size: 0.9em;">...{{.APIKeyHint}}</code>
+                    {{else}}
+                      <span class="text-muted small">-</span>
+                    {{end}}
+                  </td>
+                  <td>
+                    <code class="text-secondary bg-light border px-1" style="font-size: 0.85em;">
+                      sessions={{if .LimitSessions}}{{formatOptionalInt .LimitSessions}}{{else}}-{{end}},
+                      rpm={{if .LimitRPM}}{{formatOptionalInt .LimitRPM}}{{else}}-{{end}},
+                      tpm={{if .LimitTPM}}{{formatOptionalInt .LimitTPM}}{{else}}-{{end}}
+                    </code>
+                    {{if .Runtime.Available}}
+                    <div class="mt-1" style="font-size: 0.8rem;">
+                      <span class="text-muted"><i class="ri-pulse-line me-1"></i>运行态：</span>
+                      <code class="text-secondary bg-light border px-1" style="font-size: 0.85em;">
+                        sessions={{.Runtime.Sessions}}, rpm={{.Runtime.RPM}}, tpm={{.Runtime.TPM}}, fails={{.Runtime.FailScore}}
+                      </code>
+                      {{if .Runtime.CoolingUntil}}
+                        <span class="badge bg-warning-subtle text-warning-emphasis border ms-2">冷却至 {{.Runtime.CoolingUntil}}</span>
+                      {{end}}
+                      {{if .Runtime.OverSessions}}
+                        <span class="badge bg-danger-subtle text-danger-emphasis border ms-2">Sessions 超限</span>
+                      {{end}}
+                      {{if .Runtime.OverRPM}}
+                        <span class="badge bg-danger-subtle text-danger-emphasis border ms-2">RPM 超限</span>
+                      {{end}}
+                      {{if .Runtime.OverTPM}}
+                        <span class="badge bg-danger-subtle text-danger-emphasis border ms-2">TPM 超限</span>
+                      {{end}}
+                    </div>
+                    {{end}}
+                  </td>
+                  <td>
+                    {{if eq .Status 1}}
+                      <span class="badge rounded-pill bg-success bg-opacity-10 text-success px-2">
+                        <i class="ri-checkbox-circle-line me-1"></i>启用
+                      </span>
+                    {{else}}
+                      <span class="badge rounded-pill bg-secondary bg-opacity-10 text-secondary px-2">
+                        <i class="ri-close-circle-line me-1"></i>禁用
+                      </span>
+                    {{end}}
+                  </td>
+                  <td class="text-end">
+                    <div class="d-inline-flex gap-2">
+                      <button type="button" class="btn btn-sm btn-light border" data-bs-toggle="modal" data-bs-target="#editCredentialLimitsModal-{{.ID}}" title="设置限额">
+                        <i class="ri-speed-up-line"></i>
+                      </button>
+                      <form method="POST" action="/admin/openai-credentials/{{.ID}}/delete" onsubmit="return confirm('确认彻底删除该凭证？且不可恢复。')">
+                        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+                        <button class="btn btn-sm btn-light border text-danger" type="submit" title="删除密钥">
+                          <i class="ri-delete-bin-line"></i>
+                        </button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+                {{end}}
+              {{else}}
+                <tr>
+                  <td colspan="5" class="text-center text-muted py-3">暂无密钥</td>
+                </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {{if .Credentials}}
+        {{range .Credentials}}
+        <div class="modal fade" id="editCredentialLimitsModal-{{.ID}}" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-sm">
+            <div class="modal-content border-0 shadow">
+              <div class="modal-header">
+                <h5 class="modal-title fw-bold">设置密钥限额</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+              </div>
+              <form method="POST" action="/admin/openai-credentials/{{.ID}}/limits">
+                <div class="modal-body">
+                  <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+                  <input type="hidden" name="return_to" value="/admin/channels/{{$.Channel.ID}}/endpoints#keys" />
+
+                  <div class="row g-2">
+                    <div class="col-12">
+                      <label class="form-label small text-muted mb-1">Sessions（会话ID级别）</label>
+                      <input name="limit_sessions" type="number" min="1" class="form-control form-control-sm" value="{{formatOptionalInt .LimitSessions}}" placeholder="无限制" />
+                    </div>
+                    <div class="col-12">
+                      <label class="form-label small text-muted mb-1">RPM</label>
+                      <input name="limit_rpm" type="number" min="1" class="form-control form-control-sm" value="{{formatOptionalInt .LimitRPM}}" placeholder="无限制" />
+                    </div>
+                    <div class="col-12">
+                      <label class="form-label small text-muted mb-1">TPM（总 tokens）</label>
+                      <input name="limit_tpm" type="number" min="1" class="form-control form-control-sm" value="{{formatOptionalInt .LimitTPM}}" placeholder="无限制" />
+                    </div>
+                  </div>
+                  <div class="form-text smaller mt-2">留空表示无限制；超限会自动切换到下一个账号。</div>
+                </div>
+                <div class="modal-footer border-top-0 pt-0">
+                  <button type="submit" class="btn btn-primary w-100">保存</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+        {{end}}
+      {{end}}
+
+      <!-- 添加密钥弹窗 -->
+      <div class="modal fade" id="addCredentialModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+          <div class="modal-content border-0 shadow">
+              <div class="modal-header">
+                <h5 class="modal-title fw-bold">添加 OpenAI API 密钥</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+              </div>
+            <form method="POST" action="/admin/endpoints/{{.Endpoint.ID}}/openai-credentials">
+              <div class="modal-body">
+                <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
+
+                <div class="mb-3">
+                  <label class="form-label">备注名称 (可选)</label>
+                  <input name="name" type="text" class="form-control" placeholder="例如：team-a-gpt4" />
+                </div>
+
+                <div class="mb-3">
+                  <label class="form-label">API 密钥</label>
+                  <input name="api_key" type="text" class="form-control font-monospace" required placeholder="sk-..." />
+                  <div class="form-text">密钥将以明文存储。</div>
+                </div>
+
+              </div>
+              <div class="modal-footer border-top-0">
+                <button type="button" class="btn btn-light" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-primary">保存</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {{end}}
+
+  {{if eq .Channel.Type "codex_oauth"}}
+  <div class="card border-0 shadow-sm mt-2" id="accounts">
+    <div class="card-header bg-white border-bottom-0 pt-4 px-4">
+      <div class="d-flex justify-content-between align-items-center">
+        <h5 class="fw-bold mb-0 text-dark"><i class="ri-id-card-line me-2 text-primary"></i>授权账号管理</h5>
+        <div class="d-flex align-items-center gap-2">
+          <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addCodexAccountModal">
+            <i class="ri-add-line me-1"></i>添加账号
+          </button>
+          <button type="button" class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#batchRegisterModal">
+            <i class="ri-group-line me-1"></i>批量注册
+          </button>
+          <form method="POST" action="/admin/endpoints/{{.Endpoint.ID}}/codex-accounts/refresh">
+            <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
+            <button class="btn btn-light border" type="submit">
+              <i class="ri-refresh-line me-1"></i>全部刷新
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="table-responsive p-2">
+      <table class="table table-hover align-middle mb-0" style="border-collapse: separate; border-spacing: 0 8px;">
+        <thead class="bg-light text-muted">
+          <tr>
+            <th class="ps-4 border-0" style="width: 20%;">邮箱与套餐</th>
+            <th class="border-0" style="width: 45%;">订阅与额度详情</th>
+            <th class="border-0 ps-5" style="width: 15%;">账号状态</th>
+            <th class="text-end pe-4 border-0" style="width: 20%;">管理操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{if .Accounts}}
+            {{range .Accounts}}
+            <tr class="shadow-sm rounded-3">
+              <td class="ps-4 border-0">
+                <div class="d-flex flex-column">
+                  <span class="fw-bold text-dark mb-1" style="font-size: 0.9rem;">{{if .Email}}{{.Email}}{{else}}未绑定邮箱{{end}}</span>
+                  <div>
+                    {{if .PlanType}}
+                      <span class="badge rounded-pill bg-info bg-opacity-10 text-info border border-info border-opacity-10 px-2" style="font-size: 0.75rem;">{{.PlanType}}</span>
+                    {{else}}
+                      <span class="text-muted small">-</span>
+                    {{end}}
+                  </div>
+                </div>
+              </td>
+              <td class="border-0 py-3">
+                <div style="max-width: 450px;">
+                  <!-- 订阅 -->
+                  {{if .SubscriptionActive}}
+                    <div class="mb-3">
+                      <div class="d-flex justify-content-between align-items-end mb-1">
+                        <div>
+                          <span class="text-dark fw-bold" style="font-size: 0.85rem;"><i class="ri-calendar-check-line me-1 text-success"></i>订阅</span>
+                          <span class="text-muted ms-2" style="font-size: 0.8rem;">剩 {{.SubscriptionDaysLeft}} 天</span>
+                        </div>
+                        <span class="text-primary fw-bold" style="font-size: 0.85rem;">{{.SubscriptionPercent}}%</span>
+                      </div>
+                      <div class="progress" style="height: 8px; background-color: rgba(0,0,0,0.05); border-radius: 4px;">
+                        <div class="progress-bar {{if gt .SubscriptionPercent 90}}bg-danger{{else if gt .SubscriptionPercent 70}}bg-warning{{else}}bg-primary{{end}}" 
+                             role="progressbar" 
+                             style="width: {{.SubscriptionPercent}}%; border-radius: 4px;" 
+                             aria-valuenow="{{.SubscriptionPercent}}" 
+                             aria-valuemin="0" 
+                             aria-valuemax="100"></div>
+                      </div>
+                    </div>
+                  {{end}}
+
+                  <!-- 额度 -->
+                  {{if .QuotaError}}
+                    <div class="text-danger border border-danger border-opacity-10 bg-danger bg-opacity-10 p-2 rounded small">
+                      <i class="ri-error-warning-line me-1"></i>{{.QuotaError}}
+                    </div>
+                  {{else}}
+                    {{if ne .QuotaCredits "-" }}<div class="fw-bold text-dark mb-2" style="font-size: 0.9rem;"><i class="ri-coin-line me-1 text-primary"></i>{{.QuotaCredits}}</div>{{end}}
+                    
+                    {{if .QuotaPrimaryShow}}
+                    <div class="mb-3">
+                      <div class="d-flex justify-content-between align-items-end mb-1">
+                        <div>
+                          <span class="text-dark fw-bold" style="font-size: 0.85rem;" title="5 小时额度（$6/5h）"><i class="ri-flashlight-line me-1 text-warning"></i>5h 额度</span>
+                          {{if ne .QuotaPrimaryDetail "-"}}<span class="text-muted ms-2" style="font-size: 0.8rem;">{{.QuotaPrimaryDetail}}</span>{{end}}
+                        </div>
+                        <span class="text-dark fw-bold" style="font-size: 0.85rem;">{{.QuotaPrimaryUsed}}%</span>
+                      </div>
+                      <div class="progress" style="height: 8px; background-color: rgba(0,0,0,0.05); border-radius: 4px;">
+                        <div class="progress-bar {{if gt .QuotaPrimaryUsed 90}}bg-danger{{else if gt .QuotaPrimaryUsed 70}}bg-warning{{else}}bg-primary{{end}}" 
+                             role="progressbar" 
+                             style="width: {{.QuotaPrimaryUsed}}%; border-radius: 4px;" 
+                             aria-valuenow="{{.QuotaPrimaryUsed}}" 
+                             aria-valuemin="0" 
+                             aria-valuemax="100"></div>
+                      </div>
+                    </div>
+                    {{else if ne .QuotaPrimary "-"}}
+                      <div class="text-muted mb-2" style="font-size: 0.85rem;"><i class="ri-flashlight-line me-1"></i>5h 额度：{{.QuotaPrimary}}</div>
+                    {{end}}
+
+                    {{if .QuotaSecondaryShow}}
+                    <div class="mb-0">
+                      <div class="d-flex justify-content-between align-items-end mb-1">
+                        <div>
+                          <span class="text-dark fw-bold" style="font-size: 0.85rem;" title="周限额与代码审查额度（$20/week）"><i class="ri-shield-flash-line me-1 text-info"></i>周额度</span>
+                          {{if ne .QuotaSecondaryDetail "-"}}<span class="text-muted ms-2" style="font-size: 0.8rem;">{{.QuotaSecondaryDetail}}</span>{{end}}
+                        </div>
+                        <span class="text-dark fw-bold" style="font-size: 0.85rem;">{{.QuotaSecondaryUsed}}%</span>
+                      </div>
+                      <div class="progress" style="height: 8px; background-color: rgba(0,0,0,0.05); border-radius: 4px;">
+                        <div class="progress-bar {{if gt .QuotaSecondaryUsed 90}}bg-danger{{else if gt .QuotaSecondaryUsed 70}}bg-warning{{else}}bg-primary{{end}}" 
+                             role="progressbar" 
+                             style="width: {{.QuotaSecondaryUsed}}%; border-radius: 4px;" 
+                             aria-valuenow="{{.QuotaSecondaryUsed}}" 
+                             aria-valuemin="0" 
+                             aria-valuemax="100"></div>
+                      </div>
+                    </div>
+                    {{else if ne .QuotaSecondary "-"}}
+                      <div class="text-muted" style="font-size: 0.85rem;"><i class="ri-shield-flash-line me-1"></i>周额度：{{.QuotaSecondary}}</div>
+                    {{end}}
+
+                    {{if and (eq .QuotaCredits "-") (not .QuotaPrimaryShow) (eq .QuotaPrimary "-") (not .QuotaSecondaryShow) (eq .QuotaSecondary "-") (not .SubscriptionActive) }}<span class="text-muted">-</span>{{end}}
+                  {{end}}
+                </div>
+
+	                <div class="text-muted mt-3" style="font-size: 0.8rem;">
+	                  <i class="ri-speed-up-line me-1"></i>限额：
+	                  sessions={{if .LimitSessions}}{{formatOptionalInt .LimitSessions}}{{else}}-{{end}},
+	                  rpm={{if .LimitRPM}}{{formatOptionalInt .LimitRPM}}{{else}}-{{end}},
+	                  tpm={{if .LimitTPM}}{{formatOptionalInt .LimitTPM}}{{else}}-{{end}}
+	                </div>
+                  {{if .Runtime.Available}}
+                  <div class="text-muted mt-1" style="font-size: 0.8rem;">
+                    <i class="ri-pulse-line me-1"></i>运行态：
+                    sessions={{.Runtime.Sessions}}, rpm={{.Runtime.RPM}}, tpm={{.Runtime.TPM}}, fails={{.Runtime.FailScore}}
+                    {{if .Runtime.CoolingUntil}}<span class="ms-2">| 冷却至 {{.Runtime.CoolingUntil}}</span>{{end}}
+                    {{if .Runtime.OverSessions}}<span class="ms-2 text-danger">| Sessions 超限</span>{{end}}
+                    {{if .Runtime.OverRPM}}<span class="ms-2 text-danger">| RPM 超限</span>{{end}}
+                    {{if .Runtime.OverTPM}}<span class="ms-2 text-danger">| TPM 超限</span>{{end}}
+                  </div>
+                  {{end}}
+	              </td>
+	              <td class="border-0 ps-5">
+	                {{if or .InCooldown (ne .Runtime.CoolingUntil "")}}
+	                  <div class="d-flex flex-column">
+	                    <span class="badge rounded-pill bg-warning bg-opacity-10 text-warning px-3 py-2 border border-warning border-opacity-25" style="width: fit-content;">冷却中</span>
+	                  </div>
+                  {{else if and .Runtime.Available (or .Runtime.OverSessions .Runtime.OverRPM .Runtime.OverTPM)}}
+                    <span class="badge rounded-pill bg-warning bg-opacity-10 text-warning px-3 py-2 border border-warning border-opacity-25" style="width: fit-content;">超限</span>
+	                {{else if eq .Status 1}}
+	                  <span class="badge rounded-pill bg-success bg-opacity-10 text-success px-3 py-2 border border-success border-opacity-25" style="width: fit-content;">运行中</span>
+	                {{else}}
+	                  <span class="badge rounded-pill bg-secondary bg-opacity-10 text-secondary px-3 py-2 border border-secondary border-opacity-25" style="width: fit-content;">已禁用</span>
+                {{end}}
+              </td>
+              <td class="text-end pe-4 border-0">
+                <div class="d-inline-flex gap-2">
+                  <form method="POST" action="/admin/codex-accounts/{{.ID}}/refresh">
+                    <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+                    <button class="btn btn-sm btn-outline-primary" type="submit" title="刷新数据">
+                      <i class="ri-refresh-line me-1"></i>刷新
+                    </button>
+                  </form>
+                  <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#editCodexAccountLimitsModal-{{.ID}}" title="设置限额">
+                    <i class="ri-speed-up-line me-1"></i>限额
+                  </button>
+                  <form method="POST" action="/admin/codex-accounts/{{.ID}}/delete" onsubmit="return confirm('确认彻底删除该账号？且不可恢复。')">
+                    <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+                    <button class="btn btn-sm btn-outline-danger" type="submit" title="删除账号">
+                      <i class="ri-delete-bin-line me-1"></i>删除
+                    </button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+            {{end}}
+          {{else}}
+            <tr>
+              <td colspan="4" class="text-center text-muted py-5">
+                <i class="ri-inbox-line fs-2 d-block mb-2"></i>
+                暂无账号，请先添加或通过 OAuth 授权。
+              </td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {{if .Accounts}}
+    {{range .Accounts}}
+    <div class="modal fade" id="editCodexAccountLimitsModal-{{.ID}}" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-sm">
+        <div class="modal-content border-0 shadow">
+          <div class="modal-header">
+            <h5 class="modal-title fw-bold">设置账号限额</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+          </div>
+          <form method="POST" action="/admin/codex-accounts/{{.ID}}/limits">
+            <div class="modal-body">
+              <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+              <input type="hidden" name="return_to" value="/admin/channels/{{$.Channel.ID}}/endpoints#accounts" />
+
+              <div class="row g-2">
+                <div class="col-12">
+                  <label class="form-label small text-muted mb-1">Sessions（会话ID级别）</label>
+                  <input name="limit_sessions" type="number" min="1" class="form-control form-control-sm" value="{{formatOptionalInt .LimitSessions}}" placeholder="无限制" />
+                </div>
+                <div class="col-12">
+                  <label class="form-label small text-muted mb-1">RPM</label>
+                  <input name="limit_rpm" type="number" min="1" class="form-control form-control-sm" value="{{formatOptionalInt .LimitRPM}}" placeholder="无限制" />
+                </div>
+                <div class="col-12">
+                  <label class="form-label small text-muted mb-1">TPM（总 tokens）</label>
+                  <input name="limit_tpm" type="number" min="1" class="form-control form-control-sm" value="{{formatOptionalInt .LimitTPM}}" placeholder="无限制" />
+                </div>
+              </div>
+              <div class="form-text smaller mt-2">留空表示无限制；超限会自动切换到下一个账号。</div>
+            </div>
+            <div class="modal-footer border-top-0 pt-0">
+              <button type="submit" class="btn btn-primary w-100">保存</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+    {{end}}
+  {{end}}
+
+  <!-- 添加账号弹窗 -->
+  <div class="modal fade" id="addCodexAccountModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content border-0 shadow">
+        <div class="modal-header">
+          <h5 class="modal-title fw-bold">添加 Codex OAuth 账号</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+        </div>
+        <div class="modal-body">
+          <ul class="nav nav-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" id="add-codex-oauth-tab" data-bs-toggle="tab" data-bs-target="#add-codex-oauth" type="button" role="tab" aria-controls="add-codex-oauth" aria-selected="true">快捷授权</button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="add-codex-manual-tab" data-bs-toggle="tab" data-bs-target="#add-codex-manual" type="button" role="tab" aria-controls="add-codex-manual" aria-selected="false">手工录入</button>
+            </li>
+          </ul>
+
+          <div class="tab-content pt-3">
+            <div class="tab-pane fade show active" id="add-codex-oauth" role="tabpanel" aria-labelledby="add-codex-oauth-tab">
+              <p class="text-muted small mb-3">推荐：点击“发起授权”完成登录后，复制回调 URL 粘贴到下方完成授权（默认不监听 1455）。如已启用自动回调，则会自动入库。</p>
+
+              <form method="POST" action="/admin/endpoints/{{.Endpoint.ID}}/codex-oauth/start" class="mb-3" target="_blank">
+                <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
+                <button type="submit" class="btn btn-primary w-100">
+                  <i class="ri-external-link-line me-2"></i>发起授权（新窗口打开）
+                </button>
+              </form>
+
+              <hr class="my-4 text-muted opacity-10">
+
+              <form method="POST" action="/admin/endpoints/{{.Endpoint.ID}}/codex-oauth/complete">
+                <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
+                <div class="mb-3">
+                  <label class="form-label">粘贴回调 URL</label>
+                  <input name="callback_url" class="form-control" placeholder="http://localhost:1455/auth/callback?code=...&state=..." />
+                  <div class="form-text small">如果跳转失败，请将浏览器地址栏的完整 URL 粘贴至此。</div>
+                </div>
+                <button class="btn btn-light border w-100" type="submit">完成授权</button>
+              </form>
+            </div>
+
+            <div class="tab-pane fade" id="add-codex-manual" role="tabpanel" aria-labelledby="add-codex-manual-tab">
+              <form method="POST" action="/admin/endpoints/{{.Endpoint.ID}}/codex-accounts">
+                <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
+                <div class="row g-3 mb-3">
+                  <div class="col-12">
+                    <label class="form-label">邮箱（可选）</label>
+                    <input name="email" class="form-control" type="email" placeholder="user@example.com" />
+                  </div>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">访问令牌</label>
+                  <input name="access_token" class="form-control font-monospace" required />
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">刷新令牌</label>
+                  <input name="refresh_token" class="form-control font-monospace" required />
+                </div>
+                <button type="submit" class="btn btn-primary w-100">保存账号</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 批量注册模态框 -->
+  <div class="modal fade" id="batchRegisterModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content border-0 shadow">
+        <div class="modal-header">
+          <h5 class="modal-title fw-bold"><i class="ri-group-line me-2"></i>批量注册 OpenAI 账号</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-info small">
+            <i class="ri-information-line me-1"></i>
+            批量注册将自动创建临时邮箱、注册 OpenAI 账号、完成 Codex OAuth 授权，并保存到当前端点。
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-bold">注册数量</label>
+            <input type="number" id="batchCount" class="form-control" min="1" max="10" value="1" />
+            <div class="form-text">最多可批量注册 10 个账号</div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-bold">Worker Domain</label>
+            <input type="url" id="workerDomain" class="form-control" placeholder="https://mail.example.workers.dev" />
+            <div class="form-text">临时邮箱服务地址</div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-bold">Admin Token</label>
+            <input type="text" id="adminToken" class="form-control" placeholder="your_admin_token" />
+            <div class="form-text">临时邮箱服务管理令牌</div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-bold">CRS API Base</label>
+            <input type="url" id="crsApiBase" class="form-control" placeholder="https://crs.example.com" />
+            <div class="form-text">CRS API 基础地址</div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-bold">CRS Admin Token</label>
+            <input type="text" id="crsAdminToken" class="form-control" placeholder="Bearer admin_token_xxx" />
+            <div class="form-text">CRS 管理员令牌</div>
+          </div>
+
+          <div class="mb-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="enableTeamInvite" />
+              <label class="form-check-label fw-bold" for="enableTeamInvite">
+                启用团队邀请（可选）
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-top-0">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">取消</button>
+          <button type="button" class="btn btn-warning" onclick="startBatchRegister()">
+            <i class="ri-play-line me-1"></i>开始注册
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 进度显示模态框 -->
+  <div class="modal fade" id="progressModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content border-0 shadow">
+        <div class="modal-header">
+          <h5 class="modal-title fw-bold"><i class="ri-loader-4-line me-2"></i>批量注册进行中...</h5>
+        </div>
+        <div class="modal-body">
+          <div class="mb-4">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <span class="fw-bold">总体进度</span>
+              <span id="progressText" class="text-muted">0/0</span>
+            </div>
+            <div class="progress" style="height: 20px;">
+              <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated"
+                   role="progressbar" style="width: 0%"></div>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <div class="fw-bold mb-2">当前状态</div>
+            <div id="currentStatus" class="text-muted small">等待开始...</div>
+          </div>
+
+          <div class="mb-3">
+            <div class="fw-bold mb-2">执行日志</div>
+            <div id="logContainer" class="border rounded p-3 bg-light" style="max-height: 300px; overflow-y: auto; font-family: 'Fira Code', monospace; font-size: 0.85rem;">
+              <div class="text-muted small">日志将在这里显示...</div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-top-0">
+          <button type="button" class="btn btn-light" id="closeProgressBtn" disabled>关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentEventSource = null;
+
+    function startBatchRegister() {
+      const count = parseInt(document.getElementById('batchCount').value);
+      const workerDomain = document.getElementById('workerDomain').value.trim();
+      const adminToken = document.getElementById('adminToken').value.trim();
+      const crsApiBase = document.getElementById('crsApiBase').value.trim();
+      const crsAdminToken = document.getElementById('crsAdminToken').value.trim();
+      const enableTeamInvite = document.getElementById('enableTeamInvite').checked;
+
+      // 验证
+      if (!count || count < 1 || count > 10) {
+        alert('注册数量必须在 1-10 之间');
+        return;
+      }
+      if (!workerDomain || !adminToken) {
+        alert('Worker Domain 和 Admin Token 不能为空');
+        return;
+      }
+
+      // 关闭配置模态框
+      const configModal = bootstrap.Modal.getInstance(document.getElementById('batchRegisterModal'));
+      configModal.hide();
+
+      // 显示进度模态框
+      const progressModal = new bootstrap.Modal(document.getElementById('progressModal'));
+      progressModal.show();
+
+      // 重置进度
+      document.getElementById('progressBar').style.width = '0%';
+      document.getElementById('progressText').textContent = '0/' + count;
+      document.getElementById('currentStatus').textContent = '正在启动...';
+      document.getElementById('logContainer').innerHTML = '';
+      document.getElementById('closeProgressBtn').disabled = true;
+
+      // 发送请求
+      fetch('/admin/batch-register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          '_csrf': '{{.CSRFToken}}'
+        },
+        body: JSON.stringify({
+          count: count,
+          worker_domain: workerDomain,
+          admin_token: adminToken,
+          crs_api_base: crsApiBase,
+          crs_admin_token: crsAdminToken,
+          enable_team_invite: enableTeamInvite
+        })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.task_id) {
+          subscribeProgress(data.task_id, count);
+        } else {
+          appendLog('❌ 启动失败: ' + JSON.stringify(data));
+          document.getElementById('closeProgressBtn').disabled = false;
+        }
+      })
+      .catch(error => {
+        appendLog('❌ 请求失败: ' + error);
+        document.getElementById('closeProgressBtn').disabled = false;
+      });
+    }
+
+    function subscribeProgress(taskId, totalCount) {
+      if (currentEventSource) {
+        currentEventSource.close();
+      }
+
+      const eventSource = new EventSource('/admin/batch-register-progress/' + taskId);
+      currentEventSource = eventSource;
+
+      eventSource.addEventListener('progress', function(e) {
+        const data = JSON.parse(e.data);
+        updateProgress(data.current_index, totalCount, data.current_status);
+      });
+
+      eventSource.addEventListener('log', function(e) {
+        const data = JSON.parse(e.data);
+        appendLog(data.message);
+      });
+
+      eventSource.addEventListener('complete', function(e) {
+        const data = JSON.parse(e.data);
+        appendLog('✅ 任务完成！');
+        document.getElementById('currentStatus').innerHTML = '<span class="text-success fw-bold">已完成</span>';
+        document.getElementById('closeProgressBtn').disabled = false;
+        eventSource.close();
+
+        // 3秒后自动刷新页面
+        setTimeout(() => {
+          location.reload();
+        }, 3000);
+      });
+
+      eventSource.onerror = function(e) {
+        console.error('SSE error:', e);
+        appendLog('⚠️ 连接中断，尝试重连...');
+        // 简单重连机制
+        setTimeout(() => {
+          if (document.getElementById('closeProgressBtn').disabled) {
+            subscribeProgress(taskId, totalCount);
+          }
+        }, 2000);
+      };
+    }
+
+    function updateProgress(current, total, status) {
+      const percent = Math.round((current / total) * 100);
+      document.getElementById('progressBar').style.width = percent + '%';
+      document.getElementById('progressText').textContent = current + '/' + total;
+      document.getElementById('currentStatus').textContent = status || '处理中...';
+    }
+
+    function appendLog(message) {
+      const container = document.getElementById('logContainer');
+      const logLine = document.createElement('div');
+      logLine.className = 'mb-1';
+      logLine.textContent = '[' + new Date().toLocaleTimeString() + '] ' + message;
+      container.appendChild(logLine);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    // 清理事件源
+    window.addEventListener('beforeunload', function() {
+      if (currentEventSource) {
+        currentEventSource.close();
+      }
+    });
+  </script>
+  {{end}}
+{{end}}

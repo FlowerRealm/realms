@@ -1,0 +1,117 @@
+{{define "admin_home"}}
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <h2 class="h4 fw-bold mb-0">仪表盘</h2>
+  <span class="badge bg-light text-secondary border">{{.AdminTimeZoneEffective}} 时间</span>
+</div>
+
+<!-- 关键指标 -->
+<div class="row g-4 mb-4">
+  <!-- 用户 -->
+  <div class="col-md-4">
+    <div class="card h-100 border-0 shadow-sm metric-card border-top border-4 border-primary">
+      <div class="card-body d-flex align-items-center">
+        <div class="bg-primary bg-opacity-10 p-3 rounded-3 me-3">
+          <i class="ri-group-line fs-4 text-primary"></i>
+        </div>
+        <div>
+          <h6 class="text-muted text-uppercase mb-1 small fw-semibold">总用户数</h6>
+          <h3 class="mb-0 fw-bold">{{.Stats.UsersCount}}</h3>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 渠道 -->
+  <div class="col-md-4">
+    <div class="card h-100 border-0 shadow-sm metric-card border-top border-4 border-success">
+      <div class="card-body d-flex align-items-center">
+        <div class="bg-success bg-opacity-10 p-3 rounded-3 me-3">
+          <i class="ri-git-merge-line fs-4 text-success"></i>
+        </div>
+        <div>
+          <h6 class="text-muted text-uppercase mb-1 small fw-semibold">上游渠道</h6>
+          <h3 class="mb-0 fw-bold">{{.Stats.ChannelsCount}}</h3>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 端点 -->
+  <div class="col-md-4">
+    <div class="card h-100 border-0 shadow-sm metric-card border-top border-4 border-info">
+      <div class="card-body d-flex align-items-center">
+        <div class="bg-info bg-opacity-10 p-3 rounded-3 me-3">
+          <i class="ri-server-line fs-4 text-info"></i>
+        </div>
+        <div>
+          <h6 class="text-muted text-uppercase mb-1 small fw-semibold">上游节点</h6>
+          <h3 class="mb-0 fw-bold">{{.Stats.EndpointsCount}}</h3>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 今日统计 -->
+<div class="card border-0 shadow-sm mb-4 overflow-hidden">
+  <div class="bg-dark py-3 px-4 d-flex justify-content-between align-items-center">
+    <div>
+       <span class="text-white fw-bold text-uppercase small">今日概览</span>
+       <span class="text-white-50 smaller ms-2">{{$.AdminTimeZoneEffective}} 时间</span>
+    </div>
+    <div class="text-white-50 smaller">
+       <i class="ri-pulse-line me-1"></i> 实时监控
+    </div>
+  </div>
+  <div class="card-body p-4">
+    <div class="row text-center">
+      <div class="col-md-4 border-end">
+        <h6 class="text-muted mb-2">总请求数</h6>
+        <h2 class="fw-bold text-dark">{{.Stats.RequestsToday}}</h2>
+      </div>
+      <div class="col-md-4 border-end">
+        <h6 class="text-muted mb-2">Token 消耗</h6>
+        <h2 class="fw-bold text-dark">{{.Stats.TokensToday}}</h2>
+        <div class="small text-muted font-monospace">输入 {{.Stats.InputTokensToday}} / 输出 {{.Stats.OutputTokensToday}}</div>
+        <div class="small text-muted font-monospace">缓存 输入 {{.Stats.CachedInputTokensToday}} / 输出 {{.Stats.CachedOutputTokensToday}}（命中率 {{.Stats.CacheRatioToday}}）</div>
+      </div>
+      <div class="col-md-4">
+        <h6 class="text-muted mb-2">预估消费</h6>
+        <h2 class="fw-bold text-success">{{.Stats.CostToday}}</h2>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 快捷入口 -->
+<div class="row g-4">
+  <div class="col-md-6">
+    <div class="card h-100 border-0 shadow-sm">
+      <div class="card-body">
+        <h5 class="card-title fw-bold mb-3">快捷操作</h5>
+        <div class="d-grid gap-2">
+           <a href="/admin/channels" class="btn btn-outline-primary text-start">
+             <i class="ri-git-merge-line me-2"></i> 管理上游渠道
+           </a>
+           <a href="/admin/users" class="btn btn-outline-secondary text-start">
+             <i class="ri-user-settings-line me-2"></i> 管理用户与权限
+           </a>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="col-md-6">
+    <div class="card h-100 bg-light border-0 shadow-sm">
+      <div class="card-body">
+        <h5 class="card-title fw-bold mb-3">系统信息</h5>
+        <ul class="list-unstyled mb-0">
+          <li class="mb-2"><small class="text-muted">当前用户：</small> <strong>{{.User.Email}}</strong></li>
+          <li class="mb-2"><small class="text-muted">角色权限：</small> <span class="badge bg-secondary">{{.User.Role}}</span></li>
+          <li><small class="text-muted">Realms 状态：</small> <span class="text-success fw-bold">运行中</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}

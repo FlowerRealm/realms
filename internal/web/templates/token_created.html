@@ -1,0 +1,86 @@
+{{define "page_token_created"}}
+<div class="row justify-content-center">
+  <div class="col-lg-7 col-xl-6">
+    <div class="card border-0 shadow-sm mt-4">
+      <div class="card-body p-4 p-md-5">
+        <div class="text-center mb-4">
+          <div class="bg-success bg-opacity-10 text-success rounded-circle d-inline-flex align-items-center justify-content-center mb-3" style="width: 64px; height: 64px;">
+            <i class="bi bi-check-lg fs-1"></i>
+          </div>
+          <h4 class="fw-bold text-dark">令牌已生成</h4>
+          <p class="text-muted">这是您的新 API 令牌，请立即复制并妥善保存。</p>
+        </div>
+
+        <div class="alert alert-warning border-0 bg-warning bg-opacity-10 d-flex align-items-start mb-4">
+          <i class="bi bi-exclamation-triangle-fill me-2 mt-1"></i>
+          <div class="small">
+            <strong>安全提醒：</strong>令牌仅在此处显示一次。如果您离开此页面，将无法再次查看完整的令牌。如果遗失，您只能重新生成。
+          </div>
+        </div>
+        
+        <div class="mb-4">
+          <label class="form-label small fw-bold text-uppercase text-muted">API 令牌</label>
+          <div class="input-group input-group-lg shadow-sm">
+            <input id="tokenInput" type="text" class="form-control font-monospace bg-light border-end-0" value="{{.Token}}" readonly style="font-size: 1.1rem;">
+            <button id="copyTokenBtn" class="btn btn-light border border-start-0 px-4" type="button" title="点击复制">
+              <i class="bi bi-clipboard"></i>
+            </button>
+          </div>
+          <div id="copyFeedback" class="text-success small mt-2 opacity-0 transition-opacity">
+            <i class="bi bi-check2 me-1"></i>已成功复制到剪贴板
+          </div>
+        </div>
+
+        <div class="d-grid gap-2">
+          <a href="/tokens" class="btn btn-primary btn-lg py-3">
+            <i class="bi bi-arrow-left me-2"></i>我已保存，返回列表
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .transition-opacity { transition: opacity 0.3s ease; }
+  .opacity-100 { opacity: 1 !important; }
+  #tokenInput { cursor: text; }
+  #tokenInput:focus { box-shadow: none; border-color: var(--bs-border-color); }
+</style>
+
+<script>
+  (function() {
+    const input = document.getElementById('tokenInput');
+    const btn = document.getElementById('copyTokenBtn');
+    const feedback = document.getElementById('copyFeedback');
+    if (!input || !btn) return;
+
+    const copyToClipboard = async () => {
+      try {
+        input.select();
+        await navigator.clipboard.writeText(input.value);
+        
+        // Visual feedback
+        const icon = btn.querySelector('i');
+        icon.classList.replace('bi-clipboard', 'bi-check2');
+        btn.classList.replace('btn-light', 'btn-success');
+        btn.classList.add('text-white');
+        feedback.classList.add('opacity-100');
+        
+        setTimeout(() => {
+          icon.classList.replace('bi-check2', 'bi-clipboard');
+          btn.classList.replace('btn-success', 'btn-light');
+          btn.classList.remove('text-white');
+          feedback.classList.remove('opacity-100');
+        }, 2000);
+      } catch (err) {
+        console.error('Failed to copy: ', err);
+        input.select();
+      }
+    };
+
+    btn.addEventListener('click', copyToClipboard);
+    input.addEventListener('click', () => input.select());
+  })();
+</script>
+{{end}}

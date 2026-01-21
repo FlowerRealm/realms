@@ -1,0 +1,124 @@
+{{define "admin_ticket"}}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <div class="d-flex align-items-center gap-2 mb-1">
+      <h3 class="h4 fw-bold mb-0">工单 #{{.Ticket.ID}}</h3>
+      <span class="badge rounded-pill {{.Ticket.StatusBadge}}">{{.Ticket.StatusText}}</span>
+    </div>
+    <div class="text-muted small">
+      <span class="text-dark fw-medium">{{.Ticket.UserEmail}}</span>
+      <span class="mx-1">|</span>
+      <span>{{.Ticket.CreatedAt}}</span>
+    </div>
+  </div>
+
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-white border text-dark shadow-sm" href="/admin/tickets"><i class="ri-arrow-left-line me-1"></i>返回</a>
+    {{if .Ticket.Closed}}
+      <form method="POST" action="/admin/tickets/{{.Ticket.ID}}/reopen">
+        <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
+        <button type="submit" class="btn btn-sm btn-primary shadow-sm"><i class="ri-refresh-line me-1"></i>恢复工单</button>
+      </form>
+    {{else}}
+      <form method="POST" action="/admin/tickets/{{.Ticket.ID}}/close">
+        <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
+        <button type="submit" class="btn btn-sm btn-outline-danger shadow-sm border bg-white"><i class="ri-lock-line me-1"></i>关闭工单</button>
+      </form>
+    {{end}}
+  </div>
+</div>
+
+{{if .Error}}
+<div class="alert alert-danger shadow-sm mb-4"><i class="ri-alert-line me-2"></i>{{.Error}}</div>
+{{end}}
+{{if .Notice}}
+<div class="alert alert-success shadow-sm mb-4"><i class="ri-checkbox-circle-line me-2"></i>{{.Notice}}</div>
+{{end}}
+
+<div class="d-flex flex-column gap-3 mb-4">
+  {{range .TicketMessages}}
+    {{if eq .Actor "管理员"}}
+      <div class="d-flex justify-content-end">
+        <div class="d-flex flex-column align-items-end" style="max-width: 85%;">
+          <div class="d-flex align-items-center gap-2 mb-1 small text-muted">
+             <span>{{.CreatedAt}}</span>
+             <span class="fw-medium">我 (管理员)</span>
+          </div>
+          <div class="card border-0 shadow-sm bg-primary bg-opacity-10 text-dark">
+            <div class="card-body py-2 px-3">
+              <div style="white-space: pre-wrap;">{{.Body}}</div>
+              {{if .Attachments}}
+              <div class="mt-2 pt-2 border-top border-primary border-opacity-10">
+                <div class="small text-muted mb-1">附件</div>
+                <div class="d-flex flex-wrap gap-2">
+                  {{range .Attachments}}
+                  <a href="{{.URL}}" class="badge bg-white text-primary border text-decoration-none d-flex align-items-center p-2 shadow-sm">
+                    <i class="ri-attachment-2 me-1"></i>
+                    <span class="text-truncate" style="max-width: 150px;">{{.Name}}</span>
+                    <span class="ms-1 opacity-50">({{.Size}})</span>
+                  </a>
+                  {{end}}
+                </div>
+              </div>
+              {{end}}
+            </div>
+          </div>
+        </div>
+      </div>
+    {{else}}
+      <div class="d-flex justify-content-start">
+        <div class="d-flex flex-column align-items-start" style="max-width: 85%;">
+          <div class="d-flex align-items-center gap-2 mb-1 small text-muted">
+             <span class="fw-medium">{{.Actor}}</span>
+             <span>{{.CreatedAt}}</span>
+          </div>
+          <div class="card border shadow-sm bg-white">
+            <div class="card-body py-2 px-3">
+              <div style="white-space: pre-wrap;">{{.Body}}</div>
+              {{if .Attachments}}
+              <div class="mt-2 pt-2 border-top">
+                <div class="small text-muted mb-1">附件</div>
+                <div class="d-flex flex-wrap gap-2">
+                  {{range .Attachments}}
+                  <a href="{{.URL}}" class="badge bg-light text-dark border text-decoration-none d-flex align-items-center p-2">
+                    <i class="ri-attachment-2 me-1"></i>
+                    <span class="text-truncate" style="max-width: 150px;">{{.Name}}</span>
+                    <span class="ms-1 opacity-50">({{.Size}})</span>
+                  </a>
+                  {{end}}
+                </div>
+              </div>
+              {{end}}
+            </div>
+          </div>
+        </div>
+      </div>
+    {{end}}
+  {{end}}
+</div>
+
+<div class="card shadow-sm border-0 bg-light">
+  <div class="card-body">
+    {{if .Ticket.CanReply}}
+      <h5 class="mb-3 fw-bold h6">回复用户</h5>
+      <form method="POST" action="/admin/tickets/{{.Ticket.ID}}/reply" enctype="multipart/form-data">
+        <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
+        <div class="mb-3">
+          <textarea class="form-control shadow-sm" name="body" rows="4" placeholder="请输入回复内容..." required></textarea>
+        </div>
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <div class="flex-grow-1" style="max-width: 400px;">
+             <input class="form-control form-control-sm" type="file" name="attachments" multiple />
+             <div class="form-text small mt-0">支持多文件 (Max 100MB)</div>
+          </div>
+          <button type="submit" class="btn btn-primary shadow-sm px-4"><i class="ri-send-plane-fill me-1"></i>发送回复</button>
+        </div>
+      </form>
+    {{else}}
+      <div class="d-flex align-items-center justify-content-center text-muted py-2">
+        <i class="ri-lock-fill me-2"></i> 工单已关闭。
+      </div>
+    {{end}}
+  </div>
+</div>
+{{end}}

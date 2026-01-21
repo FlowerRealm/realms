@@ -1,0 +1,42 @@
+{{define "page_ticket_new"}}
+<div class="mb-4">
+  <h3 class="mb-1 fw-bold">创建工单</h3>
+  <div class="text-muted small">提交问题或反馈，我们会尽快处理。请勿上传敏感信息（如完整 Key/Token）。</div>
+</div>
+
+{{if .Error}}
+<div class="alert alert-danger shadow-sm"><i class="bi bi-exclamation-triangle-fill me-2"></i>{{.Error}}</div>
+{{end}}
+
+<div class="card shadow-sm border-0">
+  <div class="card-body p-4">
+    <form method="POST" action="/tickets/new" enctype="multipart/form-data">
+      <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
+
+      <div class="mb-3">
+        <label class="form-label fw-medium">标题</label>
+        <input class="form-control" name="subject" maxlength="200" placeholder="简要描述问题 (例如: API 调用 500 错误)" required />
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label fw-medium">问题描述</label>
+        <textarea class="form-control" name="body" rows="8" placeholder="详细描述问题发生的过程、期望结果与实际结果。&#10;如有报错信息，请完整粘贴。" required></textarea>
+      </div>
+
+      <div class="mb-4">
+        <label class="form-label fw-medium">附件 (可选)</label>
+        <input class="form-control" type="file" name="attachments" multiple />
+        <div class="form-text">支持图片或日志文件，单次总大小不超过 100MB。</div>
+      </div>
+
+      <div class="d-flex gap-2 align-items-center border-top pt-3">
+        <button class="btn btn-primary px-4 shadow-sm" type="submit">
+          <i class="bi bi-send me-1"></i> 提交工单
+        </button>
+        <a class="btn btn-link text-decoration-none text-muted" href="/tickets">取消</a>
+      </div>
+    </form>
+  </div>
+</div>
+{{end}}
+
