@@ -14,6 +14,7 @@ import (
 
 	"realms/internal/scheduler"
 	"realms/internal/store"
+	"realms/internal/upstream"
 )
 
 func (s *Server) TestChannel(w http.ResponseWriter, r *http.Request) {
@@ -131,6 +132,7 @@ func (s *Server) TestChannel(w http.ResponseWriter, r *http.Request) {
 type channelTestStore interface {
 	ListUpstreamEndpointsByChannel(ctx context.Context, channelID int64) ([]store.UpstreamEndpoint, error)
 	ListOpenAICompatibleCredentialsByEndpoint(ctx context.Context, endpointID int64) ([]store.OpenAICompatibleCredential, error)
+	ListAnthropicCredentialsByEndpoint(ctx context.Context, endpointID int64) ([]store.AnthropicCredential, error)
 	ListCodexOAuthAccountsByEndpoint(ctx context.Context, endpointID int64) ([]store.CodexOAuthAccount, error)
 	ListChannelModelsByChannelID(ctx context.Context, channelID int64) ([]store.ChannelModel, error)
 	GetEnabledManagedModelByPublicID(ctx context.Context, publicID string) (store.ManagedModel, error)
@@ -276,11 +278,48 @@ func runSingleModelSSETest(ctx context.Context, exec UpstreamDoer, sel scheduler
 	start := time.Now()
 	r := channelTestResult{PublicID: publicID, UpstreamModel: upstreamModel}
 
+	path := "/v1/responses"
 	payload := map[string]any{
 		"model":             upstreamModel,
 		"input":             defaultTestInput(),
 		"max_output_tokens": int64(16),
 		"stream":            true,
+	}
+	if sel.ChannelType == store.UpstreamTypeCodexOAuth {
+		payload = map[string]any{
+			"model": upstreamModel,
+			"input": []any{
+				map[string]any{
+					"type": "message",
+					"role": "user",
+					"content": []any{
+						map[string]any{
+							"type": "input_text",
+							"text": defaultTestInput(),
+						},
+					},
+				},
+			},
+			"stream":              true,
+			"store":               false,
+			"parallel_tool_calls": true,
+			"include":             []string{"reasoning.encrypted_content"},
+			"instructions":        upstream.CodexInstructionsForModel(upstreamModel),
+		}
+	}
+	if sel.ChannelType == store.UpstreamTypeAnthropic {
+		path = "/v1/messages"
+		payload = map[string]any{
+			"model":      upstreamModel,
+			"max_tokens": int64(16),
+			"stream":     true,
+			"messages": []any{
+				map[string]any{
+					"role":    "user",
+					"content": defaultTestInput(),
+				},
+			},
+		}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -288,7 +327,7 @@ func runSingleModelSSETest(ctx context.Context, exec UpstreamDoer, sel scheduler
 		return r, false
 	}
 
-	downstream, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://localhost/v1/responses", http.NoBody)
+	downstream, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://localhost"+path, http.NoBody)
 	downstream.Header.Set("Content-Type", "application/json")
 	downstream.Header.Set("Accept", "text/event-stream")
 
@@ -486,10 +525,15 @@ func readSSESample(r io.Reader, start time.Time) (int, string, error) {
 	ttftMS := 0
 	var out strings.Builder
 	events := 0
+	currentEvent := ""
 
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "event:") {
+			currentEvent = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
 			continue
 		}
 		if !strings.HasPrefix(line, "data:") {
@@ -509,15 +553,11 @@ func readSSESample(r io.Reader, start time.Time) (int, string, error) {
 		events++
 		var evt map[string]any
 		if err := json.Unmarshal([]byte(data), &evt); err == nil {
-			// OpenAI Responses streaming: {"type":"response.output_text.delta","delta":"..."}
-			if delta, ok := evt["delta"].(string); ok && strings.TrimSpace(delta) != "" {
-				out.WriteString(delta)
+			if isSSEStopEvent(currentEvent, evt) {
+				break
 			}
-			// 兜底：部分实现可能给 {"text":"..."}
-			if out.Len() == 0 {
-				if text, ok := evt["text"].(string); ok && strings.TrimSpace(text) != "" {
-					out.WriteString(text)
-				}
+			if s := extractTextFromSSEEvent(currentEvent, evt); strings.TrimSpace(s) != "" {
+				out.WriteString(s)
 			}
 		}
 		if out.Len() >= 200 || events >= 12 {
@@ -534,8 +574,13 @@ func extractSampleFromSSE(b []byte) string {
 	sc := bufio.NewScanner(bytes.NewReader(b))
 	sc.Buffer(make([]byte, 0, 64<<10), 256<<10)
 	var out strings.Builder
+	currentEvent := ""
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
+		if strings.HasPrefix(line, "event:") {
+			currentEvent = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			continue
+		}
 		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
@@ -547,11 +592,11 @@ func extractSampleFromSSE(b []byte) string {
 		if err := json.Unmarshal([]byte(data), &evt); err != nil {
 			continue
 		}
-		if delta, ok := evt["delta"].(string); ok && strings.TrimSpace(delta) != "" {
-			out.WriteString(delta)
+		if isSSEStopEvent(currentEvent, evt) {
+			break
 		}
-		if text, ok := evt["text"].(string); ok && strings.TrimSpace(text) != "" && out.Len() == 0 {
-			out.WriteString(text)
+		if s := extractTextFromSSEEvent(currentEvent, evt); strings.TrimSpace(s) != "" {
+			out.WriteString(s)
 		}
 		if out.Len() >= 200 {
 			break
@@ -564,6 +609,23 @@ func extractSampleFromJSON(b []byte) string {
 	var root map[string]any
 	if err := json.Unmarshal(b, &root); err != nil {
 		return ""
+	}
+	// Anthropic Messages: content[*].text
+	if contentAny, ok := root["content"]; ok {
+		if parts, ok := contentAny.([]any); ok {
+			for _, partAny := range parts {
+				part, ok := partAny.(map[string]any)
+				if !ok {
+					continue
+				}
+				if typ, ok := part["type"].(string); ok && typ != "" && typ != "text" {
+					continue
+				}
+				if s, ok := part["text"].(string); ok && strings.TrimSpace(s) != "" {
+					return trimSummary(s)
+				}
+			}
+		}
 	}
 	// Responses: output_text
 	if s, ok := root["output_text"].(string); ok && strings.TrimSpace(s) != "" {
@@ -600,8 +662,51 @@ func extractSampleFromJSON(b []byte) string {
 	return ""
 }
 
+func extractTextFromSSEEvent(_ string, evt map[string]any) string {
+	if evt == nil {
+		return ""
+	}
+	if deltaAny, ok := evt["delta"]; ok {
+		switch v := deltaAny.(type) {
+		case string:
+			return v
+		case map[string]any:
+			if s, ok := v["text"].(string); ok {
+				return s
+			}
+		}
+	}
+	if blockAny, ok := evt["content_block"]; ok {
+		if block, ok := blockAny.(map[string]any); ok {
+			if s, ok := block["text"].(string); ok {
+				return s
+			}
+		}
+	}
+	if s, ok := evt["text"].(string); ok {
+		return s
+	}
+	return ""
+}
+
+func isSSEStopEvent(event string, evt map[string]any) bool {
+	event = strings.TrimSpace(event)
+	if event == "message_stop" {
+		return true
+	}
+	if evt == nil {
+		return false
+	}
+	if t, ok := evt["type"].(string); ok && strings.TrimSpace(t) == "message_stop" {
+		return true
+	}
+	return false
+}
+
 func defaultTestModel(channelType string) string {
 	switch channelType {
+	case store.UpstreamTypeAnthropic:
+		return "claude-3-5-sonnet-latest"
 	case store.UpstreamTypeCodexOAuth:
 		return "gpt-5.2"
 	default:
@@ -637,6 +742,24 @@ func listChannelTestSelections(ctx context.Context, st channelTestStore, ch stor
 					EndpointID:     ep.ID,
 					BaseURL:        ep.BaseURL,
 					CredentialType: scheduler.CredentialTypeOpenAI,
+					CredentialID:   c.ID,
+				})
+			}
+		case store.UpstreamTypeAnthropic:
+			creds, err := st.ListAnthropicCredentialsByEndpoint(ctx, ep.ID)
+			if err != nil {
+				return nil, err
+			}
+			for _, c := range creds {
+				if c.Status != 1 {
+					continue
+				}
+				sels = append(sels, scheduler.Selection{
+					ChannelID:      ch.ID,
+					ChannelType:    ch.Type,
+					EndpointID:     ep.ID,
+					BaseURL:        ep.BaseURL,
+					CredentialType: scheduler.CredentialTypeAnthropic,
 					CredentialID:   c.ID,
 				})
 			}

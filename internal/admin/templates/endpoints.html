@@ -40,8 +40,8 @@
 
 	          <div class="mb-3">
 	            <label class="form-label">基础地址</label>
-	            <input name="base_url" type="url" class="form-control" required value="{{.Endpoint.BaseURL}}" placeholder="https://api.openai.com" />
-	            <div class="form-text">仅支持 http/https URL（示例：https://api.openai.com）。</div>
+	            <input name="base_url" type="url" class="form-control" required value="{{.Endpoint.BaseURL}}" placeholder="{{if eq .Channel.Type "anthropic"}}https://api.anthropic.com{{else}}https://api.openai.com{{end}}" />
+	            <div class="form-text">仅支持 http/https URL（示例：{{if eq .Channel.Type "anthropic"}}https://api.anthropic.com{{else}}https://api.openai.com{{end}}）。</div>
 	          </div>
 
           <button type="submit" class="btn btn-primary w-100">
@@ -135,7 +135,7 @@
                       <button type="button" class="btn btn-sm btn-light border" data-bs-toggle="modal" data-bs-target="#editCredentialLimitsModal-{{.ID}}" title="设置限额">
                         <i class="ri-speed-up-line"></i>
                       </button>
-                      <form method="POST" action="/admin/openai-credentials/{{.ID}}/delete" onsubmit="return confirm('确认彻底删除该凭证？且不可恢复。')">
+                      <form method="POST" action="{{if eq $.Channel.Type "anthropic"}}/admin/anthropic-credentials/{{.ID}}/delete{{else}}/admin/openai-credentials/{{.ID}}/delete{{end}}" onsubmit="return confirm('确认彻底删除该凭证？且不可恢复。')">
                         <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
                         <button class="btn btn-sm btn-light border text-danger" type="submit" title="删除密钥">
                           <i class="ri-delete-bin-line"></i>
@@ -164,7 +164,7 @@
                 <h5 class="modal-title fw-bold">设置密钥限额</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
               </div>
-              <form method="POST" action="/admin/openai-credentials/{{.ID}}/limits">
+              <form method="POST" action="{{if eq $.Channel.Type "anthropic"}}/admin/anthropic-credentials/{{.ID}}/limits{{else}}/admin/openai-credentials/{{.ID}}/limits{{end}}">
                 <div class="modal-body">
                   <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
                   <input type="hidden" name="return_to" value="/admin/channels/{{$.Channel.ID}}/endpoints#keys" />
@@ -200,10 +200,10 @@
         <div class="modal-dialog">
           <div class="modal-content border-0 shadow">
               <div class="modal-header">
-                <h5 class="modal-title fw-bold">添加 OpenAI API 密钥</h5>
+                <h5 class="modal-title fw-bold">添加 {{if eq .Channel.Type "anthropic"}}Anthropic{{else}}OpenAI{{end}} API 密钥</h5>
               <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
               </div>
-            <form method="POST" action="/admin/endpoints/{{.Endpoint.ID}}/openai-credentials">
+            <form method="POST" action="{{if eq .Channel.Type "anthropic"}}/admin/endpoints/{{.Endpoint.ID}}/anthropic-credentials{{else}}/admin/endpoints/{{.Endpoint.ID}}/openai-credentials{{end}}">
               <div class="modal-body">
                 <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
 
@@ -214,7 +214,7 @@
 
                 <div class="mb-3">
                   <label class="form-label">API 密钥</label>
-                  <input name="api_key" type="text" class="form-control font-monospace" required placeholder="sk-..." />
+                  <input name="api_key" type="text" class="form-control font-monospace" required placeholder="{{if eq .Channel.Type "anthropic"}}sk-ant-...{{else}}sk-...{{end}}" />
                   <div class="form-text">密钥将以明文存储。</div>
                 </div>
 

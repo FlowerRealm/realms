@@ -321,9 +321,11 @@
 
           <div class="mb-3">
             <label class="form-label fw-medium">渠道类型</label>
-            <input class="form-control bg-light" value="openai_compatible" disabled />
-            <input type="hidden" name="type" value="openai_compatible" />
-            <div class="form-text small text-muted"><i class="ri-information-line me-1"></i>标准 OpenAI 兼容接口。</div>
+            <select class="form-select" name="type" id="create_channel_type" required>
+              <option value="openai_compatible" selected>openai_compatible</option>
+              <option value="anthropic">anthropic</option>
+            </select>
+            <div class="form-text small text-muted" id="create_channel_type_help"><i class="ri-information-line me-1"></i>标准 OpenAI 兼容接口。</div>
           </div>
 
           <div class="mb-3">
@@ -345,7 +347,7 @@
 
           <div class="mb-3">
             <label class="form-label fw-medium">接口基础地址</label>
-            <input name="base_url" type="url" class="form-control" required placeholder="https://api.openai.com" />
+            <input name="base_url" type="url" class="form-control" id="create_channel_base_url" required placeholder="https://api.openai.com" />
             <div class="form-text small text-muted">必须是有效的公开 URL。默认禁止私有网络地址。</div>
           </div>
 
@@ -399,6 +401,27 @@
     var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
       return new bootstrap.Tooltip(tooltipTriggerEl)
     })
+
+    // 创建渠道：根据类型切换默认 base_url
+    var typeSelect = document.getElementById('create_channel_type')
+    var baseURLInput = document.getElementById('create_channel_base_url')
+    var typeHelp = document.getElementById('create_channel_type_help')
+    if (typeSelect && baseURLInput) {
+      var applyChannelType = function () {
+        var typ = typeSelect.value
+        if (typ === 'anthropic') {
+          baseURLInput.placeholder = 'https://api.anthropic.com'
+          if (!baseURLInput.value) baseURLInput.value = 'https://api.anthropic.com'
+          if (typeHelp) typeHelp.innerHTML = '<i class="ri-information-line me-1"></i>Anthropic Messages 兼容接口（/v1/messages）。'
+        } else {
+          baseURLInput.placeholder = 'https://api.openai.com'
+          if (!baseURLInput.value) baseURLInput.value = 'https://api.openai.com'
+          if (typeHelp) typeHelp.innerHTML = '<i class="ri-information-line me-1"></i>标准 OpenAI 兼容接口。'
+        }
+      }
+      typeSelect.addEventListener('change', applyChannelType)
+      applyChannelType()
+    }
 
     // 初始化 Sortable
     var el = document.getElementById('channels-table-body');

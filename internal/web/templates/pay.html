@@ -4,7 +4,7 @@
   {{if .Notice}}
   <div class="col-12">
     <div class="alert alert-success d-flex align-items-center" role="alert">
-      <i class="bi bi-check-circle-fill me-2"></i>
+      <span class="me-2 material-symbols-rounded">check_circle</span>
       <div>{{.Notice}}</div>
     </div>
   </div>
@@ -13,7 +13,7 @@
   {{if .Error}}
   <div class="col-12">
     <div class="alert alert-danger d-flex align-items-center" role="alert">
-      <i class="bi bi-exclamation-triangle-fill me-2"></i>
+      <span class="me-2 material-symbols-rounded">warning</span>
       <div>{{.Error}}</div>
     </div>
   </div>
@@ -29,14 +29,14 @@
       </div>
       <div>
         {{if and .PayOrder (eq .PayOrder.Kind "subscription")}}
-          <a href="/subscription" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>返回订阅</a>
+          <a href="/subscription" class="btn btn-sm btn-outline-secondary"><span class="me-1 material-symbols-rounded">arrow_back</span>返回订阅</a>
         {{else if and .PayOrder (eq .PayOrder.Kind "topup")}}
-          <a href="/topup" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>返回充值</a>
+          <a href="/topup" class="btn btn-sm btn-outline-secondary"><span class="me-1 material-symbols-rounded">arrow_back</span>返回充值</a>
         {{end}}
       </div>
     </div>
 
-    <div class="card shadow-sm border-0">
+    <div class="card  border-0">
       <div class="card-body p-4">
         {{if .PayOrder}}
         <div class="row g-3">
@@ -90,12 +90,12 @@
 
         {{if and .PayOrder (eq .PayOrder.Status "已取消")}}
         <div class="alert alert-warning mt-4 d-flex align-items-center" role="alert">
-          <i class="bi bi-exclamation-triangle-fill me-2"></i>
+          <span class="me-2 material-symbols-rounded">warning</span>
           <div>该订单已取消。若您已完成支付，请联系管理员处理退款。</div>
         </div>
         {{else if and .PayOrder (ne .PayOrder.Status "待支付")}}
         <div class="alert alert-info mt-4 d-flex align-items-center" role="alert">
-          <i class="bi bi-info-circle-fill me-2"></i>
+          <span class="me-2 material-symbols-rounded">info</span>
           <div>该订单已不处于待支付状态，无需再次支付。</div>
         </div>
         {{else}}
@@ -106,16 +106,16 @@
           <div class="row g-3">
             {{range $.PaymentChannels}}
             <div class="col-md-6">
-              <div class="card border-0 bg-light h-100">
+              <div class="card bg-light h-100">
                 <div class="card-body p-3">
                   <div class="d-flex align-items-center justify-content-between mb-2">
                     <div class="fw-semibold">
                       {{if eq .Type "stripe"}}
-                        <i class="bi bi-credit-card me-2"></i>{{.TypeLabel}}
+                        <span class="me-2 material-symbols-rounded">credit_card</span>{{.TypeLabel}}
                       {{else if eq .Type "epay"}}
-                        <i class="bi bi-credit-card-2-front me-2"></i>{{.TypeLabel}}
+                        <span class="me-2 material-symbols-rounded">credit_card</span>{{.TypeLabel}}
                       {{else}}
-                        <i class="bi bi-credit-card me-2"></i>{{.TypeLabel}}
+                        <span class="me-2 material-symbols-rounded">credit_card</span>{{.TypeLabel}}
                       {{end}}
                     </div>
                     <span class="badge bg-light text-dark border">{{.Name}}</span>
@@ -150,9 +150,9 @@
 
           <div class="row g-3">
             <div class="col-md-6">
-              <div class="card border-0 bg-light h-100">
+              <div class="card bg-light h-100">
                 <div class="card-body p-3">
-                  <div class="fw-semibold mb-2"><i class="bi bi-credit-card me-2"></i>Stripe</div>
+                  <div class="fw-semibold mb-2"><span class="me-2 material-symbols-rounded">credit_card</span>Stripe</div>
                   <form method="POST" action="/pay/{{.PayOrder.Kind}}/{{.PayOrder.ID}}/start">
                     <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
                     <input type="hidden" name="method" value="stripe" />
@@ -168,9 +168,9 @@
             </div>
 
             <div class="col-md-6">
-              <div class="card border-0 bg-light h-100">
+              <div class="card bg-light h-100">
                 <div class="card-body p-3">
-                  <div class="fw-semibold mb-2"><i class="bi bi-credit-card-2-front me-2"></i>EPay</div>
+                  <div class="fw-semibold mb-2"><span class="me-2 material-symbols-rounded">credit_card</span>EPay</div>
                   <form method="POST" action="/pay/{{.PayOrder.Kind}}/{{.PayOrder.ID}}/start">
                     <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
                     <input type="hidden" name="method" value="epay" />

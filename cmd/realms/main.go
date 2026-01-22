@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"log/slog"
 	"net"
 	"net/http"
@@ -23,11 +22,7 @@ import (
 )
 
 func main() {
-	var configPath string
-	flag.StringVar(&configPath, "config", "config.yaml", "配置文件路径（YAML）")
-	flag.Parse()
-
-	cfg, err := config.Load(configPath)
+	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("加载配置失败", "err", err)
 		os.Exit(1)
@@ -60,10 +55,9 @@ func main() {
 	}
 
 	app, err := server.NewApp(server.AppOptions{
-		Config:     cfg,
-		ConfigPath: configPath,
-		DB:         db,
-		Version:    version.Info(),
+		Config:  cfg,
+		DB:      db,
+		Version: version.Info(),
 	})
 	if err != nil {
 		slog.Error("初始化服务失败", "err", err)

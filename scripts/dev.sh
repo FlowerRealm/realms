@@ -15,9 +15,9 @@ else
   exit 1
 fi
 
-if [[ ! -f "./config.yaml" ]]; then
-  cp "./config.example.yaml" "./config.yaml"
-  echo "已生成 config.yaml（来自 config.example.yaml）"
+if [[ ! -f "./.env" ]]; then
+  cp "./.env.example" "./.env"
+  echo "已生成 .env（来自 .env.example）"
 fi
 
 set -a

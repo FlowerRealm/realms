@@ -15,11 +15,12 @@ import (
 )
 
 type fakeChannelTestStore struct {
-	endpointsByChannel     map[int64][]store.UpstreamEndpoint
-	credsByEndpoint        map[int64][]store.OpenAICompatibleCredential
-	accsByEndpoint         map[int64][]store.CodexOAuthAccount
-	channelModelsByChannel map[int64][]store.ChannelModel
-	enabledModels          map[string]store.ManagedModel
+	endpointsByChannel       map[int64][]store.UpstreamEndpoint
+	credsByEndpoint          map[int64][]store.OpenAICompatibleCredential
+	anthropicCredsByEndpoint map[int64][]store.AnthropicCredential
+	accsByEndpoint           map[int64][]store.CodexOAuthAccount
+	channelModelsByChannel   map[int64][]store.ChannelModel
+	enabledModels            map[string]store.ManagedModel
 
 	updates []testUpdate
 }
@@ -36,6 +37,13 @@ func (f *fakeChannelTestStore) ListUpstreamEndpointsByChannel(_ context.Context,
 
 func (f *fakeChannelTestStore) ListOpenAICompatibleCredentialsByEndpoint(_ context.Context, endpointID int64) ([]store.OpenAICompatibleCredential, error) {
 	return f.credsByEndpoint[endpointID], nil
+}
+
+func (f *fakeChannelTestStore) ListAnthropicCredentialsByEndpoint(_ context.Context, endpointID int64) ([]store.AnthropicCredential, error) {
+	if f.anthropicCredsByEndpoint == nil {
+		return nil, nil
+	}
+	return f.anthropicCredsByEndpoint[endpointID], nil
 }
 
 func (f *fakeChannelTestStore) ListCodexOAuthAccountsByEndpoint(_ context.Context, endpointID int64) ([]store.CodexOAuthAccount, error) {
@@ -228,6 +236,27 @@ func TestRunChannelTest_CodexOAuth_FailoverNextAccount(t *testing.T) {
 	}
 	if doer.gotSels[1].CredentialType != scheduler.CredentialTypeCodex || doer.gotSels[1].CredentialID != 200 {
 		t.Fatalf("unexpected second selection: %+v", doer.gotSels[1])
+	}
+	if len(doer.gotBodies) != 2 {
+		t.Fatalf("expected 2 bodies (failover), got %d", len(doer.gotBodies))
+	}
+	for i, body := range doer.gotBodies {
+		instructions, _ := body["instructions"].(string)
+		if strings.TrimSpace(instructions) == "" {
+			t.Fatalf("expected non-empty instructions in body[%d]", i)
+		}
+		if _, ok := body["input"].([]any); !ok {
+			t.Fatalf("expected input to be array in body[%d], got %#v", i, body["input"])
+		}
+		if v, ok := body["store"].(bool); !ok || v {
+			t.Fatalf("expected store=false in body[%d], got %#v", i, body["store"])
+		}
+		if v, ok := body["parallel_tool_calls"].(bool); !ok || !v {
+			t.Fatalf("expected parallel_tool_calls=true in body[%d], got %#v", i, body["parallel_tool_calls"])
+		}
+		if _, ok := body["include"].([]any); !ok {
+			t.Fatalf("expected include to be array in body[%d], got %#v", i, body["include"])
+		}
 	}
 	if len(st.updates) != 1 || st.updates[0].channelID != 2 || !st.updates[0].ok || st.updates[0].latencyMS < 0 {
 		t.Fatalf("unexpected updates: %+v", st.updates)

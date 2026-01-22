@@ -139,7 +139,7 @@ func (s *Server) PaymentChannels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) PaymentChannel(w http.ResponseWriter, r *http.Request) {
-	u, csrf, isRoot, err := s.currentUser(r)
+	_, _, _, err := s.currentUser(r)
 	if err != nil {
 		http.Error(w, "未登录", http.StatusUnauthorized)
 		return
@@ -150,7 +150,7 @@ func (s *Server) PaymentChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ch, err := s.st.GetPaymentChannelByID(r.Context(), channelID)
+	_, err = s.st.GetPaymentChannelByID(r.Context(), channelID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
@@ -160,28 +160,13 @@ func (s *Server) PaymentChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	baseURL := s.baseURLFromRequest(r)
-	loc, _ := s.adminTimeLocation(r.Context())
-	view := toPaymentChannelView(ch, baseURL, loc)
-
-	errMsg := strings.TrimSpace(r.URL.Query().Get("err"))
-	if len(errMsg) > 200 {
-		errMsg = errMsg[:200] + "..."
+	params := r.URL.Query()
+	params.Set("edit", strconv.FormatInt(channelID, 10))
+	target := "/admin/settings/payment-channels"
+	if qs := params.Encode(); qs != "" {
+		target += "?" + qs
 	}
-	notice := strings.TrimSpace(r.URL.Query().Get("msg"))
-	if len(notice) > 200 {
-		notice = notice[:200] + "..."
-	}
-
-	s.render(w, "admin_payment_channel", s.withFeatures(r.Context(), templateData{
-		Title:          "支付渠道配置 - Realms",
-		Error:          errMsg,
-		Notice:         notice,
-		User:           u,
-		IsRoot:         isRoot,
-		CSRFToken:      csrf,
-		PaymentChannel: &view,
-	}))
+	http.Redirect(w, r, target, http.StatusFound)
 }
 
 func (s *Server) CreatePaymentChannel(w http.ResponseWriter, r *http.Request) {

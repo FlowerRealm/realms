@@ -4,7 +4,7 @@
   {{if .Notice}}
   <div class="col-12">
     <div class="alert alert-success d-flex align-items-center" role="alert">
-      <i class="bi bi-check-circle-fill me-2"></i>
+      <span class="me-2 material-symbols-rounded">check_circle</span>
       <div>{{.Notice}}</div>
     </div>
   </div>
@@ -13,7 +13,7 @@
   {{if .Error}}
   <div class="col-12">
     <div class="alert alert-danger d-flex align-items-center" role="alert">
-      <i class="bi bi-exclamation-triangle-fill me-2"></i>
+      <span class="me-2 material-symbols-rounded">warning</span>
       <div>{{.Error}}</div>
     </div>
   </div>
@@ -25,7 +25,7 @@
       <h4 class="mb-0 fw-bold">我的订单</h4>
     </div>
 
-    <div class="card shadow-sm border-0 overflow-hidden">
+    <div class="card  border-0 overflow-hidden">
       {{if .SubscriptionOrders}}
       <div class="table-responsive">
         <table class="table table-hover align-middle mb-0">
@@ -113,8 +113,8 @@
   {{if .Subscriptions}}
     {{range .Subscriptions}}
     <div class="col-md-6 col-xl-4">
-      <div class="card shadow-sm border-0 h-100 overflow-hidden">
-        <div class="card-header bg-white border-0 pt-4 px-4 pb-0">
+      <div class="card  border-0 h-100 overflow-hidden">
+        <div class="card-header border-0 pt-4 px-4 pb-0">
           <div class="d-flex justify-content-between align-items-center">
             <h5 class="fw-bold mb-0">{{.PlanName}}</h5>
             <span class="text-primary font-monospace fw-bold">{{.PriceCNY}}</span>
@@ -122,11 +122,11 @@
 	        </div>
 	        <div class="card-body p-4">
 	          <div class="mb-4">
-	            <div class="text-muted small mb-1"><i class="bi bi-diagram-3 me-2"></i>组</div>
+	            <div class="text-muted small mb-1"><span class="me-2 material-symbols-rounded">group_work</span>组</div>
 	            <div class="small fw-medium"><code>{{.GroupName}}</code></div>
 	          </div>
 	          <div class="mb-4">
-	            <div class="text-muted small mb-1"><i class="bi bi-calendar3 me-2"></i>有效期</div>
+	            <div class="text-muted small mb-1"><span class="me-2 material-symbols-rounded">calendar_today</span>有效期</div>
 	            <div class="small fw-medium">{{.StartAt}} 至</div>
 	            <div class="small fw-medium">{{.EndAt}}</div>
 	          </div>
@@ -158,11 +158,11 @@
 
           {{if .Active}}
           <div class="d-flex align-items-center text-success small">
-            <i class="bi bi-check-circle-fill me-2"></i> 订阅生效中
+            <span class="me-2 material-symbols-rounded">check_circle</span> 订阅生效中
           </div>
           {{else}}
           <div class="d-flex align-items-center text-primary small">
-            <i class="bi bi-clock-fill me-2"></i> 待生效
+            <span class="me-2 material-symbols-rounded">schedule</span> 待生效
           </div>
           {{end}}
         </div>
@@ -171,9 +171,9 @@
     {{end}}
   {{else}}
   <div class="col-12">
-    <div class="card shadow-sm border-0 bg-light">
+    <div class="card  border-0 bg-light">
       <div class="card-body p-5 text-center">
-        <div class="mb-3"><i class="bi bi-credit-card-2-back fs-1 text-muted"></i></div>
+        <div class="mb-3"><span class="fs-1 text-muted material-symbols-rounded">credit_card</span></div>
         <h5>尚未购买任何订阅</h5>
         <p class="text-muted">下单并完成支付后即可获得 API 访问限额。</p>
         <a href="#plans" class="btn btn-primary mt-2">浏览订阅</a>
@@ -188,7 +188,7 @@
     <div class="row g-4">
       {{range .Plans}}
       <div class="col-md-6 col-xl-3">
-        <div class="card shadow-sm border-0 h-100 hover-shadow transition-all">
+        <div class="card  border-0 h-100 hover-shadow transition-all">
           <div class="card-body p-4 d-flex flex-column">
             <div class="mb-3">
               <h5 class="fw-bold mb-1">{{.Name}}</h5>
@@ -204,10 +204,10 @@
             </div>
 
             <ul class="list-unstyled mb-4 small flex-grow-1">
-              <li class="mb-2"><i class="bi bi-check2 text-success me-2"></i>30天限额: <strong>{{.Limit30D}}</strong></li>
-              <li class="mb-2"><i class="bi bi-check2 text-success me-2"></i>7天限额: <strong>{{.Limit7D}}</strong></li>
-              <li class="mb-2"><i class="bi bi-check2 text-success me-2"></i>1天限额: <strong>{{.Limit1D}}</strong></li>
-              <li class="mb-2"><i class="bi bi-check2 text-success me-2"></i>5小时限额: <strong>{{.Limit5H}}</strong></li>
+              <li class="mb-2"><span class="text-success me-2 material-symbols-rounded">check</span>30天限额: <strong>{{.Limit30D}}</strong></li>
+              <li class="mb-2"><span class="text-success me-2 material-symbols-rounded">check</span>7天限额: <strong>{{.Limit7D}}</strong></li>
+              <li class="mb-2"><span class="text-success me-2 material-symbols-rounded">check</span>1天限额: <strong>{{.Limit1D}}</strong></li>
+              <li class="mb-2"><span class="text-success me-2 material-symbols-rounded">check</span>5小时限额: <strong>{{.Limit5H}}</strong></li>
             </ul>
 
             <form method="POST" action="/subscription/purchase">

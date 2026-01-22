@@ -118,6 +118,21 @@ type OpenAICompatibleCredential struct {
 	UpdatedAt     time.Time
 }
 
+type AnthropicCredential struct {
+	ID            int64
+	EndpointID    int64
+	Name          *string
+	APIKeyEnc     []byte
+	APIKeyHint    *string
+	Status        int
+	LimitSessions *int
+	LimitRPM      *int
+	LimitTPM      *int
+	LastUsedAt    *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 type CodexOAuthPending struct {
 	State        string
 	EndpointID   int64
@@ -218,7 +233,8 @@ type ManagedModel struct {
 	OwnedBy        *string
 	InputUSDPer1M  decimal.Decimal
 	OutputUSDPer1M decimal.Decimal
-	CacheUSDPer1M  decimal.Decimal
+	CacheInputUSDPer1M  decimal.Decimal
+	CacheOutputUSDPer1M decimal.Decimal
 	Status         int
 	CreatedAt      time.Time
 }

@@ -1,86 +1,82 @@
 {{define "page_register"}}
-<div class="row justify-content-center">
-  <div class="col-md-5 col-lg-4">
-    <div class="card shadow-sm border-0 mt-5">
-      <div class="card-body p-4">
-        <h2 class="h4 card-title text-center mb-4">注册账号</h2>
-        
-        {{if .Error}}
-        <div class="alert alert-danger py-2" role="alert">
-          <i class="bi bi-exclamation-triangle-fill me-1"></i> {{.Error}}
-        </div>
-        {{end}}
-
-        <form method="POST" action="/register">
-          <div class="mb-3">
-            <label class="form-label">邮箱</label>
-            <input name="email" type="email" class="form-control" autocomplete="email" required placeholder="name@example.com">
-	          </div>
-	          <div class="mb-3">
-	            <label class="form-label">账号名</label>
-	            <input name="username" type="text" class="form-control" autocomplete="username" required placeholder="例如：alice">
-	            <div class="form-text">支持字母/数字及 . _ -，最多 32 位；用于登录。</div>
-	          </div>
-	          {{if .EmailVerificationEnabled}}
-          <div class="mb-3">
-            <label class="form-label">验证码</label>
-            <div class="input-group">
-              <input name="verification_code" type="text" class="form-control" autocomplete="one-time-code" inputmode="numeric" maxlength="6" placeholder="6 位验证码">
-              <button type="button" class="btn btn-outline-secondary" id="send-verification-code">发送验证码</button>
-            </div>
-            <div class="form-text" id="verification-code-hint">验证码 10 分钟内有效。</div>
-          </div>
-          <script>
-            document.addEventListener("DOMContentLoaded", function() {
-              const emailInput = document.querySelector('input[name="email"]');
-              const btn = document.getElementById("send-verification-code");
-              const hint = document.getElementById("verification-code-hint");
-              if (!emailInput || !btn || !hint) return;
-
-              btn.addEventListener("click", async function() {
-                const email = (emailInput.value || "").trim().toLowerCase();
-                if (!email) {
-                  hint.textContent = "请先填写邮箱。";
-                  return;
-                }
-                btn.disabled = true;
-                hint.textContent = "正在发送…";
-                try {
-                  const resp = await fetch("/api/email/verification/send", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
-                    body: new URLSearchParams({ email })
-                  });
-                  if (!resp.ok) {
-                    const txt = await resp.text();
-                    hint.textContent = txt || "发送失败，请稍后重试。";
-                    return;
-                  }
-                  hint.textContent = "验证码已发送，请查收邮箱（10 分钟内有效）。";
-                } catch (e) {
-                  hint.textContent = "发送失败，请稍后重试。";
-                } finally {
-                  btn.disabled = false;
-                }
-              });
-            });
-          </script>
-          {{end}}
-          <div class="mb-3">
-            <label class="form-label">密码</label>
-            <input name="password" type="password" class="form-control" autocomplete="new-password" required placeholder="至少 8 位字符">
-            <div class="form-text">密码将通过 bcrypt 加密存储。</div>
-          </div>
-          <div class="d-grid mt-4">
-            <button type="submit" class="btn btn-primary">创建账号</button>
-          </div>
-        </form>
-      </div>
-      <div class="card-footer bg-transparent text-center py-3">
-        <span class="text-muted small">已有账号？</span>
-        <a href="/login" class="text-decoration-none">直接登录</a>
-      </div>
+<div class="card  border-0">
+  <div class="card-body p-4">
+    <h2 class="h4 card-title text-center mb-4">注册账号</h2>
+    
+    {{if .Error}}
+    <div class="alert alert-danger py-2" role="alert">
+      <span class="me-1 material-symbols-rounded">warning</span> {{.Error}}
     </div>
+    {{end}}
+
+    <form method="POST" action="/register">
+      <div class="mb-3">
+        <label class="form-label">邮箱</label>
+        <input name="email" type="email" class="form-control" autocomplete="email" required placeholder="name@example.com">
+      </div>
+      <div class="mb-3">
+        <label class="form-label">账号名</label>
+        <input name="username" type="text" class="form-control" autocomplete="username" required placeholder="例如：alice">
+        <div class="form-text">支持字母/数字及 . _ -，最多 32 位；用于登录。</div>
+      </div>
+      {{if .EmailVerificationEnabled}}
+      <div class="mb-3">
+        <label class="form-label">验证码</label>
+        <div class="input-group">
+          <input name="verification_code" type="text" class="form-control" autocomplete="one-time-code" inputmode="numeric" maxlength="6" placeholder="6 位验证码">
+          <button type="button" class="btn btn-outline-secondary" id="send-verification-code">发送验证码</button>
+        </div>
+        <div class="form-text" id="verification-code-hint">验证码 10 分钟内有效。</div>
+      </div>
+      <script>
+        document.addEventListener("DOMContentLoaded", function() {
+          const emailInput = document.querySelector('input[name="email"]');
+          const btn = document.getElementById("send-verification-code");
+          const hint = document.getElementById("verification-code-hint");
+          if (!emailInput || !btn || !hint) return;
+
+          btn.addEventListener("click", async function() {
+            const email = (emailInput.value || "").trim().toLowerCase();
+            if (!email) {
+              hint.textContent = "请先填写邮箱。";
+              return;
+            }
+            btn.disabled = true;
+            hint.textContent = "正在发送…";
+            try {
+              const resp = await fetch("/api/email/verification/send", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+                body: new URLSearchParams({ email })
+              });
+              if (!resp.ok) {
+                const txt = await resp.text();
+                hint.textContent = txt || "发送失败，请稍后重试。";
+                return;
+              }
+              hint.textContent = "验证码已发送，请查收邮箱（10 分钟内有效）。";
+            } catch (e) {
+              hint.textContent = "发送失败，请稍后重试。";
+            } finally {
+              btn.disabled = false;
+            }
+          });
+        });
+      </script>
+      {{end}}
+      <div class="mb-3">
+        <label class="form-label">密码</label>
+        <input name="password" type="password" class="form-control" autocomplete="new-password" required placeholder="至少 8 位字符">
+        <div class="form-text">密码将通过 bcrypt 加密存储。</div>
+      </div>
+      <div class="d-grid mt-4">
+        <button type="submit" class="btn btn-primary">创建账号</button>
+      </div>
+    </form>
+  </div>
+  <div class="card-footer bg-transparent text-center py-3">
+    <span class="text-muted small">已有账号？</span>
+    <a href="/login" class="text-decoration-none">直接登录</a>
   </div>
 </div>
 {{end}}

@@ -1,23 +1,23 @@
 {{define "page_models"}}
-<div class="card shadow-sm">
-  <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+<div class="card overflow-hidden">
+  <div class="card-header d-flex justify-content-between align-items-center">
     <div>
-      <h5 class="mb-0"><i class="bi bi-robot me-2"></i>可用模型列表</h5>
+      <h5 class="mb-0"><span class="me-2 material-symbols-rounded">smart_toy</span>可用模型列表</h5>
       <small class="text-muted">由管理员维护（名单外模型将被拒绝）</small>
     </div>
-    <a href="/dashboard" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> 返回</a>
+    <a href="/dashboard" class="btn btn-outline-secondary btn-sm"><span class="material-symbols-rounded">arrow_back</span> 返回</a>
   </div>
   
   <div class="card-body p-0">
     {{if .Error}}
     <div class="alert alert-danger m-3" role="alert">
-      <i class="bi bi-exclamation-octagon-fill me-2"></i> {{.Error}}
+      <span class="me-2 material-symbols-rounded">report</span> {{.Error}}
     </div>
     {{end}}
 
     {{if .Models}}
     <div class="table-responsive">
-      <table class="table table-striped table-hover align-middle mb-0">
+      <table class="table table-hover align-middle mb-0">
         <thead class="table-light">
           <tr>
             <th class="ps-4">模型 ID</th>
@@ -47,9 +47,10 @@
             </td>
             <td class="text-muted small">
               <div class="d-flex flex-column gap-1">
-                <div><span class="text-muted">输入</span> <i class="bi bi-currency-dollar me-1"></i>{{.InputUSDPer1M}}</div>
-                <div><span class="text-muted">输出</span> <i class="bi bi-currency-dollar me-1"></i>{{.OutputUSDPer1M}}</div>
-                <div><span class="text-muted">缓存</span> <i class="bi bi-currency-dollar me-1"></i>{{.CacheUSDPer1M}}</div>
+                <div><span class="text-muted">输入</span> <span class="me-1 material-symbols-rounded">attach_money</span>{{.InputUSDPer1M}}</div>
+                <div><span class="text-muted">输出</span> <span class="me-1 material-symbols-rounded">attach_money</span>{{.OutputUSDPer1M}}</div>
+                <div><span class="text-muted">缓存输入</span> <span class="me-1 material-symbols-rounded">attach_money</span>{{.CacheInputUSDPer1M}}</div>
+                <div><span class="text-muted">缓存输出</span> <span class="me-1 material-symbols-rounded">attach_money</span>{{.CacheOutputUSDPer1M}}</div>
               </div>
             </td>
             <td class="text-end pe-4">
@@ -63,7 +64,7 @@
     {{else}}
       {{if not .Error}}
       <div class="text-center py-5 text-muted">
-        <i class="bi bi-inbox fs-1 d-block mb-3"></i>
+        <span class="fs-1 d-block mb-3 material-symbols-rounded">inbox</span>
         暂无可用模型，请联系管理员配置模型目录。
       </div>
       {{end}}

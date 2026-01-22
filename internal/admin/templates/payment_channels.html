@@ -77,16 +77,16 @@
             <td>
               <span class="text-muted small">{{.CreatedAt}}</span>
             </td>
-            <td class="text-end pe-3">
-              <div class="d-inline-flex gap-1">
-                <a class="btn btn-sm btn-light border text-primary" href="/admin/settings/payment-channels/{{.ID}}" title="配置详情">
-                  <i class="ri-settings-3-line"></i>
-                </a>
-                <form method="POST" action="/admin/settings/payment-channels/{{.ID}}/delete" data-ajax="1" data-ajax-reload="1" class="d-inline">
-                  <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
-                  <button type="submit" class="btn btn-sm btn-light border text-danger" title="删除渠道" onclick="return confirm('确认删除支付渠道 {{.Name}}? 此操作不可撤销。');">
-                    <i class="ri-delete-bin-line"></i>
-                  </button>
+	            <td class="text-end pe-3">
+	              <div class="d-inline-flex gap-1">
+	                <button type="button" class="btn btn-sm btn-light border text-primary" title="编辑配置" data-bs-toggle="modal" data-bs-target="#editPaymentChannelModal{{.ID}}">
+	                  <i class="ri-settings-3-line"></i>
+	                </button>
+	                <form method="POST" action="/admin/settings/payment-channels/{{.ID}}/delete" data-ajax="1" data-ajax-reload="1" class="d-inline">
+	                  <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+	                  <button type="submit" class="btn btn-sm btn-light border text-danger" title="删除渠道" onclick="return confirm('确认删除支付渠道 {{.Name}}? 此操作不可撤销。');">
+	                    <i class="ri-delete-bin-line"></i>
+	                  </button>
                 </form>
               </div>
             </td>
@@ -101,8 +101,113 @@
       暂无支付渠道。
     </div>
     {{end}}
+	  </div>
+	</div>
+
+{{if .PaymentChannels}}
+{{range .PaymentChannels}}
+<!-- 编辑支付渠道弹窗 -->
+<div class="modal fade" id="editPaymentChannelModal{{.ID}}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content border-0 shadow">
+      <div class="modal-header">
+        <h5 class="modal-title fw-bold">编辑支付渠道</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <form method="POST" action="/admin/settings/payment-channels/{{.ID}}" data-ajax="1" data-ajax-reload="1">
+        <div class="modal-body">
+          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+
+          <div class="row g-3">
+            <div class="col-md-8">
+              <label class="form-label fw-medium">渠道名称</label>
+              <input name="name" type="text" class="form-control" required value="{{.Name}}" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-medium">渠道类型</label>
+              <input type="text" class="form-control" value="{{.TypeLabel}}" disabled />
+            </div>
+            <div class="col-12">
+              <div class="d-flex align-items-end justify-content-between">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" role="switch" id="paymentChannelEnabled{{.ID}}" name="enabled" value="1" {{if eq .Status 1}}checked{{end}}>
+                  <label class="form-check-label" for="paymentChannelEnabled{{.ID}}">启用</label>
+                </div>
+                <div>
+                  {{if .Usable}}
+                    <span class="badge bg-success bg-opacity-10 text-success">可用</span>
+                  {{else}}
+                    <span class="badge bg-warning bg-opacity-10 text-warning">待配置</span>
+                  {{end}}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <hr class="my-4">
+
+          {{if eq .Type "stripe"}}
+          <h6 class="fw-bold mb-3"><i class="ri-stripe-line me-1"></i>Stripe 配置</h6>
+          <div class="row g-3">
+            <div class="col-md-3">
+              <label class="form-label small">currency</label>
+              <input name="stripe_currency" type="text" class="form-control form-control-sm" value="{{.StripeCurrency}}" placeholder="cny" />
+              <div class="form-text small text-muted">留空将使用默认值（cny）。</div>
+            </div>
+            <div class="col-md-9">
+              <label class="form-label small">Secret Key (sk_...)</label>
+              <input name="stripe_secret_key" type="password" class="form-control form-control-sm" placeholder="留空表示保持不变" autocomplete="new-password" />
+              <div class="form-text small text-muted">当前：{{if .StripeSecretKeySet}}已设置{{else}}未设置{{end}}。密钥不回显。</div>
+            </div>
+            <div class="col-12">
+              <label class="form-label small">Webhook Secret (whsec_...)</label>
+              <input name="stripe_webhook_secret" type="password" class="form-control form-control-sm" placeholder="留空表示保持不变" autocomplete="new-password" />
+              <div class="form-text small text-muted">当前：{{if .StripeWebhookSecretSet}}已设置{{else}}未设置{{end}}。密钥不回显。</div>
+            </div>
+          </div>
+          <div class="alert alert-info d-flex align-items-center mt-4 mb-0" role="alert">
+            <i class="ri-information-line me-2"></i>
+            <div>
+              Stripe Webhook URL：<code>{{.WebhookURL}}</code>
+            </div>
+          </div>
+          {{end}}
+
+          {{if eq .Type "epay"}}
+          <h6 class="fw-bold mb-3"><i class="ri-bank-card-line me-1"></i>EPay（易支付）配置</h6>
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label small">gateway</label>
+              <input name="epay_gateway" type="text" class="form-control form-control-sm" value="{{.EPayGateway}}" placeholder="https://epay.example.com" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">partner_id</label>
+              <input name="epay_partner_id" type="text" class="form-control form-control-sm" value="{{.EPayPartnerID}}" placeholder="10001" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">key</label>
+              <input name="epay_key" type="password" class="form-control form-control-sm" placeholder="留空表示保持不变" autocomplete="new-password" />
+              <div class="form-text small text-muted">当前：{{if .EPayKeySet}}已设置{{else}}未设置{{end}}。密钥不回显。</div>
+            </div>
+          </div>
+          <div class="alert alert-info d-flex align-items-center mt-4 mb-0" role="alert">
+            <i class="ri-information-line me-2"></i>
+            <div>
+              EPay Notify URL：<code>{{.WebhookURL}}</code>
+            </div>
+          </div>
+          {{end}}
+        </div>
+        <div class="modal-footer border-top-0 pt-0">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-primary px-4">保存</button>
+        </div>
+      </form>
+    </div>
   </div>
 </div>
+{{end}}
+{{end}}
 
 <!-- 创建支付渠道弹窗 -->
 <div class="modal fade" id="createPaymentChannelModal" tabindex="-1" aria-hidden="true">
@@ -189,6 +294,25 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const editID = (params.get('edit') || '').trim();
+    if (editID !== '') {
+      window.setTimeout(function() {
+        try {
+          const modalEl = document.getElementById('editPaymentChannelModal' + editID);
+          if (!modalEl) return;
+          if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return;
+          bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        } catch (e) {}
+      }, 0);
+
+      params.delete('edit');
+      const clean = window.location.pathname + (params.toString() ? '?' + params.toString() : '') + window.location.hash;
+      window.history.replaceState({}, "", clean);
+    }
+  } catch (e) {}
+
   const typeSelect = document.getElementById('paymentChannelTypeSelect');
   const stripeFields = document.getElementById('stripeConfigFields');
   const epayFields = document.getElementById('epayConfigFields');

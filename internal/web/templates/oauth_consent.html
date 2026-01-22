@@ -1,13 +1,13 @@
 {{define "page_oauth_consent"}}
 <div class="row justify-content-center">
   <div class="col-md-8 col-lg-6">
-    <div class="card shadow-sm border-0 mt-5">
+    <div class="card  border-0 mt-5">
       <div class="card-body p-4">
         <h2 class="h5 mb-3">应用授权</h2>
 
         {{if .Error}}
         <div class="alert alert-danger py-2" role="alert">
-          <i class="bi bi-exclamation-triangle-fill me-1"></i> {{.Error}}
+          <span class="me-1 material-symbols-rounded">warning</span> {{.Error}}
         </div>
         {{end}}
 

@@ -14,9 +14,9 @@ dist/
 /realms
 
 # 本地配置与密钥
-config.yaml
-*.local.yaml
 .env
+docker-compose.override.yml
+docker-compose.override.yaml
 
 helloagents/
 

@@ -2,7 +2,7 @@
 <div class="d-flex justify-content-between align-items-center mb-4">
   <div>
     <h2 class="h4 fw-bold mb-1">系统设置</h2>
-    <p class="text-muted small mb-0">少量运行期配置（持久化到数据库，优先于配置文件默认）。</p>
+    <p class="text-muted small mb-0">少量运行期配置（持久化到数据库，优先于启动期默认值）。</p>
   </div>
 </div>
 
@@ -114,7 +114,7 @@
                     <div class="card-body">
                         <label class="form-label fw-medium d-flex align-items-center justify-content-between">
                             <span>Base URL</span>
-                            {{if .SiteBaseURLOverride}}<span class="badge bg-light text-dark border">界面覆盖</span>{{else}}<span class="badge bg-light text-dark border">配置文件默认</span>{{end}}
+                            {{if .SiteBaseURLOverride}}<span class="badge bg-light text-dark border">界面覆盖</span>{{else}}<span class="badge bg-light text-dark border">启动默认</span>{{end}}
                         </label>
                         <input name="site_base_url" type="url" class="form-control mb-2" value="{{.SiteBaseURL}}" placeholder="https://realms.example.com" />
                         <div class="form-text small text-muted">
@@ -159,7 +159,7 @@
                     </div>
                     <div class="card-body">
                         <div class="form-text small text-muted mb-3">
-                            以下配置项仅能在配置文件（如 <code>config.yaml</code>）中修改；修改后需要重启服务生效。本页仅展示清单以便排障。
+                            以下配置项仅能通过环境变量（如 <code>.env</code> / <code>REALMS_*</code>）在启动前配置；修改后需要重启服务生效。本页仅展示清单以便排障。
                         </div>
                         <div class="row g-2">
                             {{range .StartupConfigKeys}}
@@ -181,7 +181,7 @@
                     <h5 class="fw-semibold mb-1">邮箱验证码</h5>
                     <p class="text-muted small mb-0">
                         开启后注册页将要求验证码，并开放 <code>/api/email/verification/send</code>。
-                        {{if .EmailVerificationOverride}}<span class="badge bg-light text-dark border ms-1">界面覆盖</span>{{else}}<span class="badge bg-light text-dark border ms-1">配置文件默认</span>{{end}}
+                        {{if .EmailVerificationOverride}}<span class="badge bg-light text-dark border ms-1">界面覆盖</span>{{else}}<span class="badge bg-light text-dark border ms-1">启动默认</span>{{end}}
                     </p>
                 </div>
                 <div class="form-check form-switch">
@@ -306,4 +306,54 @@
       {{end}}
 	  </div>
 	</form>
+
+  <div id="backup" class="mt-5">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div>
+        <h3 class="h5 fw-bold mb-1">导出 / 导入</h3>
+        <p class="text-muted small mb-0">用于迁移/备份上游与模型配置（默认不包含敏感字段）。</p>
+      </div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-lg-6">
+        <div class="card border-0 shadow-sm h-100">
+          <div class="card-body">
+            <h5 class="fw-bold mb-2"><i class="ri-download-2-line me-2"></i>导出配置</h5>
+            <p class="text-muted small mb-3">
+              导出内容：渠道分组/成员、上游渠道/端点、模型目录与绑定。<br>
+              不包含：OpenAI API Key、Codex OAuth Token/Secret、支付密钥等敏感信息。
+            </p>
+            <a class="btn btn-primary w-100" href="/admin/export">
+              <i class="ri-download-2-line me-1"></i>下载 JSON
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-6">
+        <div class="card border-0 shadow-sm h-100">
+          <div class="card-body">
+            <h5 class="fw-bold mb-2"><i class="ri-upload-2-line me-2"></i>导入配置</h5>
+            <p class="text-muted small mb-3">
+              导入策略：upsert（创建或更新），不会删除当前数据库中已有但未出现在导入文件里的数据。<br>
+              建议在新数据库中导入以获得完全一致结果。
+            </p>
+            <form method="POST" action="/admin/import" enctype="multipart/form-data">
+              <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
+              <input type="file" name="file" class="form-control mb-3" accept="application/json" required />
+              <button type="submit" class="btn btn-primary w-100">
+                <i class="ri-upload-2-line me-1"></i>开始导入
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="alert alert-warning mt-4" role="alert">
+      <i class="ri-alert-line me-2"></i>
+      导入后如需启用上游：请在目标环境中重新录入 OpenAI API Key，并对 Codex OAuth 账号重新授权/刷新。
+    </div>
+  </div>
 	{{end}}

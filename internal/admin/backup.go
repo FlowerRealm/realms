@@ -13,29 +13,12 @@ import (
 )
 
 func (s *Server) Backup(w http.ResponseWriter, r *http.Request) {
-	u, csrf, isRoot, err := s.currentUser(r)
-	if err != nil {
-		http.Error(w, "未登录", http.StatusUnauthorized)
-		return
+	// 导入/导出已合并至“系统设置”页面。
+	target := "/admin/settings#backup"
+	if strings.TrimSpace(r.URL.RawQuery) != "" {
+		target = "/admin/settings?" + r.URL.RawQuery + "#backup"
 	}
-
-	errMsg := strings.TrimSpace(r.URL.Query().Get("err"))
-	if len(errMsg) > 200 {
-		errMsg = errMsg[:200] + "..."
-	}
-	notice := strings.TrimSpace(r.URL.Query().Get("msg"))
-	if len(notice) > 200 {
-		notice = notice[:200] + "..."
-	}
-
-	s.render(w, "admin_backup", s.withFeatures(r.Context(), templateData{
-		Title:     "导出 / 导入 - Realms",
-		Error:     errMsg,
-		Notice:    notice,
-		User:      u,
-		IsRoot:    isRoot,
-		CSRFToken: csrf,
-	}))
+	http.Redirect(w, r, target, http.StatusFound)
 }
 
 func (s *Server) Export(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +58,7 @@ func (s *Server) Import(w http.ResponseWriter, r *http.Request) {
 				ajaxError(w, http.StatusBadRequest, "请选择要导入的 JSON 文件")
 				return
 			}
-			http.Redirect(w, r, "/admin/backup?err="+url.QueryEscape("请选择要导入的 JSON 文件"), http.StatusFound)
+			http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("请选择要导入的 JSON 文件")+"#backup", http.StatusFound)
 			return
 		}
 		defer func() { _ = f.Close() }()
@@ -89,7 +72,7 @@ func (s *Server) Import(w http.ResponseWriter, r *http.Request) {
 			ajaxError(w, http.StatusBadRequest, "JSON 解析失败")
 			return
 		}
-		http.Redirect(w, r, "/admin/backup?err="+url.QueryEscape("JSON 解析失败"), http.StatusFound)
+		http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape("JSON 解析失败")+"#backup", http.StatusFound)
 		return
 	}
 
@@ -103,7 +86,7 @@ func (s *Server) Import(w http.ResponseWriter, r *http.Request) {
 		if len(msg) > 200 {
 			msg = msg[:200] + "..."
 		}
-		http.Redirect(w, r, "/admin/backup?err="+url.QueryEscape(msg), http.StatusFound)
+		http.Redirect(w, r, "/admin/settings?err="+url.QueryEscape(msg)+"#backup", http.StatusFound)
 		return
 	}
 
@@ -116,6 +99,5 @@ func (s *Server) Import(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Redirect(w, r, "/admin/backup?msg="+url.QueryEscape("已导入（upsert）：分组 "+fmt.Sprint(rep.ChannelGroups)+"，成员 "+fmt.Sprint(rep.ChannelGroupMembers)+"，渠道 "+fmt.Sprint(rep.UpstreamChannels)+"，端点 "+fmt.Sprint(rep.UpstreamEndpoints)+"，模型 "+fmt.Sprint(rep.ManagedModels)+"，绑定 "+fmt.Sprint(rep.ChannelModels)), http.StatusFound)
+	http.Redirect(w, r, "/admin/settings?msg="+url.QueryEscape("已导入（upsert）：分组 "+fmt.Sprint(rep.ChannelGroups)+"，成员 "+fmt.Sprint(rep.ChannelGroupMembers)+"，渠道 "+fmt.Sprint(rep.UpstreamChannels)+"，端点 "+fmt.Sprint(rep.UpstreamEndpoints)+"，模型 "+fmt.Sprint(rep.ManagedModels)+"，绑定 "+fmt.Sprint(rep.ChannelModels))+"#backup", http.StatusFound)
 }
-

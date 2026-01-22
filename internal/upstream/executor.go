@@ -39,6 +39,7 @@ type Executor struct {
 
 type upstreamStore interface {
 	GetOpenAICompatibleCredentialSecret(ctx context.Context, credentialID int64) (store.OpenAICredentialSecret, error)
+	GetAnthropicCredentialSecret(ctx context.Context, credentialID int64) (store.AnthropicCredentialSecret, error)
 	GetCodexOAuthSecret(ctx context.Context, accountID int64) (store.CodexOAuthSecret, error)
 	UpdateCodexOAuthAccountTokens(ctx context.Context, accountID int64, accessToken, refreshToken string, idToken *string, expiresAt *time.Time) error
 	SetCodexOAuthAccountStatus(ctx context.Context, accountID int64, status int) error
@@ -105,8 +106,10 @@ func (e *Executor) Do(ctx context.Context, sel scheduler.Selection, downstream *
 		return nil, err
 	}
 	// Codex OAuth：部分上游的 path 仍停留在旧版 /responses；也可能反过来只接受 /v1/responses。
-	// 为减少“配置正确但路径不兼容”导致的误报，这里在 404 时做一次互斥形态的兜底重试。
-	if sel.CredentialType == scheduler.CredentialTypeCodex && resp != nil && resp.StatusCode == http.StatusNotFound {
+	// 为减少“配置正确但路径不兼容”导致的误报，这里在 404（以及部分返回 HTML 的 403）时做一次互斥形态的兜底重试。
+	if sel.CredentialType == scheduler.CredentialTypeCodex && resp != nil &&
+		(resp.StatusCode == http.StatusNotFound ||
+			(resp.StatusCode == http.StatusForbidden && strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html"))) {
 		altPassthrough := !e.codexRequestPassthrough
 		req2, err2 := e.buildRequestWithCodexPassthrough(ctx, sel, downstream, body, altPassthrough)
 		if err2 == nil {
@@ -158,7 +161,7 @@ func isStreamRequest(downstream *http.Request, body []byte) bool {
 		return false
 	}
 	switch downstream.URL.Path {
-	case "/v1/responses":
+	case "/v1/responses", "/v1/messages":
 	default:
 		return false
 	}
@@ -212,6 +215,10 @@ func (e *Executor) buildRequestWithCodexPassthrough(ctx context.Context, sel sch
 	switch sel.CredentialType {
 	case scheduler.CredentialTypeOpenAI:
 		// 直接透传 /v1/*。
+	case scheduler.CredentialTypeAnthropic:
+		if targetPath != "/v1/messages" {
+			return nil, errors.New("anthropic 上游仅支持 /v1/messages")
+		}
 	case scheduler.CredentialTypeCodex:
 		if targetPath != "/v1/responses" {
 			return nil, errors.New("codex_oauth 上游仅支持 /v1/responses")
@@ -259,6 +266,15 @@ func (e *Executor) buildRequestWithCodexPassthrough(ctx context.Context, sel sch
 			return nil, err
 		}
 		req.Header.Set("Authorization", "Bearer "+sec.APIKey)
+	case scheduler.CredentialTypeAnthropic:
+		sec, err := e.st.GetAnthropicCredentialSecret(ctx, sel.CredentialID)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(req.Header.Get("anthropic-version")) == "" {
+			req.Header.Set("anthropic-version", "2023-06-01")
+		}
+		req.Header.Set("x-api-key", sec.APIKey)
 	case scheduler.CredentialTypeCodex:
 		sec, err := e.st.GetCodexOAuthSecret(ctx, sel.CredentialID)
 		if err != nil {

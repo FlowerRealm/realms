@@ -31,6 +31,8 @@ func isStreamCapablePath(path string) bool {
 	switch path {
 	case "/v1/responses":
 		return true
+	case "/v1/messages":
+		return true
 	default:
 		return false
 	}

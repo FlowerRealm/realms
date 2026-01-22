@@ -4,7 +4,7 @@
   {{if .Notice}}
   <div class="col-12">
     <div class="alert alert-success d-flex align-items-center" role="alert">
-      <i class="bi bi-check-circle-fill me-2"></i>
+      <span class="me-2 material-symbols-rounded">check_circle</span>
       <div>{{.Notice}}</div>
     </div>
   </div>
@@ -13,7 +13,7 @@
   {{if .Error}}
   <div class="col-12">
     <div class="alert alert-danger d-flex align-items-center" role="alert">
-      <i class="bi bi-exclamation-triangle-fill me-2"></i>
+      <span class="me-2 material-symbols-rounded">warning</span>
       <div>{{.Error}}</div>
     </div>
   </div>
@@ -30,7 +30,7 @@
       {{end}}
     </div>
 
-    <div class="card shadow-sm border-0">
+    <div class="card  border-0">
       <div class="card-body p-4">
         <div class="display-6 fw-bold text-dark">{{.BalanceUSD}}</div>
         <div class="text-muted small mt-1">余额用于无订阅/订阅额度不足时的按量计费扣费。</div>
@@ -44,11 +44,11 @@
       <h4 class="mb-0 fw-bold">创建充值订单</h4>
     </div>
 
-    <div class="card shadow-sm border-0">
+    <div class="card  border-0">
       <div class="card-body p-4">
         {{if and (not .PaymentStripeEnabled) (not .PaymentEPayEnabled)}}
         <div class="alert alert-warning d-flex align-items-center" role="alert">
-          <i class="bi bi-exclamation-circle-fill me-2"></i>
+          <span class="me-2 material-symbols-rounded">error</span>
           <div>当前未配置任何支付方式，请联系管理员在「管理后台 → 支付渠道」配置渠道，或在「管理后台 → 设置」启用旧版 Stripe/EPay。</div>
         </div>
         {{end}}
@@ -78,7 +78,7 @@
       <h4 class="mb-0 fw-bold">我的充值订单</h4>
     </div>
 
-    <div class="card shadow-sm border-0 overflow-hidden">
+    <div class="card  border-0 overflow-hidden">
       {{if .TopupOrders}}
       <div class="table-responsive">
         <table class="table table-hover align-middle mb-0">

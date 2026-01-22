@@ -4,9 +4,9 @@ tmp_dir = ".tmp/air"
 [build]
   pre_cmd = ["mkdir -p ./.tmp/air"]
   cmd = "go build -o ./.tmp/air/realms ./cmd/realms"
-  entrypoint = ["./.tmp/air/realms", "-config", "config.yaml"]
+  entrypoint = ["./.tmp/air/realms"]
 
-  include_ext = ["go", "html", "sql", "yaml"]
+  include_ext = ["go", "html", "sql", "env"]
   exclude_dir = [".git", ".tmp", "vendor", "helloagents"]
   exclude_regex = ["_test\\.go"]
 

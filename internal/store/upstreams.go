@@ -15,6 +15,7 @@ import (
 const (
 	UpstreamTypeOpenAICompatible = "openai_compatible"
 	UpstreamTypeCodexOAuth       = "codex_oauth"
+	UpstreamTypeAnthropic        = "anthropic"
 )
 
 func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, error) {
@@ -1025,6 +1026,12 @@ WHERE endpoint_id IN (SELECT id FROM upstream_endpoints WHERE channel_id=?)
 		return fmt.Errorf("删除 openai_compatible_credentials 失败: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
+DELETE FROM anthropic_credentials
+WHERE endpoint_id IN (SELECT id FROM upstream_endpoints WHERE channel_id=?)
+`, channelID); err != nil {
+		return fmt.Errorf("删除 anthropic_credentials 失败: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
 DELETE FROM codex_oauth_accounts
 WHERE endpoint_id IN (SELECT id FROM upstream_endpoints WHERE channel_id=?)
 `, channelID); err != nil {
@@ -1051,6 +1058,9 @@ func (s *Store) DeleteUpstreamEndpoint(ctx context.Context, endpointID int64) er
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM openai_compatible_credentials WHERE endpoint_id=?`, endpointID); err != nil {
 		return fmt.Errorf("删除 openai_compatible_credentials 失败: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM anthropic_credentials WHERE endpoint_id=?`, endpointID); err != nil {
+		return fmt.Errorf("删除 anthropic_credentials 失败: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM codex_oauth_accounts WHERE endpoint_id=?`, endpointID); err != nil {
 		return fmt.Errorf("删除 codex_oauth_accounts 失败: %w", err)
@@ -1095,6 +1105,145 @@ func (s *Store) DeleteOpenAICompatibleCredential(ctx context.Context, credential
 	_, err := s.db.ExecContext(ctx, `DELETE FROM openai_compatible_credentials WHERE id=?`, credentialID)
 	if err != nil {
 		return fmt.Errorf("删除 openai_compatible_credential 失败: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ListAnthropicCredentialsByEndpoint(ctx context.Context, endpointID int64) ([]AnthropicCredential, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, endpoint_id, name, api_key_enc, api_key_hint, status,
+       limit_sessions, limit_rpm, limit_tpm,
+       last_used_at, created_at, updated_at
+FROM anthropic_credentials
+WHERE endpoint_id=?
+ORDER BY id DESC
+`, endpointID)
+	if err != nil {
+		return nil, fmt.Errorf("查询 anthropic_credentials 失败: %w", err)
+	}
+	defer rows.Close()
+
+	var out []AnthropicCredential
+	for rows.Next() {
+		var c AnthropicCredential
+		var limitSessions sql.NullInt64
+		var limitRPM sql.NullInt64
+		var limitTPM sql.NullInt64
+		if err := rows.Scan(&c.ID, &c.EndpointID, &c.Name, &c.APIKeyEnc, &c.APIKeyHint, &c.Status,
+			&limitSessions, &limitRPM, &limitTPM,
+			&c.LastUsedAt, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("扫描 anthropic_credentials 失败: %w", err)
+		}
+		c.LimitSessions = nullableLimitIntPtr(limitSessions)
+		c.LimitRPM = nullableLimitIntPtr(limitRPM)
+		c.LimitTPM = nullableLimitIntPtr(limitTPM)
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历 anthropic_credentials 失败: %w", err)
+	}
+	return out, nil
+}
+
+type AnthropicCredentialSecret struct {
+	ID         int64
+	EndpointID int64
+	Name       *string
+	APIKey     string
+	APIKeyHint *string
+	Status     int
+}
+
+func (s *Store) CreateAnthropicCredential(ctx context.Context, endpointID int64, name *string, apiKey string) (int64, *string, error) {
+	enc := []byte(apiKey)
+	hint := tokenHint(apiKey)
+	res, err := s.db.ExecContext(ctx, `
+INSERT INTO anthropic_credentials(endpoint_id, name, api_key_enc, api_key_hint, status, created_at, updated_at)
+VALUES(?, ?, ?, ?, 1, NOW(), NOW())
+`, endpointID, name, enc, hint)
+	if err != nil {
+		return 0, nil, fmt.Errorf("创建 anthropic_credential 失败: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, nil, fmt.Errorf("获取 anthropic_credential id 失败: %w", err)
+	}
+	return id, hint, nil
+}
+
+func (s *Store) GetAnthropicCredentialByID(ctx context.Context, credentialID int64) (AnthropicCredential, error) {
+	var c AnthropicCredential
+	row := s.db.QueryRowContext(ctx, `
+SELECT id, endpoint_id, name, api_key_enc, api_key_hint, status,
+       limit_sessions, limit_rpm, limit_tpm,
+       last_used_at, created_at, updated_at
+FROM anthropic_credentials
+WHERE id=?
+`, credentialID)
+	var limitSessions sql.NullInt64
+	var limitRPM sql.NullInt64
+	var limitTPM sql.NullInt64
+	err := row.Scan(&c.ID, &c.EndpointID, &c.Name, &c.APIKeyEnc, &c.APIKeyHint, &c.Status,
+		&limitSessions, &limitRPM, &limitTPM,
+		&c.LastUsedAt, &c.CreatedAt, &c.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AnthropicCredential{}, sql.ErrNoRows
+		}
+		return AnthropicCredential{}, fmt.Errorf("查询 anthropic_credential 失败: %w", err)
+	}
+	c.LimitSessions = nullableLimitIntPtr(limitSessions)
+	c.LimitRPM = nullableLimitIntPtr(limitRPM)
+	c.LimitTPM = nullableLimitIntPtr(limitTPM)
+	return c, nil
+}
+
+func (s *Store) GetAnthropicCredentialSecret(ctx context.Context, credentialID int64) (AnthropicCredentialSecret, error) {
+	var c AnthropicCredential
+	err := s.db.QueryRowContext(ctx, `
+SELECT id, endpoint_id, name, api_key_enc, api_key_hint, status
+FROM anthropic_credentials
+WHERE id=?
+`, credentialID).Scan(&c.ID, &c.EndpointID, &c.Name, &c.APIKeyEnc, &c.APIKeyHint, &c.Status)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AnthropicCredentialSecret{}, sql.ErrNoRows
+		}
+		return AnthropicCredentialSecret{}, fmt.Errorf("查询 anthropic_credential 失败: %w", err)
+	}
+	if looksLikeLegacyEncryptedBlob(c.APIKeyEnc) {
+		return AnthropicCredentialSecret{}, errors.New("该 credential 为旧版加密格式，当前已禁用应用层加密；请删除并重新录入 api_key")
+	}
+	plain := c.APIKeyEnc
+	return AnthropicCredentialSecret{
+		ID:         c.ID,
+		EndpointID: c.EndpointID,
+		Name:       c.Name,
+		APIKey:     string(plain),
+		APIKeyHint: c.APIKeyHint,
+		Status:     c.Status,
+	}, nil
+}
+
+func (s *Store) UpdateAnthropicCredentialLimits(ctx context.Context, credentialID int64, limitSessions, limitRPM, limitTPM *int) error {
+	if credentialID == 0 {
+		return errors.New("credentialID 不能为空")
+	}
+	_, err := s.db.ExecContext(ctx, `
+UPDATE anthropic_credentials
+SET limit_sessions=?, limit_rpm=?, limit_tpm=?, updated_at=NOW()
+WHERE id=?
+`, nullableIntPtr(limitSessions), nullableIntPtr(limitRPM), nullableIntPtr(limitTPM), credentialID)
+	if err != nil {
+		return fmt.Errorf("更新 anthropic_credential limits 失败: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) DeleteAnthropicCredential(ctx context.Context, credentialID int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM anthropic_credentials WHERE id=?`, credentialID)
+	if err != nil {
+		return fmt.Errorf("删除 anthropic_credential 失败: %w", err)
 	}
 	return nil
 }

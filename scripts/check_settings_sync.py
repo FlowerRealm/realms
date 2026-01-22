@@ -7,8 +7,6 @@ import re
 import sys
 from pathlib import Path
 
-import yaml
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -18,16 +16,21 @@ def die(msg: str) -> None:
     raise SystemExit(1)
 
 
-def load_yaml(path: Path) -> dict:
-    try:
-        obj = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except Exception as e:
-        die(f"解析 {path} 失败: {e}")
-    if obj is None:
-        return {}
-    if not isinstance(obj, dict):
-        die(f"{path} 顶层必须为 mapping")
-    return obj
+def load_dotenv_keys(path: Path) -> set[str]:
+    keys: set[str] = set()
+    for idx, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        if "=" not in line:
+            die(f"{path} 第 {idx} 行缺少 '='")
+        key = line.split("=", 1)[0].strip()
+        if not key:
+            die(f"{path} 第 {idx} 行 key 为空")
+        keys.add(key)
+    return keys
 
 
 def extract_app_setting_keys(go_path: Path) -> list[str]:
@@ -38,14 +41,11 @@ def extract_app_setting_keys(go_path: Path) -> list[str]:
 
 
 def main() -> None:
-    config_path = ROOT / "config.example.yaml"
+    env_path = ROOT / ".env.example"
     go_path = ROOT / "internal/store/app_settings.go"
     tpl_path = ROOT / "internal/admin/templates/settings.html"
 
-    cfg = load_yaml(config_path)
-    defaults = cfg.get("app_settings_defaults")
-    if not isinstance(defaults, dict):
-        die("config.example.yaml 缺少顶层 app_settings_defaults 映射")
+    env_keys = load_dotenv_keys(env_path)
 
     all_keys = extract_app_setting_keys(go_path)
     required = sorted(
@@ -56,9 +56,13 @@ def main() -> None:
             or k.startswith("feature_disable_")
         }
     )
-    missing = [k for k in required if k not in defaults]
+    missing = [
+        k
+        for k in required
+        if f"REALMS_APP_SETTINGS_DEFAULTS_{k.upper()}" not in env_keys
+    ]
     if missing:
-        die("config.example.yaml 的 app_settings_defaults 缺少键: " + ", ".join(missing))
+        die(".env.example 缺少 app_settings_defaults 对应变量: " + ", ".join(missing))
 
     tpl = tpl_path.read_text(encoding="utf-8")
     if "StartupConfigKeys" not in tpl:

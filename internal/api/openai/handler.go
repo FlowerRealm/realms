@@ -45,7 +45,7 @@ type Handler struct {
 	proxyLog    *proxylog.Writer
 
 	features FeatureResolver
-	selfMode  bool
+	selfMode bool
 
 	quota quota.Provider
 	audit AuditSink
@@ -995,6 +995,21 @@ func extractUsageTokensFromUsageMap(usage map[string]any) (*int64, *int64, *int6
 	if cachedIn == nil {
 		if det, ok := usage["prompt_tokens_details"].(map[string]any); ok {
 			cachedIn = intFromAny(det["cached_tokens"])
+		}
+	}
+	if cachedIn == nil {
+		// Anthropic Messages：usage.cache_read_input_tokens + usage.cache_creation_input_tokens。
+		read := intFromAny(usage["cache_read_input_tokens"])
+		create := intFromAny(usage["cache_creation_input_tokens"])
+		if read != nil || create != nil {
+			sum := int64(0)
+			if read != nil {
+				sum += *read
+			}
+			if create != nil {
+				sum += *create
+			}
+			cachedIn = &sum
 		}
 	}
 

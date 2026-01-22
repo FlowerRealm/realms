@@ -16,6 +16,7 @@ import (
 
 	"realms/internal/admin"
 	openaiapi "realms/internal/api/openai"
+	"realms/internal/assets"
 	"realms/internal/codexoauth"
 	"realms/internal/config"
 	"realms/internal/limits"
@@ -31,10 +32,9 @@ import (
 )
 
 type AppOptions struct {
-	Config     config.Config
-	ConfigPath string
-	DB         *sql.DB
-	Version    version.BuildInfo
+	Config  config.Config
+	DB      *sql.DB
+	Version version.BuildInfo
 }
 
 type App struct {
@@ -106,7 +106,6 @@ func NewApp(opts AppOptions) (*App, error) {
 		opts.Config.Payment,
 		publicBaseURL,
 		opts.Config.AppSettingsDefaults.AdminTimeZone,
-		opts.ConfigPath,
 		opts.Config.Security.TrustProxyHeaders,
 		opts.Config.Security.TrustedProxyCIDRs,
 		opts.Config.Tickets,
@@ -205,6 +204,10 @@ func (a *App) routes() {
 
 	a.mux.HandleFunc("GET /healthz", a.handleHealthz)
 	a.mux.HandleFunc("GET /api/version", a.handleVersion)
+	a.mux.HandleFunc("GET /assets/realms_icon.svg", a.handleRealmsIconSVG)
+	a.mux.HandleFunc("HEAD /assets/realms_icon.svg", a.handleRealmsIconSVG)
+	a.mux.HandleFunc("GET /favicon.ico", a.handleFaviconICO)
+	a.mux.HandleFunc("HEAD /favicon.ico", a.handleFaviconICO)
 
 	a.mux.Handle("GET /{$}", http.HandlerFunc(a.web.Index))
 	a.mux.Handle("GET /login", http.HandlerFunc(a.web.LoginPage))
@@ -266,6 +269,7 @@ func (a *App) routes() {
 		)
 	}
 	a.mux.Handle("POST /v1/responses", apiChain(http.HandlerFunc(a.openai.Responses)))
+	a.mux.Handle("POST /v1/messages", apiChain(http.HandlerFunc(a.openai.Messages)))
 	a.mux.Handle("GET /v1/models", apiFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.openai.Models)))
 	a.mux.Handle("GET /api/usage/windows", apiFeatureChain(store.SettingFeatureDisableWebUsage, http.HandlerFunc(a.web.APIUsageWindows)))
 	a.mux.Handle("GET /api/usage/events", apiFeatureChain(store.SettingFeatureDisableWebUsage, http.HandlerFunc(a.web.APIUsageEvents)))
@@ -384,8 +388,11 @@ func (a *App) routes() {
 	a.mux.Handle("POST /admin/channels/{channel_id}/endpoints", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.CreateEndpoint)))
 	a.mux.Handle("POST /admin/endpoints/{endpoint_id}/delete", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.DeleteEndpoint)))
 	a.mux.Handle("POST /admin/endpoints/{endpoint_id}/openai-credentials", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.CreateOpenAICredential)))
+	a.mux.Handle("POST /admin/endpoints/{endpoint_id}/anthropic-credentials", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.CreateAnthropicCredential)))
 	a.mux.Handle("POST /admin/openai-credentials/{credential_id}/limits", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.UpdateOpenAICredentialLimits)))
 	a.mux.Handle("POST /admin/openai-credentials/{credential_id}/delete", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.DeleteOpenAICredential)))
+	a.mux.Handle("POST /admin/anthropic-credentials/{credential_id}/limits", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.UpdateAnthropicCredentialLimits)))
+	a.mux.Handle("POST /admin/anthropic-credentials/{credential_id}/delete", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.DeleteAnthropicCredential)))
 	a.mux.Handle("GET /admin/endpoints/{endpoint_id}/codex-accounts", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.CodexAccounts)))
 	a.mux.Handle("POST /admin/endpoints/{endpoint_id}/codex-accounts", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.CreateCodexAccount)))
 	a.mux.Handle("POST /admin/endpoints/{endpoint_id}/codex-accounts/refresh", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.RefreshCodexQuotasByEndpoint)))
@@ -430,9 +437,9 @@ func (a *App) routes() {
 		})))
 		a.mux.Handle("POST /admin/payment-channels", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.CreatePaymentChannel)))
 		a.mux.Handle("GET /admin/payment-channels/{payment_channel_id}", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			target := "/admin/settings/payment-channels/" + strings.TrimSpace(r.PathValue("payment_channel_id"))
+			target := "/admin/settings/payment-channels?edit=" + strings.TrimSpace(r.PathValue("payment_channel_id"))
 			if r.URL.RawQuery != "" {
-				target += "?" + r.URL.RawQuery
+				target += "&" + r.URL.RawQuery
 			}
 			http.Redirect(w, r, target, http.StatusFound)
 		})))
@@ -452,6 +459,7 @@ func (a *App) routes() {
 	a.mux.Handle("POST /admin/oauth-apps/{app_id}/rotate-secret", adminChain(http.HandlerFunc(a.admin.RotateOAuthAppSecret)))
 	a.mux.Handle("GET /admin/models", adminFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.Models)))
 	a.mux.Handle("POST /admin/models", adminFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.CreateModel)))
+	a.mux.Handle("POST /admin/models/library-lookup", adminFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.ModelLibraryLookup)))
 	a.mux.Handle("POST /admin/models/import-pricing", adminUploadFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.ImportModelPricing)))
 	a.mux.Handle("GET /admin/models/{model_id}", adminFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.Model)))
 	a.mux.Handle("POST /admin/models/{model_id}", adminFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.UpdateModel)))
@@ -553,6 +561,21 @@ func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+func (a *App) handleRealmsIconSVG(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	if r.Method == http.MethodHead {
+		return
+	}
+	_, _ = w.Write(assets.RealmsIconSVG())
+}
+
+func (a *App) handleFaviconICO(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/assets/realms_icon.svg", http.StatusPermanentRedirect)
 }
 
 func (a *App) handleVersion(w http.ResponseWriter, r *http.Request) {

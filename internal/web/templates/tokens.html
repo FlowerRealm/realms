@@ -5,7 +5,7 @@
       <div class="card-body d-flex flex-column flex-md-row justify-content-between align-items-center">
         <div class="d-flex align-items-center mb-3 mb-md-0">
           <div class="bg-primary bg-opacity-10 text-primary rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 48px; height: 48px;">
-            <i class="bi bi-key-fill fs-4"></i>
+            <span class="fs-4 material-symbols-rounded">key</span>
           </div>
           <div>
             <h5 class="mb-1 fw-semibold">我的 API 令牌</h5>
@@ -13,7 +13,7 @@
           </div>
         </div>
         <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createTokenModal">
-          <i class="bi bi-plus-lg me-1"></i> 创建令牌
+          <span class="me-1 material-symbols-rounded">add</span> 创建令牌
         </button>
       </div>
     </div>
@@ -21,43 +21,43 @@
 
   <!-- 令牌列表 -->
   <div class="col-lg-8">
-    <div class="card h-100">
-      <div class="card-body">
+    <div class="card h-100 overflow-hidden">
+      <div class="card-body p-0">
         <div class="table-responsive">
-          <table class="table table-hover align-middle">
-            <thead class="text-muted small text-uppercase">
+          <table class="table table-hover align-middle mb-0">
+            <thead class="bg-light text-muted small text-uppercase">
               <tr>
-                <th scope="col" class="fw-medium ps-3">名称</th>
-                <th scope="col" class="fw-medium">预览</th>
-                <th scope="col" class="fw-medium">状态</th>
-                <th scope="col" class="fw-medium text-end pe-3">操作</th>
+                <th scope="col" class="fw-medium ps-4 py-3">名称</th>
+                <th scope="col" class="fw-medium py-3">预览</th>
+                <th scope="col" class="fw-medium py-3">状态</th>
+                <th scope="col" class="fw-medium text-end pe-4 py-3">操作</th>
               </tr>
             </thead>
             <tbody class="border-top-0">
               {{range .Tokens}}
               <tr>
-                <td class="ps-3">
+                <td class="ps-4 py-3">
                   {{if .Name}}
                     <span class="fw-medium text-dark">{{.Name}}</span>
                   {{else}}
                     <span class="text-muted small fst-italic">无备注</span>
                   {{end}}
                 </td>
-                <td>
+                <td class="py-3">
                   {{if .TokenHint}}
                     <code class="bg-light px-2 py-1 rounded text-muted border user-select-all">rlm_…{{.TokenHint}}</code>
                   {{else}}
                     <span class="text-muted small">-</span>
                   {{end}}
                 </td>
-                <td>
+                <td class="py-3">
                   {{if eq .Status 1}}
                     <span class="badge bg-success bg-opacity-10 text-success rounded-pill px-2">活跃</span>
                   {{else}}
                     <span class="badge bg-secondary bg-opacity-10 text-secondary rounded-pill px-2">已撤销</span>
                   {{end}}
                 </td>
-                <td class="text-end pe-3">
+                <td class="text-end pe-4 py-3">
                   <form method="POST" action="/tokens/rotate" class="d-inline">
                     <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
                     <input type="hidden" name="token_id" value="{{.ID}}" />
@@ -89,7 +89,7 @@
               {{else}}
               <tr>
                 <td colspan="4" class="text-center py-5 text-muted">
-                  <div class="mb-2"><i class="bi bi-inbox fs-3 text-light-emphasis"></i></div>
+                  <div class="mb-2"><span class="fs-3 text-light-emphasis material-symbols-rounded">inbox</span></div>
                   暂无令牌，点击右上角按钮创建一个。
                 </td>
               </tr>
@@ -105,10 +105,10 @@
 	  <div class="col-lg-4">
 	    <div class="card h-100 bg-primary bg-opacity-10 border-0">
 	      <div class="card-body">
-	        <h5 class="mb-3 fw-semibold text-primary"><i class="bi bi-terminal me-2"></i>使用方式</h5>
+	        <h5 class="mb-3 fw-semibold text-primary"><span class="me-2 material-symbols-rounded">terminal</span>使用方式</h5>
 		        <p class="text-muted small mb-3">推荐：配置 <code>OPENAI_BASE_URL</code>/<code>OPENAI_API_KEY</code>，并在 Codex CLI 中将 <code>model_provider</code> 设置为 <code>realms</code>。</p>
 
-	        <div class="bg-dark rounded-3 p-3 mb-3 shadow-sm position-relative overflow-hidden">
+	        <div class="bg-dark rounded-3 p-3 mb-3  position-relative overflow-hidden">
 	          <div class="d-flex justify-content-between align-items-center mb-2">
 	            <small class="text-secondary text-uppercase fw-bold" style="font-size: 0.65rem;">终端</small>
 	            <div class="d-flex gap-1">
@@ -136,7 +136,7 @@ requires_openai_auth = true</code></pre>
 	        </div>
 
 	        <div class="d-flex align-items-start small text-muted">
-	          <i class="bi bi-info-circle-fill me-2 mt-1 text-primary"></i>
+	          <span class="me-2 mt-1 text-primary material-symbols-rounded">info</span>
 	          <div>API 基础地址：<br><strong class="text-dark user-select-all">{{.BaseURL}}/v1</strong></div>
         </div>
       </div>
@@ -161,7 +161,7 @@ requires_openai_auth = true</code></pre>
             <div class="form-text text-muted">给令牌起个名字，方便日后管理。</div>
           </div>
           <div class="alert alert-light border mb-0 d-flex align-items-start small">
-             <i class="bi bi-info-circle-fill text-primary me-2 mt-1"></i>
+             <span class="text-primary me-2 mt-1 material-symbols-rounded">info</span>
              <div>令牌创建成功后只会显示一次；如需再次复制，请在列表中点击“重新生成”。</div>
           </div>
         </div>

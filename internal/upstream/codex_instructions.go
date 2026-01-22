@@ -35,6 +35,13 @@ func codexInstructionsForModel(model string) string {
 	return codexPromptGPT52Codex
 }
 
+// CodexInstructionsForModel returns the official Codex instructions prompt for the given model.
+// It is used by internal components (e.g. channel health checks) to generate requests accepted by
+// the Codex OAuth upstream.
+func CodexInstructionsForModel(model string) string {
+	return codexInstructionsForModel(model)
+}
+
 func isOfficialCodexInstructions(instructions string) bool {
 	if strings.TrimSpace(instructions) == "" {
 		return false

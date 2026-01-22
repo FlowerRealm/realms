@@ -18,8 +18,9 @@ import (
 type CredentialType string
 
 const (
-	CredentialTypeOpenAI CredentialType = "openai_compatible"
-	CredentialTypeCodex  CredentialType = "codex_oauth"
+	CredentialTypeOpenAI    CredentialType = "openai_compatible"
+	CredentialTypeCodex     CredentialType = "codex_oauth"
+	CredentialTypeAnthropic CredentialType = "anthropic"
 )
 
 type Selection struct {
@@ -69,6 +70,7 @@ type UpstreamStore interface {
 	ListUpstreamChannels(ctx context.Context) ([]store.UpstreamChannel, error)
 	ListUpstreamEndpointsByChannel(ctx context.Context, channelID int64) ([]store.UpstreamEndpoint, error)
 	ListOpenAICompatibleCredentialsByEndpoint(ctx context.Context, endpointID int64) ([]store.OpenAICompatibleCredential, error)
+	ListAnthropicCredentialsByEndpoint(ctx context.Context, endpointID int64) ([]store.AnthropicCredential, error)
 	ListCodexOAuthAccountsByEndpoint(ctx context.Context, endpointID int64) ([]store.CodexOAuthAccount, error)
 }
 
@@ -147,7 +149,7 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 		if s.state.IsChannelBanned(ch.ID, now) {
 			continue
 		}
-		if ch.Type != store.UpstreamTypeOpenAICompatible && ch.Type != store.UpstreamTypeCodexOAuth {
+		if ch.Type != store.UpstreamTypeOpenAICompatible && ch.Type != store.UpstreamTypeCodexOAuth && ch.Type != store.UpstreamTypeAnthropic {
 			continue
 		}
 		if cons.RequireChannelType != "" && ch.Type != cons.RequireChannelType {
@@ -287,6 +289,69 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			EndpointID:     ep.ID,
 			BaseURL:        ep.BaseURL,
 			CredentialType: CredentialTypeOpenAI,
+			CredentialID:   ids[0].id,
+
+			CredentialLimitSessions: ids[0].limitSessions,
+			CredentialLimitRPM:      ids[0].limitRPM,
+			CredentialLimitTPM:      ids[0].limitTPM,
+		}, true, nil
+	case store.UpstreamTypeAnthropic:
+		creds, err := s.st.ListAnthropicCredentialsByEndpoint(ctx, ep.ID)
+		if err != nil {
+			return Selection{}, false, err
+		}
+		type cand struct {
+			id            int64
+			limitSessions *int
+			limitRPM      *int
+			limitTPM      *int
+		}
+		var ids []cand
+		for _, c := range creds {
+			if c.Status != 1 {
+				continue
+			}
+			key := fmt.Sprintf("%s:%d", CredentialTypeAnthropic, c.ID)
+			if s.state.IsCredentialCooling(key, now) {
+				continue
+			}
+			if c.LimitRPM != nil && *c.LimitRPM > 0 {
+				if s.state.RPM(key, now, s.rpmWindow) >= *c.LimitRPM {
+					continue
+				}
+			}
+			if c.LimitTPM != nil && *c.LimitTPM > 0 {
+				if s.state.TPM(key, now, s.rpmWindow) >= *c.LimitTPM {
+					continue
+				}
+			}
+			if isNewSession && c.LimitSessions != nil && *c.LimitSessions > 0 {
+				if s.state.CredentialSessions(key, now) >= *c.LimitSessions {
+					continue
+				}
+			}
+			ids = append(ids, cand{id: c.ID, limitSessions: c.LimitSessions, limitRPM: c.LimitRPM, limitTPM: c.LimitTPM})
+		}
+		if len(ids) == 0 {
+			return Selection{}, false, nil
+		}
+		sort.SliceStable(ids, func(i, j int) bool {
+			ki := fmt.Sprintf("%s:%d", CredentialTypeAnthropic, ids[i].id)
+			kj := fmt.Sprintf("%s:%d", CredentialTypeAnthropic, ids[j].id)
+			ri := s.state.RPM(ki, now, s.rpmWindow)
+			rj := s.state.RPM(kj, now, s.rpmWindow)
+			if ri != rj {
+				return ri < rj
+			}
+			return ids[i].id > ids[j].id
+		})
+		return Selection{
+			ChannelID:      ch.ID,
+			ChannelType:    ch.Type,
+			ChannelGroups:  ch.Groups,
+			EndpointID:     ep.ID,
+			BaseURL:        ep.BaseURL,
+			CredentialType: CredentialTypeAnthropic,
 			CredentialID:   ids[0].id,
 
 			CredentialLimitSessions: ids[0].limitSessions,

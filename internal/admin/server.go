@@ -25,6 +25,7 @@ import (
 	"realms/internal/codexoauth"
 	"realms/internal/config"
 	"realms/internal/icons"
+	"realms/internal/modellibrary"
 	"realms/internal/scheduler"
 	"realms/internal/security"
 	"realms/internal/store"
@@ -40,12 +41,12 @@ type Server struct {
 	codexOAuth *codexoauth.Flow
 	exec       UpstreamDoer
 	sched      *scheduler.Scheduler
+	modelsDev  *modellibrary.ModelsDevCatalog
 
 	selfMode bool
 
 	publicBaseURL        string
 	adminTimeZoneDefault string
-	configPath           string
 	trustProxyHeaders    bool
 	trustedProxies       []netip.Prefix
 
@@ -64,7 +65,7 @@ type Server struct {
 	goRegisterExecutor       *GoRegisterExecutor
 }
 
-func NewServer(st *store.Store, codexOAuth *codexoauth.Flow, exec UpstreamDoer, selfMode bool, emailVerifDefault bool, smtpDefault config.SMTPConfig, billingDefault config.BillingConfig, paymentDefault config.PaymentConfig, publicBaseURL string, adminTimeZoneDefault string, configPath string, trustProxyHeaders bool, trustedProxyCIDRs []string, ticketsCfg config.TicketsConfig, ticketStorage *ticketspkg.Storage, sched *scheduler.Scheduler) (*Server, error) {
+func NewServer(st *store.Store, codexOAuth *codexoauth.Flow, exec UpstreamDoer, selfMode bool, emailVerifDefault bool, smtpDefault config.SMTPConfig, billingDefault config.BillingConfig, paymentDefault config.PaymentConfig, publicBaseURL string, adminTimeZoneDefault string, trustProxyHeaders bool, trustedProxyCIDRs []string, ticketsCfg config.TicketsConfig, ticketStorage *ticketspkg.Storage, sched *scheduler.Scheduler) (*Server, error) {
 	if ticketStorage == nil {
 		ticketStorage = ticketspkg.NewStorage(ticketsCfg.AttachmentsDir)
 	}
@@ -109,15 +110,17 @@ func NewServer(st *store.Store, codexOAuth *codexoauth.Flow, exec UpstreamDoer, 
 	// 初始化Go执行器
 	goExec := NewGoRegisterExecutor()
 
+	modelsDevCatalog := modellibrary.NewModelsDevCatalog(modellibrary.ModelsDevCatalogOptions{})
+
 	return &Server{
 		st:                       st,
 		codexOAuth:               codexOAuth,
 		exec:                     exec,
 		sched:                    sched,
+		modelsDev:                modelsDevCatalog,
 		selfMode:                 selfMode,
 		publicBaseURL:            strings.TrimRight(strings.TrimSpace(publicBaseURL), "/"),
 		adminTimeZoneDefault:     adminTZDefault,
-		configPath:               strings.TrimSpace(configPath),
 		trustProxyHeaders:        trustProxyHeaders,
 		trustedProxies:           trustedProxies,
 		emailVerifDefault:        emailVerifDefault,
@@ -371,7 +374,7 @@ type templateData struct {
 	ChannelRuntime adminChannelRuntimeView
 	Endpoints      []store.UpstreamEndpoint
 	Endpoint       store.UpstreamEndpoint
-	Credentials    []adminOpenAICredentialView
+	Credentials    []adminCredentialView
 	Accounts       []adminCodexAccountView
 
 	ManagedModels []managedModelView
@@ -394,41 +397,48 @@ type templateData struct {
 }
 
 var startupConfigKeys = []string{
-	"env",
-	"db.dsn",
-	"server.addr",
-	"server.public_base_url",
-	"server.read_header_timeout",
-	"server.read_timeout",
-	"server.write_timeout",
-	"server.idle_timeout",
-	"limits.default_max_output_tokens",
-	"limits.max_body_bytes",
-	"limits.max_inflight_per_credential",
-	"limits.max_inflight_per_token",
-	"limits.max_request_duration",
-	"limits.max_sse_connections_per_token",
-	"limits.upstream_dial_timeout",
-	"limits.upstream_request_timeout",
-	"limits.upstream_response_header_timeout",
-	"limits.upstream_tls_handshake_timeout",
-	"security.allow_open_registration",
-	"security.disable_secure_cookies",
-	"security.trust_proxy_headers",
-	"security.trusted_proxy_cidrs",
-	"security.subscription_order_webhook_secret",
-	"tickets.attachments_dir",
-	"tickets.attachment_ttl",
-	"tickets.max_upload_bytes",
-	"codex_oauth.enable",
-	"codex_oauth.client_id",
-	"codex_oauth.authorize_url",
-	"codex_oauth.token_url",
-	"codex_oauth.callback_listen_addr",
-	"codex_oauth.redirect_uri",
-	"codex_oauth.scope",
-	"codex_oauth.prompt",
-	"self_mode.enable",
+	"REALMS_ENV",
+	"REALMS_DB_DSN",
+	"REALMS_ADDR",
+	"REALMS_PUBLIC_BASE_URL",
+	"REALMS_SERVER_READ_HEADER_TIMEOUT",
+	"REALMS_SERVER_READ_TIMEOUT",
+	"REALMS_SERVER_WRITE_TIMEOUT",
+	"REALMS_SERVER_IDLE_TIMEOUT",
+	"REALMS_LIMITS_DEFAULT_MAX_OUTPUT_TOKENS",
+	"REALMS_LIMITS_MAX_BODY_BYTES",
+	"REALMS_LIMITS_MAX_INFLIGHT_PER_CREDENTIAL",
+	"REALMS_LIMITS_MAX_INFLIGHT_PER_TOKEN",
+	"REALMS_LIMITS_MAX_REQUEST_DURATION",
+	"REALMS_LIMITS_MAX_STREAM_DURATION",
+	"REALMS_LIMITS_MAX_SSE_CONNECTIONS_PER_TOKEN",
+	"REALMS_LIMITS_STREAM_IDLE_TIMEOUT",
+	"REALMS_LIMITS_SSE_PING_INTERVAL",
+	"REALMS_LIMITS_SSE_MAX_EVENT_BYTES",
+	"REALMS_LIMITS_UPSTREAM_DIAL_TIMEOUT",
+	"REALMS_LIMITS_UPSTREAM_REQUEST_TIMEOUT",
+	"REALMS_LIMITS_UPSTREAM_RESPONSE_HEADER_TIMEOUT",
+	"REALMS_LIMITS_UPSTREAM_TLS_HANDSHAKE_TIMEOUT",
+	"REALMS_ALLOW_OPEN_REGISTRATION",
+	"REALMS_DISABLE_SECURE_COOKIES",
+	"REALMS_TRUST_PROXY_HEADERS",
+	"REALMS_TRUSTED_PROXY_CIDRS",
+	"REALMS_SUBSCRIPTION_ORDER_WEBHOOK_SECRET",
+	"REALMS_TICKETS_ATTACHMENTS_DIR",
+	"REALMS_TICKETS_ATTACHMENT_TTL",
+	"REALMS_TICKETS_MAX_UPLOAD_BYTES",
+	"REALMS_CODEX_OAUTH_ENABLE",
+	"REALMS_CODEX_OAUTH_CLIENT_ID",
+	"REALMS_CODEX_OAUTH_AUTHORIZE_URL",
+	"REALMS_CODEX_OAUTH_TOKEN_URL",
+	"REALMS_CODEX_OAUTH_HTTP_TIMEOUT",
+	"REALMS_CODEX_OAUTH_TLS_HANDSHAKE_TIMEOUT",
+	"REALMS_CODEX_OAUTH_REQUEST_PASSTHROUGH",
+	"REALMS_CODEX_OAUTH_CALLBACK_LISTEN_ADDR",
+	"REALMS_CODEX_OAUTH_REDIRECT_URI",
+	"REALMS_CODEX_OAUTH_SCOPE",
+	"REALMS_CODEX_OAUTH_PROMPT",
+	"REALMS_SELF_MODE_ENABLE",
 }
 
 type dashboardStats struct {
@@ -481,8 +491,16 @@ type adminChannelRuntimeView struct {
 	BannedActive bool
 }
 
-type adminOpenAICredentialView struct {
-	store.OpenAICompatibleCredential
+type adminCredentialView struct {
+	ID         int64
+	Name       *string
+	APIKeyHint *string
+	Status     int
+
+	LimitSessions *int
+	LimitRPM      *int
+	LimitTPM      *int
+
 	Runtime adminRuntimeLimitsView
 }
 
@@ -2208,8 +2226,14 @@ func (s *Server) CreateChannel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "参数错误", http.StatusBadRequest)
 		return
 	}
-	if typ != store.UpstreamTypeOpenAICompatible {
-		http.Error(w, "仅支持创建 openai_compatible Channel（codex_oauth 为内置）", http.StatusBadRequest)
+	switch typ {
+	case store.UpstreamTypeOpenAICompatible, store.UpstreamTypeAnthropic:
+		// ok
+	case store.UpstreamTypeCodexOAuth:
+		http.Error(w, "codex_oauth Channel 为内置，不允许创建", http.StatusBadRequest)
+		return
+	default:
+		http.Error(w, "不支持的渠道类型", http.StatusBadRequest)
 		return
 	}
 	if _, err := security.ValidateBaseURL(baseURL); err != nil {
@@ -2430,14 +2454,15 @@ func (s *Server) Endpoints(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var creds []adminOpenAICredentialView
-	if ch.Type == store.UpstreamTypeOpenAICompatible {
+	var creds []adminCredentialView
+	switch ch.Type {
+	case store.UpstreamTypeOpenAICompatible:
 		rawCreds, err := s.st.ListOpenAICompatibleCredentialsByEndpoint(r.Context(), ep.ID)
 		if err != nil {
 			http.Error(w, "查询失败", http.StatusInternalServerError)
 			return
 		}
-		creds = make([]adminOpenAICredentialView, 0, len(rawCreds))
+		creds = make([]adminCredentialView, 0, len(rawCreds))
 		for _, c := range rawCreds {
 			rv := adminRuntimeLimitsView{
 				Available: s.sched != nil,
@@ -2462,11 +2487,60 @@ func (s *Server) Endpoints(w http.ResponseWriter, r *http.Request) {
 					rv.OverSessions = true
 				}
 			}
-			creds = append(creds, adminOpenAICredentialView{
-				OpenAICompatibleCredential: c,
-				Runtime:                    rv,
+			creds = append(creds, adminCredentialView{
+				ID:            c.ID,
+				Name:          c.Name,
+				APIKeyHint:    c.APIKeyHint,
+				Status:        c.Status,
+				LimitSessions: c.LimitSessions,
+				LimitRPM:      c.LimitRPM,
+				LimitTPM:      c.LimitTPM,
+				Runtime:       rv,
 			})
 		}
+	case store.UpstreamTypeAnthropic:
+		rawCreds, err := s.st.ListAnthropicCredentialsByEndpoint(r.Context(), ep.ID)
+		if err != nil {
+			http.Error(w, "查询失败", http.StatusInternalServerError)
+			return
+		}
+		creds = make([]adminCredentialView, 0, len(rawCreds))
+		for _, c := range rawCreds {
+			rv := adminRuntimeLimitsView{
+				Available: s.sched != nil,
+			}
+			if s.sched != nil {
+				key := fmt.Sprintf("%s:%d", scheduler.CredentialTypeAnthropic, c.ID)
+				stats := s.sched.RuntimeCredentialStats(key)
+				rv.RPM = stats.RPM
+				rv.TPM = stats.TPM
+				rv.Sessions = stats.Sessions
+				rv.FailScore = stats.FailScore
+				if stats.CoolingUntil != nil {
+					rv.CoolingUntil = formatTimeIn(*stats.CoolingUntil, time.RFC3339, loc)
+				}
+				if c.LimitRPM != nil && *c.LimitRPM > 0 && rv.RPM >= *c.LimitRPM {
+					rv.OverRPM = true
+				}
+				if c.LimitTPM != nil && *c.LimitTPM > 0 && rv.TPM >= *c.LimitTPM {
+					rv.OverTPM = true
+				}
+				if c.LimitSessions != nil && *c.LimitSessions > 0 && rv.Sessions >= *c.LimitSessions {
+					rv.OverSessions = true
+				}
+			}
+			creds = append(creds, adminCredentialView{
+				ID:            c.ID,
+				Name:          c.Name,
+				APIKeyHint:    c.APIKeyHint,
+				Status:        c.Status,
+				LimitSessions: c.LimitSessions,
+				LimitRPM:      c.LimitRPM,
+				LimitTPM:      c.LimitTPM,
+				Runtime:       rv,
+			})
+		}
+	default:
 	}
 
 	var accViews []adminCodexAccountView
@@ -2713,6 +2787,79 @@ func (s *Server) CreateOpenAICredential(w http.ResponseWriter, r *http.Request) 
 		namePtr = &name
 	}
 	if _, _, err := s.st.CreateOpenAICompatibleCredential(r.Context(), ep.ID, namePtr, apiKey); err != nil {
+		http.Error(w, "创建失败", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, fmt.Sprintf("/admin/channels/%d/endpoints#keys", ep.ChannelID), http.StatusFound)
+}
+
+func (s *Server) DeleteAnthropicCredential(w http.ResponseWriter, r *http.Request) {
+	_, _, _, err := s.currentUser(r)
+	if err != nil {
+		http.Error(w, "未登录", http.StatusUnauthorized)
+		return
+	}
+	credentialID, err := parseInt64(r.PathValue("credential_id"))
+	if err != nil {
+		http.Error(w, "参数错误", http.StatusBadRequest)
+		return
+	}
+	cred, err := s.st.GetAnthropicCredentialByID(r.Context(), credentialID)
+	if err != nil {
+		http.Error(w, "credential 不存在", http.StatusNotFound)
+		return
+	}
+	ep, ch, err := s.loadEndpointAndChannel(r, cred.EndpointID)
+	if err != nil {
+		http.Error(w, "endpoint 不存在", http.StatusNotFound)
+		return
+	}
+	if ch.Type != store.UpstreamTypeAnthropic {
+		http.Error(w, "credential 不匹配 channel 类型", http.StatusBadRequest)
+		return
+	}
+	if err := s.st.DeleteAnthropicCredential(r.Context(), cred.ID); err != nil {
+		http.Error(w, "删除失败", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, fmt.Sprintf("/admin/channels/%d/endpoints#keys", ep.ChannelID), http.StatusFound)
+}
+
+func (s *Server) CreateAnthropicCredential(w http.ResponseWriter, r *http.Request) {
+	_, _, _, err := s.currentUser(r)
+	if err != nil {
+		http.Error(w, "未登录", http.StatusUnauthorized)
+		return
+	}
+	endpointID, err := parseInt64(r.PathValue("endpoint_id"))
+	if err != nil {
+		http.Error(w, "参数错误", http.StatusBadRequest)
+		return
+	}
+	ep, ch, err := s.loadEndpointAndChannel(r, endpointID)
+	if err != nil {
+		http.Error(w, "endpoint 不存在", http.StatusNotFound)
+		return
+	}
+	if ch.Type != store.UpstreamTypeAnthropic {
+		http.Error(w, "endpoint 不匹配 channel 类型", http.StatusBadRequest)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "表单解析失败", http.StatusBadRequest)
+		return
+	}
+	apiKey := strings.TrimSpace(r.FormValue("api_key"))
+	if apiKey == "" {
+		http.Error(w, "api_key 不能为空", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(r.FormValue("name"))
+	var namePtr *string
+	if name != "" {
+		namePtr = &name
+	}
+	if _, _, err := s.st.CreateAnthropicCredential(r.Context(), ep.ID, namePtr, apiKey); err != nil {
 		http.Error(w, "创建失败", http.StatusInternalServerError)
 		return
 	}
@@ -3255,6 +3402,8 @@ func defaultEndpointBaseURL(channelType string) string {
 	switch channelType {
 	case store.UpstreamTypeCodexOAuth:
 		return "https://chatgpt.com/backend-api/codex"
+	case store.UpstreamTypeAnthropic:
+		return "https://api.anthropic.com"
 	default:
 		return "https://api.openai.com"
 	}

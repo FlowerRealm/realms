@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,7 +54,6 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 		cfg.Payment,
 		cfg.Server.PublicBaseURL,
 		cfg.AppSettingsDefaults.AdminTimeZone,
-		"config.yaml",
 		cfg.Security.TrustProxyHeaders,
 		cfg.Security.TrustedProxyCIDRs,
 		cfg.Tickets,
@@ -104,6 +104,8 @@ func TestRoutes_SelfMode_DisablesBillingAndTickets(t *testing.T) {
 		{method: http.MethodGet, path: "/admin/subscriptions"},
 		{method: http.MethodGet, path: "/admin/orders"},
 		{method: http.MethodGet, path: "/admin/payment-channels"},
+		{method: http.MethodGet, path: "/admin/settings/payment-channels"},
+		{method: http.MethodGet, path: "/admin/settings/payment-channels/1"},
 		{method: http.MethodGet, path: "/admin/tickets"},
 
 		{method: http.MethodPost, path: "/api/webhooks/subscription-orders/1/paid"},
@@ -169,6 +171,8 @@ func TestRoutes_DefaultMode_EnablesBillingAndTickets(t *testing.T) {
 		{method: http.MethodGet, path: "/admin/subscriptions"},
 		{method: http.MethodGet, path: "/admin/orders"},
 		{method: http.MethodGet, path: "/admin/payment-channels"},
+		{method: http.MethodGet, path: "/admin/settings/payment-channels"},
+		{method: http.MethodGet, path: "/admin/settings/payment-channels/1"},
 		{method: http.MethodGet, path: "/admin/tickets"},
 	}
 
@@ -210,6 +214,44 @@ func TestRoutes_NoChatFeature(t *testing.T) {
 			t.Fatalf("%s %s expected status %d, got %d", tc.method, tc.path, http.StatusNotFound, rr.Code)
 		}
 	}
+}
+
+func TestRoutes_Assets_IconAndFavicon(t *testing.T) {
+	cfg := config.Config{
+		Limits: config.LimitsConfig{
+			MaxBodyBytes:       1 << 20,
+			MaxRequestDuration: 2 * time.Second,
+		},
+	}
+	app := newTestApp(t, cfg)
+
+	t.Run("GET /assets/realms_icon.svg", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://example.com/assets/realms_icon.svg", nil)
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+		}
+		ct := rr.Header().Get("Content-Type")
+		if !strings.HasPrefix(ct, "image/svg+xml") {
+			t.Fatalf("expected Content-Type image/svg+xml, got %q", ct)
+		}
+		if body := rr.Body.String(); !strings.Contains(body, "<svg") {
+			t.Fatalf("expected svg body, got %q", body)
+		}
+	})
+
+	t.Run("GET /favicon.ico", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://example.com/favicon.ico", nil)
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusPermanentRedirect {
+			t.Fatalf("expected status %d, got %d", http.StatusPermanentRedirect, rr.Code)
+		}
+		if got := rr.Header().Get("Location"); got != "/assets/realms_icon.svg" {
+			t.Fatalf("expected Location %q, got %q", "/assets/realms_icon.svg", got)
+		}
+	})
 }
 
 func TestQuotaProviderForConfig(t *testing.T) {

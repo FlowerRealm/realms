@@ -11,11 +11,11 @@
 
 本项目提供本地开发快捷方式：
 
-- 启动服务：`go run ./cmd/realms -config config.yaml`
+- 启动服务：`go run ./cmd/realms`（自动尝试加载当前目录的 `.env`）
 - 开发热重载：`make dev`
 - 运行测试：`go test ./...`
 
-> 提示：`config.yaml` 可能包含敏感信息，默认在 `.gitignore` 中忽略。请从 `config.example.yaml` 复制生成。
+> 提示：`.env` 可能包含敏感信息，默认在 `.gitignore` 中忽略。请从 `.env.example` 复制生成。
 
 ---
 
@@ -45,4 +45,3 @@
 
 - `README.md`
 - `helloagents/wiki/*`（知识库索引与说明）
-

@@ -1,0 +1,44 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Solid, Bright Color - No complex gradients -->
+  <!-- A bright Orange-Gold that stands out on dark/light/transparent -->
+  <path 
+    fill="#FBBF24" 
+    d="M256 32 
+       L320 160 
+       L448 160 
+       C460 160 470 175 460 185 
+       L360 280 
+       L400 410 
+       C405 420 390 430 380 420 
+       L256 330 
+       L132 420 
+       C122 430 107 420 112 410 
+       L152 280 
+       L52 185 
+       C42 175 52 160 64 160 
+       L192 160 
+       Z"
+  />
+  <!-- Inner Detail cut for dimension (Optional, keeping it filled for max visibility) -->
+  <!-- Adding a slight darker stroke internally to define the shape better if needed, 
+       but for "clear", a solid shape is best. -->
+       
+  <!-- Let's try a simpler, bolder abstract Crown/Realm shape instead of a generic star -->
+  <!-- Overwriting with a bolder, thicker "R" Crown shape -->
+  
+  <path 
+    fill="#F59E0B"
+    d="M100 400 L140 100 L256 200 L372 100 L412 400 L100 400 Z" 
+  />
+  
+  <path 
+    fill="#FCD34D"
+    d="M140 100 L256 200 L180 400 L120 400 Z"
+  />
+  
+  <path 
+    fill="#FCD34D"
+    d="M372 100 L256 200 L332 400 L392 400 Z"
+  />
+
+</svg>

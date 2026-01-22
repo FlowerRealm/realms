@@ -18,7 +18,8 @@ type managedModelView struct {
 	OwnedBy        string
 	InputUSDPer1M  string
 	OutputUSDPer1M string
-	CacheUSDPer1M  string
+	CacheInputUSDPer1M  string
+	CacheOutputUSDPer1M string
 	Status         int
 	CreatedAt      string
 }
@@ -29,7 +30,8 @@ func toManagedModelView(m store.ManagedModel, loc *time.Location) managedModelVi
 		PublicID:       m.PublicID,
 		InputUSDPer1M:  formatUSDPlain(m.InputUSDPer1M),
 		OutputUSDPer1M: formatUSDPlain(m.OutputUSDPer1M),
-		CacheUSDPer1M:  formatUSDPlain(m.CacheUSDPer1M),
+		CacheInputUSDPer1M:  formatUSDPlain(m.CacheInputUSDPer1M),
+		CacheOutputUSDPer1M: formatUSDPlain(m.CacheOutputUSDPer1M),
 		Status:         m.Status,
 		CreatedAt:      formatTimeIn(m.CreatedAt, "2006-01-02 15:04", loc),
 	}
@@ -92,7 +94,8 @@ func (s *Server) CreateModel(w http.ResponseWriter, r *http.Request) {
 	ownedByRaw := strings.TrimSpace(r.FormValue("owned_by"))
 	inUSDRaw := strings.TrimSpace(r.FormValue("input_usd_per_1m"))
 	outUSDRaw := strings.TrimSpace(r.FormValue("output_usd_per_1m"))
-	cacheUSDRaw := strings.TrimSpace(r.FormValue("cache_usd_per_1m"))
+	cacheInUSDRaw := strings.TrimSpace(r.FormValue("cache_input_usd_per_1m"))
+	cacheOutUSDRaw := strings.TrimSpace(r.FormValue("cache_output_usd_per_1m"))
 	status, err := parseInt(r.FormValue("status"))
 	if err != nil {
 		status = 1
@@ -115,7 +118,7 @@ func (s *Server) CreateModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if inUSDRaw == "" || outUSDRaw == "" || cacheUSDRaw == "" {
+	if inUSDRaw == "" || outUSDRaw == "" || cacheInUSDRaw == "" || cacheOutUSDRaw == "" {
 		if isAjax(r) {
 			ajaxError(w, http.StatusBadRequest, "定价不能为空")
 			return
@@ -141,13 +144,22 @@ func (s *Server) CreateModel(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/models?err="+url.QueryEscape("output_price 不合法"), http.StatusFound)
 		return
 	}
-	cacheV, err := parseUSD(cacheUSDRaw)
+	cacheInV, err := parseUSD(cacheInUSDRaw)
 	if err != nil {
 		if isAjax(r) {
-			ajaxError(w, http.StatusBadRequest, "cache_price 不合法")
+			ajaxError(w, http.StatusBadRequest, "cache_input_price 不合法")
 			return
 		}
-		http.Redirect(w, r, "/admin/models?err="+url.QueryEscape("cache_price 不合法"), http.StatusFound)
+		http.Redirect(w, r, "/admin/models?err="+url.QueryEscape("cache_input_price 不合法"), http.StatusFound)
+		return
+	}
+	cacheOutV, err := parseUSD(cacheOutUSDRaw)
+	if err != nil {
+		if isAjax(r) {
+			ajaxError(w, http.StatusBadRequest, "cache_output_price 不合法")
+			return
+		}
+		http.Redirect(w, r, "/admin/models?err="+url.QueryEscape("cache_output_price 不合法"), http.StatusFound)
 		return
 	}
 
@@ -162,7 +174,8 @@ func (s *Server) CreateModel(w http.ResponseWriter, r *http.Request) {
 		OwnedBy:        ownedBy,
 		InputUSDPer1M:  inV,
 		OutputUSDPer1M: outV,
-		CacheUSDPer1M:  cacheV,
+		CacheInputUSDPer1M:  cacheInV,
+		CacheOutputUSDPer1M: cacheOutV,
 		Status:         status,
 	}); err != nil {
 		if isAjax(r) {
@@ -234,7 +247,8 @@ func (s *Server) UpdateModel(w http.ResponseWriter, r *http.Request) {
 	ownedByRaw := strings.TrimSpace(r.FormValue("owned_by"))
 	inUSDRaw := strings.TrimSpace(r.FormValue("input_usd_per_1m"))
 	outUSDRaw := strings.TrimSpace(r.FormValue("output_usd_per_1m"))
-	cacheUSDRaw := strings.TrimSpace(r.FormValue("cache_usd_per_1m"))
+	cacheInUSDRaw := strings.TrimSpace(r.FormValue("cache_input_usd_per_1m"))
+	cacheOutUSDRaw := strings.TrimSpace(r.FormValue("cache_output_usd_per_1m"))
 	status, err := parseInt(r.FormValue("status"))
 	if err != nil {
 		http.Error(w, "status 不合法", http.StatusBadRequest)
@@ -250,7 +264,7 @@ func (s *Server) UpdateModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if inUSDRaw == "" || outUSDRaw == "" || cacheUSDRaw == "" {
+	if inUSDRaw == "" || outUSDRaw == "" || cacheInUSDRaw == "" || cacheOutUSDRaw == "" {
 		http.Error(w, "定价不能为空", http.StatusBadRequest)
 		return
 	}
@@ -264,9 +278,14 @@ func (s *Server) UpdateModel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "output_price 不合法", http.StatusBadRequest)
 		return
 	}
-	cacheV, err := parseUSD(cacheUSDRaw)
+	cacheInV, err := parseUSD(cacheInUSDRaw)
 	if err != nil {
-		http.Error(w, "cache_price 不合法", http.StatusBadRequest)
+		http.Error(w, "cache_input_price 不合法", http.StatusBadRequest)
+		return
+	}
+	cacheOutV, err := parseUSD(cacheOutUSDRaw)
+	if err != nil {
+		http.Error(w, "cache_output_price 不合法", http.StatusBadRequest)
 		return
 	}
 
@@ -282,7 +301,8 @@ func (s *Server) UpdateModel(w http.ResponseWriter, r *http.Request) {
 		OwnedBy:        ownedBy,
 		InputUSDPer1M:  inV,
 		OutputUSDPer1M: outV,
-		CacheUSDPer1M:  cacheV,
+		CacheInputUSDPer1M:  cacheInV,
+		CacheOutputUSDPer1M: cacheOutV,
 		Status:         status,
 	}); err != nil {
 		http.Error(w, "更新失败", http.StatusInternalServerError)

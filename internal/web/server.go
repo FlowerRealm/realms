@@ -315,7 +315,8 @@ type ModelView struct {
 	OwnedBy        string
 	InputUSDPer1M  string
 	OutputUSDPer1M string
-	CacheUSDPer1M  string
+	CacheInputUSDPer1M  string
+	CacheOutputUSDPer1M string
 }
 
 type SubscriptionView struct {
@@ -2190,7 +2191,8 @@ func (s *Server) ModelsPage(w http.ResponseWriter, r *http.Request) {
 			OwnedBy:        ownedBy,
 			InputUSDPer1M:  formatUSDPlain(m.InputUSDPer1M),
 			OutputUSDPer1M: formatUSDPlain(m.OutputUSDPer1M),
-			CacheUSDPer1M:  formatUSDPlain(m.CacheUSDPer1M),
+			CacheInputUSDPer1M:  formatUSDPlain(m.CacheInputUSDPer1M),
+			CacheOutputUSDPer1M: formatUSDPlain(m.CacheOutputUSDPer1M),
 		})
 	}
 

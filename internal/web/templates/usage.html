@@ -15,9 +15,9 @@
   </div>
 
   <!-- 全局筛选胶囊 -->
-  <div class="d-flex align-items-center bg-white border border-opacity-75 rounded-pill p-1 shadow-sm">
+  <div class="d-flex align-items-center bg-white border border-opacity-75 rounded-pill p-1 ">
     <div class="d-flex align-items-center px-3 border-end border-opacity-10">
-      <i class="bi bi-calendar3 text-primary me-2"></i>
+      <span class="text-primary me-2 material-symbols-rounded">calendar_today</span>
       <input type="text" id="dateStart" class="form-control form-control-sm border-0 bg-transparent p-0 mb-0 fw-medium" style="width: 85px; font-size: 0.85rem;" value="{{.UsageStart}}">
       <span class="mx-2 text-muted opacity-25">|</span>
       <input type="text" id="dateEnd" class="form-control form-control-sm border-0 bg-transparent p-0 mb-0 fw-medium" style="width: 85px; font-size: 0.85rem;" value="{{.UsageEnd}}">
@@ -37,8 +37,8 @@
         <option value="50" {{if eq .UsageLimit 50}}selected{{end}}>50条</option>
         <option value="100" {{if eq .UsageLimit 100}}selected{{end}}>100条</option>
       </select>
-      <button type="submit" class="btn btn-sm btn-primary rounded-pill px-3 mb-0 shadow-sm">
-        <i class="bi bi-search"></i>
+      <button type="submit" class="btn btn-sm btn-primary rounded-pill px-3 mb-0 ">
+        <span class="material-symbols-rounded">search</span>
       </button>
     </form>
   </div>
@@ -49,7 +49,7 @@
   {{if .Error}}
   <div class="col-12">
     <div class="alert alert-danger d-flex align-items-center" role="alert">
-      <i class="bi bi-exclamation-triangle-fill me-2"></i>
+      <span class="me-2 material-symbols-rounded">warning</span>
       <div>{{.Error}}</div>
     </div>
   </div>
@@ -57,7 +57,7 @@
 
   {{with index .UsageWindows 0}}
   <div class="col-12">
-    <div class="card shadow-sm border-0 overflow-hidden">
+    <div class="card  border-0 overflow-hidden">
       <!-- 顶部信息条 -->
       <div class="bg-primary bg-opacity-10 py-3 px-4 d-flex justify-content-between align-items-center">
         <div>
@@ -65,7 +65,7 @@
            <span class="text-muted smaller ms-2">统计区间: {{.Since}} ~ {{.Until}}</span>
         </div>
         <div class="text-primary smaller">
-           <i class="bi bi-arrow-repeat spin-slow me-1"></i> 每分钟自动刷新
+           <span class="spin-slow me-1 material-symbols-rounded">autorenew</span> 每分钟自动刷新
         </div>
       </div>
 
@@ -170,8 +170,8 @@
 
   <!-- 请求明细 -->
   <div class="col-12">
-    <div class="card shadow-sm border-0 overflow-hidden">
-      <div class="card-header bg-white py-3 px-4 d-flex justify-content-between align-items-center">
+    <div class="card  border-0 overflow-hidden">
+      <div class="card-header py-3 px-4 d-flex justify-content-between align-items-center">
         <h5 class="mb-0 fw-bold">请求明细</h5>
         <span class="text-muted smaller">按每次请求记录（倒序）</span>
       </div>
@@ -210,7 +210,7 @@
                    <div><span class="text-muted">In:</span> {{.InputTokens}}</div>
                    <div><span class="text-muted">Out:</span> {{.OutputTokens}}</div>
                    {{if ne .CachedTokens "-"}}
-                   <div class="text-success smaller"><i class="bi bi-lightning-fill"></i> {{.CachedTokens}}</div>
+                   <div class="text-success smaller"><span class="material-symbols-rounded">bolt</span> {{.CachedTokens}}</div>
                    {{end}}
                 </td>
                 <td class="text-end font-monospace fw-bold text-dark">{{.CostUSD}}</td>
@@ -220,7 +220,7 @@
                      <div class="badge bg-info-subtle text-info border border-info-subtle rounded-pill px-2 scale-90">STREAM</div>
                    {{end}}
                    {{if ne .Error ""}}
-                     <div class="text-danger smaller mt-1" title="{{.Error}}"><i class="bi bi-exclamation-circle"></i> 错误</div>
+                     <div class="text-danger smaller mt-1" title="{{.Error}}"><span class="material-symbols-rounded">error</span> 错误</div>
                    {{end}}
                 </td>
                 <td class="pe-4 font-monospace text-muted small user-select-all" style="max-width: 120px; overflow: hidden; text-overflow: ellipsis;" title="{{.RequestID}}">{{.RequestID}}</td>
@@ -229,7 +229,7 @@
               {{if not .UsageEvents}}
               <tr>
                 <td colspan="8" class="text-center py-5 text-muted small">
-                  <div class="mb-2"><i class="bi bi-inbox fs-1 text-muted opacity-25"></i></div>
+                  <div class="mb-2"><span class="fs-1 text-muted opacity-25 material-symbols-rounded">inbox</span></div>
                   暂无请求明细数据
                 </td>
               </tr>
@@ -247,14 +247,14 @@
             <!-- 回到最新 (首页) -->
             <li class="page-item {{if not .UsageCursorActive}}disabled{{end}}">
               <a class="page-link" href="/usage?start={{.UsageStart}}&end={{.UsageEnd}}&limit={{.UsageLimit}}" aria-label="First">
-                <span aria-hidden="true"><i class="bi bi-chevron-bar-left"></i> 最新</span>
+                <span aria-hidden="true"><span class="material-symbols-rounded">first_page</span> 最新</span>
               </a>
             </li>
             
             <!-- 上一页 (较新) -> after_id -->
             <li class="page-item {{if not .UsagePrevAfterID}}disabled{{end}}">
               <a class="page-link" href="{{if .UsagePrevAfterID}}/usage?start={{.UsageStart}}&end={{.UsageEnd}}&limit={{.UsageLimit}}&after_id={{.UsagePrevAfterID}}{{else}}#{{end}}">
-                <i class="bi bi-chevron-left"></i> 上一页
+                <span class="material-symbols-rounded">chevron_left</span> 上一页
               </a>
             </li>
 
@@ -267,7 +267,7 @@
             <!-- 下一页 (较早) -> before_id -->
             <li class="page-item {{if not .UsageNextBeforeID}}disabled{{end}}">
               <a class="page-link" href="{{if .UsageNextBeforeID}}/usage?start={{.UsageStart}}&end={{.UsageEnd}}&limit={{.UsageLimit}}&before_id={{.UsageNextBeforeID}}{{else}}#{{end}}">
-                下一页 <i class="bi bi-chevron-right"></i>
+                下一页 <span class="material-symbols-rounded">chevron_right</span>
               </a>
             </li>
           </ul>

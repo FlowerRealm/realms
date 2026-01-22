@@ -154,10 +154,10 @@ func estimateCostUSD(ctx context.Context, st *store.Store, model *string, inputT
 		}
 		return decimal.Zero, err
 	}
-	inUSDPer1M := mm.InputUSDPer1M
-	outUSDPer1M := mm.OutputUSDPer1M
-	cacheUSDPer1M := mm.CacheUSDPer1M
+	return estimateCostUSDWithPricing(mm.InputUSDPer1M, mm.OutputUSDPer1M, mm.CacheInputUSDPer1M, mm.CacheOutputUSDPer1M, inputTokens, cachedInputTokens, outputTokens, cachedOutputTokens, maxOutputTokens)
+}
 
+func estimateCostUSDWithPricing(inUSDPer1M, outUSDPer1M, cacheInUSDPer1M, cacheOutUSDPer1M decimal.Decimal, inputTokens, cachedInputTokens, outputTokens, cachedOutputTokens, maxOutputTokens *int64) (decimal.Decimal, error) {
 	var inTok int64
 	var cachedInTok int64
 	var outTok int64
@@ -189,7 +189,6 @@ func estimateCostUSD(ctx context.Context, st *store.Store, model *string, inputT
 
 	nonCachedInTok := inTok - cachedInTok
 	nonCachedOutTok := outTok - cachedOutTok
-	cacheTok := cachedInTok + cachedOutTok
 
 	cost := func(tokens int64, usdPer1M decimal.Decimal) (decimal.Decimal, error) {
 		if tokens == 0 || usdPer1M.Equal(decimal.Zero) {
@@ -209,12 +208,16 @@ func estimateCostUSD(ctx context.Context, st *store.Store, model *string, inputT
 	if err != nil {
 		return decimal.Zero, err
 	}
-	cacheCost, err := cost(cacheTok, cacheUSDPer1M)
+	cacheInCost, err := cost(cachedInTok, cacheInUSDPer1M)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	cacheOutCost, err := cost(cachedOutTok, cacheOutUSDPer1M)
 	if err != nil {
 		return decimal.Zero, err
 	}
 
-	sum := inCost.Add(outCost).Add(cacheCost)
+	sum := inCost.Add(outCost).Add(cacheInCost).Add(cacheOutCost)
 	if sum.IsNegative() {
 		return decimal.Zero, errors.New("成本计算为负数")
 	}

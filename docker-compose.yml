@@ -2,13 +2,38 @@ services:
   mysql:
     image: mysql:8.0
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: realms
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-realms}
     ports:
       - "3306:3306"
     command: ["--default-authentication-plugin=mysql_native_password"]
+    volumes:
+      - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD"]
       interval: 5s
       timeout: 3s
       retries: 20
+    restart: unless-stopped
+
+  realms:
+    build:
+      context: .
+      args:
+        REALMS_BUILD_TAGS: ${REALMS_BUILD_TAGS:-}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      REALMS_ENV: ${REALMS_ENV:-prod}
+      REALMS_DB_DSN: ${REALMS_DB_DSN_DOCKER:-root:root@tcp(mysql:3306)/realms?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci}
+      REALMS_ALLOW_OPEN_REGISTRATION: ${REALMS_ALLOW_OPEN_REGISTRATION:-true}
+      REALMS_DISABLE_SECURE_COOKIES: ${REALMS_DISABLE_SECURE_COOKIES:-true}
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+volumes:
+  mysql_data:

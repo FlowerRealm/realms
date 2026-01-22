@@ -220,8 +220,8 @@ func parsePricingImportJSON(b []byte) (pricingImportParseResult, error) {
 }
 
 func parsePricingFromMap(m map[string]any) (store.ManagedModelPricingUpsert, bool, string) {
-	hasUSD := hasAnyKey(m, "input_usd_per_1m", "output_usd_per_1m", "cache_usd_per_1m")
-	hasToken := hasAnyKey(m, "input_cost_per_token", "output_cost_per_token", "cache_read_input_cost_per_token", "cache_read_cost_per_token")
+	hasUSD := hasAnyKey(m, "input_usd_per_1m", "output_usd_per_1m", "cache_input_usd_per_1m", "cache_output_usd_per_1m")
+	hasToken := hasAnyKey(m, "input_cost_per_token", "output_cost_per_token", "cache_read_input_cost_per_token", "cache_read_output_cost_per_token", "cache_read_cost_per_token")
 
 	if !hasUSD && !hasToken {
 		return store.ManagedModelPricingUpsert{}, false, "缺少定价字段（usd_per_1m 或 cost_per_token）"
@@ -236,17 +236,22 @@ func parsePricingFromMap(m map[string]any) (store.ManagedModelPricingUpsert, boo
 		if err != nil {
 			return store.ManagedModelPricingUpsert{}, false, "output_usd_per_1m 不合法"
 		}
-		cacheUSD, err := parseDecimalFieldOptional(m, "cache_usd_per_1m")
+		cacheInUSD, err := parseDecimalFieldOptional(m, "cache_input_usd_per_1m")
 		if err != nil {
-			return store.ManagedModelPricingUpsert{}, false, "cache_usd_per_1m 不合法"
+			return store.ManagedModelPricingUpsert{}, false, "cache_input_usd_per_1m 不合法"
 		}
-		if inUSD.IsNegative() || outUSD.IsNegative() || cacheUSD.IsNegative() {
+		cacheOutUSD, err := parseDecimalFieldOptional(m, "cache_output_usd_per_1m")
+		if err != nil {
+			return store.ManagedModelPricingUpsert{}, false, "cache_output_usd_per_1m 不合法"
+		}
+		if inUSD.IsNegative() || outUSD.IsNegative() || cacheInUSD.IsNegative() || cacheOutUSD.IsNegative() {
 			return store.ManagedModelPricingUpsert{}, false, "定价不能为负数"
 		}
 		return store.ManagedModelPricingUpsert{
 			InputUSDPer1M:  inUSD,
 			OutputUSDPer1M: outUSD,
-			CacheUSDPer1M:  cacheUSD,
+			CacheInputUSDPer1M:  cacheInUSD,
+			CacheOutputUSDPer1M: cacheOutUSD,
 		}, true, ""
 	}
 
@@ -260,28 +265,42 @@ func parsePricingFromMap(m map[string]any) (store.ManagedModelPricingUpsert, boo
 		return store.ManagedModelPricingUpsert{}, false, "output_cost_per_token 不合法"
 	}
 
-	cacheTok, err := parseDecimalFieldOptional(m, "cache_read_input_cost_per_token")
+	cacheInTok, err := parseDecimalFieldOptional(m, "cache_read_input_cost_per_token")
 	if err != nil {
 		return store.ManagedModelPricingUpsert{}, false, "cache_read_input_cost_per_token 不合法"
 	}
-	if cacheTok.IsZero() {
-		cacheTok, err = parseDecimalFieldOptional(m, "cache_read_cost_per_token")
+	cacheOutTok, err := parseDecimalFieldOptional(m, "cache_read_output_cost_per_token")
+	if err != nil {
+		return store.ManagedModelPricingUpsert{}, false, "cache_read_output_cost_per_token 不合法"
+	}
+
+	// LiteLLM 常见兜底字段：cache_read_cost_per_token（若缺少 input/output 维度，则视为同价）。
+	if cacheInTok.IsZero() || cacheOutTok.IsZero() {
+		cacheTok, err := parseDecimalFieldOptional(m, "cache_read_cost_per_token")
 		if err != nil {
 			return store.ManagedModelPricingUpsert{}, false, "cache_read_cost_per_token 不合法"
+		}
+		if cacheInTok.IsZero() {
+			cacheInTok = cacheTok
+		}
+		if cacheOutTok.IsZero() {
+			cacheOutTok = cacheTok
 		}
 	}
 
 	million := decimal.NewFromInt(1_000_000)
 	inUSD := inTok.Mul(million)
 	outUSD := outTok.Mul(million)
-	cacheUSD := cacheTok.Mul(million)
-	if inUSD.IsNegative() || outUSD.IsNegative() || cacheUSD.IsNegative() {
+	cacheInUSD := cacheInTok.Mul(million)
+	cacheOutUSD := cacheOutTok.Mul(million)
+	if inUSD.IsNegative() || outUSD.IsNegative() || cacheInUSD.IsNegative() || cacheOutUSD.IsNegative() {
 		return store.ManagedModelPricingUpsert{}, false, "定价不能为负数"
 	}
 	return store.ManagedModelPricingUpsert{
 		InputUSDPer1M:  inUSD,
 		OutputUSDPer1M: outUSD,
-		CacheUSDPer1M:  cacheUSD,
+		CacheInputUSDPer1M:  cacheInUSD,
+		CacheOutputUSDPer1M: cacheOutUSD,
 	}, true, ""
 }
 
@@ -392,4 +411,3 @@ func summarizeFailedItems(failed map[string]string, maxItems int) string {
 	}
 	return strings.Join(parts, "，")
 }
-

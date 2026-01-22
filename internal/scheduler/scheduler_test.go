@@ -10,10 +10,11 @@ import (
 )
 
 type fakeStore struct {
-	channels  []store.UpstreamChannel
-	endpoints map[int64][]store.UpstreamEndpoint
-	creds     map[int64][]store.OpenAICompatibleCredential
-	accounts  map[int64][]store.CodexOAuthAccount
+	channels       []store.UpstreamChannel
+	endpoints      map[int64][]store.UpstreamEndpoint
+	creds          map[int64][]store.OpenAICompatibleCredential
+	anthropicCreds map[int64][]store.AnthropicCredential
+	accounts       map[int64][]store.CodexOAuthAccount
 }
 
 func (f *fakeStore) ListUpstreamChannels(_ context.Context) ([]store.UpstreamChannel, error) {
@@ -26,6 +27,13 @@ func (f *fakeStore) ListUpstreamEndpointsByChannel(_ context.Context, channelID 
 
 func (f *fakeStore) ListOpenAICompatibleCredentialsByEndpoint(_ context.Context, endpointID int64) ([]store.OpenAICompatibleCredential, error) {
 	return f.creds[endpointID], nil
+}
+
+func (f *fakeStore) ListAnthropicCredentialsByEndpoint(_ context.Context, endpointID int64) ([]store.AnthropicCredential, error) {
+	if f.anthropicCreds == nil {
+		return nil, nil
+	}
+	return f.anthropicCreds[endpointID], nil
 }
 
 func (f *fakeStore) ListCodexOAuthAccountsByEndpoint(_ context.Context, endpointID int64) ([]store.CodexOAuthAccount, error) {
