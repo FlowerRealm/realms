@@ -22,7 +22,7 @@ import (
 )
 
 func main() {
-	cfg, err := config.Load()
+	cfg, err := config.Load("config.yaml")
 	if err != nil {
 		slog.Error("加载配置失败", "err", err)
 		os.Exit(1)

@@ -76,7 +76,8 @@ type AdminConfigManagedModel struct {
 	OwnedBy        *string         `json:"owned_by,omitempty"`
 	InputUSDPer1M  decimal.Decimal `json:"input_usd_per_1m"`
 	OutputUSDPer1M decimal.Decimal `json:"output_usd_per_1m"`
-	CacheUSDPer1M  decimal.Decimal `json:"cache_usd_per_1m"`
+	CacheInputUSDPer1M  decimal.Decimal `json:"cache_input_usd_per_1m"`
+	CacheOutputUSDPer1M decimal.Decimal `json:"cache_output_usd_per_1m"`
 	Status         int             `json:"status"`
 }
 
@@ -215,7 +216,8 @@ func (s *Store) ExportAdminConfig(ctx context.Context) (AdminConfigExport, error
 			OwnedBy:        m.OwnedBy,
 			InputUSDPer1M:  m.InputUSDPer1M,
 			OutputUSDPer1M: m.OutputUSDPer1M,
-			CacheUSDPer1M:  m.CacheUSDPer1M,
+			CacheInputUSDPer1M:  m.CacheInputUSDPer1M,
+			CacheOutputUSDPer1M: m.CacheOutputUSDPer1M,
 			Status:         m.Status,
 		})
 	}
@@ -543,26 +545,28 @@ ON CONFLICT(channel_id) DO UPDATE SET
 	}
 
 	stmtUpsertManagedModel := `
-INSERT INTO managed_models(public_id, upstream_model, owned_by, input_usd_per_1m, output_usd_per_1m, cache_usd_per_1m, status, created_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+INSERT INTO managed_models(public_id, upstream_model, owned_by, input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m, status, created_at)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 ON DUPLICATE KEY UPDATE
   upstream_model=VALUES(upstream_model),
   owned_by=VALUES(owned_by),
   input_usd_per_1m=VALUES(input_usd_per_1m),
   output_usd_per_1m=VALUES(output_usd_per_1m),
-  cache_usd_per_1m=VALUES(cache_usd_per_1m),
+  cache_input_usd_per_1m=VALUES(cache_input_usd_per_1m),
+  cache_output_usd_per_1m=VALUES(cache_output_usd_per_1m),
   status=VALUES(status)
 `
 	if s.dialect == DialectSQLite {
 		stmtUpsertManagedModel = `
-INSERT INTO managed_models(public_id, upstream_model, owned_by, input_usd_per_1m, output_usd_per_1m, cache_usd_per_1m, status, created_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+INSERT INTO managed_models(public_id, upstream_model, owned_by, input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m, status, created_at)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 ON CONFLICT(public_id) DO UPDATE SET
   upstream_model=excluded.upstream_model,
   owned_by=excluded.owned_by,
   input_usd_per_1m=excluded.input_usd_per_1m,
   output_usd_per_1m=excluded.output_usd_per_1m,
-  cache_usd_per_1m=excluded.cache_usd_per_1m,
+  cache_input_usd_per_1m=excluded.cache_input_usd_per_1m,
+  cache_output_usd_per_1m=excluded.cache_output_usd_per_1m,
   status=excluded.status
 `
 	}
@@ -574,15 +578,16 @@ ON CONFLICT(public_id) DO UPDATE SET
 		}
 		inUSD := m.InputUSDPer1M.Truncate(USDScale)
 		outUSD := m.OutputUSDPer1M.Truncate(USDScale)
-		cacheUSD := m.CacheUSDPer1M.Truncate(USDScale)
-		if inUSD.IsNegative() || outUSD.IsNegative() || cacheUSD.IsNegative() {
+		cacheInUSD := m.CacheInputUSDPer1M.Truncate(USDScale)
+		cacheOutUSD := m.CacheOutputUSDPer1M.Truncate(USDScale)
+		if inUSD.IsNegative() || outUSD.IsNegative() || cacheInUSD.IsNegative() || cacheOutUSD.IsNegative() {
 			return AdminConfigImportReport{}, fmt.Errorf("managed_models[%s] 定价不合法", publicID)
 		}
 		status := m.Status
 		if status != 0 && status != 1 {
 			status = 1
 		}
-		if _, err := tx.ExecContext(ctx, stmtUpsertManagedModel, publicID, m.UpstreamModel, m.OwnedBy, inUSD, outUSD, cacheUSD, status); err != nil {
+		if _, err := tx.ExecContext(ctx, stmtUpsertManagedModel, publicID, m.UpstreamModel, m.OwnedBy, inUSD, outUSD, cacheInUSD, cacheOutUSD, status); err != nil {
 			return AdminConfigImportReport{}, fmt.Errorf("导入 managed_models 失败: %w", err)
 		}
 	}
