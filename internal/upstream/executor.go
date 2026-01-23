@@ -107,9 +107,7 @@ func (e *Executor) Do(ctx context.Context, sel scheduler.Selection, downstream *
 	}
 	// Codex OAuth：部分上游的 path 仍停留在旧版 /responses；也可能反过来只接受 /v1/responses。
 	// 为减少“配置正确但路径不兼容”导致的误报，这里在 404（以及部分返回 HTML 的 403）时做一次互斥形态的兜底重试。
-	if sel.CredentialType == scheduler.CredentialTypeCodex && resp != nil &&
-		(resp.StatusCode == http.StatusNotFound ||
-			(resp.StatusCode == http.StatusForbidden && strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html"))) {
+	if sel.CredentialType == scheduler.CredentialTypeCodex && resp != nil && shouldAttemptCodexPathFallback(resp) {
 		altPassthrough := !e.codexRequestPassthrough
 		req2, err2 := e.buildRequestWithCodexPassthrough(ctx, sel, downstream, body, altPassthrough)
 		if err2 == nil {
@@ -132,6 +130,79 @@ func (e *Executor) Do(ctx context.Context, sel scheduler.Selection, downstream *
 		resp.Body = cancelOnClose(resp.Body, cancel)
 	}
 	return resp, nil
+}
+
+type restoringReadCloser struct {
+	reader io.Reader
+	closer io.Closer
+}
+
+func (r *restoringReadCloser) Read(p []byte) (int, error) {
+	return r.reader.Read(p)
+}
+
+func (r *restoringReadCloser) Close() error {
+	return r.closer.Close()
+}
+
+func peekResponseBody(resp *http.Response, maxBytes int64) ([]byte, error) {
+	if resp == nil || resp.Body == nil || maxBytes <= 0 {
+		return nil, nil
+	}
+	origBody := resp.Body
+	limited := io.LimitReader(origBody, maxBytes)
+	b, err := io.ReadAll(limited)
+	resp.Body = &restoringReadCloser{
+		reader: io.MultiReader(bytes.NewReader(b), origBody),
+		closer: origBody,
+	}
+	return b, err
+}
+
+func shouldAttemptCodexPathFallback(resp *http.Response) bool {
+	if resp == nil {
+		return false
+	}
+	switch resp.StatusCode {
+	case http.StatusNotFound:
+		return true
+	case http.StatusForbidden:
+		// 403 + HTML 通常是 upstream 侧的登录墙/防护页；尝试另一种 path 形态以提高兼容性。
+		return strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html")
+	case http.StatusBadRequest:
+		// 部分 Codex 上游会以 400 返回“Unsupported parameter: max_output_tokens”等兼容性错误；
+		// 这种情况下尝试切换到 legacy /responses + 兼容改写可以恢复。
+		b, _ := peekResponseBody(resp, 32<<10)
+		return looksLikeCodexUnsupportedParameter(b)
+	default:
+		return false
+	}
+}
+
+func looksLikeCodexUnsupportedParameter(body []byte) bool {
+	if len(body) == 0 {
+		return false
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false
+	}
+	detail, _ := payload["detail"].(string)
+	detail = strings.ToLower(strings.TrimSpace(detail))
+	if detail == "" {
+		return false
+	}
+	if !strings.Contains(detail, "unsupported parameter") {
+		return false
+	}
+	// 目前已观测到的兼容性字段（Codex OAuth 上游不接受）。
+	if strings.Contains(detail, "max_output_tokens") {
+		return true
+	}
+	if strings.Contains(detail, "max_completion_tokens") {
+		return true
+	}
+	return false
 }
 
 func (e *Executor) wrapTimeout(ctx context.Context, sel scheduler.Selection, downstream *http.Request, body []byte) (context.Context, context.CancelFunc) {
