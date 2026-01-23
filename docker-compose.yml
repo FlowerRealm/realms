@@ -4,8 +4,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-realms}
-    ports:
-      - "3306:3306"
+    # 不暴露到宿主机：避免与现有 MySQL 冲突，也减少攻击面
     command: ["--default-authentication-plugin=mysql_native_password"]
     volumes:
       - mysql_data:/var/lib/mysql
@@ -32,7 +31,11 @@ services:
       REALMS_ALLOW_OPEN_REGISTRATION: ${REALMS_ALLOW_OPEN_REGISTRATION:-true}
       REALMS_DISABLE_SECURE_COOKIES: ${REALMS_DISABLE_SECURE_COOKIES:-true}
     ports:
-      - "8080:8080"
+      # 仅本机监听：对外统一走 Nginx(443) 反代
+      - "127.0.0.1:${REALMS_HTTP_PORT:-18080}:8080"
+    volumes:
+      # 持久化附件/导出等运行时数据（容器内 /data）
+      - ./data:/data
     restart: unless-stopped
 
 volumes:
