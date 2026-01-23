@@ -35,7 +35,7 @@
       </thead>
       <tbody>
         {{range .SubscriptionOrders}}
-        <tr>
+        <tr {{if and (ne .Status 1) (ne .Status 0)}}style="opacity: 0.5;"{{end}}>
           <td class="ps-4">
             <div class="font-monospace text-muted small">#{{.ID}}</div>
           </td>
@@ -69,13 +69,13 @@
             <div class="d-inline-flex gap-1">
               <form method="POST" action="/admin/orders/{{.ID}}/approve" class="d-inline">
                 <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
-                <button type="submit" class="btn btn-sm btn-light border text-success" title="批准生效" onclick="return confirm('确认批准并生效？该订单将被处理。');">
+                <button type="submit" class="btn btn-sm btn-light border text-success" title="批准生效" onclick="return confirm('确认批准并生效？该订单将被处理。');" {{if and (ne .Status 1) (ne .Status 0)}}disabled{{end}}>
                   <i class="ri-checkbox-circle-line"></i>
                 </button>
               </form>
               <form method="POST" action="/admin/orders/{{.ID}}/reject" class="d-inline">
                 <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
-                <button type="submit" class="btn btn-sm btn-light border text-danger" title="不批准" onclick="return confirm('确认不批准？订单将不会生效。');">
+                <button type="submit" class="btn btn-sm btn-light border text-danger" title="不批准" onclick="return confirm('确认不批准？订单将不会生效。');" {{if and (ne .Status 1) (ne .Status 0)}}disabled{{end}}>
                   <i class="ri-close-circle-line"></i>
                 </button>
               </form>
