@@ -227,6 +227,57 @@ func TestExecutor_Do_CodexOAuth_Passthrough404_FallsBackToLegacyResponsesPath(t 
 	}
 }
 
+func TestExecutor_Do_CodexOAuth_Passthrough400UnsupportedParam_FallsBackToLegacyResponsesPath(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/backend-api/codex/v1/responses":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"detail":"Unsupported parameter: max_output_tokens"}`))
+		case "/backend-api/codex/responses":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"pong\"}\n\ndata: [DONE]\n\n"))
+		default:
+			w.WriteHeader(http.StatusTeapot)
+		}
+	}))
+	defer srv.Close()
+
+	exec := &Executor{
+		st: &fakeUpstreamStore{
+			codexSecret: store.CodexOAuthSecret{
+				AccountID:    "acc",
+				AccessToken:  "at",
+				RefreshToken: "rt",
+			},
+		},
+		client:                  srv.Client(),
+		codexRequestPassthrough: true,
+	}
+
+	body := []byte(`{"model":"gpt-5.2","stream":true,"max_output_tokens":123,"input":"hi"}`)
+	downstream := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader(body))
+	resp, err := exec.Do(context.Background(), scheduler.Selection{
+		BaseURL:        srv.URL + "/backend-api/codex",
+		CredentialType: scheduler.CredentialTypeCodex,
+		CredentialID:   123,
+	}, downstream, body)
+	if err != nil {
+		t.Fatalf("Do returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d (%s)", resp.StatusCode, string(b))
+	}
+	if len(paths) != 2 || paths[0] != "/backend-api/codex/v1/responses" || paths[1] != "/backend-api/codex/responses" {
+		t.Fatalf("unexpected paths: %#v", paths)
+	}
+}
+
 func TestExecutor_Do_CodexOAuth_Passthrough403HTML_FallsBackToLegacyResponsesPath(t *testing.T) {
 	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
