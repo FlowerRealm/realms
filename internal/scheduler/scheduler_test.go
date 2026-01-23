@@ -73,6 +73,41 @@ func TestSelect_PromotionBeatsPriority(t *testing.T) {
 	}
 }
 
+func TestSelect_ForcedChannelBeatsPromotion(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0, Promotion: true},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 100, Promotion: false},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+			2: {
+				{ID: 21, ChannelID: 2, BaseURL: "https://b.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+			},
+			21: {
+				{ID: 211, EndpointID: 21, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+	s.state.SetForcedChannel(2, time.Now().Add(5*time.Minute))
+
+	sel, err := s.Select(context.Background(), 10, "")
+	if err != nil {
+		t.Fatalf("Select err: %v", err)
+	}
+	if sel.ChannelID != 2 {
+		t.Fatalf("expected forced channel=2, got=%d", sel.ChannelID)
+	}
+}
+
 func TestSelect_AffinityBeatsPriority(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
@@ -104,6 +139,34 @@ func TestSelect_AffinityBeatsPriority(t *testing.T) {
 	}
 	if sel.ChannelID != 1 {
 		t.Fatalf("expected channel=1 due to affinity, got=%d", sel.ChannelID)
+	}
+}
+
+func TestSortCandidates_ForcedChannelFirst(t *testing.T) {
+	in := map[int64]channelCandidate{
+		1: {ChannelID: 1, Priority: 0, Promotion: true},
+		2: {ChannelID: 2, Priority: 100, Promotion: false},
+	}
+	out := sortCandidates(in, 2, func(int64) int { return 0 })
+	if len(out) != 2 {
+		t.Fatalf("expected 2 candidates, got=%d", len(out))
+	}
+	if out[0].ChannelID != 2 {
+		t.Fatalf("expected forced channel first, got=%d", out[0].ChannelID)
+	}
+}
+
+func TestReport_RecordsLastSuccess(t *testing.T) {
+	s := New(&fakeStore{})
+	sel := Selection{ChannelID: 9, CredentialType: CredentialTypeOpenAI, CredentialID: 1}
+	s.Report(sel, Result{Success: true})
+
+	got, _, ok := s.LastSuccess()
+	if !ok {
+		t.Fatalf("expected last success to be recorded")
+	}
+	if got.ChannelID != 9 {
+		t.Fatalf("expected channel=9, got=%d", got.ChannelID)
 	}
 }
 

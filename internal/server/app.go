@@ -375,10 +375,11 @@ func (a *App) routes() {
 	a.mux.Handle("POST /admin/channel-groups/{group_id}/children/reorder", adminFeatureChain(store.SettingFeatureDisableAdminChannelGroups, http.HandlerFunc(a.admin.ReorderChannelGroupMembers)))
 	a.mux.Handle("POST /admin/channel-groups/{group_id}/delete", adminFeatureChain(store.SettingFeatureDisableAdminChannelGroups, http.HandlerFunc(a.admin.DeleteChannelGroup)))
 	a.mux.Handle("POST /admin/channels/reorder", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.ReorderChannels)))
-	// 兼容：部分前端/代理可能无法正确透传 path 参数，允许从表单 channel_id 读取。
-	a.mux.Handle("POST /admin/channels/test", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.TestChannel)))
-	a.mux.Handle("POST /admin/channels/{channel_id}/test", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.TestChannel)))
-	a.mux.Handle("POST /admin/channels/{channel_id}/delete", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.DeleteChannel)))
+		// 兼容：部分前端/代理可能无法正确透传 path 参数，允许从表单 channel_id 读取。
+		a.mux.Handle("POST /admin/channels/test", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.TestChannel)))
+		a.mux.Handle("POST /admin/channels/{channel_id}/test", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.TestChannel)))
+		a.mux.Handle("POST /admin/channels/{channel_id}/promote", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.PromoteChannel5Min)))
+		a.mux.Handle("POST /admin/channels/{channel_id}/delete", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.DeleteChannel)))
 	a.mux.Handle("GET /admin/channels/{channel_id}/models", adminFeatureChain2(store.SettingFeatureDisableAdminChannels, store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.ChannelModels)))
 	a.mux.Handle("POST /admin/channels/{channel_id}/models", adminFeatureChain2(store.SettingFeatureDisableAdminChannels, store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.CreateChannelModel)))
 	a.mux.Handle("GET /admin/channels/{channel_id}/models/{binding_id}", adminFeatureChain2(store.SettingFeatureDisableAdminChannels, store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.ChannelModel)))

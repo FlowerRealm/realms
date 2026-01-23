@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"time"
 
 	"realms/internal/store"
 )
@@ -136,7 +137,13 @@ func (r *GroupRouter) nextFromGroup(ctx context.Context, groupID int64) (Selecti
 	if len(cands) == 0 {
 		return Selection{}, errGroupExhausted
 	}
-	ordered := sortCandidates(cands, func(channelID int64) int {
+	forcedID := int64(0)
+	if r.sched != nil {
+		if id, _, ok := r.sched.ForcedChannel(time.Now()); ok {
+			forcedID = id
+		}
+	}
+	ordered := sortCandidates(cands, forcedID, func(channelID int64) int {
 		if r.sched == nil || r.sched.state == nil {
 			return 0
 		}
@@ -245,12 +252,20 @@ func (r *GroupRouter) collectCandidates(ctx context.Context, groupID int64, out 
 	return nil
 }
 
-func sortCandidates(in map[int64]channelCandidate, failScore func(channelID int64) int) []channelCandidate {
+func sortCandidates(in map[int64]channelCandidate, forcedChannelID int64, failScore func(channelID int64) int) []channelCandidate {
 	out := make([]channelCandidate, 0, len(in))
 	for _, c := range in {
 		out = append(out, c)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
+		if forcedChannelID != 0 {
+			if out[i].ChannelID == forcedChannelID && out[j].ChannelID != forcedChannelID {
+				return true
+			}
+			if out[j].ChannelID == forcedChannelID && out[i].ChannelID != forcedChannelID {
+				return false
+			}
+		}
 		if out[i].Promotion != out[j].Promotion {
 			return out[i].Promotion
 		}

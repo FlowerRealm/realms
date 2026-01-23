@@ -16,6 +16,8 @@ type RuntimeChannelStats struct {
 
 	BannedUntil *time.Time
 	BanStreak   int
+
+	ForcedUntil *time.Time
 }
 
 func (s *Scheduler) RuntimeCredentialStats(credentialKey string) RuntimeCredentialStats {
@@ -94,6 +96,15 @@ func (s *Scheduler) RuntimeChannelStats(channelID int64) RuntimeChannelStats {
 		BanStreak: st.channelBanStreak[channelID],
 	}
 
+	if st.forcedChannelID != 0 && !st.forcedChannelUntil.IsZero() && now.After(st.forcedChannelUntil) {
+		st.forcedChannelID = 0
+		st.forcedChannelUntil = time.Time{}
+	}
+	if st.forcedChannelID == channelID && !st.forcedChannelUntil.IsZero() {
+		u := st.forcedChannelUntil
+		out.ForcedUntil = &u
+	}
+
 	if until, ok := st.channelBanUntil[channelID]; ok {
 		if now.After(until) {
 			delete(st.channelBanUntil, channelID)
@@ -106,4 +117,3 @@ func (s *Scheduler) RuntimeChannelStats(channelID int64) RuntimeChannelStats {
 
 	return out
 }
-

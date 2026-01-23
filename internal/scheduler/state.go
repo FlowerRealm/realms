@@ -41,6 +41,12 @@ type State struct {
 
 	channelBanUntil  map[int64]time.Time
 	channelBanStreak map[int64]int
+
+	forcedChannelID    int64
+	forcedChannelUntil time.Time
+
+	lastSuccessSel Selection
+	lastSuccessAt  time.Time
 }
 
 func NewState() *State {
@@ -56,6 +62,70 @@ func NewState() *State {
 		channelBanUntil:    make(map[int64]time.Time),
 		channelBanStreak:   make(map[int64]int),
 	}
+}
+
+func (s *State) SetForcedChannel(channelID int64, until time.Time) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if channelID <= 0 || until.IsZero() || time.Now().After(until) {
+		s.forcedChannelID = 0
+		s.forcedChannelUntil = time.Time{}
+		return
+	}
+	s.forcedChannelID = channelID
+	s.forcedChannelUntil = until
+}
+
+func (s *State) ForcedChannel(now time.Time) (int64, time.Time, bool) {
+	if s == nil {
+		return 0, time.Time{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.forcedChannelID <= 0 || s.forcedChannelUntil.IsZero() {
+		return 0, time.Time{}, false
+	}
+	if now.After(s.forcedChannelUntil) {
+		s.forcedChannelID = 0
+		s.forcedChannelUntil = time.Time{}
+		return 0, time.Time{}, false
+	}
+	return s.forcedChannelID, s.forcedChannelUntil, true
+}
+
+func (s *State) ClearForcedChannel() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.forcedChannelID = 0
+	s.forcedChannelUntil = time.Time{}
+}
+
+func (s *State) RecordLastSuccess(sel Selection, at time.Time) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastSuccessSel = sel
+	s.lastSuccessAt = at
+}
+
+func (s *State) LastSuccess() (Selection, time.Time, bool) {
+	if s == nil {
+		return Selection{}, time.Time{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lastSuccessAt.IsZero() {
+		return Selection{}, time.Time{}, false
+	}
+	return s.lastSuccessSel, s.lastSuccessAt, true
 }
 
 func (s *State) bindingKey(userID int64, routeKeyHash string) string {

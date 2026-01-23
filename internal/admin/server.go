@@ -371,6 +371,7 @@ type templateData struct {
 
 	Channels       []store.UpstreamChannel
 	ChannelViews   []adminChannelView
+	SchedulerRuntime adminSchedulerRuntimeView
 	Channel        store.UpstreamChannel
 	ChannelRuntime adminChannelRuntimeView
 	Endpoints      []store.UpstreamEndpoint
@@ -460,6 +461,7 @@ type adminChannelView struct {
 	Channel  store.UpstreamChannel
 	Endpoint store.UpstreamEndpoint
 	Usage    adminChannelUsageView
+	Runtime  adminChannelRuntimeView
 }
 
 type adminChannelUsageView struct {
@@ -488,8 +490,28 @@ type adminChannelRuntimeView struct {
 
 	FailScore    int
 	BannedUntil  string
+	BannedRemaining string
 	BanStreak    int
 	BannedActive bool
+
+	ForcedUntil     string
+	ForcedRemaining string
+	ForcedActive    bool
+}
+
+type adminSchedulerRuntimeView struct {
+	Available bool
+
+	ForcedActive    bool
+	ForcedChannelID int64
+	ForcedChannel   string
+	ForcedUntil     string
+	ForcedRemaining string
+
+	LastSuccessActive    bool
+	LastSuccessChannelID int64
+	LastSuccessChannel   string
+	LastSuccessAt        string
 }
 
 type adminCredentialView struct {
@@ -2033,6 +2055,7 @@ func (s *Server) Channels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	loc, tzName := s.adminTimeLocation(r.Context())
+	nowRuntime := time.Now()
 
 	nowUTC := time.Now().UTC()
 	nowLocal := nowUTC.In(loc)
@@ -2089,6 +2112,10 @@ func (s *Server) Channels(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "查询失败", http.StatusInternalServerError)
 		return
 	}
+	channelNameByID := make(map[int64]string, len(channels))
+	for _, ch := range channels {
+		channelNameByID[ch.ID] = ch.Name
+	}
 
 	var cvs []adminChannelView
 	for _, ch := range channels {
@@ -2099,6 +2126,23 @@ func (s *Server) Channels(w http.ResponseWriter, r *http.Request) {
 				ep, _ = s.st.SetUpstreamEndpointBaseURL(r.Context(), ch.ID, def)
 			}
 		}
+		channelRuntime := adminChannelRuntimeView{Available: s.sched != nil}
+		if s.sched != nil {
+			rt := s.sched.RuntimeChannelStats(ch.ID)
+			channelRuntime.FailScore = rt.FailScore
+			channelRuntime.BanStreak = rt.BanStreak
+			if rt.BannedUntil != nil {
+				channelRuntime.BannedActive = true
+				channelRuntime.BannedUntil = formatTimeIn(*rt.BannedUntil, time.RFC3339, loc)
+				channelRuntime.BannedRemaining = formatRemainingUntilZH(*rt.BannedUntil, nowRuntime)
+			}
+			if rt.ForcedUntil != nil {
+				channelRuntime.ForcedActive = true
+				channelRuntime.ForcedUntil = formatTimeIn(*rt.ForcedUntil, time.RFC3339, loc)
+				channelRuntime.ForcedRemaining = formatRemainingUntilZH(*rt.ForcedUntil, nowRuntime)
+			}
+		}
+
 		us := usageByChannelID[ch.ID]
 		cvs = append(cvs, adminChannelView{
 			Channel:  ch,
@@ -2108,6 +2152,7 @@ func (s *Server) Channels(w http.ResponseWriter, r *http.Request) {
 				Tokens:       us.Tokens,
 				CacheRatio:   fmt.Sprintf("%.1f%%", us.CacheRatio*100),
 			},
+			Runtime: channelRuntime,
 		})
 	}
 
@@ -2130,6 +2175,30 @@ func (s *Server) Channels(w http.ResponseWriter, r *http.Request) {
 	if len(notice) > 200 {
 		notice = notice[:200] + "..."
 	}
+	schedulerRuntime := adminSchedulerRuntimeView{Available: s.sched != nil}
+	if s.sched != nil {
+		if id, until, ok := s.sched.ForcedChannel(nowRuntime); ok {
+			schedulerRuntime.ForcedActive = true
+			schedulerRuntime.ForcedChannelID = id
+			if name := strings.TrimSpace(channelNameByID[id]); name != "" {
+				schedulerRuntime.ForcedChannel = fmt.Sprintf("%s (#%d)", name, id)
+			} else {
+				schedulerRuntime.ForcedChannel = fmt.Sprintf("渠道 #%d", id)
+			}
+			schedulerRuntime.ForcedUntil = formatTimeIn(until, time.RFC3339, loc)
+			schedulerRuntime.ForcedRemaining = formatRemainingUntilZH(until, nowRuntime)
+		}
+		if sel, at, ok := s.sched.LastSuccess(); ok {
+			schedulerRuntime.LastSuccessActive = true
+			schedulerRuntime.LastSuccessChannelID = sel.ChannelID
+			if name := strings.TrimSpace(channelNameByID[sel.ChannelID]); name != "" {
+				schedulerRuntime.LastSuccessChannel = fmt.Sprintf("%s (#%d)", name, sel.ChannelID)
+			} else if sel.ChannelID > 0 {
+				schedulerRuntime.LastSuccessChannel = fmt.Sprintf("渠道 #%d", sel.ChannelID)
+			}
+			schedulerRuntime.LastSuccessAt = formatTimeIn(at, "2006-01-02 15:04:05", loc)
+		}
+	}
 	s.render(w, "admin_channels", s.withFeatures(r.Context(), templateData{
 		Title:                  "上游渠道 - Realms",
 		Error:                  errMsg,
@@ -2143,6 +2212,7 @@ func (s *Server) Channels(w http.ResponseWriter, r *http.Request) {
 		ChannelGroups:          channelGroups,
 		Channels:               channels,
 		ChannelViews:           cvs,
+		SchedulerRuntime:       schedulerRuntime,
 	}))
 }
 
@@ -2420,6 +2490,7 @@ func (s *Server) Endpoints(w http.ResponseWriter, r *http.Request) {
 	}
 
 	loc, _ := s.adminTimeLocation(r.Context())
+	nowRuntime := time.Now()
 	ep, err := s.st.GetUpstreamEndpointByChannelID(r.Context(), ch.ID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -2446,15 +2517,21 @@ func (s *Server) Endpoints(w http.ResponseWriter, r *http.Request) {
 	channelRuntime := adminChannelRuntimeView{
 		Available: s.sched != nil,
 	}
-	if s.sched != nil {
-		rt := s.sched.RuntimeChannelStats(ch.ID)
-		channelRuntime.FailScore = rt.FailScore
-		channelRuntime.BanStreak = rt.BanStreak
-		if rt.BannedUntil != nil {
-			channelRuntime.BannedActive = true
-			channelRuntime.BannedUntil = formatTimeIn(*rt.BannedUntil, time.RFC3339, loc)
+		if s.sched != nil {
+			rt := s.sched.RuntimeChannelStats(ch.ID)
+			channelRuntime.FailScore = rt.FailScore
+			channelRuntime.BanStreak = rt.BanStreak
+			if rt.BannedUntil != nil {
+				channelRuntime.BannedActive = true
+				channelRuntime.BannedUntil = formatTimeIn(*rt.BannedUntil, time.RFC3339, loc)
+				channelRuntime.BannedRemaining = formatRemainingUntilZH(*rt.BannedUntil, nowRuntime)
+			}
+			if rt.ForcedUntil != nil {
+				channelRuntime.ForcedActive = true
+				channelRuntime.ForcedUntil = formatTimeIn(*rt.ForcedUntil, time.RFC3339, loc)
+				channelRuntime.ForcedRemaining = formatRemainingUntilZH(*rt.ForcedUntil, nowRuntime)
+			}
 		}
-	}
 
 	var creds []adminCredentialView
 	switch ch.Type {

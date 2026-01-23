@@ -11,8 +11,11 @@
         {{end}}
         {{if .ChannelRuntime.Available}}
           <span class="ms-2 badge bg-light text-dark border fw-normal">失败计分: {{.ChannelRuntime.FailScore}}</span>
+          {{if .ChannelRuntime.ForcedActive}}
+            <span class="ms-1 badge bg-warning-subtle text-warning-emphasis border fw-normal">手动最高优先级 · 剩余 {{.ChannelRuntime.ForcedRemaining}}</span>
+          {{end}}
           {{if .ChannelRuntime.BannedActive}}
-            <span class="ms-1 badge bg-warning-subtle text-warning-emphasis border fw-normal">封禁至 {{.ChannelRuntime.BannedUntil}}（连续={{.ChannelRuntime.BanStreak}}）</span>
+            <span class="ms-1 badge bg-warning-subtle text-warning-emphasis border fw-normal">封禁至 {{.ChannelRuntime.BannedUntil}}（剩余 {{.ChannelRuntime.BannedRemaining}}，连续={{.ChannelRuntime.BanStreak}}）</span>
           {{end}}
         {{end}}
 	    </p>

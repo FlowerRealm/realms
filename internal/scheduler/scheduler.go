@@ -85,6 +85,36 @@ func New(st UpstreamStore) *Scheduler {
 	}
 }
 
+func (s *Scheduler) ForceChannelFor(channelID int64, d time.Duration) time.Time {
+	if s == nil || s.state == nil || channelID <= 0 || d <= 0 {
+		return time.Time{}
+	}
+	until := time.Now().Add(d)
+	s.state.SetForcedChannel(channelID, until)
+	return until
+}
+
+func (s *Scheduler) ForcedChannel(now time.Time) (int64, time.Time, bool) {
+	if s == nil || s.state == nil {
+		return 0, time.Time{}, false
+	}
+	return s.state.ForcedChannel(now)
+}
+
+func (s *Scheduler) ClearChannelBan(channelID int64) {
+	if s == nil || s.state == nil {
+		return
+	}
+	s.state.ClearChannelBan(channelID)
+}
+
+func (s *Scheduler) LastSuccess() (Selection, time.Time, bool) {
+	if s == nil || s.state == nil {
+		return Selection{}, time.Time{}, false
+	}
+	return s.state.LastSuccess()
+}
+
 func (s *Scheduler) RouteKeyHash(routeKey string) string {
 	if routeKey == "" {
 		return ""
@@ -173,7 +203,11 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 	}
 
 	affinityChannelID, affinityOK := s.state.GetAffinity(userID, now)
-	ordered := orderChannels(candidates, affinityChannelID, affinityOK, s.state.ChannelFailScore)
+	forcedChannelID, _, forcedOK := s.state.ForcedChannel(now)
+	if !forcedOK {
+		forcedChannelID = 0
+	}
+	ordered := orderChannels(candidates, forcedChannelID, affinityChannelID, affinityOK, s.state.ChannelFailScore)
 
 	// 3) 选择 endpoint + credential
 	for _, ch := range ordered {
@@ -458,6 +492,7 @@ func (s *Scheduler) Report(sel Selection, res Result) {
 		s.state.RecordChannelResult(sel.ChannelID, true)
 		s.state.RecordCredentialResult(sel.CredentialKey(), true)
 		s.state.ClearChannelBan(sel.ChannelID)
+		s.state.RecordLastSuccess(sel, now)
 		return
 	}
 	s.state.RecordChannelResult(sel.ChannelID, false)
@@ -482,11 +517,16 @@ func (s *Scheduler) RecordTokens(credentialKey string, tokens int) {
 	s.state.RecordTokens(credentialKey, time.Now(), tokens)
 }
 
-func orderChannels(chs []store.UpstreamChannel, affinityChannelID int64, affinityOK bool, failScore func(channelID int64) int) []store.UpstreamChannel {
+func orderChannels(chs []store.UpstreamChannel, forcedChannelID int64, affinityChannelID int64, affinityOK bool, failScore func(channelID int64) int) []store.UpstreamChannel {
 	seen := make(map[int64]struct{}, len(chs))
+	var forced []store.UpstreamChannel
 	var promoted []store.UpstreamChannel
 	var normal []store.UpstreamChannel
 	for _, c := range chs {
+		if forcedChannelID != 0 && c.ID == forcedChannelID {
+			forced = append(forced, c)
+			continue
+		}
 		if c.Promotion {
 			promoted = append(promoted, c)
 		} else {
@@ -507,6 +547,10 @@ func orderChannels(chs []store.UpstreamChannel, affinityChannelID int64, affinit
 	})
 
 	var out []store.UpstreamChannel
+	for _, c := range forced {
+		out = append(out, c)
+		seen[c.ID] = struct{}{}
+	}
 	for _, c := range promoted {
 		out = append(out, c)
 		seen[c.ID] = struct{}{}
