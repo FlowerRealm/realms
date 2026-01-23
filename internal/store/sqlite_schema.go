@@ -17,7 +17,7 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 	var v int
 	err := db.QueryRow(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='users' LIMIT 1`).Scan(&v)
 	if err == nil && v == 1 {
-		return nil
+		return ensureSQLiteChannelGroupMembers(db)
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("检查 SQLite schema 状态失败: %w", err)
@@ -43,5 +43,5 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("提交 SQLite schema 初始化失败: %w", err)
 	}
-	return nil
+	return ensureSQLiteChannelGroupMembers(db)
 }

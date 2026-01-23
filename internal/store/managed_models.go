@@ -13,24 +13,24 @@ import (
 )
 
 type ManagedModelCreate struct {
-	PublicID       string
-	OwnedBy        *string
-	InputUSDPer1M  decimal.Decimal
-	OutputUSDPer1M decimal.Decimal
+	PublicID            string
+	OwnedBy             *string
+	InputUSDPer1M       decimal.Decimal
+	OutputUSDPer1M      decimal.Decimal
 	CacheInputUSDPer1M  decimal.Decimal
 	CacheOutputUSDPer1M decimal.Decimal
-	Status         int
+	Status              int
 }
 
 type ManagedModelUpdate struct {
-	ID             int64
-	PublicID       string
-	OwnedBy        *string
-	InputUSDPer1M  decimal.Decimal
-	OutputUSDPer1M decimal.Decimal
+	ID                  int64
+	PublicID            string
+	OwnedBy             *string
+	InputUSDPer1M       decimal.Decimal
+	OutputUSDPer1M      decimal.Decimal
 	CacheInputUSDPer1M  decimal.Decimal
 	CacheOutputUSDPer1M decimal.Decimal
-	Status         int
+	Status              int
 }
 
 func normalizeManagedModelPricing(m *ManagedModel) error {
@@ -219,16 +219,31 @@ func (s *Store) ListEnabledManagedModelsWithBindingsForGroup(ctx context.Context
 	if groupName == "" {
 		return nil, errors.New("group_name 不能为空")
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	groupsCol := "`groups`"
+	query := fmt.Sprintf(`
 SELECT DISTINCT m.id, m.public_id, m.upstream_model, m.owned_by,
        m.input_usd_per_1m, m.output_usd_per_1m, m.cache_input_usd_per_1m, m.cache_output_usd_per_1m,
        m.status, m.created_at
 FROM managed_models m
 JOIN channel_models cm ON cm.public_id=m.public_id AND cm.status=1
 JOIN upstream_channels ch ON ch.id=cm.channel_id AND ch.status=1
-WHERE m.status=1 AND FIND_IN_SET(?, ch.groups) > 0
+WHERE m.status=1 AND FIND_IN_SET(?, ch.%s) > 0
 ORDER BY m.id DESC
-`, groupName)
+`, groupsCol)
+	if s.dialect == DialectSQLite {
+		query = fmt.Sprintf(`
+SELECT DISTINCT m.id, m.public_id, m.upstream_model, m.owned_by,
+       m.input_usd_per_1m, m.output_usd_per_1m, m.cache_input_usd_per_1m, m.cache_output_usd_per_1m,
+       m.status, m.created_at
+FROM managed_models m
+JOIN channel_models cm ON cm.public_id=m.public_id AND cm.status=1
+JOIN upstream_channels ch ON ch.id=cm.channel_id AND ch.status=1
+WHERE m.status=1 AND INSTR(',' || REPLACE(IFNULL(ch.%s, ''), ' ', '') || ',', ',' || ? || ',') > 0
+ORDER BY m.id DESC
+`, groupsCol)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, groupName)
 	if err != nil {
 		return nil, fmt.Errorf("查询可用 managed_models 失败: %w", err)
 	}
@@ -297,7 +312,11 @@ WHERE m.status=1 AND (`)
 		if i > 0 {
 			b.WriteString(" OR ")
 		}
-		b.WriteString("FIND_IN_SET(?, ch.groups) > 0")
+		if s.dialect == DialectSQLite {
+			b.WriteString("INSTR(',' || REPLACE(IFNULL(ch.`groups`, ''), ' ', '') || ',', ',' || ? || ',') > 0")
+		} else {
+			b.WriteString("FIND_IN_SET(?, ch.`groups`) > 0")
+		}
 		args = append(args, g)
 	}
 	b.WriteString(")\nORDER BY m.id DESC\n")
@@ -520,9 +539,9 @@ func (s *Store) DeleteManagedModel(ctx context.Context, id int64) error {
 }
 
 type ManagedModelPricingUpsert struct {
-	PublicID       string
-	InputUSDPer1M  decimal.Decimal
-	OutputUSDPer1M decimal.Decimal
+	PublicID            string
+	InputUSDPer1M       decimal.Decimal
+	OutputUSDPer1M      decimal.Decimal
 	CacheInputUSDPer1M  decimal.Decimal
 	CacheOutputUSDPer1M decimal.Decimal
 }
@@ -577,9 +596,9 @@ func (s *Store) UpsertManagedModelPricing(ctx context.Context, items []ManagedMo
 	b.WriteString(")")
 
 	type existing struct {
-		ID             int64
-		InputUSDPer1M  decimal.Decimal
-		OutputUSDPer1M decimal.Decimal
+		ID                  int64
+		InputUSDPer1M       decimal.Decimal
+		OutputUSDPer1M      decimal.Decimal
 		CacheInputUSDPer1M  decimal.Decimal
 		CacheOutputUSDPer1M decimal.Decimal
 	}

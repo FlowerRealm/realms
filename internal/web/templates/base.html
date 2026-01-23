@@ -396,8 +396,8 @@
             <div id="rlmAjaxAlertHost"></div>
             {{.ContentHTML}}
             
-            <footer class="mt-5 text-center text-muted small pb-4 opacity-50">
-              Realms 中转服务 &copy; 2026
+            <footer id="rlmProjectFooter" data-rlm-github="FlowerRealm/realms" class="mt-5 text-center text-muted small pb-4 opacity-50">
+              Realms 中转服务 &copy; 2026 · <a href="https://github.com/FlowerRealm/realms" target="_blank" rel="noopener noreferrer" class="link-secondary text-decoration-none">GitHub: FlowerRealm/realms</a>
             </footer>
           </div>
         </main>
@@ -429,8 +429,8 @@
         </div>
       </main>
 
-      <footer class="py-3 my-4 text-center text-muted small opacity-50">
-         &copy; 2026 Realms 服务
+      <footer id="rlmProjectFooter" data-rlm-github="FlowerRealm/realms" class="py-3 my-4 text-center text-muted small opacity-50">
+         &copy; 2026 Realms 服务 · <a href="https://github.com/FlowerRealm/realms" target="_blank" rel="noopener noreferrer" class="link-secondary text-decoration-none">GitHub: FlowerRealm/realms</a>
       </footer>
     </div>
     {{end}}
@@ -588,6 +588,67 @@
             link.classList.add('active');
           }
         });
+
+        (function installProjectFooterGuard() {
+          try {
+            const footerID = "rlmProjectFooter";
+            const githubSlug = "FlowerRealm/realms";
+            const githubURL = "https://github.com/FlowerRealm/realms";
+            const restoredFlagKey = "realms_project_footer_restored";
+
+            function footerHTML() {
+              const isApp = document.documentElement.classList.contains("app-html") || document.body.classList.contains("app-body");
+              if (isApp) {
+                return '<footer id="' + footerID + '" data-rlm-github="' + githubSlug + '" class="mt-5 text-center text-muted small pb-4 opacity-50">Realms 中转服务 &copy; 2026 · <a href="' + githubURL + '" target="_blank" rel="noopener noreferrer" class="link-secondary text-decoration-none">GitHub: ' + githubSlug + "</a></footer>";
+              }
+              return '<footer id="' + footerID + '" data-rlm-github="' + githubSlug + '" class="py-3 my-4 text-center text-muted small opacity-50">&copy; 2026 Realms 服务 · <a href="' + githubURL + '" target="_blank" rel="noopener noreferrer" class="link-secondary text-decoration-none">GitHub: ' + githubSlug + "</a></footer>";
+            }
+
+            function findMount() {
+              const appContainer = document.querySelector('main.content-scrollable > .container-fluid');
+              if (appContainer) return appContainer;
+              const publicContainer = document.querySelector('body > .container-fluid');
+              if (publicContainer) return publicContainer;
+              return document.body;
+            }
+
+            function ensureFooter() {
+              if (document.getElementById(footerID)) return;
+              const mount = findMount();
+              if (!mount) return;
+              mount.insertAdjacentHTML("beforeend", footerHTML());
+              if (!sessionStorage.getItem(restoredFlagKey)) {
+                sessionStorage.setItem(restoredFlagKey, "1");
+                try { console.warn("[Realms] 检测到项目声明底栏被移除，已自动恢复。"); } catch (e) {}
+              }
+            }
+
+            ensureFooter();
+
+            let scheduled = false;
+            function scheduleEnsure() {
+              if (scheduled) return;
+              scheduled = true;
+              requestAnimationFrame(function () {
+                scheduled = false;
+                ensureFooter();
+              });
+            }
+
+            if (typeof MutationObserver !== "undefined") {
+              const obs = new MutationObserver(function () {
+                try {
+                  if (!document.getElementById(footerID)) scheduleEnsure();
+                } catch (e) {}
+              });
+              obs.observe(document.body, { childList: true, subtree: true });
+            }
+
+            window.addEventListener("pageshow", function () {
+              try { scheduleEnsure(); } catch (e) {}
+            });
+          } catch (e) {}
+        })();
       });
     </script>
   </body>

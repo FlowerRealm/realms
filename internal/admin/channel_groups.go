@@ -121,12 +121,33 @@ func (s *Server) CreateChannelGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := s.st.CreateChannelGroup(r.Context(), name, desc, status, priceMult, maxAttempts); err != nil {
+	id, err := s.st.CreateChannelGroup(r.Context(), name, desc, status, priceMult, maxAttempts)
+	if err != nil {
 		if isAjax(r) {
 			ajaxError(w, http.StatusBadRequest, "创建失败（可能分组已存在）")
 			return
 		}
 		http.Redirect(w, r, "/admin/channel-groups?err="+url.QueryEscape("创建失败（可能分组已存在）"), http.StatusFound)
+		return
+	}
+	// 新建根分组默认挂载到 default 根组（与 MySQL 迁移回填语义一致）。
+	defaultGroup, err := s.st.GetChannelGroupByName(r.Context(), store.DefaultGroupName)
+	if err != nil {
+		_ = s.st.DeleteChannelGroup(r.Context(), id)
+		if isAjax(r) {
+			ajaxError(w, http.StatusInternalServerError, "创建失败")
+			return
+		}
+		http.Redirect(w, r, "/admin/channel-groups?err="+url.QueryEscape("创建失败"), http.StatusFound)
+		return
+	}
+	if err := s.st.AddChannelGroupMemberGroup(r.Context(), defaultGroup.ID, id, 0, false); err != nil {
+		_ = s.st.DeleteChannelGroup(r.Context(), id)
+		if isAjax(r) {
+			ajaxError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		http.Redirect(w, r, "/admin/channel-groups?err="+url.QueryEscape(err.Error()), http.StatusFound)
 		return
 	}
 	if isAjax(r) {

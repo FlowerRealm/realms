@@ -68,19 +68,19 @@
             {{if .MemberGroupID}}
               <div class="d-flex flex-column">
                 <div class="d-flex align-items-center gap-2">
-                  <a class="fw-bold text-dark text-decoration-none" href="/admin/channel-groups/{{.MemberGroupID}}">
+                  <a class="fw-bold text-dark text-decoration-none" href="/admin/channel-groups/{{formatOptionalInt64 .MemberGroupID}}">
                     {{if .MemberGroupName}}{{.MemberGroupName}}{{else}}(未命名){{end}}
                   </a>
                   <span class="badge rounded-pill bg-light text-secondary border small" style="font-size: 0.7em;">group</span>
                 </div>
                 {{if .MemberGroupMaxAttempts}}
-                  <div class="text-muted small">max_attempts：{{.MemberGroupMaxAttempts}}</div>
+                  <div class="text-muted small">max_attempts：{{formatOptionalInt .MemberGroupMaxAttempts}}</div>
                 {{end}}
               </div>
             {{else if .MemberChannelID}}
               <div class="d-flex flex-column">
                 <div class="d-flex align-items-center gap-2">
-                  <span class="fw-bold text-dark">{{if .MemberChannelName}}{{.MemberChannelName}}{{else}}channel-{{.MemberChannelID}}{{end}}</span>
+                  <span class="fw-bold text-dark">{{if .MemberChannelName}}{{.MemberChannelName}}{{else}}channel-{{formatOptionalInt64 .MemberChannelID}}{{end}}</span>
                   {{if .MemberChannelType}}
                     <span class="badge rounded-pill bg-light text-secondary border small" style="font-size: 0.7em;">{{.MemberChannelType}}</span>
                   {{end}}
@@ -104,7 +104,7 @@
           </td>
           <td>
             {{if .MemberGroupID}}
-              {{if and .MemberGroupStatus (eq .MemberGroupStatus 1)}}
+              {{if eq (formatOptionalInt .MemberGroupStatus) "1"}}
                 <span class="badge rounded-pill bg-success bg-opacity-10 text-success px-2">
                   <i class="ri-checkbox-circle-line me-1"></i>启用
                 </span>
@@ -114,7 +114,7 @@
                 </span>
               {{end}}
             {{else if .MemberChannelID}}
-              {{if and .MemberChannelStatus (eq .MemberChannelStatus 1)}}
+              {{if eq (formatOptionalInt .MemberChannelStatus) "1"}}
                 <span class="badge rounded-pill bg-success bg-opacity-10 text-success px-2">
                   <i class="ri-checkbox-circle-line me-1"></i>启用
                 </span>
@@ -130,17 +130,17 @@
           <td class="text-end text-nowrap pe-4">
             <div class="d-flex justify-content-end gap-1">
               {{if .MemberGroupID}}
-                <a href="/admin/channel-groups/{{.MemberGroupID}}" class="btn btn-sm btn-light border text-secondary" title="进入">
+                <a href="/admin/channel-groups/{{formatOptionalInt64 .MemberGroupID}}" class="btn btn-sm btn-light border text-secondary" title="进入">
                   <i class="ri-folder-open-line"></i>
                 </a>
-                <form method="POST" action="/admin/channel-groups/{{$.CurrentGroup.ID}}/children/groups/{{.MemberGroupID}}/delete" data-ajax="1" data-ajax-reload="1">
+                <form method="POST" action="/admin/channel-groups/{{$.CurrentGroup.ID}}/children/groups/{{formatOptionalInt64 .MemberGroupID}}/delete" data-ajax="1" data-ajax-reload="1">
                   <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
                   <button class="btn btn-sm btn-light border text-danger" type="submit" title="移除" onclick="return confirm('确认从该组移除子组？');">
                     <i class="ri-delete-bin-line"></i>
                   </button>
                 </form>
               {{else if .MemberChannelID}}
-                <form method="POST" action="/admin/channel-groups/{{$.CurrentGroup.ID}}/children/channels/{{.MemberChannelID}}/delete" data-ajax="1" data-ajax-reload="1">
+                <form method="POST" action="/admin/channel-groups/{{$.CurrentGroup.ID}}/children/channels/{{formatOptionalInt64 .MemberChannelID}}/delete" data-ajax="1" data-ajax-reload="1">
                   <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
                   <button class="btn btn-sm btn-light border text-danger" type="submit" title="移除" onclick="return confirm('确认从该组移除渠道？');">
                     <i class="ri-delete-bin-line"></i>
@@ -282,4 +282,3 @@
   });
 </script>
 {{end}}
-

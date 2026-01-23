@@ -69,13 +69,15 @@ WHERE id=?
 // - channel_models.status=1
 // - upstream_channels.status=1
 func (s *Store) ListEnabledChannelModelBindingsByPublicID(ctx context.Context, publicID string) ([]ChannelModelBinding, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT cm.id, cm.channel_id, ch.type, ch.groups, cm.public_id, cm.upstream_model, cm.status, cm.created_at, cm.updated_at
+	groupsCol := "`groups`"
+	query := fmt.Sprintf(`
+SELECT cm.id, cm.channel_id, ch.type, ch.%s, cm.public_id, cm.upstream_model, cm.status, cm.created_at, cm.updated_at
 FROM channel_models cm
 JOIN upstream_channels ch ON ch.id=cm.channel_id
 WHERE cm.public_id=? AND cm.status=1 AND ch.status=1
 ORDER BY cm.id DESC
-`, publicID)
+`, groupsCol)
+	rows, err := s.db.QueryContext(ctx, query, publicID)
 	if err != nil {
 		return nil, fmt.Errorf("查询 channel_models 失败: %w", err)
 	}

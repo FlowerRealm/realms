@@ -76,6 +76,7 @@ func NewServer(st *store.Store, codexOAuth *codexoauth.Flow, exec UpstreamDoer, 
 		"isDefaultGroup":        isDefaultGroup,
 		"formatMultiplierPlain": formatMultiplierPlain,
 		"formatOptionalInt":     formatOptionalInt,
+		"formatOptionalInt64":   formatOptionalInt64,
 	}).ParseFS(templatesFS, "templates/*.html")
 	if err != nil {
 		return nil, err

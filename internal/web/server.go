@@ -311,10 +311,10 @@ type UsageEventView struct {
 }
 
 type ModelView struct {
-	ID             string
-	OwnedBy        string
-	InputUSDPer1M  string
-	OutputUSDPer1M string
+	ID                  string
+	OwnedBy             string
+	InputUSDPer1M       string
+	OutputUSDPer1M      string
 	CacheInputUSDPer1M  string
 	CacheOutputUSDPer1M string
 }
@@ -751,7 +751,11 @@ func (s *Server) Dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	palette := []string{"#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16", "#14b8a6", "#64748b"}
-	var chartView DashboardChartsView
+	chartView := DashboardChartsView{
+		// Ensure JSON uses [] instead of null, so the template JS can safely call .map().
+		ModelStats:      make([]ModelUsageView, 0),
+		TimeSeriesStats: make([]TimeSeriesUsageView, 0, 24),
+	}
 	for i, m := range modelStats {
 		color := palette[i%len(palette)]
 		chartView.ModelStats = append(chartView.ModelStats, ModelUsageView{
@@ -2187,10 +2191,10 @@ func (s *Server) ModelsPage(w http.ResponseWriter, r *http.Request) {
 			ownedBy = *m.OwnedBy
 		}
 		models = append(models, ModelView{
-			ID:             m.PublicID,
-			OwnedBy:        ownedBy,
-			InputUSDPer1M:  formatUSDPlain(m.InputUSDPer1M),
-			OutputUSDPer1M: formatUSDPlain(m.OutputUSDPer1M),
+			ID:                  m.PublicID,
+			OwnedBy:             ownedBy,
+			InputUSDPer1M:       formatUSDPlain(m.InputUSDPer1M),
+			OutputUSDPer1M:      formatUSDPlain(m.OutputUSDPer1M),
 			CacheInputUSDPer1M:  formatUSDPlain(m.CacheInputUSDPer1M),
 			CacheOutputUSDPer1M: formatUSDPlain(m.CacheOutputUSDPer1M),
 		})

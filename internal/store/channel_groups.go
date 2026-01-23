@@ -199,6 +199,19 @@ func (s *Store) DeleteChannelGroup(ctx context.Context, id int64) error {
 	return nil
 }
 
+func csvHasExactGroup(groupsCSV string, group string) bool {
+	group = strings.TrimSpace(group)
+	if group == "" {
+		return false
+	}
+	for _, g := range splitUpstreamChannelGroupsCSV(groupsCSV) {
+		if g == group {
+			return true
+		}
+	}
+	return false
+}
+
 func removeGroupFromCSV(groupsCSV string, group string) (string, bool) {
 	group = strings.TrimSpace(group)
 	if group == "" {
@@ -265,7 +278,33 @@ func (s *Store) ForceDeleteChannelGroup(ctx context.Context, id int64) (ChannelG
 		return ChannelGroupDeleteSummary{}, fmt.Errorf("统计 user_groups 失败: %w", err)
 	}
 
-	rows, err := tx.QueryContext(ctx, "SELECT id, `groups`, status FROM upstream_channels WHERE FIND_IN_SET(?, `groups`)", group)
+	groupIDByName := make(map[string]int64)
+	{
+		rows, err := tx.QueryContext(ctx, `SELECT id, name FROM channel_groups`)
+		if err != nil {
+			return ChannelGroupDeleteSummary{}, fmt.Errorf("查询 channel_groups 失败: %w", err)
+		}
+		for rows.Next() {
+			var id int64
+			var name string
+			if err := rows.Scan(&id, &name); err != nil {
+				_ = rows.Close()
+				return ChannelGroupDeleteSummary{}, fmt.Errorf("扫描 channel_groups 失败: %w", err)
+			}
+			name = strings.TrimSpace(name)
+			if id == 0 || name == "" {
+				continue
+			}
+			groupIDByName[name] = id
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return ChannelGroupDeleteSummary{}, fmt.Errorf("遍历 channel_groups 失败: %w", err)
+		}
+		_ = rows.Close()
+	}
+
+	rows, err := tx.QueryContext(ctx, "SELECT id, `groups`, status, priority, promotion FROM upstream_channels")
 	if err != nil {
 		return ChannelGroupDeleteSummary{}, fmt.Errorf("查询 upstream_channels.groups 失败: %w", err)
 	}
@@ -273,15 +312,19 @@ func (s *Store) ForceDeleteChannelGroup(ctx context.Context, id int64) (ChannelG
 		id        int64
 		groupsCSV string
 		status    int
+		priority  int
+		promotion int
 	}
 	var chans []chUpd
 	for rows.Next() {
 		var row chUpd
-		if err := rows.Scan(&row.id, &row.groupsCSV, &row.status); err != nil {
+		if err := rows.Scan(&row.id, &row.groupsCSV, &row.status, &row.priority, &row.promotion); err != nil {
 			_ = rows.Close()
 			return ChannelGroupDeleteSummary{}, fmt.Errorf("扫描 upstream_channels 失败: %w", err)
 		}
-		chans = append(chans, row)
+		if csvHasExactGroup(row.groupsCSV, group) {
+			chans = append(chans, row)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
@@ -296,8 +339,27 @@ func (s *Store) ForceDeleteChannelGroup(ctx context.Context, id int64) (ChannelG
 
 	for _, ch := range chans {
 		newCSV, _ := removeGroupFromCSV(ch.groupsCSV, group)
-		newCSV = strings.TrimSpace(newCSV)
-		if newCSV == "" {
+		disableIfEmpty := strings.TrimSpace(newCSV) == ""
+
+		// 清理脏 groups：移除不存在的分组名（避免后续 SSOT 重建失败）。
+		var kept []string
+		for _, name := range splitUpstreamChannelGroupsCSV(newCSV) {
+			name = strings.TrimSpace(name)
+			if name == "" || name == group {
+				continue
+			}
+			if _, ok := groupIDByName[name]; ok {
+				kept = append(kept, name)
+				continue
+			}
+		}
+		if len(kept) == 0 {
+			kept = []string{DefaultGroupName}
+			disableIfEmpty = true
+		}
+		newCSV = strings.Join(kept, ",")
+
+		if disableIfEmpty {
 			if ch.status == 1 {
 				sum.ChannelsDisabled++
 			}
@@ -316,20 +378,14 @@ func (s *Store) ForceDeleteChannelGroup(ctx context.Context, id int64) (ChannelG
 			return ChannelGroupDeleteSummary{}, fmt.Errorf("清理 channel_group_members 失败: %w", err)
 		}
 		for _, name := range splitUpstreamChannelGroupsCSV(newCSV) {
-			var gid int64
-			if err := tx.QueryRowContext(ctx, `SELECT id FROM channel_groups WHERE name=? LIMIT 1`, name).Scan(&gid); err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
-					return ChannelGroupDeleteSummary{}, fmt.Errorf("分组不存在：%s", name)
-				}
-				return ChannelGroupDeleteSummary{}, fmt.Errorf("查询 channel_groups 失败: %w", err)
-			}
+			gid := groupIDByName[name]
 			if gid == 0 {
 				continue
 			}
 			if _, err := tx.ExecContext(ctx, `
 INSERT INTO channel_group_members(parent_group_id, member_channel_id, priority, promotion, created_at, updated_at)
-VALUES(?, ?, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-`, gid, ch.id); err != nil {
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+`, gid, ch.id, ch.priority, ch.promotion); err != nil {
 				return ChannelGroupDeleteSummary{}, fmt.Errorf("写入 channel_group_members 失败: %w", err)
 			}
 		}
@@ -367,9 +423,23 @@ func (s *Store) CountUpstreamChannelsByGroup(ctx context.Context, group string) 
 	if group == "" {
 		return 0, errors.New("group 不能为空")
 	}
+	rows, err := s.db.QueryContext(ctx, "SELECT `groups` FROM upstream_channels")
+	if err != nil {
+		return 0, fmt.Errorf("统计 upstream_channels.groups 失败: %w", err)
+	}
+	defer rows.Close()
+
 	var n int64
-	// `groups` 在 MySQL 8 中是保留字（窗口函数 frame unit），作为列名必须用反引号引用。
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM upstream_channels WHERE FIND_IN_SET(?, `groups`)", group).Scan(&n); err != nil {
+	for rows.Next() {
+		var groupsCSV string
+		if err := rows.Scan(&groupsCSV); err != nil {
+			return 0, fmt.Errorf("统计 upstream_channels.groups 失败: %w", err)
+		}
+		if csvHasExactGroup(groupsCSV, group) {
+			n++
+		}
+	}
+	if err := rows.Err(); err != nil {
 		return 0, fmt.Errorf("统计 upstream_channels.groups 失败: %w", err)
 	}
 	return n, nil
