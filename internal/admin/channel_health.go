@@ -281,7 +281,12 @@ func runSingleModelSSETest(ctx context.Context, exec UpstreamDoer, sel scheduler
 	path := "/v1/responses"
 	payload := map[string]any{
 		"model":             upstreamModel,
-		"input":             defaultTestInput(),
+		"input": []any{
+			map[string]any{
+				"role":    "user",
+				"content": defaultTestInput(),
+			},
+		},
 		"max_output_tokens": int64(16),
 		"stream":            true,
 	}

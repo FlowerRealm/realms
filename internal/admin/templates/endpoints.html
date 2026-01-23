@@ -33,7 +33,7 @@
   <div class="row g-3">
     {{if ne .Channel.Type "codex_oauth"}}
     <div class="col-md-7">
-      <div class="card h-100">
+      <div class="card h-100 p-4">
         <h5 class="fw-bold mb-3"><i class="ri-link me-2"></i>接口基础地址</h5>
         <form method="POST" action="/admin/channels/{{.Channel.ID}}/endpoints">
           <input type="hidden" name="_csrf" value="{{.CSRFToken}}" />
@@ -54,7 +54,7 @@
 
     <div class="{{if ne .Channel.Type "codex_oauth"}}col-md-5{{else}}col-12{{end}}">
       {{if ne .Channel.Type "codex_oauth"}}
-      <div class="card h-100" id="keys">
+      <div class="card h-100 p-4" id="keys">
         <div class="d-flex justify-content-between align-items-center mb-3">
           <h5 class="fw-bold mb-0"><i class="ri-key-2-line me-2"></i>密钥</h5>
           <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addCredentialModal">
@@ -64,7 +64,7 @@
         <p class="text-muted small mb-3">密钥将以明文存储，仅展示提示。</p>
 
         <div class="table-responsive">
-          <table class="table table-sm table-hover align-middle mb-0">
+          <table class="table table-hover align-middle mb-0">
             <thead class="bg-light">
               <tr>
                 <th>名称</th>
@@ -87,37 +87,17 @@
                   </td>
                   <td>
                     {{if .APIKeyHint}}
-                      <code class="text-secondary bg-light border px-1" style="font-size: 0.9em;">...{{.APIKeyHint}}</code>
+                      <code class="text-secondary bg-light border p-2 rounded d-inline-block" style="font-size: 0.9em;">{{.MaskedKey}}</code>
                     {{else}}
                       <span class="text-muted small">-</span>
                     {{end}}
                   </td>
                   <td>
-                    <code class="text-secondary bg-light border px-1" style="font-size: 0.85em;">
-                      sessions={{if .LimitSessions}}{{formatOptionalInt .LimitSessions}}{{else}}-{{end}},
-                      rpm={{if .LimitRPM}}{{formatOptionalInt .LimitRPM}}{{else}}-{{end}},
-                      tpm={{if .LimitTPM}}{{formatOptionalInt .LimitTPM}}{{else}}-{{end}}
+                    <code class="text-secondary bg-light border p-2 rounded d-inline-block" style="font-size: 0.85em; line-height: 1.4;">
+                      会话: {{if .LimitSessions}}{{formatOptionalInt .LimitSessions}}{{else}}-{{end}}<br>
+                      RPM: {{if .LimitRPM}}{{formatOptionalInt .LimitRPM}}{{else}}-{{end}}<br>
+                      TPM: {{if .LimitTPM}}{{formatOptionalInt .LimitTPM}}{{else}}-{{end}}
                     </code>
-                    {{if .Runtime.Available}}
-                    <div class="mt-1" style="font-size: 0.8rem;">
-                      <span class="text-muted"><i class="ri-pulse-line me-1"></i>运行态：</span>
-                      <code class="text-secondary bg-light border px-1" style="font-size: 0.85em;">
-                        sessions={{.Runtime.Sessions}}, rpm={{.Runtime.RPM}}, tpm={{.Runtime.TPM}}, fails={{.Runtime.FailScore}}
-                      </code>
-                      {{if .Runtime.CoolingUntil}}
-                        <span class="badge bg-warning-subtle text-warning-emphasis border ms-2">冷却至 {{.Runtime.CoolingUntil}}</span>
-                      {{end}}
-                      {{if .Runtime.OverSessions}}
-                        <span class="badge bg-danger-subtle text-danger-emphasis border ms-2">Sessions 超限</span>
-                      {{end}}
-                      {{if .Runtime.OverRPM}}
-                        <span class="badge bg-danger-subtle text-danger-emphasis border ms-2">RPM 超限</span>
-                      {{end}}
-                      {{if .Runtime.OverTPM}}
-                        <span class="badge bg-danger-subtle text-danger-emphasis border ms-2">TPM 超限</span>
-                      {{end}}
-                    </div>
-                    {{end}}
                   </td>
                   <td>
                     {{if eq .Status 1}}
@@ -359,20 +339,12 @@
 
 	                <div class="text-muted mt-3" style="font-size: 0.8rem;">
 	                  <i class="ri-speed-up-line me-1"></i>限额：
-	                  sessions={{if .LimitSessions}}{{formatOptionalInt .LimitSessions}}{{else}}-{{end}},
-	                  rpm={{if .LimitRPM}}{{formatOptionalInt .LimitRPM}}{{else}}-{{end}},
-	                  tpm={{if .LimitTPM}}{{formatOptionalInt .LimitTPM}}{{else}}-{{end}}
+                    <code class="text-secondary bg-light border p-2 rounded d-inline-block my-1" style="font-size: 0.85em; line-height: 1.4;">
+	                    会话: {{if .LimitSessions}}{{formatOptionalInt .LimitSessions}}{{else}}-{{end}}<br>
+	                    RPM: {{if .LimitRPM}}{{formatOptionalInt .LimitRPM}}{{else}}-{{end}}<br>
+	                    TPM: {{if .LimitTPM}}{{formatOptionalInt .LimitTPM}}{{else}}-{{end}}
+                    </code>
 	                </div>
-                  {{if .Runtime.Available}}
-                  <div class="text-muted mt-1" style="font-size: 0.8rem;">
-                    <i class="ri-pulse-line me-1"></i>运行态：
-                    sessions={{.Runtime.Sessions}}, rpm={{.Runtime.RPM}}, tpm={{.Runtime.TPM}}, fails={{.Runtime.FailScore}}
-                    {{if .Runtime.CoolingUntil}}<span class="ms-2">| 冷却至 {{.Runtime.CoolingUntil}}</span>{{end}}
-                    {{if .Runtime.OverSessions}}<span class="ms-2 text-danger">| Sessions 超限</span>{{end}}
-                    {{if .Runtime.OverRPM}}<span class="ms-2 text-danger">| RPM 超限</span>{{end}}
-                    {{if .Runtime.OverTPM}}<span class="ms-2 text-danger">| TPM 超限</span>{{end}}
-                  </div>
-                  {{end}}
 	              </td>
 	              <td class="border-0 ps-5">
 	                {{if or .InCooldown (ne .Runtime.CoolingUntil "")}}

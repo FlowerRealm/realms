@@ -51,8 +51,7 @@
       <thead class="bg-light">
         <tr>
           <th style="width: 5%;"></th> <!-- 拖拽把手 -->
-          <th style="width: 26%;">渠道详情</th>
-          <th style="width: 18%;">统计（区间）</th>
+          <th style="width: 44%;">渠道详情</th>
           <th style="width: 10%;">状态</th>
           <th style="width: 11%;">属性</th>
           <th style="width: 15%;">健康状况</th>
@@ -65,49 +64,53 @@
           <td class="text-center text-muted drag-handle-cell" style="cursor: move; width: 60px;" title="拖动排序">
             <i class="ri-drag-move-2-line fs-5"></i>
           </td>
-          <td>
-            <div class="d-flex flex-column">
-              <div class="d-flex align-items-center mb-1">
-                <span class="fw-bold text-dark me-2">{{.Channel.Name}}</span>
-                <span class="badge rounded-pill bg-light text-secondary border small" style="font-size: 0.7em;">{{.Channel.Type}}</span>
-	              </div>
-	              <div class="d-flex align-items-center text-muted small">
-	                {{if eq .Channel.Type "codex_oauth"}}
-	                  <span class="text-muted">内置（无需配置基础地址）</span>
-	                {{else if .Endpoint.BaseURL}}
-	                  <code class="text-primary bg-light border px-1" style="font-size: 0.8em; max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{.Endpoint.BaseURL}}</code>
-	                {{else}}
-	                  <span class="text-muted">-</span>
-	                {{end}}
-	              </div>
-	              <div class="d-flex align-items-center text-muted small mt-1">
-	                <span class="me-1">分组:</span>
-                  <a href="#" class="text-decoration-none" data-bs-toggle="modal" data-bs-target="#editGroupsModal-{{.Channel.ID}}">
-	                  <code class="bg-light px-1 border text-primary" style="font-size: 0.8em; max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;" title="点击修改分组">{{.Channel.Groups}}</code>
-                  </a>
-	              </div>
-                <div class="d-flex align-items-center text-muted small mt-1">
-                  <span class="me-1">限额:</span>
-                  <a href="#" class="text-decoration-none" data-bs-toggle="modal" data-bs-target="#editLimitsModal-{{.Channel.ID}}">
-                    <code class="bg-light px-1 border text-primary" style="font-size: 0.8em; max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;" title="点击配置限额">
-                      sessions={{if .Channel.LimitSessions}}{{formatOptionalInt .Channel.LimitSessions}}{{else}}-{{end}},
-                      rpm={{if .Channel.LimitRPM}}{{formatOptionalInt .Channel.LimitRPM}}{{else}}-{{end}},
-                      tpm={{if .Channel.LimitTPM}}{{formatOptionalInt .Channel.LimitTPM}}{{else}}-{{end}}
-                    </code>
-                  </a>
-                </div>
-            </div>
-          </td>
-          <td>
-            <div class="small">
-              <div class="text-muted" style="font-size: 0.75rem;">总消耗（USD）</div>
-              <div class="font-monospace fw-bold text-dark">{{.Usage.CommittedUSD}}</div>
-              <div class="text-muted mt-2" style="font-size: 0.75rem;">总 Token</div>
-              <div class="fw-medium text-dark">{{.Usage.Tokens}}</div>
-              <div class="text-muted mt-2" style="font-size: 0.75rem;">缓存命中率</div>
-              <div class="fw-medium text-success">{{.Usage.CacheRatio}}</div>
-            </div>
-          </td>
+                    <td>
+                      <div class="d-flex flex-column gap-1">
+                        <div class="d-flex flex-wrap align-items-center gap-2">
+                          <span class="fw-bold text-dark">{{.Channel.Name}}</span>
+                          <span class="badge rounded-pill bg-light text-secondary border small" style="font-size: 0.7em;">{{.Channel.Type}}</span>
+                          {{if ne .Channel.Type "codex_oauth"}}
+                            {{if .Endpoint.BaseURL}}
+                              <code class="text-primary bg-light border px-2 py-1 rounded" style="font-size: 0.75em; max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{.Endpoint.BaseURL}}</code>
+                            {{end}}
+                          {{end}}
+                        </div>
+                        
+                        <div class="d-flex flex-wrap align-items-center gap-3 small text-muted">
+                          <div class="d-flex align-items-center">
+                            <span class="me-1">组:</span>
+                            <a href="#" class="text-decoration-none" data-bs-toggle="modal" data-bs-target="#editGroupsModal-{{.Channel.ID}}">
+                              <code class="bg-light px-2 py-1 rounded border text-primary" style="font-size: 0.8em; max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;" title="点击修改分组">{{.Channel.Groups}}</code>
+                            </a>
+                          </div>
+                          <div class="d-flex align-items-center">
+                            <span class="me-1">限:</span>
+                            <a href="#" class="text-decoration-none" data-bs-toggle="modal" data-bs-target="#editLimitsModal-{{.Channel.ID}}">
+                              <code class="bg-light px-2 py-1 rounded border text-primary" style="font-size: 0.8em; cursor: pointer;" title="点击配置限额">
+                                会话:{{if .Channel.LimitSessions}}{{formatOptionalInt .Channel.LimitSessions}}{{else}}-{{end}}
+                                RPM:{{if .Channel.LimitRPM}}{{formatOptionalInt .Channel.LimitRPM}}{{else}}-{{end}}
+                                TPM:{{if .Channel.LimitTPM}}{{formatOptionalInt .Channel.LimitTPM}}{{else}}-{{end}}
+                              </code>
+                            </a>
+                          </div>
+                          <div class="vr bg-secondary bg-opacity-25" style="height: 14px;"></div>
+                          <div class="d-flex align-items-center gap-2">
+                            <div class="d-flex align-items-center">
+                              <span class="text-muted me-1">消耗:</span>
+                              <span class="font-monospace fw-bold text-dark">{{.Usage.CommittedUSD}}</span>
+                            </div>
+                            <div class="d-flex align-items-center">
+                              <span class="text-muted me-1">Token:</span>
+                              <span class="fw-medium text-dark">{{.Usage.Tokens}}</span>
+                            </div>
+                            <div class="d-flex align-items-center">
+                              <span class="text-muted me-1">缓存:</span>
+                              <span class="fw-medium text-success">{{.Usage.CacheRatio}}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </td>
           <td>
             {{if eq .Channel.Status 1}}
               <span class="badge rounded-pill bg-success bg-opacity-10 text-success px-2">

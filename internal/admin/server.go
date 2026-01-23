@@ -496,6 +496,7 @@ type adminCredentialView struct {
 	ID         int64
 	Name       *string
 	APIKeyHint *string
+	MaskedKey  string
 	Status     int
 
 	LimitSessions *int
@@ -2488,10 +2489,20 @@ func (s *Server) Endpoints(w http.ResponseWriter, r *http.Request) {
 					rv.OverSessions = true
 				}
 			}
+			maskedKey := "-"
+			if c.APIKeyHint != nil && *c.APIKeyHint != "" {
+				hint := *c.APIKeyHint
+				if len(hint) > 4 {
+					maskedKey = "..." + hint[len(hint)-4:]
+				} else {
+					maskedKey = hint
+				}
+			}
 			creds = append(creds, adminCredentialView{
 				ID:            c.ID,
 				Name:          c.Name,
 				APIKeyHint:    c.APIKeyHint,
+				MaskedKey:     maskedKey,
 				Status:        c.Status,
 				LimitSessions: c.LimitSessions,
 				LimitRPM:      c.LimitRPM,
@@ -2530,10 +2541,20 @@ func (s *Server) Endpoints(w http.ResponseWriter, r *http.Request) {
 					rv.OverSessions = true
 				}
 			}
+			maskedKey := "-"
+			if c.APIKeyHint != nil && *c.APIKeyHint != "" {
+				hint := *c.APIKeyHint
+				if len(hint) > 4 {
+					maskedKey = "..." + hint[len(hint)-4:]
+				} else {
+					maskedKey = hint
+				}
+			}
 			creds = append(creds, adminCredentialView{
 				ID:            c.ID,
 				Name:          c.Name,
 				APIKeyHint:    c.APIKeyHint,
+				MaskedKey:     maskedKey,
 				Status:        c.Status,
 				LimitSessions: c.LimitSessions,
 				LimitRPM:      c.LimitRPM,

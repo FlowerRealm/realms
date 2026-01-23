@@ -48,45 +48,50 @@
   #tokenInput:focus { box-shadow: none; border-color: var(--bs-border-color); }
 </style>
 
-<script>
-  (function() {
-    const input = document.getElementById('tokenInput');
-    const btn = document.getElementById('copyTokenBtn');
-    const feedback = document.getElementById('copyFeedback');
-    if (!input || !btn) return;
+	<script>
+	  (function() {
+	    const input = document.getElementById('tokenInput');
+	    const btn = document.getElementById('copyTokenBtn');
+	    const feedback = document.getElementById('copyFeedback');
+	    if (!input || !btn) return;
 
-    const copyToClipboard = async () => {
-      try {
-        input.select();
-        await navigator.clipboard.writeText(input.value);
-        
-        // Visual feedback
-        const icon = btn.querySelector('.material-symbols-rounded');
-        const originalIcon = icon.textContent;
-        icon.textContent = 'check';
-        icon.style.fontVariationSettings = "'FILL' 1";
-        
-        btn.classList.replace('btn-light', 'btn-success');
-        btn.classList.add('text-white');
-        feedback.classList.add('opacity-100');
-        
-        setTimeout(() => {
-          icon.textContent = originalIcon;
-          icon.style.fontVariationSettings = "";
-          btn.classList.replace('btn-success', 'btn-light');
-          btn.classList.remove('text-white');
-          feedback.classList.remove('opacity-100');
-        }, 2000);
-          feedback.classList.remove('opacity-100');
-        }, 2000);
-      } catch (err) {
-        console.error('Failed to copy: ', err);
-        input.select();
-      }
-    };
+	    const copyToClipboard = async () => {
+	      input.select();
+	      input.setSelectionRange(0, input.value.length);
 
-    btn.addEventListener('click', copyToClipboard);
-    input.addEventListener('click', () => input.select());
-  })();
-</script>
+	      try {
+	        await navigator.clipboard.writeText(input.value);
+	      } catch (err) {
+	        try {
+	          const ok = document.execCommand('copy');
+	          if (!ok) throw err;
+	        } catch (fallbackErr) {
+	          console.error('Failed to copy: ', fallbackErr);
+	          return;
+	        }
+	      }
+
+	      // Visual feedback
+	      const icon = btn.querySelector('.material-symbols-rounded');
+	      const originalIcon = icon.textContent;
+	      icon.textContent = 'check';
+	      icon.style.fontVariationSettings = "'FILL' 1";
+
+	      btn.classList.replace('btn-light', 'btn-success');
+	      btn.classList.add('text-white');
+	      feedback.classList.add('opacity-100');
+
+	      setTimeout(() => {
+	        icon.textContent = originalIcon;
+	        icon.style.fontVariationSettings = "";
+	        btn.classList.replace('btn-success', 'btn-light');
+	        btn.classList.remove('text-white');
+	        feedback.classList.remove('opacity-100');
+	      }, 2000);
+	    };
+
+	    btn.addEventListener('click', copyToClipboard);
+	    input.addEventListener('click', () => input.select());
+	  })();
+	</script>
 {{end}}

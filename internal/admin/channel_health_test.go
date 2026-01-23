@@ -180,8 +180,16 @@ func TestRunChannelTest_OpenAI_OK(t *testing.T) {
 	if len(doer.gotBodies) != 1 {
 		t.Fatalf("expected 1 call, got %d", len(doer.gotBodies))
 	}
-	if doer.gotBodies[0]["input"] != defaultTestInput() {
+	inputArr, ok := doer.gotBodies[0]["input"].([]any)
+	if !ok || len(inputArr) != 1 {
 		t.Fatalf("unexpected input: %#v", doer.gotBodies[0]["input"])
+	}
+	inputMsg, ok := inputArr[0].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected input message: %#v", inputArr[0])
+	}
+	if inputMsg["role"] != "user" || inputMsg["content"] != defaultTestInput() {
+		t.Fatalf("unexpected input message: %#v", inputMsg)
 	}
 	if doer.gotBodies[0]["model"] != "m1-up" {
 		t.Fatalf("unexpected model: %#v", doer.gotBodies[0]["model"])
