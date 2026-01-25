@@ -115,17 +115,19 @@ func (e *Executor) Do(ctx context.Context, sel scheduler.Selection, downstream *
 		// - upstream 不支持 Responses 风格 max_output_tokens，只接受 max_tokens
 		// - upstream 只支持 Responses 风格 max_output_tokens，不接受 legacy max_tokens
 		//
-		// 同时兼容一类“错误提示不完全匹配请求体字段名”的上游实现：
-		// - upstream 可能在报错中输出 max_tokens，但实际需要 max_output_tokens（反之亦然）
-		// 这里最多尝试两次互斥改写，以提高兼容性（不会无限重试）。
-		candidates := make([][]byte, 0, 2)
+		// NOTE: 不再根据“报错字段名与请求体字段名不一致”的异常实现做反向猜测（如：请求体仅含 max_output_tokens
+		// 但报错提示为 max_tokens），避免把正确的请求改写成必然失败的形态并污染最终错误信息。
+		// 重试仅在请求体确实包含被提示为 unsupported 的字段时触发。
+		candidates := make([][]byte, 0, 1)
 		switch unsupportedParameterName(b) {
 		case "max_output_tokens":
-			candidates = append(candidates, rewriteMaxOutputTokensToMaxTokens(body))
-			candidates = append(candidates, rewriteMaxTokensToMaxOutputTokens(body))
+			if bytes.Contains(body, []byte(`"max_output_tokens"`)) {
+				candidates = append(candidates, rewriteMaxOutputTokensToMaxTokens(body))
+			}
 		case "max_tokens":
-			candidates = append(candidates, rewriteMaxTokensToMaxOutputTokens(body))
-			candidates = append(candidates, rewriteMaxOutputTokensToMaxTokens(body))
+			if bytes.Contains(body, []byte(`"max_tokens"`)) {
+				candidates = append(candidates, rewriteMaxTokensToMaxOutputTokens(body))
+			}
 		}
 
 		tried := make([][]byte, 0, len(candidates))
@@ -157,7 +159,7 @@ func (e *Executor) Do(ctx context.Context, sel scheduler.Selection, downstream *
 				continue
 			}
 
-			// 若已成功则直接替换并结束；失败时尝试下一个候选（最多 2 次）。
+			// 若已成功则直接替换并结束；失败时继续保持原始响应（避免“越改越错”导致错误信息被覆盖）。
 			if resp2.StatusCode >= 200 && resp2.StatusCode < 300 {
 				if resp.Body != nil {
 					_ = resp.Body.Close()
@@ -165,10 +167,9 @@ func (e *Executor) Do(ctx context.Context, sel scheduler.Selection, downstream *
 				resp = resp2
 				break
 			}
-			if resp.Body != nil {
-				_ = resp.Body.Close()
+			if resp2.Body != nil {
+				_ = resp2.Body.Close()
 			}
-			resp = resp2
 		}
 	}
 	// Codex OAuth：部分上游的 path 仍停留在旧版 /responses；也可能反过来只接受 /v1/responses。
