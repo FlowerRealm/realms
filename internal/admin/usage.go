@@ -38,16 +38,20 @@ type usageUserView struct {
 }
 
 type usageEventView struct {
+	ID                int64
 	Time              string
 	UserID            int64
 	UserEmail         string
 	Endpoint          string
+	Method            string
 	Model             string
 	StatusCode        string
 	LatencyMS         string
 	InputTokens       string
 	OutputTokens      string
 	CachedTokens      string
+	RequestBytes      string
+	ResponseBytes     string
 	CostUSD           string
 	StateLabel        string
 	StateBadgeClass   string
@@ -55,6 +59,8 @@ type usageEventView struct {
 	UpstreamChannelID string
 	RequestID         string
 	Error             string
+	ErrorClass        string
+	ErrorMessage      string
 }
 
 func (s *Server) Usage(w http.ResponseWriter, r *http.Request) {
@@ -222,6 +228,10 @@ func (s *Server) Usage(w http.ResponseWriter, r *http.Request) {
 		if e.Endpoint != nil && strings.TrimSpace(*e.Endpoint) != "" {
 			endpoint = *e.Endpoint
 		}
+		method := "-"
+		if e.Method != nil && strings.TrimSpace(*e.Method) != "" {
+			method = *e.Method
+		}
 		model := "-"
 		if e.Model != nil && strings.TrimSpace(*e.Model) != "" {
 			model = *e.Model
@@ -253,6 +263,8 @@ func (s *Server) Usage(w http.ResponseWriter, r *http.Request) {
 		if cached > 0 {
 			cachedTok = fmt.Sprintf("%d", cached)
 		}
+		reqBytes := fmt.Sprintf("%d", e.RequestBytes)
+		respBytes := fmt.Sprintf("%d", e.ResponseBytes)
 		costUSD := decimal.Zero
 		switch e.State {
 		case store.UsageStateCommitted:
@@ -284,32 +296,45 @@ func (s *Server) Usage(w http.ResponseWriter, r *http.Request) {
 		if e.UpstreamChannelID != nil && *e.UpstreamChannelID > 0 {
 			upstreamChannelID = fmt.Sprintf("%d", *e.UpstreamChannelID)
 		}
-		errText := ""
-		if e.ErrorClass != nil {
-			c := strings.TrimSpace(*e.ErrorClass)
-			if c != "" && c != "client_disconnect" {
-				errText = c
-			}
+		errClass := ""
+		if e.ErrorClass != nil && strings.TrimSpace(*e.ErrorClass) != "" {
+			errClass = strings.TrimSpace(*e.ErrorClass)
 		}
+		errMsg := ""
 		if e.ErrorMessage != nil && strings.TrimSpace(*e.ErrorMessage) != "" {
+			errMsg = strings.TrimSpace(*e.ErrorMessage)
+		}
+		if errClass == "client_disconnect" {
+			errClass = ""
+			errMsg = ""
+		}
+		errText := ""
+		if errClass != "" {
+			errText = errClass
+		}
+		if errMsg != "" {
 			if errText == "" {
-				errText = *e.ErrorMessage
+				errText = errMsg
 			} else {
-				errText = errText + " (" + *e.ErrorMessage + ")"
+				errText = errText + " (" + errMsg + ")"
 			}
 		}
 
 		eventViews = append(eventViews, usageEventView{
+			ID:                e.ID,
 			Time:              formatTimeIn(e.Time, "2006-01-02 15:04:05", loc),
 			UserID:            e.UserID,
 			UserEmail:         row.UserEmail,
 			Endpoint:          endpoint,
+			Method:            method,
 			Model:             model,
 			StatusCode:        statusCode,
 			LatencyMS:         latencyMS,
 			InputTokens:       inTok,
 			OutputTokens:      outTok,
 			CachedTokens:      cachedTok,
+			RequestBytes:      reqBytes,
+			ResponseBytes:     respBytes,
 			CostUSD:           cost,
 			StateLabel:        stateLabel,
 			StateBadgeClass:   stateBadge,
@@ -317,6 +342,8 @@ func (s *Server) Usage(w http.ResponseWriter, r *http.Request) {
 			UpstreamChannelID: upstreamChannelID,
 			RequestID:         e.RequestID,
 			Error:             errText,
+			ErrorClass:        errClass,
+			ErrorMessage:      errMsg,
 		})
 	}
 	nextBeforeID := ""

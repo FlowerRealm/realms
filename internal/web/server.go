@@ -294,12 +294,15 @@ type UsageEventView struct {
 	ID                int64
 	Time              string
 	Endpoint          string
+	Method            string
 	Model             string
 	StatusCode        string
 	LatencyMS         string
 	InputTokens       string
 	OutputTokens      string
 	CachedTokens      string
+	RequestBytes      string
+	ResponseBytes     string
 	CostUSD           string
 	State             string
 	StateLabel        string
@@ -307,6 +310,8 @@ type UsageEventView struct {
 	RequestID         string
 	UpstreamChannelID string
 	Error             string
+	ErrorClass        string
+	ErrorMessage      string
 	IsStream          bool
 }
 
@@ -1825,6 +1830,10 @@ func (s *Server) UsagePage(w http.ResponseWriter, r *http.Request) {
 		if e.Endpoint != nil && strings.TrimSpace(*e.Endpoint) != "" {
 			endpoint = *e.Endpoint
 		}
+		method := "-"
+		if e.Method != nil && strings.TrimSpace(*e.Method) != "" {
+			method = *e.Method
+		}
 		model := "-"
 		if e.Model != nil && strings.TrimSpace(*e.Model) != "" {
 			model = *e.Model
@@ -1856,6 +1865,8 @@ func (s *Server) UsagePage(w http.ResponseWriter, r *http.Request) {
 		if cached > 0 {
 			cachedTok = strconv.FormatInt(cached, 10)
 		}
+		reqBytes := strconv.FormatInt(e.RequestBytes, 10)
+		respBytes := strconv.FormatInt(e.ResponseBytes, 10)
 		costUSD := decimal.Zero
 		switch e.State {
 		case store.UsageStateCommitted:
@@ -1887,18 +1898,27 @@ func (s *Server) UsagePage(w http.ResponseWriter, r *http.Request) {
 		if e.UpstreamChannelID != nil && *e.UpstreamChannelID > 0 {
 			upstreamChannelID = strconv.FormatInt(*e.UpstreamChannelID, 10)
 		}
-		errText := ""
-		if e.ErrorClass != nil {
-			c := strings.TrimSpace(*e.ErrorClass)
-			if c != "" && c != "client_disconnect" {
-				errText = c
-			}
+		errClass := ""
+		if e.ErrorClass != nil && strings.TrimSpace(*e.ErrorClass) != "" {
+			errClass = strings.TrimSpace(*e.ErrorClass)
 		}
+		errMsg := ""
 		if e.ErrorMessage != nil && strings.TrimSpace(*e.ErrorMessage) != "" {
+			errMsg = strings.TrimSpace(*e.ErrorMessage)
+		}
+		if errClass == "client_disconnect" {
+			errClass = ""
+			errMsg = ""
+		}
+		errText := ""
+		if errClass != "" {
+			errText = errClass
+		}
+		if errMsg != "" {
 			if errText == "" {
-				errText = *e.ErrorMessage
+				errText = errMsg
 			} else {
-				errText = errText + " (" + *e.ErrorMessage + ")"
+				errText = errText + " (" + errMsg + ")"
 			}
 		}
 
@@ -1906,12 +1926,15 @@ func (s *Server) UsagePage(w http.ResponseWriter, r *http.Request) {
 			ID:                e.ID,
 			Time:              e.Time.UTC().Format("2006-01-02 15:04:05"),
 			Endpoint:          endpoint,
+			Method:            method,
 			Model:             model,
 			StatusCode:        statusCode,
 			LatencyMS:         latencyMS,
 			InputTokens:       inTok,
 			OutputTokens:      outTok,
 			CachedTokens:      cachedTok,
+			RequestBytes:      reqBytes,
+			ResponseBytes:     respBytes,
 			CostUSD:           cost,
 			State:             e.State,
 			StateLabel:        stateLabel,
@@ -1919,6 +1942,8 @@ func (s *Server) UsagePage(w http.ResponseWriter, r *http.Request) {
 			RequestID:         e.RequestID,
 			UpstreamChannelID: upstreamChannelID,
 			Error:             errText,
+			ErrorClass:        errClass,
+			ErrorMessage:      errMsg,
 			IsStream:          e.IsStream,
 		})
 	}

@@ -219,10 +219,13 @@
                 <th class="pe-4 border-0">Request ID</th>
               </tr>
             </thead>
-            <tbody class="small">
+            <tbody class="small" id="rlmAdminUsageEvents">
               {{range .UsageEvents}}
-              <tr>
-                <td class="ps-4 text-nowrap font-monospace">{{.Time}}</td>
+              <tr class="rlm-usage-row" role="button" data-bs-toggle="collapse" data-bs-target="#rlmAdminUsageDetail{{.ID}}" aria-expanded="false" aria-controls="rlmAdminUsageDetail{{.ID}}">
+                <td class="ps-4 text-nowrap font-monospace">
+                  <i class="ri-arrow-right-s-line text-muted rlm-usage-chevron me-1 align-middle"></i>
+                  <span class="align-middle">{{.Time}}</span>
+                </td>
                 <td class="text-nowrap">
                   <div class="fw-bold small">{{.UserEmail}}</div>
                   <div class="text-muted smaller">ID: {{.UserID}}</div>
@@ -257,7 +260,83 @@
                    {{end}}
                 </td>
                 <td class="text-center font-monospace text-muted">{{.UpstreamChannelID}}</td>
-                <td class="pe-4 font-monospace text-muted small user-select-all" style="max-width: 120px; overflow: hidden; text-overflow: ellipsis;" title="{{.RequestID}}">{{.RequestID}}</td>
+                <td class="pe-4 font-monospace text-muted small user-select-all" onclick="event.stopPropagation();" style="max-width: 120px; overflow: hidden; text-overflow: ellipsis;" title="{{.RequestID}}">{{.RequestID}}</td>
+              </tr>
+              <tr class="rlm-usage-detail-row">
+                <td colspan="10" class="p-0 border-0">
+                  <div class="collapse" id="rlmAdminUsageDetail{{.ID}}" data-bs-parent="#rlmAdminUsageEvents">
+                    <div class="bg-light border-top px-4 py-3">
+                      <div class="row g-3 small">
+                        <div class="col-12 col-lg-6">
+                          <div class="text-muted smaller">Request ID</div>
+                          <div class="font-monospace user-select-all">{{.RequestID}}</div>
+                        </div>
+                        <div class="col-6 col-lg-3">
+                          <div class="text-muted smaller">Event ID</div>
+                          <div class="font-monospace">{{.ID}}</div>
+                        </div>
+                        <div class="col-6 col-lg-3">
+                          <div class="text-muted smaller">渠道</div>
+                          <div class="font-monospace">{{.UpstreamChannelID}}</div>
+                        </div>
+
+                        <div class="col-12 col-lg-6">
+                          <div class="text-muted smaller">用户</div>
+                          <div class="font-monospace">{{.UserEmail}} (ID: {{.UserID}})</div>
+                        </div>
+                        <div class="col-12 col-lg-6">
+                          <div class="text-muted smaller">Endpoint</div>
+                          <div class="font-monospace">{{.Method}} {{.Endpoint}}</div>
+                        </div>
+
+                        <div class="col-12 col-lg-6">
+                          <div class="text-muted smaller">模型</div>
+                          <div class="font-monospace">{{.Model}}</div>
+                        </div>
+                        <div class="col-6 col-lg-3">
+                          <div class="text-muted smaller">状态码</div>
+                          <div class="font-monospace">{{.StatusCode}}</div>
+                        </div>
+                        <div class="col-6 col-lg-3">
+                          <div class="text-muted smaller">耗时</div>
+                          <div class="font-monospace">{{.LatencyMS}} ms</div>
+                        </div>
+
+                        <div class="col-6 col-lg-3">
+                          <div class="text-muted smaller">请求/响应大小</div>
+                          <div class="font-monospace">{{.RequestBytes}} / {{.ResponseBytes}} bytes</div>
+                        </div>
+                        <div class="col-6 col-lg-3">
+                          <div class="text-muted smaller">费用</div>
+                          <div class="font-monospace">{{.CostUSD}}</div>
+                        </div>
+                        <div class="col-12 col-lg-6">
+                          <div class="text-muted smaller">Tokens</div>
+                          <div class="font-monospace">In: {{.InputTokens}} / Out: {{.OutputTokens}} / Cache: {{.CachedTokens}}</div>
+                        </div>
+                        <div class="col-12 col-lg-6">
+                          <div class="text-muted smaller">状态</div>
+                          <div class="font-monospace">{{.StateLabel}}{{if .IsStream}} · STREAM{{end}}</div>
+                        </div>
+
+                        <div class="col-12 col-lg-3">
+                          <div class="text-muted smaller">错误类型</div>
+                          <div class="font-monospace">{{if .ErrorClass}}{{.ErrorClass}}{{else}}-{{end}}</div>
+                        </div>
+                        <div class="col-12 col-lg-9">
+                          <div class="text-muted smaller">错误信息</div>
+                          {{if .ErrorMessage}}
+                            <pre class="mb-0 font-monospace rlm-prewrap">{{.ErrorMessage}}</pre>
+                          {{else if .Error}}
+                            <pre class="mb-0 font-monospace rlm-prewrap">{{.Error}}</pre>
+                          {{else}}
+                            <div class="text-muted">-</div>
+                          {{end}}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </td>
               </tr>
               {{end}}
               {{if not .UsageEvents}}
@@ -317,6 +396,10 @@
   .btn-xs { padding: 0.1rem 0.5rem; font-size: 0.75rem; }
   .scale-90 { transform: scale(0.9); transform-origin: center; display: inline-block; }
   .flatpickr-input { background-color: #fff !important; }
+  .rlm-usage-row { cursor: pointer; }
+  .rlm-usage-chevron { font-size: 18px; transition: transform 0.15s ease; }
+  .rlm-usage-row[aria-expanded="true"] .rlm-usage-chevron { transform: rotate(90deg); }
+  .rlm-prewrap { white-space: pre-wrap; word-break: break-word; }
 
   .quick-range-btn { 
     border: none;
