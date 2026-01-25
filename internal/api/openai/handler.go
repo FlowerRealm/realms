@@ -152,23 +152,19 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload := make(map[string]any)
-	if err := json.Unmarshal(body, &payload); err != nil {
-		http.Error(w, "请求体不是有效 JSON", http.StatusBadRequest)
+	payload, err := sanitizeResponsesPayload(body, h.defaultMaxOutputTokens)
+	if err != nil {
+		if errors.Is(err, errInvalidJSON) {
+			http.Error(w, "请求体不是有效 JSON", http.StatusBadRequest)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	normalizeMaxOutputTokensInPayload(payload)
-
 	stream := boolFromAny(payload["stream"])
 	publicModel := stringFromAny(payload["model"])
-	var maxOut *int64
-
-	// 默认最大输出，避免无限长输出穿透配额窗口。
-	if _, ok := payload["max_output_tokens"]; !ok && h.defaultMaxOutputTokens > 0 {
-		payload["max_output_tokens"] = int64(h.defaultMaxOutputTokens)
-	}
-	maxOut = intFromAny(payload["max_output_tokens"])
+	maxOut := intFromAny(payload["max_output_tokens"])
 
 	freeMode := h.selfMode
 	modelPassthrough := false

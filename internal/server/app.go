@@ -269,8 +269,12 @@ func (a *App) routes() {
 		)
 	}
 	a.mux.Handle("POST /v1/responses", apiChain(http.HandlerFunc(a.openai.Responses)))
+	a.mux.Handle("POST /v1/chat/completions", apiChain(http.HandlerFunc(a.openai.ChatCompletions)))
 	a.mux.Handle("POST /v1/messages", apiChain(http.HandlerFunc(a.openai.Messages)))
 	a.mux.Handle("GET /v1/models", apiFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.openai.Models)))
+	a.mux.Handle("GET /v1beta/models", apiFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.openai.GeminiModels)))
+	a.mux.Handle("GET /v1beta/openai/models", apiFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.openai.Models)))
+	a.mux.Handle("POST /v1beta/models/{path...}", apiChain(http.HandlerFunc(a.openai.GeminiProxy)))
 	a.mux.Handle("GET /api/usage/windows", apiFeatureChain(store.SettingFeatureDisableWebUsage, http.HandlerFunc(a.web.APIUsageWindows)))
 	a.mux.Handle("GET /api/usage/events", apiFeatureChain(store.SettingFeatureDisableWebUsage, http.HandlerFunc(a.web.APIUsageEvents)))
 

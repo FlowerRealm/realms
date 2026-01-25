@@ -128,6 +128,14 @@ func (e *Executor) Do(ctx context.Context, sel scheduler.Selection, downstream *
 			if bytes.Contains(body, []byte(`"max_tokens"`)) {
 				candidates = append(candidates, rewriteMaxTokensToMaxOutputTokens(body))
 			}
+		case "max_completion_tokens":
+			if bytes.Contains(body, []byte(`"max_completion_tokens"`)) {
+				candidates = append(candidates, rewriteMaxCompletionTokensToMaxTokens(body))
+			}
+		case "stream_options":
+			if bytes.Contains(body, []byte(`"stream_options"`)) {
+				candidates = append(candidates, rewriteRemoveStreamOptions(body))
+			}
 		}
 
 		tried := make([][]byte, 0, len(candidates))
@@ -345,6 +353,54 @@ func rewriteMaxTokensToMaxOutputTokens(body []byte) []byte {
 	if n, ok := int64FromAny(v); ok {
 		payload["max_output_tokens"] = n
 	}
+
+	out, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	return out
+}
+
+func rewriteMaxCompletionTokensToMaxTokens(body []byte) []byte {
+	if len(body) == 0 {
+		return nil
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil
+	}
+	v, ok := payload["max_completion_tokens"]
+	if !ok {
+		return nil
+	}
+	delete(payload, "max_completion_tokens")
+
+	// 兼容旧形态：把 max_completion_tokens 挪到 max_tokens（若上游不接受该字段，会返回新的 400 以便继续排障）。
+	if _, ok := payload["max_tokens"]; !ok {
+		if n, ok := int64FromAny(v); ok {
+			payload["max_tokens"] = n
+		}
+	}
+
+	out, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	return out
+}
+
+func rewriteRemoveStreamOptions(body []byte) []byte {
+	if len(body) == 0 {
+		return nil
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil
+	}
+	if _, ok := payload["stream_options"]; !ok {
+		return nil
+	}
+	delete(payload, "stream_options")
 
 	out, err := json.Marshal(payload)
 	if err != nil {

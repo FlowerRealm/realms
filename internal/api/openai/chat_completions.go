@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tidwall/gjson"
+
 	"realms/internal/auth"
 	"realms/internal/middleware"
 	"realms/internal/quota"
@@ -16,38 +18,40 @@ import (
 	"realms/internal/store"
 )
 
-// Messages 提供 Anthropic Messages 兼容入口：POST /v1/messages。
-func (h *Handler) Messages(w http.ResponseWriter, r *http.Request) {
-	h.proxyMessagesJSON(w, r)
+// ChatCompletions 提供 OpenAI Chat Completions 兼容入口：POST /v1/chat/completions。
+func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
+	h.proxyChatCompletionsJSON(w, r)
 }
 
-func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Request) {
 	reqStart := time.Now()
 	p, ok := auth.PrincipalFromContext(r.Context())
 	if !ok || p.ActorType != auth.ActorTypeToken || p.TokenID == nil {
-		writeAnthropicError(w, http.StatusUnauthorized, "未鉴权")
+		http.Error(w, "未鉴权", http.StatusUnauthorized)
 		return
 	}
 	body := middleware.CachedBody(r.Context())
 	if len(body) == 0 {
-		writeAnthropicError(w, http.StatusBadRequest, "请求体为空")
+		http.Error(w, "请求体为空", http.StatusBadRequest)
 		return
 	}
 
-	payload, err := sanitizeMessagesPayload(body, h.defaultMaxOutputTokens)
+	payload, err := sanitizeChatCompletionsPayload(body, h.defaultMaxOutputTokens)
 	if err != nil {
 		if errors.Is(err, errInvalidJSON) {
-			writeAnthropicError(w, http.StatusBadRequest, "请求体不是有效 JSON")
+			http.Error(w, "请求体不是有效 JSON", http.StatusBadRequest)
 			return
 		}
-		writeAnthropicError(w, http.StatusBadRequest, err.Error())
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	stream := boolFromAny(payload["stream"])
 	publicModel := strings.TrimSpace(stringFromAny(payload["model"]))
-
-	maxOut := intFromAny(payload["max_tokens"])
+	maxOut := intFromAny(payload["max_completion_tokens"])
+	if maxOut == nil {
+		maxOut = intFromAny(payload["max_tokens"])
+	}
 
 	freeMode := h.selfMode
 	modelPassthrough := false
@@ -58,16 +62,16 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if publicModel == "" {
-		writeAnthropicError(w, http.StatusBadRequest, "model 不能为空")
+		http.Error(w, "model 不能为空", http.StatusBadRequest)
 		return
 	}
 	if h.models == nil {
-		writeAnthropicError(w, http.StatusBadGateway, "服务未配置模型目录")
+		http.Error(w, "服务未配置模型目录", http.StatusBadGateway)
 		return
 	}
 
 	var cons scheduler.Constraints
-	cons.RequireChannelType = store.UpstreamTypeAnthropic
+	cons.RequireChannelType = store.UpstreamTypeOpenAICompatible
 
 	var rewriteBody func(sel scheduler.Selection) ([]byte, error)
 	var upstreamByChannel map[int64]string
@@ -77,16 +81,24 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 		if !freeMode {
 			if _, err := h.models.GetManagedModelByPublicID(r.Context(), publicModel); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
-					writeAnthropicError(w, http.StatusBadRequest, "模型不存在")
+					http.Error(w, "模型不存在", http.StatusBadRequest)
 					return
 				}
-				writeAnthropicError(w, http.StatusBadGateway, "查询模型失败")
+				http.Error(w, "查询模型失败", http.StatusBadGateway)
 				return
 			}
 		}
 		rewriteBody = func(sel scheduler.Selection) ([]byte, error) {
 			out := clonePayload(payload)
 			raw, err := json.Marshal(out)
+			if err != nil {
+				return nil, err
+			}
+			raw, err = applyChatCompletionsModelSuffixTransforms(raw, sel, publicModel)
+			if err != nil {
+				return nil, err
+			}
+			raw, err = applyChatCompletionsModelRules(raw)
 			if err != nil {
 				return nil, err
 			}
@@ -98,12 +110,9 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return nil, err
 			}
-			ctx := buildParamOverrideContext(sel, publicModel, stringFromAny(out["model"]), r.URL.Path)
+			upstreamModel := strings.TrimSpace(gjson.GetBytes(raw, "model").String())
+			ctx := buildParamOverrideContext(sel, publicModel, upstreamModel, r.URL.Path)
 			raw, err = applyChannelParamOverride(raw, sel, ctx)
-			if err != nil {
-				return nil, err
-			}
-			raw, err = normalizeMaxTokensInBody(raw)
 			if err != nil {
 				return nil, err
 			}
@@ -113,15 +122,15 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 		_, err := h.models.GetEnabledManagedModelByPublicID(r.Context(), publicModel)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				writeAnthropicError(w, http.StatusBadRequest, "模型未启用")
+				http.Error(w, "模型未启用", http.StatusBadRequest)
 				return
 			}
-			writeAnthropicError(w, http.StatusBadGateway, "查询模型失败")
+			http.Error(w, "查询模型失败", http.StatusBadGateway)
 			return
 		}
 		bindings, err := h.models.ListEnabledChannelModelBindingsByPublicID(r.Context(), publicModel)
 		if err != nil {
-			writeAnthropicError(w, http.StatusBadGateway, "查询模型绑定失败")
+			http.Error(w, "查询模型绑定失败", http.StatusBadGateway)
 			return
 		}
 
@@ -132,9 +141,8 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 			}
 			upstreamByChannel[b.ChannelID] = b.UpstreamModel
 		}
-		// 统一使用“渠道绑定模型”配置：无绑定即不可用（避免 legacy 字段导致的调度歧义）。
 		if len(upstreamByChannel) == 0 {
-			writeAnthropicError(w, http.StatusBadGateway, "模型未配置可用上游")
+			http.Error(w, "模型未配置可用上游", http.StatusBadGateway)
 			return
 		}
 
@@ -154,6 +162,14 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return nil, err
 			}
+			raw, err = applyChatCompletionsModelSuffixTransforms(raw, sel, publicModel)
+			if err != nil {
+				return nil, err
+			}
+			raw, err = applyChatCompletionsModelRules(raw)
+			if err != nil {
+				return nil, err
+			}
 			raw, err = applyChannelRequestPolicy(raw, sel)
 			if err != nil {
 				return nil, err
@@ -162,12 +178,9 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return nil, err
 			}
-			ctx := buildParamOverrideContext(sel, publicModel, up, r.URL.Path)
+			upstreamModel := strings.TrimSpace(gjson.GetBytes(raw, "model").String())
+			ctx := buildParamOverrideContext(sel, publicModel, upstreamModel, r.URL.Path)
 			raw, err = applyChannelParamOverride(raw, sel, ctx)
-			if err != nil {
-				return nil, err
-			}
-			raw, err = normalizeMaxTokensInBody(raw)
 			if err != nil {
 				return nil, err
 			}
@@ -205,14 +218,14 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			if errors.Is(err, quota.ErrSubscriptionRequired) || errors.Is(err, quota.ErrQuotaExceeded) {
-				writeAnthropicError(w, http.StatusTooManyRequests, err.Error())
+				http.Error(w, err.Error(), http.StatusTooManyRequests)
 				return
 			}
 			if errors.Is(err, quota.ErrInsufficientBalance) {
-				writeAnthropicError(w, http.StatusPaymentRequired, err.Error())
+				http.Error(w, err.Error(), http.StatusPaymentRequired)
 				return
 			}
-			writeAnthropicError(w, http.StatusTooManyRequests, "配额预留失败")
+			http.Error(w, "配额预留失败", http.StatusTooManyRequests)
 			return
 		}
 		usageID = res.UsageEventID
@@ -227,7 +240,7 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 		}
 		h.auditUpstreamError(r.Context(), r.URL.Path, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", 0)
 		cw := &countingResponseWriter{ResponseWriter: w}
-		writeAnthropicError(cw, http.StatusBadGateway, "上游不可用")
+		http.Error(cw, "上游不可用", http.StatusBadGateway)
 		h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream)
 		h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream, reqBytes, cw.bytes)
 		return
@@ -248,7 +261,7 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 				cancel()
 			}
 			cw := &countingResponseWriter{ResponseWriter: w}
-			writeAnthropicError(cw, http.StatusInternalServerError, "请求体处理失败")
+			http.Error(cw, "请求体处理失败", http.StatusInternalServerError)
 			h.finalizeUsageEvent(r, usageID, &sel, http.StatusInternalServerError, "rewrite_body", "请求体处理失败", time.Since(reqStart), stream, reqBytes, cw.bytes)
 			return
 		}
@@ -264,41 +277,7 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	h.auditUpstreamError(r.Context(), r.URL.Path, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", 0)
 	cw := &countingResponseWriter{ResponseWriter: w}
-	writeAnthropicError(cw, http.StatusBadGateway, "上游不可用")
+	http.Error(cw, "上游不可用", http.StatusBadGateway)
 	h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream)
 	h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream, reqBytes, cw.bytes)
-}
-
-func writeAnthropicError(w http.ResponseWriter, status int, message string) {
-	errType := anthropicErrorTypeForStatus(status)
-
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"type": "error",
-		"error": map[string]any{
-			"type":    errType,
-			"message": strings.TrimSpace(message),
-		},
-	})
-}
-
-func anthropicErrorTypeForStatus(status int) string {
-	switch status {
-	case http.StatusBadRequest:
-		return "invalid_request_error"
-	case http.StatusUnauthorized:
-		return "authentication_error"
-	case http.StatusForbidden:
-		return "permission_error"
-	case http.StatusNotFound:
-		return "not_found_error"
-	case http.StatusTooManyRequests:
-		return "rate_limit_error"
-	default:
-		if status >= 500 {
-			return "api_error"
-		}
-		return "invalid_request_error"
-	}
 }

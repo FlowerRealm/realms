@@ -203,7 +203,6 @@ func TestRoutes_NoChatFeature(t *testing.T) {
 	}{
 		{method: http.MethodGet, path: "/chat"},
 		{method: http.MethodPost, path: "/api/chat/token"},
-		{method: http.MethodPost, path: "/v1/chat/completions"},
 	}
 
 	for _, tc := range cases {

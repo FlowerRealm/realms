@@ -119,7 +119,12 @@ curl "http://localhost:8080/v1/responses" \
 
 目前支持：
 - `POST /v1/responses`
+- `POST /v1/chat/completions`
+- `POST /v1/messages`
 - `GET /v1/models`
+- `GET /v1beta/models`
+- `GET /v1beta/openai/models`
+- `POST /v1beta/models/{path...}`
 
 认证方式：
 - `Authorization: Bearer <token>`（或 `x-api-key`）
