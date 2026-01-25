@@ -819,6 +819,69 @@ func TestResponses_MaxTokensAlias_NormalizesToMaxOutputTokens(t *testing.T) {
 	}
 }
 
+func TestResponses_ChannelParamOverride_MaxTokens_NormalizesToMaxOutputTokens(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, ParamOverride: `{"max_tokens":7}`},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"m1": {ID: 1, PublicID: "m1", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"m1": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "m1-up", Status: 1},
+			},
+		},
+	}
+
+	doer := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, body []byte) (*http.Response, error) {
+		var got map[string]any
+		if err := json.Unmarshal(body, &got); err != nil {
+			return nil, err
+		}
+		if _, ok := got["max_tokens"]; ok {
+			t.Fatalf("expected max_tokens to be removed, got=%v", got["max_tokens"])
+		}
+		if _, ok := got["max_completion_tokens"]; ok {
+			t.Fatalf("expected max_completion_tokens to be removed, got=%v", got["max_completion_tokens"])
+		}
+		if v, ok := got["max_output_tokens"].(float64); !ok || v != 7 {
+			t.Fatalf("expected max_output_tokens=7, got=%v", got["max_output_tokens"])
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, nil, fakeAudit{}, nil, 123, upstream.SSEPumpOptions{})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestResponses_ModelSuffixEffort_IsPerChannelAttempt(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{

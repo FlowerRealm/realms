@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -208,23 +209,33 @@ func shouldAttemptCodexPathFallback(resp *http.Response) bool {
 	}
 }
 
+var unsupportedParamRegexp = regexp.MustCompile(`(?i)unsupported parameter[^a-z0-9_]+([a-z0-9_]+)`)
+
 func looksLikeUnsupportedParameter(body []byte, param string) bool {
-	if len(body) == 0 {
+	param = strings.ToLower(strings.TrimSpace(param))
+	if param == "" {
 		return false
+	}
+	return unsupportedParameterName(body) == param
+}
+
+func unsupportedParameterName(body []byte) string {
+	if len(body) == 0 {
+		return ""
 	}
 	var payload any
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return false
+		return ""
 	}
-	msg := extractUpstreamErrorMessage(payload)
-	msg = strings.ToLower(strings.TrimSpace(msg))
+	msg := strings.TrimSpace(extractUpstreamErrorMessage(payload))
 	if msg == "" {
-		return false
+		return ""
 	}
-	if !strings.Contains(msg, "unsupported parameter") {
-		return false
+	m := unsupportedParamRegexp.FindStringSubmatch(msg)
+	if len(m) < 2 {
+		return ""
 	}
-	return strings.Contains(msg, strings.ToLower(param))
+	return strings.ToLower(m[1])
 }
 
 func looksLikeCodexUnsupportedParameter(body []byte) bool {
@@ -439,6 +450,19 @@ func (e *Executor) buildRequestWithCodexPassthrough(ctx context.Context, sel sch
 	}
 	u = *uu
 	u.RawQuery = downstream.URL.RawQuery
+	if u.RawQuery != "" && (targetPath == "/v1/responses" || targetPath == "/v1/messages") {
+		q := u.Query()
+		changed := false
+		for _, k := range []string{"max_tokens", "max_output_tokens", "max_completion_tokens"} {
+			if _, ok := q[k]; ok {
+				q.Del(k)
+				changed = true
+			}
+		}
+		if changed {
+			u.RawQuery = q.Encode()
+		}
+	}
 
 	req, err := http.NewRequestWithContext(ctx, downstream.Method, u.String(), bytes.NewReader(body))
 	if err != nil {

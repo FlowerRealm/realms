@@ -109,6 +109,10 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return nil, err
 			}
+			raw, err = normalizeMaxTokensInBody(raw)
+			if err != nil {
+				return nil, err
+			}
 			return raw, nil
 		}
 	} else {
@@ -166,6 +170,10 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 			}
 			ctx := buildParamOverrideContext(sel, publicModel, up, r.URL.Path)
 			raw, err = applyChannelParamOverride(raw, sel, ctx)
+			if err != nil {
+				return nil, err
+			}
+			raw, err = normalizeMaxTokensInBody(raw)
 			if err != nil {
 				return nil, err
 			}

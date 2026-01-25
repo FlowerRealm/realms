@@ -227,6 +227,10 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return nil, err
 			}
+			raw, err = normalizeMaxOutputTokensInBody(raw)
+			if err != nil {
+				return nil, err
+			}
 			return raw, nil
 		}
 	} else {
@@ -289,6 +293,10 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			}
 			ctx := buildParamOverrideContext(sel, publicModel, up, r.URL.Path)
 			raw, err = applyChannelParamOverride(raw, sel, ctx)
+			if err != nil {
+				return nil, err
+			}
+			raw, err = normalizeMaxOutputTokensInBody(raw)
 			if err != nil {
 				return nil, err
 			}
@@ -527,6 +535,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			}
 			defer h.tokenLimits.ReleaseSSE(*tokenID)
 		}
+
 		cw := &countingResponseWriter{ResponseWriter: w}
 		copyResponseHeaders(cw.Header(), resp.Header)
 		cw.Header().Set("X-Accel-Buffering", "no")
