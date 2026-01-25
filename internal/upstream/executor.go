@@ -110,20 +110,26 @@ func (e *Executor) Do(ctx context.Context, sel scheduler.Selection, downstream *
 	// 为减少误报/兼容更多代理实现，这里对该错误做一次无损改写重试（max_output_tokens -> max_tokens）。
 	if sel.CredentialType == scheduler.CredentialTypeOpenAI && resp != nil && resp.StatusCode == http.StatusBadRequest {
 		b, _ := peekResponseBody(resp, 32<<10)
+		// 兼容两种常见形态：
+		// - upstream 不支持 Responses 风格 max_output_tokens，只接受 max_tokens
+		// - upstream 只支持 Responses 风格 max_output_tokens，不接受 legacy max_tokens
+		var body2 []byte
 		if looksLikeUnsupportedParameter(b, "max_output_tokens") {
-			body2 := rewriteMaxOutputTokensToMaxTokens(body)
-			if len(body2) > 0 {
-				req2, err2 := e.buildRequest(ctx, sel, downstream, body2)
-				if err2 == nil {
-					resp2, err2 := e.client.Do(req2)
-					if err2 == nil && resp2 != nil {
-						if resp.Body != nil {
-							_ = resp.Body.Close()
-						}
-						resp = resp2
-					} else if resp2 != nil && resp2.Body != nil {
-						_ = resp2.Body.Close()
+			body2 = rewriteMaxOutputTokensToMaxTokens(body)
+		} else if looksLikeUnsupportedParameter(b, "max_tokens") {
+			body2 = rewriteMaxTokensToMaxOutputTokens(body)
+		}
+		if len(body2) > 0 {
+			req2, err2 := e.buildRequest(ctx, sel, downstream, body2)
+			if err2 == nil {
+				resp2, err2 := e.client.Do(req2)
+				if err2 == nil && resp2 != nil {
+					if resp.Body != nil {
+						_ = resp.Body.Close()
 					}
+					resp = resp2
+				} else if resp2 != nil && resp2.Body != nil {
+					_ = resp2.Body.Close()
 				}
 			}
 		}
@@ -264,6 +270,32 @@ func rewriteMaxOutputTokensToMaxTokens(body []byte) []byte {
 		if n, ok := int64FromAny(v); ok {
 			payload["max_tokens"] = n
 		}
+	}
+
+	out, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	return out
+}
+
+func rewriteMaxTokensToMaxOutputTokens(body []byte) []byte {
+	if len(body) == 0 {
+		return nil
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil
+	}
+	v, ok := payload["max_tokens"]
+	if !ok {
+		return nil
+	}
+	delete(payload, "max_tokens")
+
+	// 兼容旧形态：把 max_tokens 挪到 max_output_tokens（覆盖已有值，避免“客户端 max_tokens + 服务端默认 max_output_tokens”导致语义偏差）。
+	if n, ok := int64FromAny(v); ok {
+		payload["max_output_tokens"] = n
 	}
 
 	out, err := json.Marshal(payload)

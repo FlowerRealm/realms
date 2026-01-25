@@ -528,3 +528,67 @@ func TestExecutor_Do_OpenAICompat_UnsupportedMaxOutputTokens_RewritesToMaxTokens
 		t.Fatalf("expected max_tokens=123 in retry, got %#v", bodies[1]["max_tokens"])
 	}
 }
+
+func TestExecutor_Do_OpenAICompat_UnsupportedMaxTokens_RewritesToMaxOutputTokens(t *testing.T) {
+	var bodies []map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+
+		var payload map[string]any
+		if err := json.Unmarshal(b, &payload); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"detail":"bad json"}`))
+			return
+		}
+		bodies = append(bodies, payload)
+
+		if _, ok := payload["max_tokens"]; ok {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"detail":"Unsupported parameter: max_tokens"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	exec := &Executor{
+		st: &fakeUpstreamStore{
+			openaiSecret: store.OpenAICredentialSecret{
+				APIKey: "sk-test",
+			},
+		},
+		client: srv.Client(),
+	}
+
+	body := []byte(`{"model":"gpt-5.2","stream":false,"max_tokens":123,"max_output_tokens":999,"input":"hi"}`)
+	downstream := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader(body))
+	resp, err := exec.Do(context.Background(), scheduler.Selection{
+		BaseURL:        srv.URL,
+		CredentialType: scheduler.CredentialTypeOpenAI,
+		CredentialID:   123,
+	}, downstream, body)
+	if err != nil {
+		t.Fatalf("Do returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d (%s)", resp.StatusCode, string(b))
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(bodies))
+	}
+	if _, ok := bodies[0]["max_tokens"]; !ok {
+		t.Fatalf("expected max_tokens in first request, got %#v", bodies[0])
+	}
+	if _, ok := bodies[1]["max_tokens"]; ok {
+		t.Fatalf("expected max_tokens to be removed in retry, got %#v", bodies[1])
+	}
+	if got, ok := bodies[1]["max_output_tokens"].(float64); !ok || got != 123 {
+		t.Fatalf("expected max_output_tokens=123 in retry, got %#v", bodies[1]["max_output_tokens"])
+	}
+}
