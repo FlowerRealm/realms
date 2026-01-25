@@ -20,6 +20,9 @@ services:
       context: .
       args:
         REALMS_BUILD_TAGS: ${REALMS_BUILD_TAGS:-}
+        REALMS_VERSION: ${REALMS_VERSION:-}
+        REALMS_COMMIT: ${REALMS_COMMIT:-none}
+        REALMS_BUILD_DATE: ${REALMS_BUILD_DATE:-unknown}
     depends_on:
       mysql:
         condition: service_healthy

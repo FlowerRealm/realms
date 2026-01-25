@@ -28,8 +28,14 @@ func TestBaseTemplates_ContainGitHubFooterAndGuard(t *testing.T) {
 			if !strings.Contains(s, `id="rlmProjectFooter"`) {
 				t.Fatalf("expected project footer id in %s", tc.path)
 			}
+			if !strings.Contains(s, `id="rlmBuildInfoWrap"`) || !strings.Contains(s, `id="rlmBuildInfo"`) {
+				t.Fatalf("expected build info placeholder in %s", tc.path)
+			}
 			if !strings.Contains(s, "https://github.com/FlowerRealm/realms") {
 				t.Fatalf("expected GitHub repo link in %s", tc.path)
+			}
+			if !strings.Contains(s, "/api/version") {
+				t.Fatalf("expected version api reference in %s", tc.path)
 			}
 			if !strings.Contains(s, "MutationObserver") {
 				t.Fatalf("expected MutationObserver guard in %s", tc.path)

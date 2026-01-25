@@ -198,3 +198,10 @@ make dev
 ```bash
 go test ./...
 ```
+
+## 7) 版本号
+
+- 版本号文件：`internal/version/version.txt`（默认以该值作为 `GET /api/version` / `GET /healthz` 的 `version`）
+- 查询版本（公开）：`GET /api/version`
+- 健康检查（公开，含版本）：`GET /healthz`
+- Web 控制台与管理后台会在页脚展示版本信息（来源：`/api/version`）

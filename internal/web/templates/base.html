@@ -397,7 +397,7 @@
             {{.ContentHTML}}
             
             <footer id="rlmProjectFooter" data-rlm-github="FlowerRealm/realms" class="mt-5 text-center text-muted small pb-4 opacity-50">
-              Realms 中转服务 &copy; 2026 · <a href="https://github.com/FlowerRealm/realms" target="_blank" rel="noopener noreferrer" class="link-secondary text-decoration-none">GitHub: FlowerRealm/realms</a>
+              Realms 中转服务 &copy; 2026<span id="rlmBuildInfoWrap" class="d-none"> · <span id="rlmBuildInfo"></span></span> · <a href="https://github.com/FlowerRealm/realms" target="_blank" rel="noopener noreferrer" class="link-secondary text-decoration-none">GitHub: FlowerRealm/realms</a>
             </footer>
           </div>
         </main>
@@ -430,7 +430,7 @@
       </main>
 
       <footer id="rlmProjectFooter" data-rlm-github="FlowerRealm/realms" class="py-3 my-4 text-center text-muted small opacity-50">
-         &copy; 2026 Realms 服务 · <a href="https://github.com/FlowerRealm/realms" target="_blank" rel="noopener noreferrer" class="link-secondary text-decoration-none">GitHub: FlowerRealm/realms</a>
+         &copy; 2026 Realms 服务<span id="rlmBuildInfoWrap" class="d-none"> · <span id="rlmBuildInfo"></span></span> · <a href="https://github.com/FlowerRealm/realms" target="_blank" rel="noopener noreferrer" class="link-secondary text-decoration-none">GitHub: FlowerRealm/realms</a>
       </footer>
     </div>
     {{end}}
@@ -592,16 +592,94 @@
         (function installProjectFooterGuard() {
           try {
             const footerID = "rlmProjectFooter";
+            const buildInfoWrapID = "rlmBuildInfoWrap";
+            const buildInfoID = "rlmBuildInfo";
             const githubSlug = "FlowerRealm/realms";
             const githubURL = "https://github.com/FlowerRealm/realms";
             const restoredFlagKey = "realms_project_footer_restored";
 
+            let buildInfo = null;
+            let buildInfoReq = null;
+
+            function formatBuildInfo(data) {
+              try {
+                const version = (data && data.version ? data.version : "").toString().trim();
+                if (!version) return null;
+                const commit = (data && data.commit ? data.commit : "").toString().trim();
+                const date = (data && data.date ? data.date : "").toString().trim();
+                const env = (data && data.env ? data.env : "").toString().trim();
+
+                let label = version;
+                if (commit && commit !== "none") {
+                  label += " (" + commit.slice(0, 7) + ")";
+                }
+
+                const titleParts = [];
+                if (env) titleParts.push("env: " + env);
+                if (commit && commit !== "none") titleParts.push("commit: " + commit);
+                if (date && date !== "unknown") titleParts.push("build: " + date);
+
+                return { label: label, title: titleParts.join(" · ") };
+              } catch (e) {
+                return null;
+              }
+            }
+
+            function fetchBuildInfoOnce() {
+              if (buildInfo) return Promise.resolve(buildInfo);
+              if (buildInfoReq) return buildInfoReq;
+              buildInfoReq = fetch("/api/version", {
+                method: "GET",
+                headers: { "Accept": "application/json" },
+                cache: "no-store"
+              })
+                .then(function (resp) {
+                  try {
+                    if (!resp || !resp.ok) return null;
+                    return resp.json();
+                  } catch (e) {
+                    return null;
+                  }
+                })
+                .then(function (data) {
+                  buildInfo = formatBuildInfo(data);
+                  return buildInfo;
+                })
+                .catch(function () { return null; })
+                .finally(function () { buildInfoReq = null; });
+              return buildInfoReq;
+            }
+
+            function applyBuildInfo(info) {
+              try {
+                const wrap = document.getElementById(buildInfoWrapID);
+                const el = document.getElementById(buildInfoID);
+                if (!wrap || !el || !info || !info.label) return;
+                el.textContent = info.label;
+                if (info.title) el.setAttribute("title", info.title);
+                wrap.classList.remove("d-none");
+              } catch (e) {}
+            }
+
+            function ensureBuildInfo() {
+              try {
+                const wrap = document.getElementById(buildInfoWrapID);
+                const el = document.getElementById(buildInfoID);
+                if (!wrap || !el) return;
+                if (buildInfo) {
+                  applyBuildInfo(buildInfo);
+                  return;
+                }
+                fetchBuildInfoOnce().then(applyBuildInfo);
+              } catch (e) {}
+            }
+
             function footerHTML() {
               const isApp = document.documentElement.classList.contains("app-html") || document.body.classList.contains("app-body");
               if (isApp) {
-                return '<footer id="' + footerID + '" data-rlm-github="' + githubSlug + '" class="mt-5 text-center text-muted small pb-4 opacity-50">Realms 中转服务 &copy; 2026 · <a href="' + githubURL + '" target="_blank" rel="noopener noreferrer" class="link-secondary text-decoration-none">GitHub: ' + githubSlug + "</a></footer>";
+                return '<footer id="' + footerID + '" data-rlm-github="' + githubSlug + '" class="mt-5 text-center text-muted small pb-4 opacity-50">Realms 中转服务 &copy; 2026<span id="rlmBuildInfoWrap" class="d-none"> · <span id="rlmBuildInfo"></span></span> · <a href="' + githubURL + '" target="_blank" rel="noopener noreferrer" class="link-secondary text-decoration-none">GitHub: ' + githubSlug + "</a></footer>";
               }
-              return '<footer id="' + footerID + '" data-rlm-github="' + githubSlug + '" class="py-3 my-4 text-center text-muted small opacity-50">&copy; 2026 Realms 服务 · <a href="' + githubURL + '" target="_blank" rel="noopener noreferrer" class="link-secondary text-decoration-none">GitHub: ' + githubSlug + "</a></footer>";
+              return '<footer id="' + footerID + '" data-rlm-github="' + githubSlug + '" class="py-3 my-4 text-center text-muted small opacity-50">&copy; 2026 Realms 服务<span id="rlmBuildInfoWrap" class="d-none"> · <span id="rlmBuildInfo"></span></span> · <a href="' + githubURL + '" target="_blank" rel="noopener noreferrer" class="link-secondary text-decoration-none">GitHub: ' + githubSlug + "</a></footer>";
             }
 
             function findMount() {
@@ -613,14 +691,16 @@
             }
 
             function ensureFooter() {
-              if (document.getElementById(footerID)) return;
-              const mount = findMount();
-              if (!mount) return;
-              mount.insertAdjacentHTML("beforeend", footerHTML());
-              if (!sessionStorage.getItem(restoredFlagKey)) {
-                sessionStorage.setItem(restoredFlagKey, "1");
-                try { console.warn("[Realms] 检测到项目声明底栏被移除，已自动恢复。"); } catch (e) {}
+              if (!document.getElementById(footerID)) {
+                const mount = findMount();
+                if (!mount) return;
+                mount.insertAdjacentHTML("beforeend", footerHTML());
+                if (!sessionStorage.getItem(restoredFlagKey)) {
+                  sessionStorage.setItem(restoredFlagKey, "1");
+                  try { console.warn("[Realms] 检测到项目声明底栏被移除，已自动恢复。"); } catch (e) {}
+                }
               }
+              ensureBuildInfo();
             }
 
             ensureFooter();
