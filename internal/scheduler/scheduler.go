@@ -34,6 +34,9 @@ type Selection struct {
 	ParamOverride         string
 	HeaderOverride        string
 	StatusCodeMapping     string
+	ModelSuffixPreserve   string
+	RequestBodyBlacklist  string
+	RequestBodyWhitelist  string
 
 	EndpointID int64
 	BaseURL    string
@@ -334,6 +337,9 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			ParamOverride:         ch.ParamOverride,
 			HeaderOverride:        ch.HeaderOverride,
 			StatusCodeMapping:     ch.StatusCodeMapping,
+			ModelSuffixPreserve:   ch.ModelSuffixPreserve,
+			RequestBodyBlacklist:  ch.RequestBodyBlacklist,
+			RequestBodyWhitelist:  ch.RequestBodyWhitelist,
 			EndpointID:            ep.ID,
 			BaseURL:               ep.BaseURL,
 			CredentialType:        CredentialTypeOpenAI,
@@ -403,6 +409,9 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			ParamOverride:         ch.ParamOverride,
 			HeaderOverride:        ch.HeaderOverride,
 			StatusCodeMapping:     ch.StatusCodeMapping,
+			ModelSuffixPreserve:   ch.ModelSuffixPreserve,
+			RequestBodyBlacklist:  ch.RequestBodyBlacklist,
+			RequestBodyWhitelist:  ch.RequestBodyWhitelist,
 			EndpointID:            ep.ID,
 			BaseURL:               ep.BaseURL,
 			CredentialType:        CredentialTypeAnthropic,
@@ -475,6 +484,9 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			ParamOverride:         ch.ParamOverride,
 			HeaderOverride:        ch.HeaderOverride,
 			StatusCodeMapping:     ch.StatusCodeMapping,
+			ModelSuffixPreserve:   ch.ModelSuffixPreserve,
+			RequestBodyBlacklist:  ch.RequestBodyBlacklist,
+			RequestBodyWhitelist:  ch.RequestBodyWhitelist,
 			EndpointID:            ep.ID,
 			BaseURL:               ep.BaseURL,
 			CredentialType:        CredentialTypeCodex,

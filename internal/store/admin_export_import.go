@@ -12,7 +12,7 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-const AdminConfigExportVersion = 4
+const AdminConfigExportVersion = 5
 
 type AdminConfigExport struct {
 	Version    int       `json:"version"`
@@ -67,6 +67,9 @@ type AdminConfigUpstreamChannel struct {
 	ParamOverride         json.RawMessage `json:"param_override,omitempty"`
 	HeaderOverride        json.RawMessage `json:"header_override,omitempty"`
 	StatusCodeMapping     json.RawMessage `json:"status_code_mapping,omitempty"`
+	ModelSuffixPreserve   json.RawMessage `json:"model_suffix_preserve,omitempty"`
+	RequestBodyBlacklist  json.RawMessage `json:"request_body_blacklist,omitempty"`
+	RequestBodyWhitelist  json.RawMessage `json:"request_body_whitelist,omitempty"`
 }
 
 type AdminConfigUpstreamEndpoint struct {
@@ -186,6 +189,18 @@ func (s *Store) ExportAdminConfig(ctx context.Context) (AdminConfigExport, error
 		if strings.TrimSpace(ch.StatusCodeMapping) != "" {
 			statusCodeMapping = json.RawMessage(strings.TrimSpace(ch.StatusCodeMapping))
 		}
+		var modelSuffixPreserve json.RawMessage
+		if strings.TrimSpace(ch.ModelSuffixPreserve) != "" {
+			modelSuffixPreserve = json.RawMessage(strings.TrimSpace(ch.ModelSuffixPreserve))
+		}
+		var requestBodyBlacklist json.RawMessage
+		if strings.TrimSpace(ch.RequestBodyBlacklist) != "" {
+			requestBodyBlacklist = json.RawMessage(strings.TrimSpace(ch.RequestBodyBlacklist))
+		}
+		var requestBodyWhitelist json.RawMessage
+		if strings.TrimSpace(ch.RequestBodyWhitelist) != "" {
+			requestBodyWhitelist = json.RawMessage(strings.TrimSpace(ch.RequestBodyWhitelist))
+		}
 		out.UpstreamChannels = append(out.UpstreamChannels, AdminConfigUpstreamChannel{
 			Type:                  strings.TrimSpace(ch.Type),
 			Name:                  strings.TrimSpace(ch.Name),
@@ -202,6 +217,9 @@ func (s *Store) ExportAdminConfig(ctx context.Context) (AdminConfigExport, error
 			ParamOverride:         paramOverride,
 			HeaderOverride:        headerOverride,
 			StatusCodeMapping:     statusCodeMapping,
+			ModelSuffixPreserve:   modelSuffixPreserve,
+			RequestBodyBlacklist:  requestBodyBlacklist,
+			RequestBodyWhitelist:  requestBodyWhitelist,
 		})
 
 		ep, err := s.GetUpstreamEndpointByChannelID(ctx, ch.ID)
@@ -255,7 +273,7 @@ func (s *Store) ImportAdminConfig(ctx context.Context, in AdminConfigExport) (Ad
 	if s == nil || s.db == nil {
 		return AdminConfigImportReport{}, errors.New("数据库未初始化")
 	}
-	if in.Version != 1 && in.Version != 2 && in.Version != 3 && in.Version != AdminConfigExportVersion {
+	if in.Version < 1 || in.Version > AdminConfigExportVersion {
 		return AdminConfigImportReport{}, fmt.Errorf("不支持的导入版本: %d", in.Version)
 	}
 
@@ -488,6 +506,28 @@ ON CONFLICT(name) DO UPDATE SET
 		paramOverride := strings.TrimSpace(string(ch.ParamOverride))
 		headerOverride := strings.TrimSpace(string(ch.HeaderOverride))
 		statusCodeMapping := strings.TrimSpace(string(ch.StatusCodeMapping))
+		modelSuffixPreserve := strings.TrimSpace(string(ch.ModelSuffixPreserve))
+		requestBodyBlacklist := strings.TrimSpace(string(ch.RequestBodyBlacklist))
+		requestBodyWhitelist := strings.TrimSpace(string(ch.RequestBodyWhitelist))
+		if in.Version >= 5 {
+			normalized, err := normalizeStringJSONArray(modelSuffixPreserve)
+			if err != nil {
+				return 0, fmt.Errorf("model_suffix_preserve 不是有效 JSON 数组: %w", err)
+			}
+			modelSuffixPreserve = normalized
+
+			normalized, err = normalizeStringJSONArray(requestBodyBlacklist)
+			if err != nil {
+				return 0, fmt.Errorf("request_body_blacklist 不是有效 JSON 数组: %w", err)
+			}
+			requestBodyBlacklist = normalized
+
+			normalized, err = normalizeStringJSONArray(requestBodyWhitelist)
+			if err != nil {
+				return 0, fmt.Errorf("request_body_whitelist 不是有效 JSON 数组: %w", err)
+			}
+			requestBodyWhitelist = normalized
+		}
 
 		id, err := findChannelID(typ, name)
 		if err != nil {
@@ -503,6 +543,13 @@ INSERT INTO upstream_channels(type, name, ` + "`groups`" + `, status, priority, 
 VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `
 					args = append(args, allowServiceTier, disableStore, allowSafetyIdentifier, nullableString(&paramOverride), nullableString(&headerOverride), nullableString(&statusCodeMapping))
+					if in.Version >= 5 {
+						stmtInsert = `
+INSERT INTO upstream_channels(type, name, ` + "`groups`" + `, status, priority, promotion, limit_sessions, limit_rpm, limit_tpm, allow_service_tier, disable_store, allow_safety_identifier, param_override, header_override, status_code_mapping, model_suffix_preserve, request_body_blacklist, request_body_whitelist, created_at, updated_at)
+VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+`
+						args = append(args, nullableString(&modelSuffixPreserve), nullableString(&requestBodyBlacklist), nullableString(&requestBodyWhitelist))
+					}
 				} else if in.Version >= 3 {
 					stmtInsert = `
 INSERT INTO upstream_channels(type, name, ` + "`groups`" + `, status, priority, promotion, limit_sessions, limit_rpm, limit_tpm, allow_service_tier, disable_store, allow_safety_identifier, param_override, created_at, updated_at)
@@ -551,6 +598,24 @@ SET name=COALESCE(NULLIF(?, ''), name),
 WHERE id=?
 `
 				args = []any{name, ch.Status, ch.Priority, p, nullableIntPtr(ch.LimitSessions), nullableIntPtr(ch.LimitRPM), nullableIntPtr(ch.LimitTPM), allowServiceTier, disableStore, allowSafetyIdentifier, nullableString(&paramOverride), nullableString(&headerOverride), nullableString(&statusCodeMapping), id}
+				if in.Version >= 5 {
+					stmtUpdate = `
+UPDATE upstream_channels
+SET name=COALESCE(NULLIF(?, ''), name),
+    status=?, priority=?, promotion=?,
+    limit_sessions=?, limit_rpm=?, limit_tpm=?,
+    allow_service_tier=?, disable_store=?, allow_safety_identifier=?,
+    param_override=?,
+    header_override=?,
+    status_code_mapping=?,
+    model_suffix_preserve=?,
+    request_body_blacklist=?,
+    request_body_whitelist=?,
+    updated_at=CURRENT_TIMESTAMP
+WHERE id=?
+`
+					args = []any{name, ch.Status, ch.Priority, p, nullableIntPtr(ch.LimitSessions), nullableIntPtr(ch.LimitRPM), nullableIntPtr(ch.LimitTPM), allowServiceTier, disableStore, allowSafetyIdentifier, nullableString(&paramOverride), nullableString(&headerOverride), nullableString(&statusCodeMapping), nullableString(&modelSuffixPreserve), nullableString(&requestBodyBlacklist), nullableString(&requestBodyWhitelist), id}
+				}
 			} else if in.Version >= 3 {
 				stmtUpdate = `
 UPDATE upstream_channels

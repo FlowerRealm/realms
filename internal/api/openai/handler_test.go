@@ -744,6 +744,271 @@ func TestResponses_ChannelParamOverride_IsPerChannelAttempt(t *testing.T) {
 	}
 }
 
+func TestResponses_MaxTokensAlias_NormalizesToMaxOutputTokens(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"m1": {ID: 1, PublicID: "m1", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"m1": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "m1-up", Status: 1},
+			},
+		},
+	}
+
+	var gotBody []byte
+	doer := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, body []byte) (*http.Response, error) {
+		gotBody = body
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, nil, fakeAudit{}, nil, 0, upstream.SSEPumpOptions{})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi","max_tokens":123}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var forwarded map[string]any
+	if err := json.Unmarshal(gotBody, &forwarded); err != nil {
+		t.Fatalf("unmarshal forwarded body: %v", err)
+	}
+	if v, ok := forwarded["max_output_tokens"].(float64); !ok || int64(v) != 123 {
+		t.Fatalf("expected max_output_tokens=123, got=%v", forwarded["max_output_tokens"])
+	}
+	if _, ok := forwarded["max_tokens"]; ok {
+		t.Fatalf("expected max_tokens to be removed, got=%v", forwarded["max_tokens"])
+	}
+	if _, ok := forwarded["max_completion_tokens"]; ok {
+		t.Fatalf("expected max_completion_tokens to be removed, got=%v", forwarded["max_completion_tokens"])
+	}
+}
+
+func TestResponses_ModelSuffixEffort_IsPerChannelAttempt(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, ModelSuffixPreserve: `["o1-mini-high"]`},
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			2: {
+				{ID: 21, ChannelID: 2, BaseURL: "https://b.example", Status: 1},
+			},
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			21: {
+				{ID: 2, EndpointID: 21, Status: 1},
+			},
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"m1": {ID: 1, PublicID: "m1", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"m1": {
+				{ID: 1, ChannelID: 2, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "o1-mini-high", Status: 1},
+				{ID: 2, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "o1-mini-high", Status: 1},
+			},
+		},
+	}
+
+	var bodies [][]byte
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, body []byte) (*http.Response, error) {
+		bodies = append(bodies, body)
+		if sel.ChannelID == 2 {
+			return &http.Response{
+				StatusCode: http.StatusBadGateway,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(bytes.NewReader([]byte(`{"error":{"message":"upstream down"}}`))),
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, nil, fakeAudit{}, nil, 0, upstream.SSEPumpOptions{})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("expected 2 attempts, got=%d", len(bodies))
+	}
+
+	var first map[string]any
+	if err := json.Unmarshal(bodies[0], &first); err != nil {
+		t.Fatalf("unmarshal first body: %v", err)
+	}
+	if first["model"] != "o1-mini-high" {
+		t.Fatalf("expected preserved model=o1-mini-high, got=%v", first["model"])
+	}
+	if _, ok := first["reasoning"]; ok {
+		t.Fatalf("expected reasoning to be absent when preserved, got=%v", first["reasoning"])
+	}
+
+	var second map[string]any
+	if err := json.Unmarshal(bodies[1], &second); err != nil {
+		t.Fatalf("unmarshal second body: %v", err)
+	}
+	if second["model"] != "o1-mini" {
+		t.Fatalf("expected converted model=o1-mini, got=%v", second["model"])
+	}
+	reasoning, _ := second["reasoning"].(map[string]any)
+	if reasoning == nil || reasoning["effort"] != "high" {
+		t.Fatalf("expected reasoning.effort=high, got=%v", second["reasoning"])
+	}
+}
+
+func TestResponses_ChannelBodyFilters_ArePerChannelAttempt(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, RequestBodyBlacklist: `["metadata.trace","extra"]`},
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, RequestBodyWhitelist: `["model","input"]`},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			2: {
+				{ID: 21, ChannelID: 2, BaseURL: "https://b.example", Status: 1},
+			},
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			21: {
+				{ID: 2, EndpointID: 21, Status: 1},
+			},
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"m1": {ID: 1, PublicID: "m1", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"m1": {
+				{ID: 1, ChannelID: 2, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "m1-up2", Status: 1},
+				{ID: 2, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "m1-up1", Status: 1},
+			},
+		},
+	}
+
+	var bodies [][]byte
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, body []byte) (*http.Response, error) {
+		bodies = append(bodies, body)
+		if sel.ChannelID == 2 {
+			return &http.Response{
+				StatusCode: http.StatusBadGateway,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(bytes.NewReader([]byte(`{"error":{"message":"upstream down"}}`))),
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, nil, fakeAudit{}, nil, 0, upstream.SSEPumpOptions{})
+
+	reqBody := `{"model":"m1","input":"hi","metadata":{"trace":"t","keep":"k"},"extra":"x"}`
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(reqBody)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("expected 2 attempts, got=%d", len(bodies))
+	}
+
+	var first map[string]any
+	if err := json.Unmarshal(bodies[0], &first); err != nil {
+		t.Fatalf("unmarshal first body: %v", err)
+	}
+	if first["model"] != "m1-up2" {
+		t.Fatalf("unexpected first model: %v", first["model"])
+	}
+	if _, ok := first["extra"]; ok {
+		t.Fatalf("expected extra to be removed on channel 2")
+	}
+	meta1, _ := first["metadata"].(map[string]any)
+	if meta1 == nil || meta1["keep"] != "k" {
+		t.Fatalf("expected metadata.keep=k on channel 2, got=%v", first["metadata"])
+	}
+	if _, ok := meta1["trace"]; ok {
+		t.Fatalf("expected metadata.trace to be removed on channel 2, got=%v", meta1["trace"])
+	}
+
+	var second map[string]any
+	if err := json.Unmarshal(bodies[1], &second); err != nil {
+		t.Fatalf("unmarshal second body: %v", err)
+	}
+	if second["model"] != "m1-up1" {
+		t.Fatalf("unexpected second model: %v", second["model"])
+	}
+	if _, ok := second["input"]; !ok {
+		t.Fatalf("expected input to be present on channel 1")
+	}
+	if _, ok := second["metadata"]; ok {
+		t.Fatalf("expected metadata to be removed by whitelist on channel 1")
+	}
+	if _, ok := second["extra"]; ok {
+		t.Fatalf("expected extra to be removed by whitelist on channel 1")
+	}
+}
+
 func TestResponses_StatusCodeMapping_OverridesDownstreamStatus(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{

@@ -158,6 +158,8 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	normalizeMaxOutputTokensInPayload(payload)
+
 	stream := boolFromAny(payload["stream"])
 	publicModel := stringFromAny(payload["model"])
 	var maxOut *int64
@@ -208,7 +210,15 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return nil, err
 			}
+			raw, err = applyResponsesModelSuffixTransforms(raw, sel, publicModel)
+			if err != nil {
+				return nil, err
+			}
 			raw, err = applyChannelRequestPolicy(raw, sel)
+			if err != nil {
+				return nil, err
+			}
+			raw, err = applyChannelBodyFilters(raw, sel)
 			if err != nil {
 				return nil, err
 			}
@@ -265,7 +275,15 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return nil, err
 			}
+			raw, err = applyResponsesModelSuffixTransforms(raw, sel, publicModel)
+			if err != nil {
+				return nil, err
+			}
 			raw, err = applyChannelRequestPolicy(raw, sel)
+			if err != nil {
+				return nil, err
+			}
+			raw, err = applyChannelBodyFilters(raw, sel)
 			if err != nil {
 				return nil, err
 			}

@@ -92,6 +92,9 @@ type UpstreamChannel struct {
 	ParamOverride         string
 	HeaderOverride        string
 	StatusCodeMapping     string
+	ModelSuffixPreserve   string
+	RequestBodyBlacklist  string
+	RequestBodyWhitelist  string
 
 	LastTestAt        *time.Time
 	LastTestLatencyMS int

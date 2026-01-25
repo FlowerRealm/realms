@@ -28,6 +28,9 @@ func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, er
 			"       param_override,\n"+
 			"       header_override,\n"+
 			"       status_code_mapping,\n"+
+			"       model_suffix_preserve,\n"+
+			"       request_body_blacklist,\n"+
+			"       request_body_whitelist,\n"+
 			"       last_test_at, last_test_latency_ms, last_test_ok,\n"+
 			"       created_at, updated_at\n"+
 			"FROM upstream_channels\n"+
@@ -51,6 +54,9 @@ func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, er
 		var paramOverride sql.NullString
 		var headerOverride sql.NullString
 		var statusCodeMapping sql.NullString
+		var modelSuffixPreserve sql.NullString
+		var requestBodyBlacklist sql.NullString
+		var requestBodyWhitelist sql.NullString
 		var lastOK int
 		if err := rows.Scan(&c.ID, &c.Type, &c.Name, &c.Groups, &c.Status, &c.Priority, &promotion,
 			&limitSessions, &limitRPM, &limitTPM,
@@ -58,6 +64,9 @@ func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, er
 			&paramOverride,
 			&headerOverride,
 			&statusCodeMapping,
+			&modelSuffixPreserve,
+			&requestBodyBlacklist,
+			&requestBodyWhitelist,
 			&c.LastTestAt, &c.LastTestLatencyMS, &lastOK,
 			&c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("扫描 upstream_channels 失败: %w", err)
@@ -77,6 +86,15 @@ func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, er
 		}
 		if statusCodeMapping.Valid {
 			c.StatusCodeMapping = strings.TrimSpace(statusCodeMapping.String)
+		}
+		if modelSuffixPreserve.Valid {
+			c.ModelSuffixPreserve = strings.TrimSpace(modelSuffixPreserve.String)
+		}
+		if requestBodyBlacklist.Valid {
+			c.RequestBodyBlacklist = strings.TrimSpace(requestBodyBlacklist.String)
+		}
+		if requestBodyWhitelist.Valid {
+			c.RequestBodyWhitelist = strings.TrimSpace(requestBodyWhitelist.String)
 		}
 		c.LastTestOK = lastOK != 0
 		out = append(out, c)
@@ -209,6 +227,9 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 	var paramOverride sql.NullString
 	var headerOverride sql.NullString
 	var statusCodeMapping sql.NullString
+	var modelSuffixPreserve sql.NullString
+	var requestBodyBlacklist sql.NullString
+	var requestBodyWhitelist sql.NullString
 	var lastOK int
 	err := s.db.QueryRowContext(ctx,
 		"SELECT id, type, name, `groups`, status, priority, promotion,\n"+
@@ -217,6 +238,9 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 			"       param_override,\n"+
 			"       header_override,\n"+
 			"       status_code_mapping,\n"+
+			"       model_suffix_preserve,\n"+
+			"       request_body_blacklist,\n"+
+			"       request_body_whitelist,\n"+
 			"       last_test_at, last_test_latency_ms, last_test_ok,\n"+
 			"       created_at, updated_at\n"+
 			"FROM upstream_channels\n"+
@@ -228,6 +252,9 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 		&paramOverride,
 		&headerOverride,
 		&statusCodeMapping,
+		&modelSuffixPreserve,
+		&requestBodyBlacklist,
+		&requestBodyWhitelist,
 		&c.LastTestAt, &c.LastTestLatencyMS, &lastOK,
 		&c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
@@ -251,6 +278,15 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 	}
 	if statusCodeMapping.Valid {
 		c.StatusCodeMapping = strings.TrimSpace(statusCodeMapping.String)
+	}
+	if modelSuffixPreserve.Valid {
+		c.ModelSuffixPreserve = strings.TrimSpace(modelSuffixPreserve.String)
+	}
+	if requestBodyBlacklist.Valid {
+		c.RequestBodyBlacklist = strings.TrimSpace(requestBodyBlacklist.String)
+	}
+	if requestBodyWhitelist.Valid {
+		c.RequestBodyWhitelist = strings.TrimSpace(requestBodyWhitelist.String)
 	}
 	c.LastTestOK = lastOK != 0
 	return c, nil
@@ -390,6 +426,108 @@ WHERE id=?
 `, vv, channelID)
 	if err != nil {
 		return fmt.Errorf("更新 upstream_channel status_code_mapping 失败: %w", err)
+	}
+	return nil
+}
+
+func normalizeStringJSONArray(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "[]" {
+		return "", nil
+	}
+
+	var parsed []string
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return "", err
+	}
+	for i := range parsed {
+		parsed[i] = strings.TrimSpace(parsed[i])
+		if parsed[i] == "" {
+			return "", errors.New("数组元素不能为空")
+		}
+	}
+	b, err := json.Marshal(parsed)
+	if err != nil {
+		return "", err
+	}
+	out := strings.TrimSpace(string(b))
+	if out == "[]" {
+		return "", nil
+	}
+	return out, nil
+}
+
+func (s *Store) UpdateUpstreamChannelModelSuffixPreserve(ctx context.Context, channelID int64, modelSuffixPreserve string) error {
+	if channelID == 0 {
+		return errors.New("channelID 不能为空")
+	}
+
+	normalized, err := normalizeStringJSONArray(modelSuffixPreserve)
+	if err != nil {
+		return fmt.Errorf("model_suffix_preserve 不是有效 JSON 数组: %w", err)
+	}
+
+	var v any
+	if normalized != "" {
+		v = normalized
+	}
+	_, err = s.db.ExecContext(ctx, `
+UPDATE upstream_channels
+SET model_suffix_preserve=?, updated_at=CURRENT_TIMESTAMP
+WHERE id=?
+`, v, channelID)
+	if err != nil {
+		return fmt.Errorf("更新 upstream_channel model_suffix_preserve 失败: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) UpdateUpstreamChannelRequestBodyBlacklist(ctx context.Context, channelID int64, requestBodyBlacklist string) error {
+	if channelID == 0 {
+		return errors.New("channelID 不能为空")
+	}
+
+	normalized, err := normalizeStringJSONArray(requestBodyBlacklist)
+	if err != nil {
+		return fmt.Errorf("request_body_blacklist 不是有效 JSON 数组: %w", err)
+	}
+
+	var v any
+	if normalized != "" {
+		v = normalized
+	}
+	_, err = s.db.ExecContext(ctx, `
+UPDATE upstream_channels
+SET request_body_blacklist=?, updated_at=CURRENT_TIMESTAMP
+WHERE id=?
+`, v, channelID)
+	if err != nil {
+		return fmt.Errorf("更新 upstream_channel request_body_blacklist 失败: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) UpdateUpstreamChannelRequestBodyWhitelist(ctx context.Context, channelID int64, requestBodyWhitelist string) error {
+	if channelID == 0 {
+		return errors.New("channelID 不能为空")
+	}
+
+	normalized, err := normalizeStringJSONArray(requestBodyWhitelist)
+	if err != nil {
+		return fmt.Errorf("request_body_whitelist 不是有效 JSON 数组: %w", err)
+	}
+
+	var v any
+	if normalized != "" {
+		v = normalized
+	}
+	_, err = s.db.ExecContext(ctx, `
+UPDATE upstream_channels
+SET request_body_whitelist=?, updated_at=CURRENT_TIMESTAMP
+WHERE id=?
+`, v, channelID)
+	if err != nil {
+		return fmt.Errorf("更新 upstream_channel request_body_whitelist 失败: %w", err)
 	}
 	return nil
 }

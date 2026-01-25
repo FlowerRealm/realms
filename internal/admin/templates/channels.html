@@ -256,6 +256,21 @@
                     </a>
                   </li>
                   <li>
+                    <a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#editModelSuffixPreserveModal-{{.Channel.ID}}">
+                      <i class="ri-shield-check-line me-2 text-muted"></i>模型后缀保护名单
+                    </a>
+                  </li>
+                  <li>
+                    <a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#editRequestBodyWhitelistModal-{{.Channel.ID}}">
+                      <i class="ri-list-check-2 me-2 text-muted"></i>请求体白名单
+                    </a>
+                  </li>
+                  <li>
+                    <a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#editRequestBodyBlacklistModal-{{.Channel.ID}}">
+                      <i class="ri-forbid-2-line me-2 text-muted"></i>请求体黑名单
+                    </a>
+                  </li>
+                  <li>
                     <a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#editStatusCodeMappingModal-{{.Channel.ID}}">
                       <i class="ri-shuffle-line me-2 text-muted"></i>状态码映射
                     </a>
@@ -423,6 +438,93 @@
                 </div>
                 <div class="modal-footer border-top-0 pt-0">
                   <button type="submit" class="btn btn-primary w-100">保存改写</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <!-- 模型后缀保护名单弹窗 -->
+        <div class="modal fade" id="editModelSuffixPreserveModal-{{.Channel.ID}}" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-sm">
+            <div class="modal-content border-0 shadow">
+              <div class="modal-header">
+                <h5 class="modal-title fw-bold">模型后缀保护名单</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+              </div>
+              <form method="POST" action="/admin/channels/{{.Channel.ID}}/model_suffix_preserve" data-ajax="1" data-ajax-reload="1">
+                <div class="modal-body">
+                  <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+                  <input type="hidden" name="return_to" value="/admin/channels" />
+                  <label class="form-label small text-muted">所属渠道：{{.Channel.Name}}</label>
+
+                  <div class="mb-2">
+                    <textarea name="model_suffix_preserve" class="form-control font-monospace" rows="6" placeholder='["o1-mini-high","gpt-5-mini-high"]'>{{.Channel.ModelSuffixPreserve}}</textarea>
+                  </div>
+                  <div class="form-text smaller">
+                    留空表示禁用。JSON 必须为数组；命中时跳过模型后缀解析（<code>-low/-medium/-high/-minimal/-none/-xhigh</code>）。
+                  </div>
+                </div>
+                <div class="modal-footer border-top-0 pt-0">
+                  <button type="submit" class="btn btn-primary w-100">保存</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <!-- 请求体白名单弹窗 -->
+        <div class="modal fade" id="editRequestBodyWhitelistModal-{{.Channel.ID}}" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog">
+            <div class="modal-content border-0 shadow">
+              <div class="modal-header">
+                <h5 class="modal-title fw-bold">请求体白名单</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+              </div>
+              <form method="POST" action="/admin/channels/{{.Channel.ID}}/request_body_whitelist" data-ajax="1" data-ajax-reload="1">
+                <div class="modal-body">
+                  <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+                  <input type="hidden" name="return_to" value="/admin/channels" />
+                  <label class="form-label small text-muted">所属渠道：{{.Channel.Name}}</label>
+
+                  <div class="mb-2">
+                    <textarea name="request_body_whitelist" class="form-control font-monospace" rows="8" placeholder='["model","input","max_output_tokens","metadata.channel"]'>{{.Channel.RequestBodyWhitelist}}</textarea>
+                  </div>
+                  <div class="form-text smaller">
+                    留空表示禁用。JSON 必须为数组，每项为 JSON path（gjson/sjson 语法）；启用后会先“仅保留白名单字段”，再应用请求体黑名单与参数改写。
+                  </div>
+                </div>
+                <div class="modal-footer border-top-0 pt-0">
+                  <button type="submit" class="btn btn-primary w-100">保存</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <!-- 请求体黑名单弹窗 -->
+        <div class="modal fade" id="editRequestBodyBlacklistModal-{{.Channel.ID}}" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog">
+            <div class="modal-content border-0 shadow">
+              <div class="modal-header">
+                <h5 class="modal-title fw-bold">请求体黑名单</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+              </div>
+              <form method="POST" action="/admin/channels/{{.Channel.ID}}/request_body_blacklist" data-ajax="1" data-ajax-reload="1">
+                <div class="modal-body">
+                  <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+                  <input type="hidden" name="return_to" value="/admin/channels" />
+                  <label class="form-label small text-muted">所属渠道：{{.Channel.Name}}</label>
+
+                  <div class="mb-2">
+                    <textarea name="request_body_blacklist" class="form-control font-monospace" rows="8" placeholder='["metadata.sensitive","user","store"]'>{{.Channel.RequestBodyBlacklist}}</textarea>
+                  </div>
+                  <div class="form-text smaller">
+                    留空表示禁用。JSON 必须为数组，每项为 JSON path（gjson/sjson 语法）；会在每次 selection 转发前按渠道应用。
+                  </div>
+                </div>
+                <div class="modal-footer border-top-0 pt-0">
+                  <button type="submit" class="btn btn-primary w-100">保存</button>
                 </div>
               </form>
             </div>

@@ -40,6 +40,8 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	normalizeMaxTokensInPayload(payload)
+
 	stream := boolFromAny(payload["stream"])
 	publicModel := strings.TrimSpace(stringFromAny(payload["model"]))
 
@@ -98,6 +100,10 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return nil, err
 			}
+			raw, err = applyChannelBodyFilters(raw, sel)
+			if err != nil {
+				return nil, err
+			}
 			ctx := buildParamOverrideContext(sel, publicModel, stringFromAny(out["model"]), r.URL.Path)
 			raw, err = applyChannelParamOverride(raw, sel, ctx)
 			if err != nil {
@@ -151,6 +157,10 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 				return nil, err
 			}
 			raw, err = applyChannelRequestPolicy(raw, sel)
+			if err != nil {
+				return nil, err
+			}
+			raw, err = applyChannelBodyFilters(raw, sel)
 			if err != nil {
 				return nil, err
 			}
