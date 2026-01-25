@@ -4,8 +4,10 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +24,10 @@ func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, er
 	rows, err := s.db.QueryContext(ctx,
 		"SELECT id, type, name, `groups`, status, priority, promotion,\n"+
 			"       limit_sessions, limit_rpm, limit_tpm,\n"+
+			"       allow_service_tier, disable_store, allow_safety_identifier,\n"+
+			"       param_override,\n"+
+			"       header_override,\n"+
+			"       status_code_mapping,\n"+
 			"       last_test_at, last_test_latency_ms, last_test_ok,\n"+
 			"       created_at, updated_at\n"+
 			"FROM upstream_channels\n"+
@@ -39,9 +45,19 @@ func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, er
 		var limitSessions sql.NullInt64
 		var limitRPM sql.NullInt64
 		var limitTPM sql.NullInt64
+		var allowServiceTier int
+		var disableStore int
+		var allowSafetyIdentifier int
+		var paramOverride sql.NullString
+		var headerOverride sql.NullString
+		var statusCodeMapping sql.NullString
 		var lastOK int
 		if err := rows.Scan(&c.ID, &c.Type, &c.Name, &c.Groups, &c.Status, &c.Priority, &promotion,
 			&limitSessions, &limitRPM, &limitTPM,
+			&allowServiceTier, &disableStore, &allowSafetyIdentifier,
+			&paramOverride,
+			&headerOverride,
+			&statusCodeMapping,
 			&c.LastTestAt, &c.LastTestLatencyMS, &lastOK,
 			&c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("扫描 upstream_channels 失败: %w", err)
@@ -50,6 +66,18 @@ func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, er
 		c.LimitSessions = nullableLimitIntPtr(limitSessions)
 		c.LimitRPM = nullableLimitIntPtr(limitRPM)
 		c.LimitTPM = nullableLimitIntPtr(limitTPM)
+		c.AllowServiceTier = allowServiceTier != 0
+		c.DisableStore = disableStore != 0
+		c.AllowSafetyIdentifier = allowSafetyIdentifier != 0
+		if paramOverride.Valid {
+			c.ParamOverride = strings.TrimSpace(paramOverride.String)
+		}
+		if headerOverride.Valid {
+			c.HeaderOverride = strings.TrimSpace(headerOverride.String)
+		}
+		if statusCodeMapping.Valid {
+			c.StatusCodeMapping = strings.TrimSpace(statusCodeMapping.String)
+		}
 		c.LastTestOK = lastOK != 0
 		out = append(out, c)
 	}
@@ -67,10 +95,22 @@ func (s *Store) CountUpstreamChannels(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
-func (s *Store) CreateUpstreamChannel(ctx context.Context, typ, name, groups string, priority int, promotion bool, limitSessions, limitRPM, limitTPM *int) (int64, error) {
+func (s *Store) CreateUpstreamChannel(ctx context.Context, typ, name, groups string, priority int, promotion bool, limitSessions, limitRPM, limitTPM *int, allowServiceTier bool, disableStore bool, allowSafetyIdentifier bool) (int64, error) {
 	p := 0
 	if promotion {
 		p = 1
+	}
+	allowServiceTierInt := 0
+	if allowServiceTier {
+		allowServiceTierInt = 1
+	}
+	disableStoreInt := 0
+	if disableStore {
+		disableStoreInt = 1
+	}
+	allowSafetyIdentifierInt := 0
+	if allowSafetyIdentifier {
+		allowSafetyIdentifierInt = 1
 	}
 	names := splitUpstreamChannelGroupsCSV(groups)
 	groups = strings.Join(names, ",")
@@ -82,12 +122,15 @@ func (s *Store) CreateUpstreamChannel(ctx context.Context, typ, name, groups str
 	defer func() { _ = tx.Rollback() }()
 
 	res, err := tx.ExecContext(ctx,
-		"INSERT INTO upstream_channels(type, name, `groups`, status, priority, promotion, limit_sessions, limit_rpm, limit_tpm, created_at, updated_at)\n"+
-			"VALUES(?, ?, ?, 1, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)\n",
+		"INSERT INTO upstream_channels(type, name, `groups`, status, priority, promotion, limit_sessions, limit_rpm, limit_tpm, allow_service_tier, disable_store, allow_safety_identifier, created_at, updated_at)\n"+
+			"VALUES(?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)\n",
 		typ, name, groups, priority, p,
 		nullableIntPtr(limitSessions),
 		nullableIntPtr(limitRPM),
 		nullableIntPtr(limitTPM),
+		allowServiceTierInt,
+		disableStoreInt,
+		allowSafetyIdentifierInt,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("创建 upstream_channel 失败: %w", err)
@@ -160,10 +203,20 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 	var limitSessions sql.NullInt64
 	var limitRPM sql.NullInt64
 	var limitTPM sql.NullInt64
+	var allowServiceTier int
+	var disableStore int
+	var allowSafetyIdentifier int
+	var paramOverride sql.NullString
+	var headerOverride sql.NullString
+	var statusCodeMapping sql.NullString
 	var lastOK int
 	err := s.db.QueryRowContext(ctx,
 		"SELECT id, type, name, `groups`, status, priority, promotion,\n"+
 			"       limit_sessions, limit_rpm, limit_tpm,\n"+
+			"       allow_service_tier, disable_store, allow_safety_identifier,\n"+
+			"       param_override,\n"+
+			"       header_override,\n"+
+			"       status_code_mapping,\n"+
 			"       last_test_at, last_test_latency_ms, last_test_ok,\n"+
 			"       created_at, updated_at\n"+
 			"FROM upstream_channels\n"+
@@ -171,6 +224,10 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 		id,
 	).Scan(&c.ID, &c.Type, &c.Name, &c.Groups, &c.Status, &c.Priority, &promotion,
 		&limitSessions, &limitRPM, &limitTPM,
+		&allowServiceTier, &disableStore, &allowSafetyIdentifier,
+		&paramOverride,
+		&headerOverride,
+		&statusCodeMapping,
 		&c.LastTestAt, &c.LastTestLatencyMS, &lastOK,
 		&c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
@@ -183,6 +240,18 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 	c.LimitSessions = nullableLimitIntPtr(limitSessions)
 	c.LimitRPM = nullableLimitIntPtr(limitRPM)
 	c.LimitTPM = nullableLimitIntPtr(limitTPM)
+	c.AllowServiceTier = allowServiceTier != 0
+	c.DisableStore = disableStore != 0
+	c.AllowSafetyIdentifier = allowSafetyIdentifier != 0
+	if paramOverride.Valid {
+		c.ParamOverride = strings.TrimSpace(paramOverride.String)
+	}
+	if headerOverride.Valid {
+		c.HeaderOverride = strings.TrimSpace(headerOverride.String)
+	}
+	if statusCodeMapping.Valid {
+		c.StatusCodeMapping = strings.TrimSpace(statusCodeMapping.String)
+	}
 	c.LastTestOK = lastOK != 0
 	return c, nil
 }
@@ -198,6 +267,129 @@ WHERE id=?
 `, nullableIntPtr(limitSessions), nullableIntPtr(limitRPM), nullableIntPtr(limitTPM), channelID)
 	if err != nil {
 		return fmt.Errorf("更新 upstream_channel limits 失败: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) UpdateUpstreamChannelRequestPolicy(ctx context.Context, channelID int64, allowServiceTier bool, disableStore bool, allowSafetyIdentifier bool) error {
+	if channelID == 0 {
+		return errors.New("channelID 不能为空")
+	}
+	allowServiceTierInt := 0
+	if allowServiceTier {
+		allowServiceTierInt = 1
+	}
+	disableStoreInt := 0
+	if disableStore {
+		disableStoreInt = 1
+	}
+	allowSafetyIdentifierInt := 0
+	if allowSafetyIdentifier {
+		allowSafetyIdentifierInt = 1
+	}
+	_, err := s.db.ExecContext(ctx, `
+UPDATE upstream_channels
+SET allow_service_tier=?, disable_store=?, allow_safety_identifier=?, updated_at=CURRENT_TIMESTAMP
+WHERE id=?
+`, allowServiceTierInt, disableStoreInt, allowSafetyIdentifierInt, channelID)
+	if err != nil {
+		return fmt.Errorf("更新 upstream_channel request policy 失败: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) UpdateUpstreamChannelParamOverride(ctx context.Context, channelID int64, paramOverride string) error {
+	if channelID == 0 {
+		return errors.New("channelID 不能为空")
+	}
+
+	paramOverride = strings.TrimSpace(paramOverride)
+	if paramOverride != "" {
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(paramOverride), &parsed); err != nil {
+			return fmt.Errorf("param_override 不是有效 JSON: %w", err)
+		}
+	}
+
+	var v any
+	if paramOverride != "" {
+		v = paramOverride
+	}
+	_, err := s.db.ExecContext(ctx, `
+UPDATE upstream_channels
+SET param_override=?, updated_at=CURRENT_TIMESTAMP
+WHERE id=?
+`, v, channelID)
+	if err != nil {
+		return fmt.Errorf("更新 upstream_channel param_override 失败: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) UpdateUpstreamChannelHeaderOverride(ctx context.Context, channelID int64, headerOverride string) error {
+	if channelID == 0 {
+		return errors.New("channelID 不能为空")
+	}
+
+	headerOverride = strings.TrimSpace(headerOverride)
+	if headerOverride != "" {
+		var parsed map[string]string
+		if err := json.Unmarshal([]byte(headerOverride), &parsed); err != nil {
+			return fmt.Errorf("header_override 不是有效 JSON: %w", err)
+		}
+	}
+
+	var v any
+	if headerOverride != "" {
+		v = headerOverride
+	}
+	_, err := s.db.ExecContext(ctx, `
+UPDATE upstream_channels
+SET header_override=?, updated_at=CURRENT_TIMESTAMP
+WHERE id=?
+`, v, channelID)
+	if err != nil {
+		return fmt.Errorf("更新 upstream_channel header_override 失败: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) UpdateUpstreamChannelStatusCodeMapping(ctx context.Context, channelID int64, statusCodeMapping string) error {
+	if channelID == 0 {
+		return errors.New("channelID 不能为空")
+	}
+
+	statusCodeMapping = strings.TrimSpace(statusCodeMapping)
+	if statusCodeMapping == "{}" {
+		statusCodeMapping = ""
+	}
+
+	if statusCodeMapping != "" {
+		var parsed map[string]string
+		if err := json.Unmarshal([]byte(statusCodeMapping), &parsed); err != nil {
+			return fmt.Errorf("status_code_mapping 不是有效 JSON: %w", err)
+		}
+		for k, v := range parsed {
+			if _, err := strconv.Atoi(strings.TrimSpace(k)); err != nil {
+				return fmt.Errorf("status_code_mapping key 不合法: %s", k)
+			}
+			if _, err := strconv.Atoi(strings.TrimSpace(v)); err != nil {
+				return fmt.Errorf("status_code_mapping value 不合法: %s", v)
+			}
+		}
+	}
+
+	var vv any
+	if statusCodeMapping != "" {
+		vv = statusCodeMapping
+	}
+	_, err := s.db.ExecContext(ctx, `
+UPDATE upstream_channels
+SET status_code_mapping=?, updated_at=CURRENT_TIMESTAMP
+WHERE id=?
+`, vv, channelID)
+	if err != nil {
+		return fmt.Errorf("更新 upstream_channel status_code_mapping 失败: %w", err)
 	}
 	return nil
 }

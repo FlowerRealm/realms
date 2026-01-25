@@ -68,7 +68,7 @@ func TestForceDeleteChannelGroup_SQLite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateChannelGroup: %v", err)
 	}
-	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch1", "vip", 3, true, nil, nil, nil)
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch1", "vip", 3, true, nil, nil, nil, false, false, false)
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestListEnabledManagedModelsWithBindingsForGroup_SQLite(t *testing.T) {
 	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, store.DefaultGroupPriceMultiplier, 5); err != nil {
 		t.Fatalf("CreateChannelGroup: %v", err)
 	}
-	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch1", "vip", 0, false, nil, nil, nil)
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch1", "vip", 0, false, nil, nil, nil, false, false, false)
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel: %v", err)
 	}

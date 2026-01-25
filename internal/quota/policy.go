@@ -18,7 +18,7 @@ type FeatureGetter interface {
 // - 否则：使用 normal provider（订阅优先 + 余额兜底）
 type FeatureProvider struct {
 	features FeatureGetter
-	selfMode  bool
+	selfMode bool
 
 	normal Provider
 	free   Provider
@@ -27,9 +27,9 @@ type FeatureProvider struct {
 func NewFeatureProvider(features FeatureGetter, selfMode bool, normal Provider, free Provider) *FeatureProvider {
 	return &FeatureProvider{
 		features: features,
-		selfMode:  selfMode,
-		normal:    normal,
-		free:      free,
+		selfMode: selfMode,
+		normal:   normal,
+		free:     free,
 	}
 }
 

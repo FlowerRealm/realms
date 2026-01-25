@@ -280,7 +280,7 @@ func runSingleModelSSETest(ctx context.Context, exec UpstreamDoer, sel scheduler
 
 	path := "/v1/responses"
 	payload := map[string]any{
-		"model":             upstreamModel,
+		"model": upstreamModel,
 		"input": []any{
 			map[string]any{
 				"role":    "user",
@@ -742,12 +742,19 @@ func listChannelTestSelections(ctx context.Context, st channelTestStore, ch stor
 					continue
 				}
 				sels = append(sels, scheduler.Selection{
-					ChannelID:      ch.ID,
-					ChannelType:    ch.Type,
-					EndpointID:     ep.ID,
-					BaseURL:        ep.BaseURL,
-					CredentialType: scheduler.CredentialTypeOpenAI,
-					CredentialID:   c.ID,
+					ChannelID:             ch.ID,
+					ChannelType:           ch.Type,
+					ChannelGroups:         ch.Groups,
+					AllowServiceTier:      ch.AllowServiceTier,
+					DisableStore:          ch.DisableStore,
+					AllowSafetyIdentifier: ch.AllowSafetyIdentifier,
+					ParamOverride:         ch.ParamOverride,
+					HeaderOverride:        ch.HeaderOverride,
+					StatusCodeMapping:     ch.StatusCodeMapping,
+					EndpointID:            ep.ID,
+					BaseURL:               ep.BaseURL,
+					CredentialType:        scheduler.CredentialTypeOpenAI,
+					CredentialID:          c.ID,
 				})
 			}
 		case store.UpstreamTypeAnthropic:
@@ -760,12 +767,19 @@ func listChannelTestSelections(ctx context.Context, st channelTestStore, ch stor
 					continue
 				}
 				sels = append(sels, scheduler.Selection{
-					ChannelID:      ch.ID,
-					ChannelType:    ch.Type,
-					EndpointID:     ep.ID,
-					BaseURL:        ep.BaseURL,
-					CredentialType: scheduler.CredentialTypeAnthropic,
-					CredentialID:   c.ID,
+					ChannelID:             ch.ID,
+					ChannelType:           ch.Type,
+					ChannelGroups:         ch.Groups,
+					AllowServiceTier:      ch.AllowServiceTier,
+					DisableStore:          ch.DisableStore,
+					AllowSafetyIdentifier: ch.AllowSafetyIdentifier,
+					ParamOverride:         ch.ParamOverride,
+					HeaderOverride:        ch.HeaderOverride,
+					StatusCodeMapping:     ch.StatusCodeMapping,
+					EndpointID:            ep.ID,
+					BaseURL:               ep.BaseURL,
+					CredentialType:        scheduler.CredentialTypeAnthropic,
+					CredentialID:          c.ID,
 				})
 			}
 		case store.UpstreamTypeCodexOAuth:
@@ -781,12 +795,19 @@ func listChannelTestSelections(ctx context.Context, st channelTestStore, ch stor
 					continue
 				}
 				sels = append(sels, scheduler.Selection{
-					ChannelID:      ch.ID,
-					ChannelType:    ch.Type,
-					EndpointID:     ep.ID,
-					BaseURL:        ep.BaseURL,
-					CredentialType: scheduler.CredentialTypeCodex,
-					CredentialID:   a.ID,
+					ChannelID:             ch.ID,
+					ChannelType:           ch.Type,
+					ChannelGroups:         ch.Groups,
+					AllowServiceTier:      ch.AllowServiceTier,
+					DisableStore:          ch.DisableStore,
+					AllowSafetyIdentifier: ch.AllowSafetyIdentifier,
+					ParamOverride:         ch.ParamOverride,
+					HeaderOverride:        ch.HeaderOverride,
+					StatusCodeMapping:     ch.StatusCodeMapping,
+					EndpointID:            ep.ID,
+					BaseURL:               ep.BaseURL,
+					CredentialType:        scheduler.CredentialTypeCodex,
+					CredentialID:          a.ID,
 				})
 			}
 		default:

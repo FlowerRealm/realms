@@ -88,8 +88,22 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		rewriteBody = func(_ scheduler.Selection) ([]byte, error) {
-			return json.Marshal(payload)
+		rewriteBody = func(sel scheduler.Selection) ([]byte, error) {
+			out := clonePayload(payload)
+			raw, err := json.Marshal(out)
+			if err != nil {
+				return nil, err
+			}
+			raw, err = applyChannelRequestPolicy(raw, sel)
+			if err != nil {
+				return nil, err
+			}
+			ctx := buildParamOverrideContext(sel, publicModel, stringFromAny(out["model"]), r.URL.Path)
+			raw, err = applyChannelParamOverride(raw, sel, ctx)
+			if err != nil {
+				return nil, err
+			}
+			return raw, nil
 		}
 	} else {
 		_, err := h.models.GetEnabledManagedModelByPublicID(r.Context(), publicModel)
@@ -130,8 +144,22 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return nil, errors.New("选中渠道未配置该模型")
 			}
-			payload["model"] = up
-			return json.Marshal(payload)
+			out := clonePayload(payload)
+			out["model"] = up
+			raw, err := json.Marshal(out)
+			if err != nil {
+				return nil, err
+			}
+			raw, err = applyChannelRequestPolicy(raw, sel)
+			if err != nil {
+				return nil, err
+			}
+			ctx := buildParamOverrideContext(sel, publicModel, up, r.URL.Path)
+			raw, err = applyChannelParamOverride(raw, sel, ctx)
+			if err != nil {
+				return nil, err
+			}
+			return raw, nil
 		}
 	}
 

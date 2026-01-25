@@ -35,7 +35,7 @@ func (s *Scheduler) RuntimeCredentialStats(credentialKey string) RuntimeCredenti
 	st.maybeSweepBindingsLocked(now)
 
 	out := RuntimeCredentialStats{
-		Sessions: st.credentialSessions[credentialKey],
+		Sessions:  st.credentialSessions[credentialKey],
 		FailScore: st.credFails[credentialKey],
 	}
 

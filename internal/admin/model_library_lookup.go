@@ -15,13 +15,13 @@ type modelLibraryLookupResponse struct {
 	Notice string `json:"notice,omitempty"`
 	Error  string `json:"error,omitempty"`
 
-	OwnedBy        string `json:"owned_by,omitempty"`
-	InputUSDPer1M  string `json:"input_usd_per_1m,omitempty"`
-	OutputUSDPer1M string `json:"output_usd_per_1m,omitempty"`
+	OwnedBy             string `json:"owned_by,omitempty"`
+	InputUSDPer1M       string `json:"input_usd_per_1m,omitempty"`
+	OutputUSDPer1M      string `json:"output_usd_per_1m,omitempty"`
 	CacheInputUSDPer1M  string `json:"cache_input_usd_per_1m,omitempty"`
 	CacheOutputUSDPer1M string `json:"cache_output_usd_per_1m,omitempty"`
-	Source         string `json:"source,omitempty"`
-	IconURL        string `json:"icon_url,omitempty"`
+	Source              string `json:"source,omitempty"`
+	IconURL             string `json:"icon_url,omitempty"`
 }
 
 func (s *Server) ModelLibraryLookup(w http.ResponseWriter, r *http.Request) {
@@ -52,15 +52,15 @@ func (s *Server) ModelLibraryLookup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := modelLibraryLookupResponse{
-		OK:             true,
-		Notice:         "已从模型库填充（models.dev）",
-		Source:         res.Source,
-		OwnedBy:        res.OwnedBy,
-		InputUSDPer1M:  formatUSDPlain(res.InputUSDPer1M),
-		OutputUSDPer1M: formatUSDPlain(res.OutputUSDPer1M),
+		OK:                  true,
+		Notice:              "已从模型库填充（models.dev）",
+		Source:              res.Source,
+		OwnedBy:             res.OwnedBy,
+		InputUSDPer1M:       formatUSDPlain(res.InputUSDPer1M),
+		OutputUSDPer1M:      formatUSDPlain(res.OutputUSDPer1M),
 		CacheInputUSDPer1M:  formatUSDPlain(res.CacheInputUSDPer1M),
 		CacheOutputUSDPer1M: formatUSDPlain(res.CacheOutputUSDPer1M),
-		IconURL:        icons.ModelIconURL(modelID, res.OwnedBy),
+		IconURL:             icons.ModelIconURL(modelID, res.OwnedBy),
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(resp)

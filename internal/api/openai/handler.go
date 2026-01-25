@@ -202,8 +202,22 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		rewriteBody = func(_ scheduler.Selection) ([]byte, error) {
-			return json.Marshal(payload)
+		rewriteBody = func(sel scheduler.Selection) ([]byte, error) {
+			out := clonePayload(payload)
+			raw, err := json.Marshal(out)
+			if err != nil {
+				return nil, err
+			}
+			raw, err = applyChannelRequestPolicy(raw, sel)
+			if err != nil {
+				return nil, err
+			}
+			ctx := buildParamOverrideContext(sel, publicModel, stringFromAny(out["model"]), r.URL.Path)
+			raw, err = applyChannelParamOverride(raw, sel, ctx)
+			if err != nil {
+				return nil, err
+			}
+			return raw, nil
 		}
 	} else {
 		_, err := h.models.GetEnabledManagedModelByPublicID(r.Context(), publicModel)
@@ -245,8 +259,22 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return nil, errors.New("选中渠道未配置该模型")
 			}
-			payload["model"] = up
-			return json.Marshal(payload)
+			out := clonePayload(payload)
+			out["model"] = up
+			raw, err := json.Marshal(out)
+			if err != nil {
+				return nil, err
+			}
+			raw, err = applyChannelRequestPolicy(raw, sel)
+			if err != nil {
+				return nil, err
+			}
+			ctx := buildParamOverrideContext(sel, publicModel, up, r.URL.Path)
+			raw, err = applyChannelParamOverride(raw, sel, ctx)
+			if err != nil {
+				return nil, err
+			}
+			return raw, nil
 		}
 	}
 
@@ -432,7 +460,8 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		}
 		h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, "upstream_status", time.Since(attemptStart))
 		cw := &countingResponseWriter{ResponseWriter: w}
-		respBytes := h.copyNonStreamResponse(cw, resp)
+		downstreamStatus := resetStatusCode(resp.StatusCode, sel.StatusCodeMapping)
+		respBytes := h.copyNonStreamResponseWithStatus(cw, resp, downstreamStatus)
 		h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, resp.StatusCode, "upstream_status", resp.Status, time.Since(attemptStart), wantStream || isSSE)
 		if usageID != 0 && h.quota != nil {
 			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -607,9 +636,13 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 }
 
 func (h *Handler) copyNonStreamResponse(w http.ResponseWriter, resp *http.Response) int64 {
+	return h.copyNonStreamResponseWithStatus(w, resp, resp.StatusCode)
+}
+
+func (h *Handler) copyNonStreamResponseWithStatus(w http.ResponseWriter, resp *http.Response, status int) int64 {
 	bodyBytes, _ := readLimited(resp.Body, 8<<20)
 	copyResponseHeaders(w.Header(), resp.Header)
-	w.WriteHeader(resp.StatusCode)
+	w.WriteHeader(status)
 	n, _ := w.Write(bodyBytes)
 	return int64(n)
 }
@@ -782,6 +815,34 @@ func isRetriableStatus(code int) bool {
 		}
 		return false
 	}
+}
+
+func resetStatusCode(status int, statusCodeMapping string) int {
+	statusCodeMapping = strings.TrimSpace(statusCodeMapping)
+	if statusCodeMapping == "" || statusCodeMapping == "{}" {
+		return status
+	}
+	if status == http.StatusOK {
+		return status
+	}
+
+	mapping := make(map[string]string)
+	if err := json.Unmarshal([]byte(statusCodeMapping), &mapping); err != nil {
+		return status
+	}
+	to, ok := mapping[strconv.Itoa(status)]
+	if !ok {
+		return status
+	}
+	to = strings.TrimSpace(to)
+	if to == "" {
+		return status
+	}
+	v, err := strconv.Atoi(to)
+	if err != nil || v <= 0 {
+		return status
+	}
+	return v
 }
 
 func extractRouteKey(r *http.Request) string {

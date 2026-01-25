@@ -8,4 +8,3 @@ func formatOptionalInt(v *int) string {
 	}
 	return strconv.Itoa(*v)
 }
-

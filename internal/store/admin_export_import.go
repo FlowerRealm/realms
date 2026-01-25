@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,7 +12,7 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-const AdminConfigExportVersion = 1
+const AdminConfigExportVersion = 4
 
 type AdminConfigExport struct {
 	Version    int       `json:"version"`
@@ -59,6 +60,13 @@ type AdminConfigUpstreamChannel struct {
 	LimitSessions *int `json:"limit_sessions,omitempty"`
 	LimitRPM      *int `json:"limit_rpm,omitempty"`
 	LimitTPM      *int `json:"limit_tpm,omitempty"`
+
+	AllowServiceTier      bool            `json:"allow_service_tier,omitempty"`
+	DisableStore          bool            `json:"disable_store,omitempty"`
+	AllowSafetyIdentifier bool            `json:"allow_safety_identifier,omitempty"`
+	ParamOverride         json.RawMessage `json:"param_override,omitempty"`
+	HeaderOverride        json.RawMessage `json:"header_override,omitempty"`
+	StatusCodeMapping     json.RawMessage `json:"status_code_mapping,omitempty"`
 }
 
 type AdminConfigUpstreamEndpoint struct {
@@ -71,14 +79,14 @@ type AdminConfigUpstreamEndpoint struct {
 }
 
 type AdminConfigManagedModel struct {
-	PublicID       string          `json:"public_id"`
-	UpstreamModel  *string         `json:"upstream_model,omitempty"`
-	OwnedBy        *string         `json:"owned_by,omitempty"`
-	InputUSDPer1M  decimal.Decimal `json:"input_usd_per_1m"`
-	OutputUSDPer1M decimal.Decimal `json:"output_usd_per_1m"`
+	PublicID            string          `json:"public_id"`
+	UpstreamModel       *string         `json:"upstream_model,omitempty"`
+	OwnedBy             *string         `json:"owned_by,omitempty"`
+	InputUSDPer1M       decimal.Decimal `json:"input_usd_per_1m"`
+	OutputUSDPer1M      decimal.Decimal `json:"output_usd_per_1m"`
 	CacheInputUSDPer1M  decimal.Decimal `json:"cache_input_usd_per_1m"`
 	CacheOutputUSDPer1M decimal.Decimal `json:"cache_output_usd_per_1m"`
-	Status         int             `json:"status"`
+	Status              int             `json:"status"`
 }
 
 type AdminConfigChannelModel struct {
@@ -166,16 +174,34 @@ func (s *Store) ExportAdminConfig(ctx context.Context) (AdminConfigExport, error
 	out.UpstreamEndpoints = make([]AdminConfigUpstreamEndpoint, 0, len(channels))
 	out.ChannelModels = make([]AdminConfigChannelModel, 0, len(channels))
 	for _, ch := range channels {
+		var paramOverride json.RawMessage
+		if strings.TrimSpace(ch.ParamOverride) != "" {
+			paramOverride = json.RawMessage(strings.TrimSpace(ch.ParamOverride))
+		}
+		var headerOverride json.RawMessage
+		if strings.TrimSpace(ch.HeaderOverride) != "" {
+			headerOverride = json.RawMessage(strings.TrimSpace(ch.HeaderOverride))
+		}
+		var statusCodeMapping json.RawMessage
+		if strings.TrimSpace(ch.StatusCodeMapping) != "" {
+			statusCodeMapping = json.RawMessage(strings.TrimSpace(ch.StatusCodeMapping))
+		}
 		out.UpstreamChannels = append(out.UpstreamChannels, AdminConfigUpstreamChannel{
-			Type:          strings.TrimSpace(ch.Type),
-			Name:          strings.TrimSpace(ch.Name),
-			Groups:        strings.TrimSpace(ch.Groups),
-			Status:        ch.Status,
-			Priority:      ch.Priority,
-			Promotion:     ch.Promotion,
-			LimitSessions: ch.LimitSessions,
-			LimitRPM:      ch.LimitRPM,
-			LimitTPM:      ch.LimitTPM,
+			Type:                  strings.TrimSpace(ch.Type),
+			Name:                  strings.TrimSpace(ch.Name),
+			Groups:                strings.TrimSpace(ch.Groups),
+			Status:                ch.Status,
+			Priority:              ch.Priority,
+			Promotion:             ch.Promotion,
+			LimitSessions:         ch.LimitSessions,
+			LimitRPM:              ch.LimitRPM,
+			LimitTPM:              ch.LimitTPM,
+			AllowServiceTier:      ch.AllowServiceTier,
+			DisableStore:          ch.DisableStore,
+			AllowSafetyIdentifier: ch.AllowSafetyIdentifier,
+			ParamOverride:         paramOverride,
+			HeaderOverride:        headerOverride,
+			StatusCodeMapping:     statusCodeMapping,
 		})
 
 		ep, err := s.GetUpstreamEndpointByChannelID(ctx, ch.ID)
@@ -211,14 +237,14 @@ func (s *Store) ExportAdminConfig(ctx context.Context) (AdminConfigExport, error
 	out.ManagedModels = make([]AdminConfigManagedModel, 0, len(managed))
 	for _, m := range managed {
 		out.ManagedModels = append(out.ManagedModels, AdminConfigManagedModel{
-			PublicID:       strings.TrimSpace(m.PublicID),
-			UpstreamModel:  m.UpstreamModel,
-			OwnedBy:        m.OwnedBy,
-			InputUSDPer1M:  m.InputUSDPer1M,
-			OutputUSDPer1M: m.OutputUSDPer1M,
+			PublicID:            strings.TrimSpace(m.PublicID),
+			UpstreamModel:       m.UpstreamModel,
+			OwnedBy:             m.OwnedBy,
+			InputUSDPer1M:       m.InputUSDPer1M,
+			OutputUSDPer1M:      m.OutputUSDPer1M,
 			CacheInputUSDPer1M:  m.CacheInputUSDPer1M,
 			CacheOutputUSDPer1M: m.CacheOutputUSDPer1M,
-			Status:         m.Status,
+			Status:              m.Status,
 		})
 	}
 
@@ -229,7 +255,7 @@ func (s *Store) ImportAdminConfig(ctx context.Context, in AdminConfigExport) (Ad
 	if s == nil || s.db == nil {
 		return AdminConfigImportReport{}, errors.New("数据库未初始化")
 	}
-	if in.Version != AdminConfigExportVersion {
+	if in.Version != 1 && in.Version != 2 && in.Version != 3 && in.Version != AdminConfigExportVersion {
 		return AdminConfigImportReport{}, fmt.Errorf("不支持的导入版本: %d", in.Version)
 	}
 
@@ -443,17 +469,54 @@ ON CONFLICT(name) DO UPDATE SET
 			return 0, errors.New("name 不能为空")
 		}
 
+		p := 0
+		if ch.Promotion {
+			p = 1
+		}
+		allowServiceTier := 0
+		if ch.AllowServiceTier {
+			allowServiceTier = 1
+		}
+		disableStore := 0
+		if ch.DisableStore {
+			disableStore = 1
+		}
+		allowSafetyIdentifier := 0
+		if ch.AllowSafetyIdentifier {
+			allowSafetyIdentifier = 1
+		}
+		paramOverride := strings.TrimSpace(string(ch.ParamOverride))
+		headerOverride := strings.TrimSpace(string(ch.HeaderOverride))
+		statusCodeMapping := strings.TrimSpace(string(ch.StatusCodeMapping))
+
 		id, err := findChannelID(typ, name)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				p := 0
-				if ch.Promotion {
-					p = 1
-				}
-				res, err := tx.ExecContext(ctx, `
-INSERT INTO upstream_channels(type, name, `+"`groups`"+`, status, priority, promotion, limit_sessions, limit_rpm, limit_tpm, created_at, updated_at)
+				stmtInsert := `
+INSERT INTO upstream_channels(type, name, ` + "`groups`" + `, status, priority, promotion, limit_sessions, limit_rpm, limit_tpm, created_at, updated_at)
 VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-`, typ, name, ch.Status, ch.Priority, p, nullableIntPtr(ch.LimitSessions), nullableIntPtr(ch.LimitRPM), nullableIntPtr(ch.LimitTPM))
+`
+				args := []any{typ, name, ch.Status, ch.Priority, p, nullableIntPtr(ch.LimitSessions), nullableIntPtr(ch.LimitRPM), nullableIntPtr(ch.LimitTPM)}
+				if in.Version >= 4 {
+					stmtInsert = `
+INSERT INTO upstream_channels(type, name, ` + "`groups`" + `, status, priority, promotion, limit_sessions, limit_rpm, limit_tpm, allow_service_tier, disable_store, allow_safety_identifier, param_override, header_override, status_code_mapping, created_at, updated_at)
+VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+`
+					args = append(args, allowServiceTier, disableStore, allowSafetyIdentifier, nullableString(&paramOverride), nullableString(&headerOverride), nullableString(&statusCodeMapping))
+				} else if in.Version >= 3 {
+					stmtInsert = `
+INSERT INTO upstream_channels(type, name, ` + "`groups`" + `, status, priority, promotion, limit_sessions, limit_rpm, limit_tpm, allow_service_tier, disable_store, allow_safety_identifier, param_override, created_at, updated_at)
+VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+`
+					args = append(args, allowServiceTier, disableStore, allowSafetyIdentifier, nullableString(&paramOverride))
+				} else if in.Version >= 2 {
+					stmtInsert = `
+INSERT INTO upstream_channels(type, name, ` + "`groups`" + `, status, priority, promotion, limit_sessions, limit_rpm, limit_tpm, allow_service_tier, disable_store, allow_safety_identifier, created_at, updated_at)
+VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+`
+					args = append(args, allowServiceTier, disableStore, allowSafetyIdentifier)
+				}
+				res, err := tx.ExecContext(ctx, stmtInsert, args...)
 				if err != nil {
 					return 0, fmt.Errorf("创建 upstream_channel 失败: %w", err)
 				}
@@ -465,18 +528,54 @@ VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 				return 0, err
 			}
 		} else {
-			p := 0
-			if ch.Promotion {
-				p = 1
-			}
-			if _, err := tx.ExecContext(ctx, `
+			stmtUpdate := `
 UPDATE upstream_channels
 SET name=COALESCE(NULLIF(?, ''), name),
     status=?, priority=?, promotion=?,
     limit_sessions=?, limit_rpm=?, limit_tpm=?,
     updated_at=CURRENT_TIMESTAMP
 WHERE id=?
-`, name, ch.Status, ch.Priority, p, nullableIntPtr(ch.LimitSessions), nullableIntPtr(ch.LimitRPM), nullableIntPtr(ch.LimitTPM), id); err != nil {
+`
+			args := []any{name, ch.Status, ch.Priority, p, nullableIntPtr(ch.LimitSessions), nullableIntPtr(ch.LimitRPM), nullableIntPtr(ch.LimitTPM), id}
+			if in.Version >= 4 {
+				stmtUpdate = `
+UPDATE upstream_channels
+SET name=COALESCE(NULLIF(?, ''), name),
+    status=?, priority=?, promotion=?,
+    limit_sessions=?, limit_rpm=?, limit_tpm=?,
+    allow_service_tier=?, disable_store=?, allow_safety_identifier=?,
+    param_override=?,
+    header_override=?,
+    status_code_mapping=?,
+    updated_at=CURRENT_TIMESTAMP
+WHERE id=?
+`
+				args = []any{name, ch.Status, ch.Priority, p, nullableIntPtr(ch.LimitSessions), nullableIntPtr(ch.LimitRPM), nullableIntPtr(ch.LimitTPM), allowServiceTier, disableStore, allowSafetyIdentifier, nullableString(&paramOverride), nullableString(&headerOverride), nullableString(&statusCodeMapping), id}
+			} else if in.Version >= 3 {
+				stmtUpdate = `
+UPDATE upstream_channels
+SET name=COALESCE(NULLIF(?, ''), name),
+    status=?, priority=?, promotion=?,
+    limit_sessions=?, limit_rpm=?, limit_tpm=?,
+    allow_service_tier=?, disable_store=?, allow_safety_identifier=?,
+    param_override=?,
+    updated_at=CURRENT_TIMESTAMP
+WHERE id=?
+`
+				args = []any{name, ch.Status, ch.Priority, p, nullableIntPtr(ch.LimitSessions), nullableIntPtr(ch.LimitRPM), nullableIntPtr(ch.LimitTPM), allowServiceTier, disableStore, allowSafetyIdentifier, nullableString(&paramOverride), id}
+			} else if in.Version >= 2 {
+				stmtUpdate = `
+UPDATE upstream_channels
+SET name=COALESCE(NULLIF(?, ''), name),
+    status=?, priority=?, promotion=?,
+    limit_sessions=?, limit_rpm=?, limit_tpm=?,
+    allow_service_tier=?, disable_store=?, allow_safety_identifier=?,
+    updated_at=CURRENT_TIMESTAMP
+WHERE id=?
+`
+				args = []any{name, ch.Status, ch.Priority, p, nullableIntPtr(ch.LimitSessions), nullableIntPtr(ch.LimitRPM), nullableIntPtr(ch.LimitTPM), allowServiceTier, disableStore, allowSafetyIdentifier, id}
+			}
+			if _, err := tx.ExecContext(ctx, stmtUpdate, args...); err != nil {
 				return 0, fmt.Errorf("更新 upstream_channel 失败: %w", err)
 			}
 		}

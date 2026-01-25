@@ -113,8 +113,8 @@ func (c *CRSClient) ExchangeCode(ctx context.Context, code, sessionID string) (*
 	var result struct {
 		Success bool `json:"success"`
 		Data    struct {
-			Tokens       CodexTokens      `json:"tokens"`
-			AccountInfo  CodexAccountInfo `json:"accountInfo"`
+			Tokens      CodexTokens      `json:"tokens"`
+			AccountInfo CodexAccountInfo `json:"accountInfo"`
 		} `json:"data"`
 	}
 

@@ -75,4 +75,3 @@ func (s *Server) PromoteChannel5Min(w http.ResponseWriter, r *http.Request) {
 	}
 	http.Redirect(w, r, returnTo+"?msg="+url.QueryEscape(msg), http.StatusFound)
 }
-

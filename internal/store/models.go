@@ -86,6 +86,13 @@ type UpstreamChannel struct {
 	LimitRPM      *int
 	LimitTPM      *int
 
+	AllowServiceTier      bool
+	DisableStore          bool
+	AllowSafetyIdentifier bool
+	ParamOverride         string
+	HeaderOverride        string
+	StatusCodeMapping     string
+
 	LastTestAt        *time.Time
 	LastTestLatencyMS int
 	LastTestOK        bool
@@ -227,16 +234,16 @@ type OAuthAppToken struct {
 }
 
 type ManagedModel struct {
-	ID             int64
-	PublicID       string
-	UpstreamModel  *string
-	OwnedBy        *string
-	InputUSDPer1M  decimal.Decimal
-	OutputUSDPer1M decimal.Decimal
+	ID                  int64
+	PublicID            string
+	UpstreamModel       *string
+	OwnedBy             *string
+	InputUSDPer1M       decimal.Decimal
+	OutputUSDPer1M      decimal.Decimal
 	CacheInputUSDPer1M  decimal.Decimal
 	CacheOutputUSDPer1M decimal.Decimal
-	Status         int
-	CreatedAt      time.Time
+	Status              int
+	CreatedAt           time.Time
 }
 
 type ChannelModel struct {

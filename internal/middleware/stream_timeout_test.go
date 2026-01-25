@@ -51,4 +51,3 @@ func TestStreamAwareRequestTimeout_StreamSkipsNonStreamDeadline(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
 	}
 }
-

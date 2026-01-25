@@ -23,8 +23,8 @@ type GroupRouter struct {
 	st    ChannelGroupStore
 	sched *Scheduler
 
-	cons        Constraints
-	userID      int64
+	cons         Constraints
+	userID       int64
 	routeKeyHash string
 
 	cursors          map[int64]*groupCursor
@@ -44,13 +44,13 @@ type groupCursor struct {
 
 func NewGroupRouter(st ChannelGroupStore, sched *Scheduler, userID int64, routeKeyHash string, cons Constraints) *GroupRouter {
 	return &GroupRouter{
-		st:              st,
-		sched:           sched,
-		userID:          userID,
-		routeKeyHash:    routeKeyHash,
-		cons:            cons,
-		cursors:         make(map[int64]*groupCursor),
-		activePath:      make(map[int64]struct{}),
+		st:               st,
+		sched:            sched,
+		userID:           userID,
+		routeKeyHash:     routeKeyHash,
+		cons:             cons,
+		cursors:          make(map[int64]*groupCursor),
+		activePath:       make(map[int64]struct{}),
 		excludedChannels: make(map[int64]struct{}),
 	}
 }

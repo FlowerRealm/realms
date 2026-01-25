@@ -248,8 +248,8 @@ func parsePricingFromMap(m map[string]any) (store.ManagedModelPricingUpsert, boo
 			return store.ManagedModelPricingUpsert{}, false, "定价不能为负数"
 		}
 		return store.ManagedModelPricingUpsert{
-			InputUSDPer1M:  inUSD,
-			OutputUSDPer1M: outUSD,
+			InputUSDPer1M:       inUSD,
+			OutputUSDPer1M:      outUSD,
 			CacheInputUSDPer1M:  cacheInUSD,
 			CacheOutputUSDPer1M: cacheOutUSD,
 		}, true, ""
@@ -297,8 +297,8 @@ func parsePricingFromMap(m map[string]any) (store.ManagedModelPricingUpsert, boo
 		return store.ManagedModelPricingUpsert{}, false, "定价不能为负数"
 	}
 	return store.ManagedModelPricingUpsert{
-		InputUSDPer1M:  inUSD,
-		OutputUSDPer1M: outUSD,
+		InputUSDPer1M:       inUSD,
+		OutputUSDPer1M:      outUSD,
 		CacheInputUSDPer1M:  cacheInUSD,
 		CacheOutputUSDPer1M: cacheOutUSD,
 	}, true, ""

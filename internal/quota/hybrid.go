@@ -32,11 +32,11 @@ func NewHybridProvider(st *store.Store, reserveTTL time.Duration, paygEnabledDef
 		reserveTTL = 2 * time.Minute
 	}
 	return &HybridProvider{
-		st:                     st,
-		sub:                    NewSubscriptionProvider(st, reserveTTL),
-		reserveTTL:             reserveTTL,
-		paygEnabledDefault:     paygEnabledDefault,
-		defaultReserveUSD:      decimal.NewFromInt(1).Div(decimal.NewFromInt(1000)), // 0.001 USD
+		st:                 st,
+		sub:                NewSubscriptionProvider(st, reserveTTL),
+		reserveTTL:         reserveTTL,
+		paygEnabledDefault: paygEnabledDefault,
+		defaultReserveUSD:  decimal.NewFromInt(1).Div(decimal.NewFromInt(1000)), // 0.001 USD
 	}
 }
 
@@ -82,13 +82,13 @@ func (p *HybridProvider) Reserve(ctx context.Context, in ReserveInput) (ReserveR
 
 	now := time.Now()
 	id, err := p.st.ReserveUsageAndDebitBalance(ctx, store.ReserveUsageInput{
-		RequestID:         in.RequestID,
-		UserID:            in.UserID,
-		SubscriptionID:    nil,
-		TokenID:           in.TokenID,
-		Model:             in.Model,
-		ReservedUSD:       reservedUSD,
-		ReserveExpiresAt:  now.Add(p.reserveTTL),
+		RequestID:        in.RequestID,
+		UserID:           in.UserID,
+		SubscriptionID:   nil,
+		TokenID:          in.TokenID,
+		Model:            in.Model,
+		ReservedUSD:      reservedUSD,
+		ReserveExpiresAt: now.Add(p.reserveTTL),
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrInsufficientBalance) {

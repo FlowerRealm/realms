@@ -37,4 +37,3 @@ func TestChannelLimits_Unlimited(t *testing.T) {
 		t.Fatalf("expected negative limit to be treated as unlimited")
 	}
 }
-

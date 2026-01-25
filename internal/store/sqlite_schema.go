@@ -17,6 +17,12 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 	var v int
 	err := db.QueryRow(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='users' LIMIT 1`).Scan(&v)
 	if err == nil && v == 1 {
+		if err := ensureSQLiteUpstreamChannelRequestPolicyColumns(db); err != nil {
+			return err
+		}
+		if err := ensureSQLiteUpstreamChannelParamOverrideColumn(db); err != nil {
+			return err
+		}
 		return ensureSQLiteChannelGroupMembers(db)
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {

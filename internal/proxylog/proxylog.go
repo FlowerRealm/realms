@@ -231,4 +231,3 @@ func (w *Writer) cleanupOldFiles(dir string) {
 		_ = os.Remove(filepath.Join(dir, ff.name))
 	}
 }
-

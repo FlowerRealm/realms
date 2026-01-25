@@ -221,16 +221,16 @@ func (s *Server) CreateSubscriptionPlan(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if _, err := s.st.CreateSubscriptionPlan(r.Context(), store.SubscriptionPlanCreate{
-		Code:              code,
-		Name:              name,
-		GroupName:         groupName,
-		PriceCNY:          priceCNY,
-		Limit5HUSD:        limit5H,
-		Limit1DUSD:        limit1D,
-		Limit7DUSD:        limit7D,
-		Limit30DUSD:       limit30D,
-		DurationDays:      durationDays,
-		Status:            status,
+		Code:         code,
+		Name:         name,
+		GroupName:    groupName,
+		PriceCNY:     priceCNY,
+		Limit5HUSD:   limit5H,
+		Limit1DUSD:   limit1D,
+		Limit7DUSD:   limit7D,
+		Limit30DUSD:  limit30D,
+		DurationDays: durationDays,
+		Status:       status,
 	}); err != nil {
 		if isAjax(r) {
 			ajaxError(w, http.StatusInternalServerError, "创建失败")
@@ -381,17 +381,17 @@ func (s *Server) UpdateSubscriptionPlan(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := s.st.UpdateSubscriptionPlan(r.Context(), store.SubscriptionPlanUpdate{
-		ID:                planID,
-		Code:              code,
-		Name:              name,
-		GroupName:         groupName,
-		PriceCNY:          priceCNY,
-		Limit5HUSD:        limit5H,
-		Limit1DUSD:        limit1D,
-		Limit7DUSD:        limit7D,
-		Limit30DUSD:       limit30D,
-		DurationDays:      durationDays,
-		Status:            status,
+		ID:           planID,
+		Code:         code,
+		Name:         name,
+		GroupName:    groupName,
+		PriceCNY:     priceCNY,
+		Limit5HUSD:   limit5H,
+		Limit1DUSD:   limit1D,
+		Limit7DUSD:   limit7D,
+		Limit30DUSD:  limit30D,
+		DurationDays: durationDays,
+		Status:       status,
 	}); err != nil {
 		http.Error(w, "更新失败", http.StatusInternalServerError)
 		return

@@ -89,8 +89,8 @@ type LookupResult struct {
 	// ModelID 是查询时使用的 model_id（通常等于 managed_models.public_id）。
 	ModelID string
 
-	InputUSDPer1M  decimal.Decimal
-	OutputUSDPer1M decimal.Decimal
+	InputUSDPer1M       decimal.Decimal
+	OutputUSDPer1M      decimal.Decimal
 	CacheInputUSDPer1M  decimal.Decimal
 	CacheOutputUSDPer1M decimal.Decimal
 }
@@ -312,11 +312,11 @@ func buildResultFromProviderModel(source string, queryID string, m modelsDevMode
 		return LookupResult{}, false, errors.New("模型库数据缺少归属方信息")
 	}
 	return LookupResult{
-		Source:         source,
-		OwnedBy:        ownedBy,
-		ModelID:        strings.TrimSpace(queryID),
-		InputUSDPer1M:  m.Cost.Input,
-		OutputUSDPer1M: m.Cost.Output,
+		Source:              source,
+		OwnedBy:             ownedBy,
+		ModelID:             strings.TrimSpace(queryID),
+		InputUSDPer1M:       m.Cost.Input,
+		OutputUSDPer1M:      m.Cost.Output,
 		CacheInputUSDPer1M:  m.Cost.CacheRead,
 		CacheOutputUSDPer1M: m.Cost.CacheRead,
 	}, true, nil

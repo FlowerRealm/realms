@@ -46,4 +46,3 @@ func formatDurationShortZH(d time.Duration) string {
 func formatRemainingUntilZH(until time.Time, now time.Time) string {
 	return formatDurationShortZH(until.Sub(now))
 }
-

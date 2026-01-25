@@ -9,14 +9,14 @@ import (
 
 // BatchRegisterConfig 批量注册配置
 type BatchRegisterConfig struct {
-	Count             int                    `json:"count"`
-	WorkerDomain      string                 `json:"worker_domain"`
-	AdminToken        string                 `json:"admin_token"`
-	CRSAPIBase        string                 `json:"crs_api_base"`
-	CRSAdminToken     string                 `json:"crs_admin_token"`
-	EnableTeamInvite  bool                   `json:"enable_team_invite"`
-	Teams             []TeamConfig           `json:"teams,omitempty"`
-	OpenAIConfig      *OpenAIRegisterConfig  `json:"openai_config,omitempty"`
+	Count            int                   `json:"count"`
+	WorkerDomain     string                `json:"worker_domain"`
+	AdminToken       string                `json:"admin_token"`
+	CRSAPIBase       string                `json:"crs_api_base"`
+	CRSAdminToken    string                `json:"crs_admin_token"`
+	EnableTeamInvite bool                  `json:"enable_team_invite"`
+	Teams            []TeamConfig          `json:"teams,omitempty"`
+	OpenAIConfig     *OpenAIRegisterConfig `json:"openai_config,omitempty"`
 }
 
 // OpenAIRegisterConfig OpenAI注册配置
@@ -118,10 +118,10 @@ func (t *BatchRegisterTask) GetFullSnapshot() map[string]interface{} {
 
 // TaskManager 任务管理器
 type TaskManager struct {
-	tasks   map[string]*BatchRegisterTask
-	mu      sync.RWMutex
+	tasks    map[string]*BatchRegisterTask
+	mu       sync.RWMutex
 	maxTasks int
-	ttl     time.Duration
+	ttl      time.Duration
 }
 
 // NewTaskManager 创建任务管理器
@@ -214,4 +214,3 @@ func (tm *TaskManager) cleanupExpiredTasks() {
 		tm.mu.Unlock()
 	}
 }
-

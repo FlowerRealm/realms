@@ -79,4 +79,3 @@ func parseCNY(raw string) (decimal.Decimal, error) {
 func parseMultiplier(raw string) (decimal.Decimal, error) {
 	return parseDecimalNonNeg(raw, store.PriceMultiplierScale)
 }
-

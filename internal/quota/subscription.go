@@ -136,13 +136,13 @@ func (p *SubscriptionProvider) Reserve(ctx context.Context, in ReserveInput) (Re
 	}
 
 	id, err := p.st.ReserveUsage(ctx, store.ReserveUsageInput{
-		RequestID:         in.RequestID,
-		UserID:            in.UserID,
-		SubscriptionID:    &chosen.Subscription.ID,
-		TokenID:           in.TokenID,
-		Model:             in.Model,
-		ReservedUSD:       chosenReservedUSD,
-		ReserveExpiresAt:  now.Add(p.reserveTTL),
+		RequestID:        in.RequestID,
+		UserID:           in.UserID,
+		SubscriptionID:   &chosen.Subscription.ID,
+		TokenID:          in.TokenID,
+		Model:            in.Model,
+		ReservedUSD:      chosenReservedUSD,
+		ReserveExpiresAt: now.Add(p.reserveTTL),
 	})
 	if err != nil {
 		return ReserveResult{}, err

@@ -86,6 +86,37 @@ func (f *fakeUpstreamStore) SetCodexOAuthAccountCooldown(_ context.Context, _ in
 	return nil
 }
 
+func TestExecutor_HeaderOverride_AppliesAndDoesNotOverrideDefaultAuth(t *testing.T) {
+	exec := &Executor{
+		st: &fakeUpstreamStore{
+			openaiSecret: store.OpenAICredentialSecret{
+				APIKey: "sk_test",
+			},
+		},
+		upstreamTimeout: 2 * time.Minute,
+	}
+
+	body := []byte(`{"model":"m1","stream":false,"input":"hi"}`)
+	r := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	req, err := exec.buildRequest(context.Background(), scheduler.Selection{
+		BaseURL:        "https://127.0.0.1/v1",
+		CredentialType: scheduler.CredentialTypeOpenAI,
+		CredentialID:   1,
+		HeaderOverride: `{"X-Proxy-Key":"{api_key}","Authorization":"Bearer override"}`,
+	}, r, body)
+	if err != nil {
+		t.Fatalf("buildRequest returned error: %v", err)
+	}
+	if got := req.Header.Get("X-Proxy-Key"); got != "sk_test" {
+		t.Fatalf("expected X-Proxy-Key to be overridden, got %q", got)
+	}
+	if got := req.Header.Get("Authorization"); got != "Bearer sk_test" {
+		t.Fatalf("expected Authorization to use upstream api key, got %q", got)
+	}
+}
+
 func TestExecutor_CodexOAuthRequestPassthrough_LeavesPathAndBody(t *testing.T) {
 	exec := &Executor{
 		st: &fakeUpstreamStore{
@@ -431,5 +462,69 @@ func TestExecutor_Do_CodexOAuth_Legacy404_FallsBackToPassthroughResponsesPath(t 
 	}
 	if len(paths) != 2 || paths[0] != "/backend-api/codex/responses" || paths[1] != "/backend-api/codex/v1/responses" {
 		t.Fatalf("unexpected paths: %#v", paths)
+	}
+}
+
+func TestExecutor_Do_OpenAICompat_UnsupportedMaxOutputTokens_RewritesToMaxTokens(t *testing.T) {
+	var bodies []map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+
+		var payload map[string]any
+		if err := json.Unmarshal(b, &payload); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"detail":"bad json"}`))
+			return
+		}
+		bodies = append(bodies, payload)
+
+		if _, ok := payload["max_output_tokens"]; ok {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"detail":"Unsupported parameter: max_output_tokens"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	exec := &Executor{
+		st: &fakeUpstreamStore{
+			openaiSecret: store.OpenAICredentialSecret{
+				APIKey: "sk-test",
+			},
+		},
+		client: srv.Client(),
+	}
+
+	body := []byte(`{"model":"gpt-5.2","stream":false,"max_output_tokens":123,"input":"hi"}`)
+	downstream := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader(body))
+	resp, err := exec.Do(context.Background(), scheduler.Selection{
+		BaseURL:        srv.URL,
+		CredentialType: scheduler.CredentialTypeOpenAI,
+		CredentialID:   123,
+	}, downstream, body)
+	if err != nil {
+		t.Fatalf("Do returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d (%s)", resp.StatusCode, string(b))
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(bodies))
+	}
+	if _, ok := bodies[0]["max_output_tokens"]; !ok {
+		t.Fatalf("expected max_output_tokens in first request, got %#v", bodies[0])
+	}
+	if _, ok := bodies[1]["max_output_tokens"]; ok {
+		t.Fatalf("expected max_output_tokens to be removed in retry, got %#v", bodies[1])
+	}
+	if got, ok := bodies[1]["max_tokens"].(float64); !ok || got != 123 {
+		t.Fatalf("expected max_tokens=123 in retry, got %#v", bodies[1]["max_tokens"])
 	}
 }

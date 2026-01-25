@@ -27,8 +27,16 @@ type Selection struct {
 	ChannelID     int64
 	ChannelType   string
 	ChannelGroups string
-	EndpointID    int64
-	BaseURL       string
+
+	AllowServiceTier      bool
+	DisableStore          bool
+	AllowSafetyIdentifier bool
+	ParamOverride         string
+	HeaderOverride        string
+	StatusCodeMapping     string
+
+	EndpointID int64
+	BaseURL    string
 
 	CredentialType CredentialType
 	CredentialID   int64
@@ -317,13 +325,19 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			return ids[i].id > ids[j].id
 		})
 		return Selection{
-			ChannelID:      ch.ID,
-			ChannelType:    ch.Type,
-			ChannelGroups:  ch.Groups,
-			EndpointID:     ep.ID,
-			BaseURL:        ep.BaseURL,
-			CredentialType: CredentialTypeOpenAI,
-			CredentialID:   ids[0].id,
+			ChannelID:             ch.ID,
+			ChannelType:           ch.Type,
+			ChannelGroups:         ch.Groups,
+			AllowServiceTier:      ch.AllowServiceTier,
+			DisableStore:          ch.DisableStore,
+			AllowSafetyIdentifier: ch.AllowSafetyIdentifier,
+			ParamOverride:         ch.ParamOverride,
+			HeaderOverride:        ch.HeaderOverride,
+			StatusCodeMapping:     ch.StatusCodeMapping,
+			EndpointID:            ep.ID,
+			BaseURL:               ep.BaseURL,
+			CredentialType:        CredentialTypeOpenAI,
+			CredentialID:          ids[0].id,
 
 			CredentialLimitSessions: ids[0].limitSessions,
 			CredentialLimitRPM:      ids[0].limitRPM,
@@ -380,13 +394,19 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			return ids[i].id > ids[j].id
 		})
 		return Selection{
-			ChannelID:      ch.ID,
-			ChannelType:    ch.Type,
-			ChannelGroups:  ch.Groups,
-			EndpointID:     ep.ID,
-			BaseURL:        ep.BaseURL,
-			CredentialType: CredentialTypeAnthropic,
-			CredentialID:   ids[0].id,
+			ChannelID:             ch.ID,
+			ChannelType:           ch.Type,
+			ChannelGroups:         ch.Groups,
+			AllowServiceTier:      ch.AllowServiceTier,
+			DisableStore:          ch.DisableStore,
+			AllowSafetyIdentifier: ch.AllowSafetyIdentifier,
+			ParamOverride:         ch.ParamOverride,
+			HeaderOverride:        ch.HeaderOverride,
+			StatusCodeMapping:     ch.StatusCodeMapping,
+			EndpointID:            ep.ID,
+			BaseURL:               ep.BaseURL,
+			CredentialType:        CredentialTypeAnthropic,
+			CredentialID:          ids[0].id,
 
 			CredentialLimitSessions: ids[0].limitSessions,
 			CredentialLimitRPM:      ids[0].limitRPM,
@@ -446,13 +466,19 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			return ids[i].id > ids[j].id
 		})
 		return Selection{
-			ChannelID:      ch.ID,
-			ChannelType:    ch.Type,
-			ChannelGroups:  ch.Groups,
-			EndpointID:     ep.ID,
-			BaseURL:        ep.BaseURL,
-			CredentialType: CredentialTypeCodex,
-			CredentialID:   ids[0].id,
+			ChannelID:             ch.ID,
+			ChannelType:           ch.Type,
+			ChannelGroups:         ch.Groups,
+			AllowServiceTier:      ch.AllowServiceTier,
+			DisableStore:          ch.DisableStore,
+			AllowSafetyIdentifier: ch.AllowSafetyIdentifier,
+			ParamOverride:         ch.ParamOverride,
+			HeaderOverride:        ch.HeaderOverride,
+			StatusCodeMapping:     ch.StatusCodeMapping,
+			EndpointID:            ep.ID,
+			BaseURL:               ep.BaseURL,
+			CredentialType:        CredentialTypeCodex,
+			CredentialID:          ids[0].id,
 
 			CredentialLimitSessions: ids[0].limitSessions,
 			CredentialLimitRPM:      ids[0].limitRPM,

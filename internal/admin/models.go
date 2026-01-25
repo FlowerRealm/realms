@@ -13,27 +13,27 @@ import (
 )
 
 type managedModelView struct {
-	ID             int64
-	PublicID       string
-	OwnedBy        string
-	InputUSDPer1M  string
-	OutputUSDPer1M string
+	ID                  int64
+	PublicID            string
+	OwnedBy             string
+	InputUSDPer1M       string
+	OutputUSDPer1M      string
 	CacheInputUSDPer1M  string
 	CacheOutputUSDPer1M string
-	Status         int
-	CreatedAt      string
+	Status              int
+	CreatedAt           string
 }
 
 func toManagedModelView(m store.ManagedModel, loc *time.Location) managedModelView {
 	v := managedModelView{
-		ID:             m.ID,
-		PublicID:       m.PublicID,
-		InputUSDPer1M:  formatUSDPlain(m.InputUSDPer1M),
-		OutputUSDPer1M: formatUSDPlain(m.OutputUSDPer1M),
+		ID:                  m.ID,
+		PublicID:            m.PublicID,
+		InputUSDPer1M:       formatUSDPlain(m.InputUSDPer1M),
+		OutputUSDPer1M:      formatUSDPlain(m.OutputUSDPer1M),
 		CacheInputUSDPer1M:  formatUSDPlain(m.CacheInputUSDPer1M),
 		CacheOutputUSDPer1M: formatUSDPlain(m.CacheOutputUSDPer1M),
-		Status:         m.Status,
-		CreatedAt:      formatTimeIn(m.CreatedAt, "2006-01-02 15:04", loc),
+		Status:              m.Status,
+		CreatedAt:           formatTimeIn(m.CreatedAt, "2006-01-02 15:04", loc),
 	}
 	if m.OwnedBy != nil {
 		v.OwnedBy = *m.OwnedBy
@@ -170,13 +170,13 @@ func (s *Server) CreateModel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := s.st.CreateManagedModel(r.Context(), store.ManagedModelCreate{
-		PublicID:       publicID,
-		OwnedBy:        ownedBy,
-		InputUSDPer1M:  inV,
-		OutputUSDPer1M: outV,
+		PublicID:            publicID,
+		OwnedBy:             ownedBy,
+		InputUSDPer1M:       inV,
+		OutputUSDPer1M:      outV,
 		CacheInputUSDPer1M:  cacheInV,
 		CacheOutputUSDPer1M: cacheOutV,
-		Status:         status,
+		Status:              status,
 	}); err != nil {
 		if isAjax(r) {
 			ajaxError(w, http.StatusInternalServerError, "创建失败")
@@ -296,14 +296,14 @@ func (s *Server) UpdateModel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.st.UpdateManagedModel(r.Context(), store.ManagedModelUpdate{
-		ID:             modelID,
-		PublicID:       publicID,
-		OwnedBy:        ownedBy,
-		InputUSDPer1M:  inV,
-		OutputUSDPer1M: outV,
+		ID:                  modelID,
+		PublicID:            publicID,
+		OwnedBy:             ownedBy,
+		InputUSDPer1M:       inV,
+		OutputUSDPer1M:      outV,
 		CacheInputUSDPer1M:  cacheInV,
 		CacheOutputUSDPer1M: cacheOutV,
-		Status:         status,
+		Status:              status,
 	}); err != nil {
 		http.Error(w, "更新失败", http.StatusInternalServerError)
 		return

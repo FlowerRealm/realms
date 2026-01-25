@@ -369,15 +369,15 @@ type templateData struct {
 	UsageCursorActive bool
 	UsageLimit        int
 
-	Channels       []store.UpstreamChannel
-	ChannelViews   []adminChannelView
+	Channels         []store.UpstreamChannel
+	ChannelViews     []adminChannelView
 	SchedulerRuntime adminSchedulerRuntimeView
-	Channel        store.UpstreamChannel
-	ChannelRuntime adminChannelRuntimeView
-	Endpoints      []store.UpstreamEndpoint
-	Endpoint       store.UpstreamEndpoint
-	Credentials    []adminCredentialView
-	Accounts       []adminCodexAccountView
+	Channel          store.UpstreamChannel
+	ChannelRuntime   adminChannelRuntimeView
+	Endpoints        []store.UpstreamEndpoint
+	Endpoint         store.UpstreamEndpoint
+	Credentials      []adminCredentialView
+	Accounts         []adminCodexAccountView
 
 	ManagedModels []managedModelView
 	ManagedModel  managedModelView
@@ -488,11 +488,11 @@ type adminRuntimeLimitsView struct {
 type adminChannelRuntimeView struct {
 	Available bool
 
-	FailScore    int
-	BannedUntil  string
+	FailScore       int
+	BannedUntil     string
 	BannedRemaining string
-	BanStreak    int
-	BannedActive bool
+	BanStreak       int
+	BannedActive    bool
 
 	ForcedUntil     string
 	ForcedRemaining string
@@ -2294,6 +2294,9 @@ func (s *Server) CreateChannel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "limit_tpm 不合法", http.StatusBadRequest)
 		return
 	}
+	allowServiceTier := strings.TrimSpace(r.FormValue("allow_service_tier")) == "1"
+	disableStore := strings.TrimSpace(r.FormValue("disable_store")) == "1"
+	allowSafetyIdentifier := strings.TrimSpace(r.FormValue("allow_safety_identifier")) == "1"
 	if typ == "" || name == "" || baseURL == "" {
 		http.Error(w, "参数错误", http.StatusBadRequest)
 		return
@@ -2313,7 +2316,7 @@ func (s *Server) CreateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, err := s.st.CreateUpstreamChannel(r.Context(), typ, name, groups, priority, promotion, limitSessions, limitRPM, limitTPM)
+	id, err := s.st.CreateUpstreamChannel(r.Context(), typ, name, groups, priority, promotion, limitSessions, limitRPM, limitTPM, allowServiceTier, disableStore, allowSafetyIdentifier)
 	if err != nil {
 		http.Error(w, "创建失败", http.StatusInternalServerError)
 		return
@@ -2517,21 +2520,21 @@ func (s *Server) Endpoints(w http.ResponseWriter, r *http.Request) {
 	channelRuntime := adminChannelRuntimeView{
 		Available: s.sched != nil,
 	}
-		if s.sched != nil {
-			rt := s.sched.RuntimeChannelStats(ch.ID)
-			channelRuntime.FailScore = rt.FailScore
-			channelRuntime.BanStreak = rt.BanStreak
-			if rt.BannedUntil != nil {
-				channelRuntime.BannedActive = true
-				channelRuntime.BannedUntil = formatTimeIn(*rt.BannedUntil, time.RFC3339, loc)
-				channelRuntime.BannedRemaining = formatRemainingUntilZH(*rt.BannedUntil, nowRuntime)
-			}
-			if rt.ForcedUntil != nil {
-				channelRuntime.ForcedActive = true
-				channelRuntime.ForcedUntil = formatTimeIn(*rt.ForcedUntil, time.RFC3339, loc)
-				channelRuntime.ForcedRemaining = formatRemainingUntilZH(*rt.ForcedUntil, nowRuntime)
-			}
+	if s.sched != nil {
+		rt := s.sched.RuntimeChannelStats(ch.ID)
+		channelRuntime.FailScore = rt.FailScore
+		channelRuntime.BanStreak = rt.BanStreak
+		if rt.BannedUntil != nil {
+			channelRuntime.BannedActive = true
+			channelRuntime.BannedUntil = formatTimeIn(*rt.BannedUntil, time.RFC3339, loc)
+			channelRuntime.BannedRemaining = formatRemainingUntilZH(*rt.BannedUntil, nowRuntime)
 		}
+		if rt.ForcedUntil != nil {
+			channelRuntime.ForcedActive = true
+			channelRuntime.ForcedUntil = formatTimeIn(*rt.ForcedUntil, time.RFC3339, loc)
+			channelRuntime.ForcedRemaining = formatRemainingUntilZH(*rt.ForcedUntil, nowRuntime)
+		}
+	}
 
 	var creds []adminCredentialView
 	switch ch.Type {

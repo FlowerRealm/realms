@@ -101,4 +101,3 @@ func TestFeatureGate_EmptyKey_PassesThrough(t *testing.T) {
 		t.Fatalf("next handler should be called once")
 	}
 }
-

@@ -215,6 +215,12 @@
               <button class="btn btn-sm btn-light border text-secondary" data-bs-toggle="modal" data-bs-target="#editLimitsModal-{{.Channel.ID}}" title="配置限额">
                 <i class="ri-speed-line"></i>
               </button>
+              <button class="btn btn-sm btn-light border text-secondary" data-bs-toggle="modal" data-bs-target="#editRequestPolicyModal-{{.Channel.ID}}" title="请求字段策略">
+                <i class="ri-filter-2-line"></i>
+              </button>
+              <button class="btn btn-sm btn-light border text-secondary" data-bs-toggle="modal" data-bs-target="#editParamOverrideModal-{{.Channel.ID}}" title="参数改写（param_override）">
+                <i class="ri-braces-line"></i>
+              </button>
               <a href="/admin/channels/{{.Channel.ID}}/endpoints" class="btn btn-sm btn-light border text-secondary" data-bs-toggle="tooltip" title="配置端点">
                 <i class="ri-settings-3-line"></i>
               </a>
@@ -244,6 +250,16 @@
                     </a>
                   </li>
                   {{end}}
+                  <li>
+                    <a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#editHeaderOverrideModal-{{.Channel.ID}}">
+                      <i class="ri-file-code-line me-2 text-muted"></i>Header Override
+                    </a>
+                  </li>
+                  <li>
+                    <a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#editStatusCodeMappingModal-{{.Channel.ID}}">
+                      <i class="ri-shuffle-line me-2 text-muted"></i>状态码映射
+                    </a>
+                  </li>
                   <li><hr class="dropdown-divider"></li>
 	                  {{if ne .Channel.Type "codex_oauth"}}
 	                  <li>
@@ -342,6 +358,134 @@
             </div>
           </div>
         </div>
+
+        <!-- 请求字段策略弹窗 -->
+        <div class="modal fade" id="editRequestPolicyModal-{{.Channel.ID}}" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-sm">
+            <div class="modal-content border-0 shadow">
+              <div class="modal-header">
+                <h5 class="modal-title fw-bold">请求字段策略</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+              </div>
+              <form method="POST" action="/admin/channels/{{.Channel.ID}}/request_policy" data-ajax="1" data-ajax-reload="1">
+                <div class="modal-body">
+                  <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+                  <input type="hidden" name="return_to" value="/admin/channels" />
+                  <label class="form-label small text-muted">所属渠道：{{.Channel.Name}}</label>
+
+                  {{$ch := .Channel}}
+                  <div class="d-flex flex-column gap-2">
+                    <div class="form-check">
+                      <input class="form-check-input" type="checkbox" name="allow_service_tier" value="1" id="policy_service_tier_{{$ch.ID}}" {{if $ch.AllowServiceTier}}checked{{end}} />
+                      <label class="form-check-label" for="policy_service_tier_{{$ch.ID}}">允许透传 <code>service_tier</code></label>
+                      <div class="form-text smaller">可能触发上游额外计费；默认会过滤。</div>
+                    </div>
+                    <div class="form-check">
+                      <input class="form-check-input" type="checkbox" name="disable_store" value="1" id="policy_disable_store_{{$ch.ID}}" {{if $ch.DisableStore}}checked{{end}} />
+                      <label class="form-check-label" for="policy_disable_store_{{$ch.ID}}">禁用透传 <code>store</code></label>
+                      <div class="form-text smaller">涉及数据存储授权；默认允许透传。</div>
+                    </div>
+                    <div class="form-check">
+                      <input class="form-check-input" type="checkbox" name="allow_safety_identifier" value="1" id="policy_safety_identifier_{{$ch.ID}}" {{if $ch.AllowSafetyIdentifier}}checked{{end}} />
+                      <label class="form-check-label" for="policy_safety_identifier_{{$ch.ID}}">允许透传 <code>safety_identifier</code></label>
+                      <div class="form-text smaller">可能暴露用户信息；默认会过滤。</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="modal-footer border-top-0 pt-0">
+                  <button type="submit" class="btn btn-primary w-100">保存策略</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <!-- 参数改写（param_override）弹窗 -->
+        <div class="modal fade" id="editParamOverrideModal-{{.Channel.ID}}" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog">
+            <div class="modal-content border-0 shadow">
+              <div class="modal-header">
+                <h5 class="modal-title fw-bold">参数改写（param_override）</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+              </div>
+              <form method="POST" action="/admin/channels/{{.Channel.ID}}/param_override" data-ajax="1" data-ajax-reload="1">
+                <div class="modal-body">
+                  <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+                  <input type="hidden" name="return_to" value="/admin/channels" />
+                  <label class="form-label small text-muted">所属渠道：{{.Channel.Name}}</label>
+
+                  <div class="mb-2">
+                    <textarea name="param_override" class="form-control font-monospace" rows="10" placeholder='{"operations":[{"path":"metadata.channel","mode":"set","value":"example"}]}'>{{.Channel.ParamOverride}}</textarea>
+                  </div>
+                  <div class="form-text smaller">
+                    留空表示禁用。JSON 必须为对象（new-api 兼容格式），会在转发前按渠道应用。
+                  </div>
+                </div>
+                <div class="modal-footer border-top-0 pt-0">
+                  <button type="submit" class="btn btn-primary w-100">保存改写</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <!-- Header Override 弹窗 -->
+        <div class="modal fade" id="editHeaderOverrideModal-{{.Channel.ID}}" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog">
+            <div class="modal-content border-0 shadow">
+              <div class="modal-header">
+                <h5 class="modal-title fw-bold">Header Override</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+              </div>
+              <form method="POST" action="/admin/channels/{{.Channel.ID}}/header_override" data-ajax="1" data-ajax-reload="1">
+                <div class="modal-body">
+                  <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+                  <input type="hidden" name="return_to" value="/admin/channels" />
+                  <label class="form-label small text-muted">所属渠道：{{.Channel.Name}}</label>
+
+                  <div class="mb-2">
+                    <textarea name="header_override" class="form-control font-monospace" rows="10" placeholder='{"OpenAI-Organization":"org_xxx","X-Proxy-Key":"{api_key}"}'>{{.Channel.HeaderOverride}}</textarea>
+                  </div>
+                  <div class="form-text smaller">
+                    留空表示禁用。JSON 必须为对象，value 必须为字符串；支持变量 <code>{api_key}</code>（会替换为该渠道实际使用的上游 key/token）。
+                  </div>
+                </div>
+                <div class="modal-footer border-top-0 pt-0">
+                  <button type="submit" class="btn btn-primary w-100">保存</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <!-- 状态码映射弹窗 -->
+        <div class="modal fade" id="editStatusCodeMappingModal-{{.Channel.ID}}" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-sm">
+            <div class="modal-content border-0 shadow">
+              <div class="modal-header">
+                <h5 class="modal-title fw-bold">状态码映射</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+              </div>
+              <form method="POST" action="/admin/channels/{{.Channel.ID}}/status_code_mapping" data-ajax="1" data-ajax-reload="1">
+                <div class="modal-body">
+                  <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+                  <input type="hidden" name="return_to" value="/admin/channels" />
+                  <label class="form-label small text-muted">所属渠道：{{.Channel.Name}}</label>
+
+                  <div class="mb-2">
+                    <textarea name="status_code_mapping" class="form-control font-monospace" rows="6" placeholder='{"401":"200","429":"200"}'>{{.Channel.StatusCodeMapping}}</textarea>
+                  </div>
+                  <div class="form-text smaller">
+                    留空表示禁用。仅影响对下游返回的 HTTP 状态码，不影响内部 failover 判定与日志/用量记录。
+                  </div>
+                </div>
+                <div class="modal-footer border-top-0 pt-0">
+                  <button type="submit" class="btn btn-primary w-100">保存</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
         {{end}}
       </tbody>
     </table>
@@ -428,6 +572,25 @@
               </div>
             </div>
             <div class="form-text small text-muted">留空表示无限制。最终生效以账号（key/授权账号）限额为准。</div>
+          </div>
+
+          <div class="mt-3">
+            <label class="form-label fw-medium mb-1">请求字段策略（可选）</label>
+            <div class="d-flex flex-column gap-2">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="allow_service_tier" value="1" id="create_allow_service_tier" />
+                <label class="form-check-label" for="create_allow_service_tier">允许透传 <code>service_tier</code></label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="disable_store" value="1" id="create_disable_store" />
+                <label class="form-check-label" for="create_disable_store">禁用透传 <code>store</code></label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="allow_safety_identifier" value="1" id="create_allow_safety_identifier" />
+                <label class="form-check-label" for="create_allow_safety_identifier">允许透传 <code>safety_identifier</code></label>
+              </div>
+            </div>
+            <div class="form-text small text-muted">默认过滤 <code>service_tier</code> / <code>safety_identifier</code>，默认允许透传 <code>store</code>。</div>
           </div>
         </div>
         <div class="modal-footer border-top-0 pt-0 pb-4 pe-4">

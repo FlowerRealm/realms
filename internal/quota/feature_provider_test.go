@@ -25,7 +25,7 @@ func (p *countingProvider) Reserve(_ context.Context, _ ReserveInput) (ReserveRe
 }
 
 func (p *countingProvider) Commit(_ context.Context, _ CommitInput) error { return nil }
-func (p *countingProvider) Void(_ context.Context, _ int64) error       { return nil }
+func (p *countingProvider) Void(_ context.Context, _ int64) error         { return nil }
 
 func TestFeatureProvider_SelectsFreeWhenBillingDisabled(t *testing.T) {
 	normal := &countingProvider{}
@@ -58,4 +58,3 @@ func TestFeatureProvider_SelectsNormalWhenBillingEnabled(t *testing.T) {
 		t.Fatalf("unexpected reserve calls: free=%d normal=%d", free.reserveCalls, normal.reserveCalls)
 	}
 }
-

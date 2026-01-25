@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -105,6 +106,28 @@ func (e *Executor) Do(ctx context.Context, sel scheduler.Selection, downstream *
 		}
 		return nil, err
 	}
+	// OpenAI-compatible：部分上游只接受 legacy max_tokens，返回 400 "Unsupported parameter: max_output_tokens"。
+	// 为减少误报/兼容更多代理实现，这里对该错误做一次无损改写重试（max_output_tokens -> max_tokens）。
+	if sel.CredentialType == scheduler.CredentialTypeOpenAI && resp != nil && resp.StatusCode == http.StatusBadRequest {
+		b, _ := peekResponseBody(resp, 32<<10)
+		if looksLikeUnsupportedParameter(b, "max_output_tokens") {
+			body2 := rewriteMaxOutputTokensToMaxTokens(body)
+			if len(body2) > 0 {
+				req2, err2 := e.buildRequest(ctx, sel, downstream, body2)
+				if err2 == nil {
+					resp2, err2 := e.client.Do(req2)
+					if err2 == nil && resp2 != nil {
+						if resp.Body != nil {
+							_ = resp.Body.Close()
+						}
+						resp = resp2
+					} else if resp2 != nil && resp2.Body != nil {
+						_ = resp2.Body.Close()
+					}
+				}
+			}
+		}
+	}
 	// Codex OAuth：部分上游的 path 仍停留在旧版 /responses；也可能反过来只接受 /v1/responses。
 	// 为减少“配置正确但路径不兼容”导致的误报，这里在 404（以及部分返回 HTML 的 403）时做一次互斥形态的兜底重试。
 	if sel.CredentialType == scheduler.CredentialTypeCodex && resp != nil && shouldAttemptCodexPathFallback(resp) {
@@ -179,30 +202,98 @@ func shouldAttemptCodexPathFallback(resp *http.Response) bool {
 	}
 }
 
-func looksLikeCodexUnsupportedParameter(body []byte) bool {
+func looksLikeUnsupportedParameter(body []byte, param string) bool {
 	if len(body) == 0 {
 		return false
 	}
-	var payload map[string]any
+	var payload any
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return false
 	}
-	detail, _ := payload["detail"].(string)
-	detail = strings.ToLower(strings.TrimSpace(detail))
-	if detail == "" {
+	msg := extractUpstreamErrorMessage(payload)
+	msg = strings.ToLower(strings.TrimSpace(msg))
+	if msg == "" {
 		return false
 	}
-	if !strings.Contains(detail, "unsupported parameter") {
+	if !strings.Contains(msg, "unsupported parameter") {
 		return false
 	}
+	return strings.Contains(msg, strings.ToLower(param))
+}
+
+func looksLikeCodexUnsupportedParameter(body []byte) bool {
 	// 目前已观测到的兼容性字段（Codex OAuth 上游不接受）。
-	if strings.Contains(detail, "max_output_tokens") {
-		return true
+	return looksLikeUnsupportedParameter(body, "max_output_tokens") || looksLikeUnsupportedParameter(body, "max_completion_tokens")
+}
+
+func extractUpstreamErrorMessage(payload any) string {
+	m, _ := payload.(map[string]any)
+	if m == nil {
+		return ""
 	}
-	if strings.Contains(detail, "max_completion_tokens") {
-		return true
+	if s, ok := m["detail"].(string); ok && strings.TrimSpace(s) != "" {
+		return s
 	}
-	return false
+	if errObj, ok := m["error"].(map[string]any); ok {
+		if s, ok := errObj["message"].(string); ok && strings.TrimSpace(s) != "" {
+			return s
+		}
+	}
+	if s, ok := m["message"].(string); ok && strings.TrimSpace(s) != "" {
+		return s
+	}
+	return ""
+}
+
+func rewriteMaxOutputTokensToMaxTokens(body []byte) []byte {
+	if len(body) == 0 {
+		return nil
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil
+	}
+	v, ok := payload["max_output_tokens"]
+	if !ok {
+		return nil
+	}
+	delete(payload, "max_output_tokens")
+
+	// 兼容旧形态：把 max_output_tokens 挪到 max_tokens（若上游不接受该字段，会返回新的 400 以便继续排障）。
+	if _, ok := payload["max_tokens"]; !ok {
+		if n, ok := int64FromAny(v); ok {
+			payload["max_tokens"] = n
+		}
+	}
+
+	out, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	return out
+}
+
+func int64FromAny(v any) (int64, bool) {
+	switch vv := v.(type) {
+	case int:
+		return int64(vv), true
+	case int64:
+		return vv, true
+	case float64:
+		return int64(vv), true
+	case string:
+		vv = strings.TrimSpace(vv)
+		if vv == "" {
+			return 0, false
+		}
+		n, err := strconv.ParseInt(vv, 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return n, true
+	default:
+		return 0, false
+	}
 }
 
 func (e *Executor) wrapTimeout(ctx context.Context, sel scheduler.Selection, downstream *http.Request, body []byte) (context.Context, context.CancelFunc) {
@@ -328,7 +419,6 @@ func (e *Executor) buildRequestWithCodexPassthrough(ctx context.Context, sel sch
 	req.Header.Del("X-Api-Key")
 	req.Header.Del("x-api-key")
 	req.Header.Del("Accept-Encoding")
-	req.Header.Set("Accept-Encoding", "identity")
 
 	switch sel.CredentialType {
 	case scheduler.CredentialTypeOpenAI:
@@ -336,12 +426,20 @@ func (e *Executor) buildRequestWithCodexPassthrough(ctx context.Context, sel sch
 		if err != nil {
 			return nil, err
 		}
+		if err := applyHeaderOverride(req.Header, sel.HeaderOverride, sec.APIKey); err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept-Encoding", "identity")
 		req.Header.Set("Authorization", "Bearer "+sec.APIKey)
 	case scheduler.CredentialTypeAnthropic:
 		sec, err := e.st.GetAnthropicCredentialSecret(ctx, sel.CredentialID)
 		if err != nil {
 			return nil, err
 		}
+		if err := applyHeaderOverride(req.Header, sel.HeaderOverride, sec.APIKey); err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept-Encoding", "identity")
 		if strings.TrimSpace(req.Header.Get("anthropic-version")) == "" {
 			req.Header.Set("anthropic-version", "2023-06-01")
 		}
@@ -351,8 +449,6 @@ func (e *Executor) buildRequestWithCodexPassthrough(ctx context.Context, sel sch
 		if err != nil {
 			return nil, err
 		}
-
-		applyCodexHeaders(req.Header, sec.AccountID)
 
 		accessToken := sec.AccessToken
 		if e.codexOAuth != nil && sec.ExpiresAt != nil && time.Until(*sec.ExpiresAt) < 5*time.Minute {
@@ -381,11 +477,34 @@ func (e *Executor) buildRequestWithCodexPassthrough(ctx context.Context, sel sch
 			}
 		}
 
+		if err := applyHeaderOverride(req.Header, sel.HeaderOverride, accessToken); err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept-Encoding", "identity")
+		applyCodexHeaders(req.Header, sec.AccountID)
 		req.Header.Set("Authorization", "Bearer "+accessToken)
 	default:
 	}
 
 	return req, nil
+}
+
+func applyHeaderOverride(headers http.Header, headerOverride string, apiKey string) error {
+	headerOverride = strings.TrimSpace(headerOverride)
+	if headerOverride == "" || headerOverride == "{}" {
+		return nil
+	}
+	parsed := make(map[string]string)
+	if err := json.Unmarshal([]byte(headerOverride), &parsed); err != nil {
+		return fmt.Errorf("header_override 不是有效 JSON: %w", err)
+	}
+	for k, v := range parsed {
+		if strings.Contains(v, "{api_key}") {
+			v = strings.ReplaceAll(v, "{api_key}", apiKey)
+		}
+		headers.Set(k, v)
+	}
+	return nil
 }
 
 func normalizeUpstreamPath(base *url.URL, targetPath string) string {
