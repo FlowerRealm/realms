@@ -350,7 +350,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		cw := &countingResponseWriter{ResponseWriter: w}
 		http.Error(cw, "上游不可用", http.StatusBadGateway)
 		h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream)
-		h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", time.Since(reqStart), stream, reqBytes, cw.bytes)
+		h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream, reqBytes, cw.bytes)
 		return
 	}
 
@@ -370,7 +370,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			}
 			cw := &countingResponseWriter{ResponseWriter: w}
 			http.Error(cw, "请求体处理失败", http.StatusInternalServerError)
-			h.finalizeUsageEvent(r, usageID, &sel, http.StatusInternalServerError, "rewrite_body", time.Since(reqStart), stream, reqBytes, cw.bytes)
+			h.finalizeUsageEvent(r, usageID, &sel, http.StatusInternalServerError, "rewrite_body", "请求体处理失败", time.Since(reqStart), stream, reqBytes, cw.bytes)
 			return
 		}
 		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), usageID, reqStart, reqBytes, 1) {
@@ -387,7 +387,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	cw := &countingResponseWriter{ResponseWriter: w}
 	http.Error(cw, "上游不可用", http.StatusBadGateway)
 	h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream)
-	h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", time.Since(reqStart), stream, reqBytes, cw.bytes)
+	h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream, reqBytes, cw.bytes)
 }
 
 func selectionMatchesConstraints(sel scheduler.Selection, cons scheduler.Constraints) bool {
@@ -479,14 +479,24 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, "upstream_status", time.Since(attemptStart))
 		cw := &countingResponseWriter{ResponseWriter: w}
 		downstreamStatus := resetStatusCode(resp.StatusCode, sel.StatusCodeMapping)
-		respBytes := h.copyNonStreamResponseWithStatus(cw, resp, downstreamStatus)
-		h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, resp.StatusCode, "upstream_status", resp.Status, time.Since(attemptStart), wantStream || isSSE)
+		bodyBytes, _ := readLimited(resp.Body, 8<<20)
+		copyResponseHeaders(cw.Header(), resp.Header)
+		cw.WriteHeader(downstreamStatus)
+		n, _ := cw.Write(bodyBytes)
+		respBytes := int64(n)
+
+		failMsg := summarizeUpstreamErrorBody(bodyBytes)
+		logMsg := resp.Status
+		if strings.TrimSpace(failMsg) != "" {
+			logMsg = failMsg
+		}
+		h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, resp.StatusCode, "upstream_status", logMsg, time.Since(attemptStart), wantStream || isSSE)
 		if usageID != 0 && h.quota != nil {
 			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_ = h.quota.Void(bookCtx, usageID)
 			cancel()
 		}
-		h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "upstream_status", time.Since(reqStart), wantStream || isSSE, reqBytes, respBytes)
+		h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "upstream_status", failMsg, time.Since(reqStart), wantStream || isSSE, reqBytes, respBytes)
 		return true
 	}
 
@@ -512,7 +522,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 					_ = h.quota.Void(bookCtx, usageID)
 					cancel()
 				}
-				h.finalizeUsageEvent(r, usageID, &sel, http.StatusTooManyRequests, "sse_limit", time.Since(reqStart), true, reqBytes, cw.bytes)
+				h.finalizeUsageEvent(r, usageID, &sel, http.StatusTooManyRequests, "sse_limit", "SSE 连接超限", time.Since(reqStart), true, reqBytes, cw.bytes)
 				return true
 			}
 			defer h.tokenLimits.ReleaseSSE(*tokenID)
@@ -601,7 +611,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		if pumpRes.ErrorClass != "" && pumpRes.ErrorClass != "client_disconnect" && pumpRes.ErrorClass != "stream_max_duration" {
 			h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, resp.StatusCode, pumpRes.ErrorClass, "", time.Since(attemptStart), true)
 		}
-		h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, pumpRes.ErrorClass, time.Since(reqStart), true, reqBytes, cw.bytes)
+		h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, pumpRes.ErrorClass, "", time.Since(reqStart), true, reqBytes, cw.bytes)
 		return true
 	}
 
@@ -649,7 +659,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		}
 	}
 	h.sched.Report(sel, scheduler.Result{Success: true})
-	h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "", time.Since(reqStart), false, reqBytes, int64(respBytes))
+	h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "", "", time.Since(reqStart), false, reqBytes, int64(respBytes))
 	return true
 }
 
@@ -734,7 +744,7 @@ func (h *Handler) maybeLogProxyFailure(ctx context.Context, r *http.Request, p a
 	h.proxyLog.WriteFailure(ctx, entry)
 }
 
-func (h *Handler) finalizeUsageEvent(r *http.Request, usageID int64, sel *scheduler.Selection, status int, class string, latency time.Duration, stream bool, reqBytes, respBytes int64) {
+func (h *Handler) finalizeUsageEvent(r *http.Request, usageID int64, sel *scheduler.Selection, status int, class string, msg string, latency time.Duration, stream bool, reqBytes, respBytes int64) {
 	if usageID == 0 || h.usage == nil {
 		return
 	}
@@ -769,8 +779,7 @@ func (h *Handler) finalizeUsageEvent(r *http.Request, usageID int64, sel *schedu
 		classPtr = &c
 	}
 
-	msg := ""
-	if status > 0 && (status < 200 || status >= 300) {
+	if strings.TrimSpace(msg) == "" && status > 0 && (status < 200 || status >= 300) {
 		msg = http.StatusText(status)
 	}
 	var msgPtr *string
@@ -794,6 +803,45 @@ func (h *Handler) finalizeUsageEvent(r *http.Request, usageID int64, sel *schedu
 		RequestBytes:       reqBytes,
 		ResponseBytes:      respBytes,
 	})
+}
+
+func summarizeUpstreamErrorBody(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(b, &parsed); err == nil && len(parsed) > 0 {
+		if msg, ok := parsed["detail"].(string); ok && strings.TrimSpace(msg) != "" {
+			return trimSummary(msg)
+		}
+		// 常见错误结构：{"error": {"message": "..."}}
+		if errObj, ok := parsed["error"].(map[string]any); ok {
+			if msg, ok := errObj["message"].(string); ok && strings.TrimSpace(msg) != "" {
+				return trimSummary(msg)
+			}
+			if msg, ok := errObj["error_description"].(string); ok && strings.TrimSpace(msg) != "" {
+				return trimSummary(msg)
+			}
+		}
+		// 兼容：{"message": "..."} / {"error_description": "..."}
+		if msg, ok := parsed["message"].(string); ok && strings.TrimSpace(msg) != "" {
+			return trimSummary(msg)
+		}
+		if msg, ok := parsed["error_description"].(string); ok && strings.TrimSpace(msg) != "" {
+			return trimSummary(msg)
+		}
+	}
+	return trimSummary(string(b))
+}
+
+func trimSummary(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	if len(s) > 200 {
+		s = s[:200] + "..."
+	}
+	return s
 }
 
 func readLimited(r io.Reader, max int64) ([]byte, error) {

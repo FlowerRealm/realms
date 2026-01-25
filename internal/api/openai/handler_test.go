@@ -454,6 +454,15 @@ type fakeAudit struct{}
 
 func (fakeAudit) InsertAuditEvent(_ context.Context, _ store.AuditEventInput) error { return nil }
 
+type recordingUsage struct {
+	calls []store.FinalizeUsageEventInput
+}
+
+func (u *recordingUsage) FinalizeUsageEvent(_ context.Context, in store.FinalizeUsageEventInput) error {
+	u.calls = append(u.calls, in)
+	return nil
+}
+
 type staticFeatures struct {
 	fs store.FeatureState
 }
@@ -1058,6 +1067,67 @@ func TestResponses_StatusCodeMapping_OverridesDownstreamStatus(t *testing.T) {
 	errObj, _ := got["error"].(map[string]any)
 	if errObj == nil || errObj["message"] != "bad request" {
 		t.Fatalf("unexpected body: %s", rr.Body.String())
+	}
+}
+
+func TestResponses_UsageEvent_RecordsUpstreamErrorMessage(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"m1": {ID: 1, PublicID: "m1", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"m1": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "m1", Status: 1},
+			},
+		},
+	}
+
+	sched := scheduler.New(fs)
+	q := &fakeQuota{}
+	usage := &recordingUsage{}
+	h := NewHandler(fs, fs, sched, statusDoer{status: http.StatusBadRequest, body: `{"detail":"Unsupported parameter: max_tokens"}`}, nil, nil, nil, nil, false, q, fakeAudit{}, usage, 0, upstream.SSEPumpOptions{})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
+	req.Header.Set("Content-Type", "application/json")
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(q.voidCalls) != 1 {
+		t.Fatalf("expected quota void, got=%d", len(q.voidCalls))
+	}
+	if len(usage.calls) != 1 {
+		t.Fatalf("expected 1 usage finalization, got=%d", len(usage.calls))
+	}
+	call := usage.calls[0]
+	if call.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unexpected usage status: %d", call.StatusCode)
+	}
+	if call.ErrorClass == nil || *call.ErrorClass != "upstream_status" {
+		t.Fatalf("unexpected usage error_class: %v", call.ErrorClass)
+	}
+	if call.ErrorMessage == nil || *call.ErrorMessage != "Unsupported parameter: max_tokens" {
+		t.Fatalf("unexpected usage error_message: %v", call.ErrorMessage)
 	}
 }
 
