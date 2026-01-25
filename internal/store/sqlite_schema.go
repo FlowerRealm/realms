@@ -26,6 +26,9 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 		if err := ensureSQLiteUpstreamChannelBodyFilterColumns(db); err != nil {
 			return err
 		}
+		if err := ensureSQLiteUsageEventDetailsTable(db); err != nil {
+			return err
+		}
 		return ensureSQLiteChannelGroupMembers(db)
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {

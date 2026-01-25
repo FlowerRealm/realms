@@ -264,7 +264,7 @@
               </tr>
               <tr class="rlm-usage-detail-row">
                 <td colspan="10" class="p-0 border-0">
-                  <div class="collapse" id="rlmAdminUsageDetail{{.ID}}" data-bs-parent="#rlmAdminUsageEvents">
+                  <div class="collapse" id="rlmAdminUsageDetail{{.ID}}" data-bs-parent="#rlmAdminUsageEvents" data-event-id="{{.ID}}">
                     <div class="bg-light border-top px-4 py-3">
                       <div class="row g-3 small">
                         <div class="col-12 col-lg-6">
@@ -333,6 +333,16 @@
                             <div class="text-muted">-</div>
                           {{end}}
                         </div>
+
+                        <div class="col-12">
+                          <hr class="my-2">
+                          <div class="text-muted smaller">转发请求体（最终）<span class="ms-2">· 仅失败请求会保存</span></div>
+                          <pre class="mb-0 font-monospace rlm-prewrap rlm-usage-detail-pre" id="rlmAdminUsageUpReq{{.ID}}">（展开后自动加载）</pre>
+                        </div>
+                        <div class="col-12">
+                          <div class="text-muted smaller">上游响应体</div>
+                          <pre class="mb-0 font-monospace rlm-prewrap rlm-usage-detail-pre" id="rlmAdminUsageUpResp{{.ID}}">（展开后自动加载）</pre>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -400,6 +410,7 @@
   .rlm-usage-chevron { font-size: 18px; transition: transform 0.15s ease; }
   .rlm-usage-row[aria-expanded="true"] .rlm-usage-chevron { transform: rotate(90deg); }
   .rlm-prewrap { white-space: pre-wrap; word-break: break-word; }
+  .rlm-usage-detail-pre { max-height: 320px; overflow: auto; background: rgba(255, 255, 255, 0.7); border: 1px solid rgba(0,0,0,0.08); border-radius: 0.5rem; padding: 0.75rem; }
 
   .quick-range-btn { 
     border: none;
@@ -452,6 +463,47 @@ document.addEventListener("DOMContentLoaded", function() {
   // 简单的表单同步逻辑，确保顶部日期控件的值传给 Form
   document.getElementById('usageFilterForm').addEventListener('submit', function() {
     syncUsageFilterDatesToHidden();
+  });
+
+  // 用量事件详情：点击展开后拉取请求/响应明细（仅失败请求会保存）。
+  document.querySelectorAll('#rlmAdminUsageEvents .collapse[data-event-id]').forEach(function(el) {
+    el.addEventListener('shown.bs.collapse', function() {
+      const eventID = el.getAttribute('data-event-id');
+      if (!eventID) return;
+      if (el.getAttribute('data-detail-loaded') === '1') return;
+      el.setAttribute('data-detail-loaded', '1');
+
+      const reqEl = document.getElementById('rlmAdminUsageUpReq' + eventID);
+      const respEl = document.getElementById('rlmAdminUsageUpResp' + eventID);
+      if (reqEl) reqEl.textContent = '加载中...';
+      if (respEl) respEl.textContent = '加载中...';
+
+      fetch('/admin/usage/events/' + eventID + '/detail', { headers: { 'Accept': 'application/json' } })
+        .then(function(r) {
+          if (r.status === 404) return { available: false };
+          if (!r.ok) {
+            return r.text().then(function(t) {
+              throw new Error(t || ('HTTP ' + r.status));
+            });
+          }
+          return r.json();
+        })
+        .then(function(data) {
+          if (!data || !data.available) {
+            if (reqEl) reqEl.textContent = '（无明细：仅对失败请求保存，或该条记录未启用存储）';
+            if (respEl) respEl.textContent = '-';
+            return;
+          }
+          if (reqEl) reqEl.textContent = data.upstream_request_body || '-';
+          if (respEl) respEl.textContent = data.upstream_response_body || '-';
+        })
+        .catch(function(err) {
+          el.setAttribute('data-detail-loaded', '0');
+          const msg = (err && err.message) ? err.message : String(err);
+          if (reqEl) reqEl.textContent = '加载失败：' + msg;
+          if (respEl) respEl.textContent = '-';
+        });
+    });
   });
 
   updateActiveQuickRange();

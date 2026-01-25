@@ -1163,7 +1163,7 @@ func TestResponses_UsageEvent_RecordsUpstreamErrorMessage(t *testing.T) {
 	usage := &recordingUsage{}
 	h := NewHandler(fs, fs, sched, statusDoer{status: http.StatusBadRequest, body: `{"detail":"Unsupported parameter: max_tokens"}`}, nil, nil, nil, nil, false, q, fakeAudit{}, usage, 0, upstream.SSEPumpOptions{})
 
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi","max_tokens":123}`)))
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
@@ -1191,6 +1191,23 @@ func TestResponses_UsageEvent_RecordsUpstreamErrorMessage(t *testing.T) {
 	}
 	if call.ErrorMessage == nil || *call.ErrorMessage != "Unsupported parameter: max_tokens" {
 		t.Fatalf("unexpected usage error_message: %v", call.ErrorMessage)
+	}
+
+	if call.UpstreamRequestBody == nil || strings.TrimSpace(*call.UpstreamRequestBody) == "" {
+		t.Fatalf("expected upstream_request_body to be recorded")
+	}
+	var forwarded map[string]any
+	if err := json.Unmarshal([]byte(*call.UpstreamRequestBody), &forwarded); err != nil {
+		t.Fatalf("unmarshal upstream_request_body: %v body=%q", err, *call.UpstreamRequestBody)
+	}
+	if _, ok := forwarded["max_tokens"]; ok {
+		t.Fatalf("expected max_tokens to be removed in upstream_request_body, got=%v", forwarded["max_tokens"])
+	}
+	if v, ok := forwarded["max_output_tokens"].(float64); !ok || int64(v) != 123 {
+		t.Fatalf("expected max_output_tokens=123 in upstream_request_body, got=%v", forwarded["max_output_tokens"])
+	}
+	if call.UpstreamResponseBody == nil || !strings.Contains(*call.UpstreamResponseBody, "Unsupported parameter: max_tokens") {
+		t.Fatalf("expected upstream_response_body to be recorded, got=%v", call.UpstreamResponseBody)
 	}
 }
 

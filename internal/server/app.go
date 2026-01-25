@@ -455,6 +455,7 @@ func (a *App) routes() {
 		a.mux.Handle("POST /admin/payment-channels/{payment_channel_id}/delete", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.DeletePaymentChannel)))
 	}
 	a.mux.Handle("GET /admin/usage", adminFeatureChain(store.SettingFeatureDisableAdminUsage, http.HandlerFunc(a.admin.Usage)))
+	a.mux.Handle("GET /admin/usage/events/{event_id}/detail", adminFeatureChain(store.SettingFeatureDisableAdminUsage, http.HandlerFunc(a.admin.UsageEventDetailAPI)))
 	a.mux.Handle("GET /admin/settings", adminChain(http.HandlerFunc(a.admin.Settings)))
 	a.mux.Handle("POST /admin/settings", adminChain(http.HandlerFunc(a.admin.UpdateSettings)))
 	a.mux.Handle("GET /admin/backup", adminChain(http.HandlerFunc(a.admin.Backup)))
@@ -499,6 +500,7 @@ func (a *App) routes() {
 		a.mux.Handle("GET /topup", webFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.web.TopupPage)))
 	}
 	a.mux.Handle("GET /usage", webFeatureChain(store.SettingFeatureDisableWebUsage, http.HandlerFunc(a.web.UsagePage)))
+	a.mux.Handle("GET /usage/events/{event_id}/detail", webFeatureChain(store.SettingFeatureDisableWebUsage, http.HandlerFunc(a.web.UsageEventDetailAPI)))
 	if !selfMode {
 		a.mux.Handle("GET /tickets", webFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.web.TicketsPage)))
 		a.mux.Handle("GET /tickets/new", webFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.web.TicketNewPage)))
