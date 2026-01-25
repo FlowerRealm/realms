@@ -108,7 +108,7 @@ func (e *Executor) Do(ctx context.Context, sel scheduler.Selection, downstream *
 	}
 	// OpenAI-compatible：部分上游只接受 legacy max_tokens，返回 400 "Unsupported parameter: max_output_tokens"。
 	// 为减少误报/兼容更多代理实现，这里对该错误做一次无损改写重试（max_output_tokens -> max_tokens）。
-	if sel.CredentialType == scheduler.CredentialTypeOpenAI && resp != nil && resp.StatusCode == http.StatusBadRequest {
+	if sel.CredentialType == scheduler.CredentialTypeOpenAI && resp != nil && resp.StatusCode >= 400 && resp.StatusCode < 500 {
 		b, _ := peekResponseBody(resp, 32<<10)
 		// 兼容两种常见形态：
 		// - upstream 不支持 Responses 风格 max_output_tokens，只接受 max_tokens
