@@ -114,25 +114,61 @@ func (e *Executor) Do(ctx context.Context, sel scheduler.Selection, downstream *
 		// 兼容两种常见形态：
 		// - upstream 不支持 Responses 风格 max_output_tokens，只接受 max_tokens
 		// - upstream 只支持 Responses 风格 max_output_tokens，不接受 legacy max_tokens
-		var body2 []byte
-		if looksLikeUnsupportedParameter(b, "max_output_tokens") {
-			body2 = rewriteMaxOutputTokensToMaxTokens(body)
-		} else if looksLikeUnsupportedParameter(b, "max_tokens") {
-			body2 = rewriteMaxTokensToMaxOutputTokens(body)
+		//
+		// 同时兼容一类“错误提示不完全匹配请求体字段名”的上游实现：
+		// - upstream 可能在报错中输出 max_tokens，但实际需要 max_output_tokens（反之亦然）
+		// 这里最多尝试两次互斥改写，以提高兼容性（不会无限重试）。
+		candidates := make([][]byte, 0, 2)
+		switch unsupportedParameterName(b) {
+		case "max_output_tokens":
+			candidates = append(candidates, rewriteMaxOutputTokensToMaxTokens(body))
+			candidates = append(candidates, rewriteMaxTokensToMaxOutputTokens(body))
+		case "max_tokens":
+			candidates = append(candidates, rewriteMaxTokensToMaxOutputTokens(body))
+			candidates = append(candidates, rewriteMaxOutputTokensToMaxTokens(body))
 		}
-		if len(body2) > 0 {
-			req2, err2 := e.buildRequest(ctx, sel, downstream, body2)
-			if err2 == nil {
-				resp2, err2 := e.client.Do(req2)
-				if err2 == nil && resp2 != nil {
-					if resp.Body != nil {
-						_ = resp.Body.Close()
-					}
-					resp = resp2
-				} else if resp2 != nil && resp2.Body != nil {
-					_ = resp2.Body.Close()
+
+		tried := make([][]byte, 0, len(candidates))
+		for _, body2 := range candidates {
+			if len(body2) == 0 || bytes.Equal(body2, body) {
+				continue
+			}
+			dup := false
+			for _, prev := range tried {
+				if bytes.Equal(prev, body2) {
+					dup = true
+					break
 				}
 			}
+			if dup {
+				continue
+			}
+			tried = append(tried, body2)
+
+			req2, err2 := e.buildRequest(ctx, sel, downstream, body2)
+			if err2 != nil {
+				continue
+			}
+			resp2, err2 := e.client.Do(req2)
+			if err2 != nil || resp2 == nil {
+				if resp2 != nil && resp2.Body != nil {
+					_ = resp2.Body.Close()
+				}
+				continue
+			}
+
+			// 若已成功则直接替换并结束；失败时尝试下一个候选（最多 2 次）。
+			if resp2.StatusCode >= 200 && resp2.StatusCode < 300 {
+				if resp.Body != nil {
+					_ = resp.Body.Close()
+				}
+				resp = resp2
+				break
+			}
+			if resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+			resp = resp2
 		}
 	}
 	// Codex OAuth：部分上游的 path 仍停留在旧版 /responses；也可能反过来只接受 /v1/responses。

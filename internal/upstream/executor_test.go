@@ -653,3 +653,71 @@ func TestExecutor_Do_OpenAICompat_UnsupportedMaxTokens_WithSuggestion_RewritesTo
 		t.Fatalf("expected max_output_tokens=123 in retry, got %#v", bodies[1]["max_output_tokens"])
 	}
 }
+
+func TestExecutor_Do_OpenAICompat_UnsupportedMaxTokens_WhenBodyHasMaxOutputTokens_TriesMaxTokensFallback(t *testing.T) {
+	var bodies []map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+
+		var payload map[string]any
+		if err := json.Unmarshal(b, &payload); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"detail":"bad json"}`))
+			return
+		}
+		bodies = append(bodies, payload)
+
+		// 模拟一类“报错字段名与实际接受字段名不完全一致”的上游：
+		// - 当请求携带 max_output_tokens 时，报错提示为 max_tokens
+		// - 当请求携带 max_tokens 时，正常返回
+		if _, ok := payload["max_tokens"]; ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+			return
+		}
+
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"detail":"Unsupported parameter: max_tokens"}`))
+	}))
+	defer srv.Close()
+
+	exec := &Executor{
+		st: &fakeUpstreamStore{
+			openaiSecret: store.OpenAICredentialSecret{
+				APIKey: "sk-test",
+			},
+		},
+		client: srv.Client(),
+	}
+
+	body := []byte(`{"model":"gpt-5.2","stream":false,"max_output_tokens":123,"input":"hi"}`)
+	downstream := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader(body))
+	resp, err := exec.Do(context.Background(), scheduler.Selection{
+		BaseURL:        srv.URL,
+		CredentialType: scheduler.CredentialTypeOpenAI,
+		CredentialID:   123,
+	}, downstream, body)
+	if err != nil {
+		t.Fatalf("Do returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d (%s)", resp.StatusCode, string(b))
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(bodies))
+	}
+	if _, ok := bodies[0]["max_output_tokens"]; !ok {
+		t.Fatalf("expected max_output_tokens in first request, got %#v", bodies[0])
+	}
+	if _, ok := bodies[1]["max_tokens"]; !ok {
+		t.Fatalf("expected max_tokens in retry, got %#v", bodies[1])
+	}
+	if _, ok := bodies[1]["max_output_tokens"]; ok {
+		t.Fatalf("expected max_output_tokens to be removed in retry, got %#v", bodies[1])
+	}
+}
