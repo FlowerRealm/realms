@@ -249,6 +249,10 @@ func shouldAttemptCodexPathFallback(resp *http.Response) bool {
 		// 这种情况下尝试切换到 legacy /responses + 兼容改写可以恢复。
 		b, _ := peekResponseBody(resp, 32<<10)
 		return looksLikeCodexUnsupportedParameter(b)
+	case http.StatusUnprocessableEntity:
+		// 部分 Codex 上游会以 422 返回参数校验错误（例如 “Unsupported parameter: ...”），同样需要切换兼容形态。
+		b, _ := peekResponseBody(resp, 32<<10)
+		return looksLikeCodexUnsupportedParameter(b)
 	default:
 		return false
 	}
@@ -270,11 +274,21 @@ func unsupportedParameterName(body []byte) string {
 	}
 	var payload any
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return ""
+		// 兼容 SSE/纯文本：部分上游会返回 `data: {...}` 或直接返回纯文本错误。
+		m := unsupportedParamRegexp.FindStringSubmatch(string(body))
+		if len(m) < 2 {
+			return ""
+		}
+		return strings.ToLower(m[1])
 	}
 	msg := strings.TrimSpace(extractUpstreamErrorMessage(payload))
 	if msg == "" {
-		return ""
+		// 兜底：有些上游错误并非标准 error/message/detail 结构，直接在原始 body 内查找。
+		m := unsupportedParamRegexp.FindStringSubmatch(string(body))
+		if len(m) < 2 {
+			return ""
+		}
+		return strings.ToLower(m[1])
 	}
 	m := unsupportedParamRegexp.FindStringSubmatch(msg)
 	if len(m) < 2 {
