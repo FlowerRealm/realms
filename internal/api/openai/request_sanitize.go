@@ -8,90 +8,21 @@ import (
 
 var errInvalidJSON = errors.New("invalid json")
 
-// sanitizeResponsesPayload 参考 new-api 的请求结构：仅保留已写定字段（未知字段静默丢弃），并做最小补齐/别名处理。
-func sanitizeResponsesPayload(body []byte, defaultMaxOutputTokens int) (map[string]any, error) {
-	type reasoning struct {
-		Effort  string `json:"effort,omitempty"`
-		Summary string `json:"summary,omitempty"`
-	}
-	type req struct {
-		Model string `json:"model,omitempty"`
-		Input any    `json:"input,omitempty"`
-
-		Include      json.RawMessage `json:"include,omitempty"`
-		Instructions json.RawMessage `json:"instructions,omitempty"`
-
-		MaxOutputTokens *int64 `json:"max_output_tokens,omitempty"`
-		MaxTokens       *int64 `json:"max_tokens,omitempty"`
-		MaxCompletion   *int64 `json:"max_completion_tokens,omitempty"`
-
-		Metadata          json.RawMessage `json:"metadata,omitempty"`
-		ParallelToolCalls json.RawMessage `json:"parallel_tool_calls,omitempty"`
-
-		PreviousResponseID string `json:"previous_response_id,omitempty"`
-
-		Reasoning *reasoning `json:"reasoning,omitempty"`
-
-		ServiceTier string          `json:"service_tier,omitempty"`
-		Store       json.RawMessage `json:"store,omitempty"`
-
-		PromptCacheKey       json.RawMessage `json:"prompt_cache_key,omitempty"`
-		PromptCacheRetention json.RawMessage `json:"prompt_cache_retention,omitempty"`
-
-		Stream      bool            `json:"stream,omitempty"`
-		Temperature json.RawMessage `json:"temperature,omitempty"`
-		Text        json.RawMessage `json:"text,omitempty"`
-		ToolChoice  json.RawMessage `json:"tool_choice,omitempty"`
-		Tools       json.RawMessage `json:"tools,omitempty"`
-		TopP        json.RawMessage `json:"top_p,omitempty"`
-		Truncation  string          `json:"truncation,omitempty"`
-		User        string          `json:"user,omitempty"`
-
-		MaxToolCalls *int64          `json:"max_tool_calls,omitempty"`
-		Prompt       json.RawMessage `json:"prompt,omitempty"`
-
-		SafetyIdentifier string `json:"safety_identifier,omitempty"`
-	}
-
-	var r req
-	if err := json.Unmarshal(body, &r); err != nil {
+// sanitizeResponsesPayload 用于解析 /v1/responses 请求体，并做最小的结构校验。
+//
+// 注意：这里不做字段白名单过滤，也不做 tokens 字段别名/补齐，避免“中转改写导致上游校验失败”。
+func sanitizeResponsesPayload(body []byte) (map[string]any, error) {
+	out := make(map[string]any)
+	if err := json.Unmarshal(body, &out); err != nil {
 		return nil, errInvalidJSON
 	}
 
-	if strings.TrimSpace(r.Model) == "" {
+	model, _ := out["model"].(string)
+	if strings.TrimSpace(model) == "" {
 		return nil, errors.New("model 不能为空")
 	}
-	if r.Input == nil {
+	if _, ok := out["input"]; !ok || out["input"] == nil {
 		return nil, errors.New("input 不能为空")
-	}
-
-	// max_tokens/max_completion_tokens -> max_output_tokens
-	switch {
-	case r.MaxOutputTokens != nil:
-		r.MaxTokens = nil
-		r.MaxCompletion = nil
-	case r.MaxTokens != nil:
-		r.MaxOutputTokens = r.MaxTokens
-		r.MaxTokens = nil
-		r.MaxCompletion = nil
-	case r.MaxCompletion != nil:
-		r.MaxOutputTokens = r.MaxCompletion
-		r.MaxTokens = nil
-		r.MaxCompletion = nil
-	}
-
-	if r.MaxOutputTokens == nil && defaultMaxOutputTokens > 0 {
-		v := int64(defaultMaxOutputTokens)
-		r.MaxOutputTokens = &v
-	}
-
-	raw, err := json.Marshal(r)
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]any)
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, errInvalidJSON
 	}
 	return out, nil
 }

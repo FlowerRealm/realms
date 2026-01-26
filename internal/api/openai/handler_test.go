@@ -753,7 +753,7 @@ func TestResponses_ChannelParamOverride_IsPerChannelAttempt(t *testing.T) {
 	}
 }
 
-func TestResponses_MaxTokensAlias_NormalizesToMaxOutputTokens(t *testing.T) {
+func TestResponses_MaxTokensAlias_PreservesMaxTokens(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
 			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
@@ -808,18 +808,18 @@ func TestResponses_MaxTokensAlias_NormalizesToMaxOutputTokens(t *testing.T) {
 	if err := json.Unmarshal(gotBody, &forwarded); err != nil {
 		t.Fatalf("unmarshal forwarded body: %v", err)
 	}
-	if v, ok := forwarded["max_output_tokens"].(float64); !ok || int64(v) != 123 {
-		t.Fatalf("expected max_output_tokens=123, got=%v", forwarded["max_output_tokens"])
+	if v, ok := forwarded["max_tokens"].(float64); !ok || int64(v) != 123 {
+		t.Fatalf("expected max_tokens=123, got=%v", forwarded["max_tokens"])
 	}
-	if _, ok := forwarded["max_tokens"]; ok {
-		t.Fatalf("expected max_tokens to be removed, got=%v", forwarded["max_tokens"])
+	if _, ok := forwarded["max_output_tokens"]; ok {
+		t.Fatalf("expected max_output_tokens to be absent, got=%v", forwarded["max_output_tokens"])
 	}
 	if _, ok := forwarded["max_completion_tokens"]; ok {
-		t.Fatalf("expected max_completion_tokens to be removed, got=%v", forwarded["max_completion_tokens"])
+		t.Fatalf("expected max_completion_tokens to be absent, got=%v", forwarded["max_completion_tokens"])
 	}
 }
 
-func TestResponses_ChannelParamOverride_MaxTokens_NormalizesToMaxOutputTokens(t *testing.T) {
+func TestResponses_ChannelParamOverride_MaxTokens_PreservesMaxTokens(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
 			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, ParamOverride: `{"max_tokens":7}`},
@@ -849,14 +849,14 @@ func TestResponses_ChannelParamOverride_MaxTokens_NormalizesToMaxOutputTokens(t 
 		if err := json.Unmarshal(body, &got); err != nil {
 			return nil, err
 		}
-		if _, ok := got["max_tokens"]; ok {
-			t.Fatalf("expected max_tokens to be removed, got=%v", got["max_tokens"])
-		}
 		if _, ok := got["max_completion_tokens"]; ok {
-			t.Fatalf("expected max_completion_tokens to be removed, got=%v", got["max_completion_tokens"])
+			t.Fatalf("expected max_completion_tokens to be absent, got=%v", got["max_completion_tokens"])
 		}
-		if v, ok := got["max_output_tokens"].(float64); !ok || v != 7 {
-			t.Fatalf("expected max_output_tokens=7, got=%v", got["max_output_tokens"])
+		if v, ok := got["max_tokens"].(float64); !ok || v != 7 {
+			t.Fatalf("expected max_tokens=7, got=%v", got["max_tokens"])
+		}
+		if _, ok := got["max_output_tokens"]; ok {
+			t.Fatalf("expected max_output_tokens to be absent, got=%v", got["max_output_tokens"])
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -1207,11 +1207,11 @@ func TestResponses_UsageEvent_RecordsUpstreamErrorMessage(t *testing.T) {
 	if err := json.Unmarshal([]byte(*call.UpstreamRequestBody), &forwarded); err != nil {
 		t.Fatalf("unmarshal upstream_request_body: %v body=%q", err, *call.UpstreamRequestBody)
 	}
-	if _, ok := forwarded["max_tokens"]; ok {
-		t.Fatalf("expected max_tokens to be removed in upstream_request_body, got=%v", forwarded["max_tokens"])
+	if v, ok := forwarded["max_tokens"].(float64); !ok || int64(v) != 123 {
+		t.Fatalf("expected max_tokens=123 in upstream_request_body, got=%v", forwarded["max_tokens"])
 	}
-	if v, ok := forwarded["max_output_tokens"].(float64); !ok || int64(v) != 123 {
-		t.Fatalf("expected max_output_tokens=123 in upstream_request_body, got=%v", forwarded["max_output_tokens"])
+	if _, ok := forwarded["max_output_tokens"]; ok {
+		t.Fatalf("expected max_output_tokens to be absent in upstream_request_body, got=%v", forwarded["max_output_tokens"])
 	}
 	if call.UpstreamResponseBody == nil || !strings.Contains(*call.UpstreamResponseBody, "Unsupported parameter: max_tokens") {
 		t.Fatalf("expected upstream_response_body to be recorded, got=%v", call.UpstreamResponseBody)
