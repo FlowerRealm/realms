@@ -96,21 +96,22 @@ WHERE id=? AND state=?
 }
 
 type FinalizeUsageEventInput struct {
-	UsageEventID         int64
-	Endpoint             string
-	Method               string
-	StatusCode           int
-	LatencyMS            int
-	ErrorClass           *string
-	ErrorMessage         *string
-	UpstreamChannelID    *int64
-	UpstreamEndpointID   *int64
-	UpstreamCredID       *int64
-	IsStream             bool
-	RequestBytes         int64
-	ResponseBytes        int64
-	UpstreamRequestBody  *string
-	UpstreamResponseBody *string
+	UsageEventID          int64
+	Endpoint              string
+	Method                string
+	StatusCode            int
+	LatencyMS             int
+	ErrorClass            *string
+	ErrorMessage          *string
+	UpstreamChannelID     *int64
+	UpstreamEndpointID    *int64
+	UpstreamCredID        *int64
+	IsStream              bool
+	RequestBytes          int64
+	ResponseBytes         int64
+	DownstreamRequestBody *string
+	UpstreamRequestBody   *string
+	UpstreamResponseBody  *string
 }
 
 func (s *Store) FinalizeUsageEvent(ctx context.Context, in FinalizeUsageEventInput) error {
@@ -192,11 +193,12 @@ WHERE id=?
 		return fmt.Errorf("更新 usage_event 明细失败: %w", err)
 	}
 
-	if in.UpstreamRequestBody != nil || in.UpstreamResponseBody != nil {
+	if in.DownstreamRequestBody != nil || in.UpstreamRequestBody != nil || in.UpstreamResponseBody != nil {
 		if err := s.UpsertUsageEventDetail(ctx, UpsertUsageEventDetailInput{
-			UsageEventID:         in.UsageEventID,
-			UpstreamRequestBody:  in.UpstreamRequestBody,
-			UpstreamResponseBody: in.UpstreamResponseBody,
+			UsageEventID:          in.UsageEventID,
+			DownstreamRequestBody: in.DownstreamRequestBody,
+			UpstreamRequestBody:   in.UpstreamRequestBody,
+			UpstreamResponseBody:  in.UpstreamResponseBody,
 		}); err != nil {
 			return err
 		}

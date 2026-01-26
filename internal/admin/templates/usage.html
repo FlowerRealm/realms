@@ -336,6 +336,10 @@
 
                         <div class="col-12">
                           <hr class="my-2">
+                          <div class="text-muted smaller">原始请求体（客户端）<span class="ms-2">· 仅失败请求会保存</span></div>
+                          <pre class="mb-0 font-monospace rlm-prewrap rlm-usage-detail-pre" id="rlmAdminUsageDownReq{{.ID}}">（展开后自动加载）</pre>
+                        </div>
+                        <div class="col-12">
                           <div class="text-muted smaller">转发请求体（最终）<span class="ms-2">· 仅失败请求会保存</span></div>
                           <pre class="mb-0 font-monospace rlm-prewrap rlm-usage-detail-pre" id="rlmAdminUsageUpReq{{.ID}}">（展开后自动加载）</pre>
                         </div>
@@ -473,8 +477,10 @@ document.addEventListener("DOMContentLoaded", function() {
       if (el.getAttribute('data-detail-loaded') === '1') return;
       el.setAttribute('data-detail-loaded', '1');
 
+      const downEl = document.getElementById('rlmAdminUsageDownReq' + eventID);
       const reqEl = document.getElementById('rlmAdminUsageUpReq' + eventID);
       const respEl = document.getElementById('rlmAdminUsageUpResp' + eventID);
+      if (downEl) downEl.textContent = '加载中...';
       if (reqEl) reqEl.textContent = '加载中...';
       if (respEl) respEl.textContent = '加载中...';
 
@@ -490,16 +496,19 @@ document.addEventListener("DOMContentLoaded", function() {
         })
         .then(function(data) {
           if (!data || !data.available) {
+            if (downEl) downEl.textContent = '（无明细：仅对失败请求保存，或该条记录未启用存储）';
             if (reqEl) reqEl.textContent = '（无明细：仅对失败请求保存，或该条记录未启用存储）';
             if (respEl) respEl.textContent = '-';
             return;
           }
+          if (downEl) downEl.textContent = data.downstream_request_body || '-';
           if (reqEl) reqEl.textContent = data.upstream_request_body || '-';
           if (respEl) respEl.textContent = data.upstream_response_body || '-';
         })
         .catch(function(err) {
           el.setAttribute('data-detail-loaded', '0');
           const msg = (err && err.message) ? err.message : String(err);
+          if (downEl) downEl.textContent = '加载失败：' + msg;
           if (reqEl) reqEl.textContent = '加载失败：' + msg;
           if (respEl) respEl.textContent = '-';
         });

@@ -53,19 +53,21 @@ func TestSQLiteUsageEventDetails_FinalizeStoresBodies(t *testing.T) {
 		t.Fatalf("ReserveUsage: %v", err)
 	}
 
+	downReq := `{"model":"m1","input":"hi","max_tokens":123}`
 	upReq := `{"model":"m1","input":"hi","max_output_tokens":123}`
 	upResp := `{"detail":"Unsupported parameter: max_tokens"}`
 	if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
-		UsageEventID:         usageID,
-		Endpoint:             "/v1/responses",
-		Method:               "POST",
-		StatusCode:           400,
-		LatencyMS:            10,
-		IsStream:             true,
-		RequestBytes:         123,
-		ResponseBytes:        46,
-		UpstreamRequestBody:  &upReq,
-		UpstreamResponseBody: &upResp,
+		UsageEventID:          usageID,
+		Endpoint:              "/v1/responses",
+		Method:                "POST",
+		StatusCode:            400,
+		LatencyMS:             10,
+		IsStream:              true,
+		RequestBytes:          123,
+		ResponseBytes:         46,
+		DownstreamRequestBody: &downReq,
+		UpstreamRequestBody:   &upReq,
+		UpstreamResponseBody:  &upResp,
 	}); err != nil {
 		t.Fatalf("FinalizeUsageEvent: %v", err)
 	}
@@ -76,6 +78,9 @@ func TestSQLiteUsageEventDetails_FinalizeStoresBodies(t *testing.T) {
 	}
 	if detail.UsageEventID != usageID {
 		t.Fatalf("usage_event_id mismatch: got %d want %d", detail.UsageEventID, usageID)
+	}
+	if detail.DownstreamRequestBody == nil || *detail.DownstreamRequestBody != downReq {
+		t.Fatalf("downstream_request_body mismatch: got=%v want=%q", detail.DownstreamRequestBody, downReq)
 	}
 	if detail.UpstreamRequestBody == nil || *detail.UpstreamRequestBody != upReq {
 		t.Fatalf("upstream_request_body mismatch: got=%v want=%q", detail.UpstreamRequestBody, upReq)

@@ -233,6 +233,7 @@ CREATE INDEX IF NOT EXISTS `idx_usage_events_time_id` ON `usage_events` (`time`,
 
 CREATE TABLE IF NOT EXISTS `usage_event_details` (
   `usage_event_id` INTEGER PRIMARY KEY,
+  `downstream_request_body` TEXT NULL,
   `upstream_request_body` TEXT NULL,
   `upstream_response_body` TEXT NULL,
   `created_at` DATETIME NOT NULL,

@@ -1193,6 +1193,13 @@ func TestResponses_UsageEvent_RecordsUpstreamErrorMessage(t *testing.T) {
 		t.Fatalf("unexpected usage error_message: %v", call.ErrorMessage)
 	}
 
+	if call.DownstreamRequestBody == nil || strings.TrimSpace(*call.DownstreamRequestBody) == "" {
+		t.Fatalf("expected downstream_request_body to be recorded")
+	}
+	if strings.TrimSpace(*call.DownstreamRequestBody) != `{"model":"m1","input":"hi","max_tokens":123}` {
+		t.Fatalf("unexpected downstream_request_body: %q", *call.DownstreamRequestBody)
+	}
+
 	if call.UpstreamRequestBody == nil || strings.TrimSpace(*call.UpstreamRequestBody) == "" {
 		t.Fatalf("expected upstream_request_body to be recorded")
 	}

@@ -500,7 +500,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			_ = h.quota.Void(bookCtx, usageID)
 			cancel()
 		}
-		h.finalizeUsageEventWithUpstreamBodies(r, usageID, &sel, resp.StatusCode, "upstream_status", failMsg, time.Since(reqStart), wantStream || isSSE, reqBytes, respBytes, body, bodyBytes)
+		h.finalizeUsageEventWithUpstreamBodies(r, usageID, &sel, resp.StatusCode, "upstream_status", failMsg, time.Since(reqStart), wantStream || isSSE, reqBytes, respBytes, middleware.CachedBody(r.Context()), body, bodyBytes)
 		return true
 	}
 
@@ -810,7 +810,7 @@ func (h *Handler) finalizeUsageEvent(r *http.Request, usageID int64, sel *schedu
 	})
 }
 
-func (h *Handler) finalizeUsageEventWithUpstreamBodies(r *http.Request, usageID int64, sel *scheduler.Selection, status int, class string, msg string, latency time.Duration, stream bool, reqBytes, respBytes int64, upstreamReqBody []byte, upstreamRespBody []byte) {
+func (h *Handler) finalizeUsageEventWithUpstreamBodies(r *http.Request, usageID int64, sel *scheduler.Selection, status int, class string, msg string, latency time.Duration, stream bool, reqBytes, respBytes int64, downstreamReqBody []byte, upstreamReqBody []byte, upstreamRespBody []byte) {
 	if usageID == 0 || h.usage == nil {
 		return
 	}
@@ -854,6 +854,11 @@ func (h *Handler) finalizeUsageEventWithUpstreamBodies(r *http.Request, usageID 
 		msgPtr = &m
 	}
 
+	var downPtr *string
+	if len(downstreamReqBody) > 0 {
+		s := string(downstreamReqBody)
+		downPtr = &s
+	}
 	var reqPtr *string
 	if len(upstreamReqBody) > 0 {
 		s := string(upstreamReqBody)
@@ -866,21 +871,22 @@ func (h *Handler) finalizeUsageEventWithUpstreamBodies(r *http.Request, usageID 
 	}
 
 	_ = h.usage.FinalizeUsageEvent(bookCtx, store.FinalizeUsageEventInput{
-		UsageEventID:         usageID,
-		Endpoint:             ep,
-		Method:               method,
-		StatusCode:           status,
-		LatencyMS:            int(latency.Milliseconds()),
-		ErrorClass:           classPtr,
-		ErrorMessage:         msgPtr,
-		UpstreamChannelID:    upstreamChannelID,
-		UpstreamEndpointID:   upstreamEndpointID,
-		UpstreamCredID:       upstreamCredID,
-		IsStream:             stream,
-		RequestBytes:         reqBytes,
-		ResponseBytes:        respBytes,
-		UpstreamRequestBody:  reqPtr,
-		UpstreamResponseBody: respPtr,
+		UsageEventID:          usageID,
+		Endpoint:              ep,
+		Method:                method,
+		StatusCode:            status,
+		LatencyMS:             int(latency.Milliseconds()),
+		ErrorClass:            classPtr,
+		ErrorMessage:          msgPtr,
+		UpstreamChannelID:     upstreamChannelID,
+		UpstreamEndpointID:    upstreamEndpointID,
+		UpstreamCredID:        upstreamCredID,
+		IsStream:              stream,
+		RequestBytes:          reqBytes,
+		ResponseBytes:         respBytes,
+		DownstreamRequestBody: downPtr,
+		UpstreamRequestBody:   reqPtr,
+		UpstreamResponseBody:  respPtr,
 	})
 }
 

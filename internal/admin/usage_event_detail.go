@@ -9,10 +9,11 @@ import (
 )
 
 type usageEventDetailAPIResponse struct {
-	EventID              int64  `json:"event_id"`
-	Available            bool   `json:"available"`
-	UpstreamRequestBody  string `json:"upstream_request_body,omitempty"`
-	UpstreamResponseBody string `json:"upstream_response_body,omitempty"`
+	EventID               int64  `json:"event_id"`
+	Available             bool   `json:"available"`
+	DownstreamRequestBody string `json:"downstream_request_body,omitempty"`
+	UpstreamRequestBody   string `json:"upstream_request_body,omitempty"`
+	UpstreamResponseBody  string `json:"upstream_response_body,omitempty"`
 }
 
 func (s *Server) UsageEventDetailAPI(w http.ResponseWriter, r *http.Request) {
@@ -47,6 +48,9 @@ func (s *Server) UsageEventDetailAPI(w http.ResponseWriter, r *http.Request) {
 	resp := usageEventDetailAPIResponse{
 		EventID:   id,
 		Available: true,
+	}
+	if detail.DownstreamRequestBody != nil {
+		resp.DownstreamRequestBody = *detail.DownstreamRequestBody
 	}
 	if detail.UpstreamRequestBody != nil {
 		resp.UpstreamRequestBody = *detail.UpstreamRequestBody
