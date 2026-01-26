@@ -422,6 +422,7 @@ func (a *App) routes() {
 	a.mux.Handle("GET /admin/users", adminFeatureChain(store.SettingFeatureDisableAdminUsers, http.HandlerFunc(a.admin.Users)))
 	a.mux.Handle("POST /admin/users", adminFeatureChain(store.SettingFeatureDisableAdminUsers, http.HandlerFunc(a.admin.CreateUser)))
 	a.mux.Handle("POST /admin/users/{user_id}", adminFeatureChain(store.SettingFeatureDisableAdminUsers, http.HandlerFunc(a.admin.UpdateUser)))
+	a.mux.Handle("POST /admin/users/{user_id}/balance", adminFeatureChain(store.SettingFeatureDisableAdminUsers, http.HandlerFunc(a.admin.AddUserBalance)))
 	a.mux.Handle("POST /admin/users/{user_id}/profile", adminFeatureChain(store.SettingFeatureDisableAdminUsers, http.HandlerFunc(a.admin.UpdateUserProfile)))
 	a.mux.Handle("POST /admin/users/{user_id}/password", adminFeatureChain(store.SettingFeatureDisableAdminUsers, http.HandlerFunc(a.admin.UpdateUserPassword)))
 	a.mux.Handle("POST /admin/users/{user_id}/delete", adminFeatureChain(store.SettingFeatureDisableAdminUsers, http.HandlerFunc(a.admin.DeleteUser)))

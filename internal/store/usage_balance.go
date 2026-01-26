@@ -52,11 +52,7 @@ VALUES(?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	if bal.LessThan(reservedUSD) {
 		return 0, ErrInsufficientBalance
 	}
-	if _, err := tx.ExecContext(ctx, `
-UPDATE user_balances
-SET usd=usd-?, updated_at=CURRENT_TIMESTAMP
-WHERE user_id=?
-`, reservedUSD, in.UserID); err != nil {
+	if _, err := tx.ExecContext(ctx, userBalancesSubSQL(s.dialect), reservedUSD, in.UserID); err != nil {
 		return 0, fmt.Errorf("扣减余额失败: %w", err)
 	}
 
@@ -138,11 +134,7 @@ WHERE id=? AND state=?
 	}
 
 	if refund.GreaterThan(decimal.Zero) {
-		if _, err := tx.ExecContext(ctx, `
-UPDATE user_balances
-SET usd=usd+?, updated_at=CURRENT_TIMESTAMP
-WHERE user_id=?
-`, refund, userID); err != nil {
+		if _, err := tx.ExecContext(ctx, userBalancesAddSQL(s.dialect), refund, userID); err != nil {
 			return fmt.Errorf("返还余额失败: %w", err)
 		}
 	}
@@ -205,11 +197,7 @@ WHERE id=? AND state=?
 		return fmt.Errorf("作废 usage_event 失败: %w", err)
 	}
 	if reserved.GreaterThan(decimal.Zero) {
-		if _, err := tx.ExecContext(ctx, `
-UPDATE user_balances
-SET usd=usd+?, updated_at=CURRENT_TIMESTAMP
-WHERE user_id=?
-`, reserved, userID); err != nil {
+		if _, err := tx.ExecContext(ctx, userBalancesAddSQL(s.dialect), reserved, userID); err != nil {
 			return fmt.Errorf("返还余额失败: %w", err)
 		}
 	}
@@ -291,11 +279,7 @@ VALUES(?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		if _, err := tx.ExecContext(ctx, stmtInitBalance, userID); err != nil {
 			return 0, fmt.Errorf("初始化余额失败: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `
-UPDATE user_balances
-SET usd=usd+?, updated_at=CURRENT_TIMESTAMP
-WHERE user_id=?
-`, refundUSD, userID); err != nil {
+		if _, err := tx.ExecContext(ctx, userBalancesAddSQL(s.dialect), refundUSD, userID); err != nil {
 			return 0, fmt.Errorf("返还余额失败: %w", err)
 		}
 	}

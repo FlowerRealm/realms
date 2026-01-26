@@ -30,6 +30,7 @@
           <th>组</th>
           <th>角色</th>
           <th>状态</th>
+          <th>余额(USD)</th>
           <th>创建时间</th>
           <th class="text-end pe-4">操作</th>
         </tr>
@@ -68,9 +69,15 @@
               </span>
             {{end}}
           </td>
+          <td>
+            <span class="fw-medium text-dark">{{.BalanceUSD}}</span>
+          </td>
           <td class="small text-muted">{{.CreatedAt}}</td>
           <td class="text-end pe-4">
             <div class="d-inline-flex gap-1">
+              <button type="button" class="btn btn-sm btn-light border text-success" data-bs-toggle="modal" data-bs-target="#addBalanceModal-{{.ID}}" title="加余额">
+                <i class="ri-money-dollar-circle-line"></i>
+              </button>
               <button type="button" class="btn btn-sm btn-light border text-primary" data-bs-toggle="modal" data-bs-target="#editUserModal-{{.ID}}" title="编辑用户">
                 <i class="ri-edit-line"></i>
               </button>
@@ -97,6 +104,45 @@
 </div>
 
 {{range .Users}}
+<!-- 加余额弹窗 -->
+<div class="modal fade" id="addBalanceModal-{{.ID}}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content border-0 shadow">
+      <div class="modal-header">
+        <h5 class="modal-title fw-bold">加余额</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <form method="POST" action="/admin/users/{{.ID}}/balance" data-ajax="1" data-ajax-reload="1">
+        <div class="modal-body">
+          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+
+          <div class="alert alert-light border py-2 small mb-3">
+            <div class="d-flex justify-content-between">
+              <span class="text-muted">当前余额</span>
+              <span class="fw-bold text-dark">{{.BalanceUSD}} USD</span>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">增加金额 (USD)</label>
+            <input name="amount_usd" type="text" class="form-control" required placeholder="例如：5 或 0.5" inputmode="decimal" />
+            <div class="form-text">最多 6 位小数；仅支持增加（不支持扣减/设置）。</div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">备注（可选）</label>
+            <textarea name="note" class="form-control" rows="3" maxlength="200" placeholder="用于审计记录（最多 200 字符）"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer border-top-0">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-success">确认加余额</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <!-- 编辑用户弹窗 -->
 <div class="modal fade" id="editUserModal-{{.ID}}" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">

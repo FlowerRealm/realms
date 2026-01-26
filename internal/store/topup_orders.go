@@ -315,11 +315,7 @@ VALUES(?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	if _, err := tx.ExecContext(ctx, stmtInitBalance, o.UserID); err != nil {
 		return fmt.Errorf("初始化余额失败: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE user_balances
-	SET usd=usd+?, updated_at=CURRENT_TIMESTAMP
-	WHERE user_id=?
-`, creditUSD, o.UserID); err != nil {
+	if _, err := tx.ExecContext(ctx, userBalancesAddSQL(s.dialect), creditUSD, o.UserID); err != nil {
 		return fmt.Errorf("入账失败: %w", err)
 	}
 

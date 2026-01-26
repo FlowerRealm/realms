@@ -529,13 +529,14 @@ type adminCredentialView struct {
 }
 
 type adminUserView struct {
-	ID        int64
-	Email     string
-	Username  string
-	Groups    string
-	Role      string
-	Status    int
-	CreatedAt string
+	ID         int64
+	Email      string
+	Username   string
+	Groups     string
+	Role       string
+	Status     int
+	BalanceUSD string
+	CreatedAt  string
 }
 
 type adminCodexAccountView struct {
@@ -1503,26 +1504,37 @@ func (s *Server) Users(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loc, _ := s.adminTimeLocation(r.Context())
-	users, err := s.st.ListUsers(r.Context())
+	ctx := r.Context()
+	loc, _ := s.adminTimeLocation(ctx)
+	users, err := s.st.ListUsers(ctx)
 	if err != nil {
 		http.Error(w, "查询失败", http.StatusInternalServerError)
+		return
+	}
+	userIDs := make([]int64, 0, len(users))
+	for _, user := range users {
+		userIDs = append(userIDs, user.ID)
+	}
+	balances, err := s.st.GetUserBalancesUSD(ctx, userIDs)
+	if err != nil {
+		http.Error(w, "余额查询失败", http.StatusInternalServerError)
 		return
 	}
 	var uv []adminUserView
 	for _, user := range users {
 		uv = append(uv, adminUserView{
-			ID:        user.ID,
-			Email:     user.Email,
-			Username:  user.Username,
-			Groups:    strings.Join(user.Groups, ","),
-			Role:      user.Role,
-			Status:    user.Status,
-			CreatedAt: formatTimeIn(user.CreatedAt, "2006-01-02 15:04", loc),
+			ID:         user.ID,
+			Email:      user.Email,
+			Username:   user.Username,
+			Groups:     strings.Join(user.Groups, ","),
+			Role:       user.Role,
+			Status:     user.Status,
+			BalanceUSD: formatUSDPlain(balances[user.ID]),
+			CreatedAt:  formatTimeIn(user.CreatedAt, "2006-01-02 15:04", loc),
 		})
 	}
 
-	channelGroups, err := s.st.ListChannelGroups(r.Context())
+	channelGroups, err := s.st.ListChannelGroups(ctx)
 	if err != nil {
 		http.Error(w, "查询渠道分组失败", http.StatusInternalServerError)
 		return
@@ -1548,7 +1560,7 @@ func (s *Server) Users(w http.ResponseWriter, r *http.Request) {
 		User:                     u,
 		IsRoot:                   isRoot,
 		CSRFToken:                csrf,
-		EmailVerificationEnabled: s.emailVerificationEnabled(r.Context()),
+		EmailVerificationEnabled: s.emailVerificationEnabled(ctx),
 		ChannelGroups:            channelGroups,
 		Users:                    uv,
 	}))
