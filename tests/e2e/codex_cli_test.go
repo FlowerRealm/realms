@@ -132,7 +132,7 @@ func TestCodexCLI_E2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "codex", "exec", "Reply with exactly: REALMS_CI_OK")
+	cmd := exec.CommandContext(ctx, "codex", "exec", "--skip-git-repo-check", "Reply with exactly: REALMS_CI_OK")
 	cmd.Dir = workDir
 	cmd.Env = append(os.Environ(),
 		"HOME="+homeDir,
