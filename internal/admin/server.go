@@ -479,10 +479,6 @@ type adminRuntimeLimitsView struct {
 
 	CoolingUntil string
 	FailScore    int
-
-	OverRPM      bool
-	OverTPM      bool
-	OverSessions bool
 }
 
 type adminChannelRuntimeView struct {
@@ -521,10 +517,6 @@ type adminCredentialView struct {
 	MaskedKey  string
 	Status     int
 
-	LimitSessions *int
-	LimitRPM      *int
-	LimitTPM      *int
-
 	Runtime adminRuntimeLimitsView
 }
 
@@ -544,9 +536,6 @@ type adminCodexAccountView struct {
 	AccountID               string
 	Email                   *string
 	Status                  int
-	LimitSessions           *int
-	LimitRPM                *int
-	LimitTPM                *int
 	InCooldown              bool
 	ExpiresAt               string
 	LastRefreshAt           string
@@ -2286,26 +2275,6 @@ func (s *Server) CreateChannel(w http.ResponseWriter, r *http.Request) {
 	baseURL := strings.TrimSpace(r.FormValue("base_url"))
 	priority, _ := parseInt(r.FormValue("priority"))
 	promotion := strings.TrimSpace(r.FormValue("promotion")) == "1"
-	limitSessionsRaw := strings.TrimSpace(r.FormValue("limit_sessions"))
-	// 兼容旧字段名：limit_cc
-	if limitSessionsRaw == "" {
-		limitSessionsRaw = r.FormValue("limit_cc")
-	}
-	limitSessions, err := parseOptionalLimitInt(limitSessionsRaw)
-	if err != nil {
-		http.Error(w, "limit_sessions 不合法", http.StatusBadRequest)
-		return
-	}
-	limitRPM, err := parseOptionalLimitInt(r.FormValue("limit_rpm"))
-	if err != nil {
-		http.Error(w, "limit_rpm 不合法", http.StatusBadRequest)
-		return
-	}
-	limitTPM, err := parseOptionalLimitInt(r.FormValue("limit_tpm"))
-	if err != nil {
-		http.Error(w, "limit_tpm 不合法", http.StatusBadRequest)
-		return
-	}
 	allowServiceTier := strings.TrimSpace(r.FormValue("allow_service_tier")) == "1"
 	disableStore := strings.TrimSpace(r.FormValue("disable_store")) == "1"
 	allowSafetyIdentifier := strings.TrimSpace(r.FormValue("allow_safety_identifier")) == "1"
@@ -2328,7 +2297,7 @@ func (s *Server) CreateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, err := s.st.CreateUpstreamChannel(r.Context(), typ, name, groups, priority, promotion, limitSessions, limitRPM, limitTPM, allowServiceTier, disableStore, allowSafetyIdentifier)
+	id, err := s.st.CreateUpstreamChannel(r.Context(), typ, name, groups, priority, promotion, allowServiceTier, disableStore, allowSafetyIdentifier)
 	if err != nil {
 		http.Error(w, "创建失败", http.StatusInternalServerError)
 		return
@@ -2571,15 +2540,6 @@ func (s *Server) Endpoints(w http.ResponseWriter, r *http.Request) {
 				if stats.CoolingUntil != nil {
 					rv.CoolingUntil = formatTimeIn(*stats.CoolingUntil, time.RFC3339, loc)
 				}
-				if c.LimitRPM != nil && *c.LimitRPM > 0 && rv.RPM >= *c.LimitRPM {
-					rv.OverRPM = true
-				}
-				if c.LimitTPM != nil && *c.LimitTPM > 0 && rv.TPM >= *c.LimitTPM {
-					rv.OverTPM = true
-				}
-				if c.LimitSessions != nil && *c.LimitSessions > 0 && rv.Sessions >= *c.LimitSessions {
-					rv.OverSessions = true
-				}
 			}
 			maskedKey := "-"
 			if c.APIKeyHint != nil && *c.APIKeyHint != "" {
@@ -2591,15 +2551,12 @@ func (s *Server) Endpoints(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			creds = append(creds, adminCredentialView{
-				ID:            c.ID,
-				Name:          c.Name,
-				APIKeyHint:    c.APIKeyHint,
-				MaskedKey:     maskedKey,
-				Status:        c.Status,
-				LimitSessions: c.LimitSessions,
-				LimitRPM:      c.LimitRPM,
-				LimitTPM:      c.LimitTPM,
-				Runtime:       rv,
+				ID:         c.ID,
+				Name:       c.Name,
+				APIKeyHint: c.APIKeyHint,
+				MaskedKey:  maskedKey,
+				Status:     c.Status,
+				Runtime:    rv,
 			})
 		}
 	case store.UpstreamTypeAnthropic:
@@ -2623,15 +2580,6 @@ func (s *Server) Endpoints(w http.ResponseWriter, r *http.Request) {
 				if stats.CoolingUntil != nil {
 					rv.CoolingUntil = formatTimeIn(*stats.CoolingUntil, time.RFC3339, loc)
 				}
-				if c.LimitRPM != nil && *c.LimitRPM > 0 && rv.RPM >= *c.LimitRPM {
-					rv.OverRPM = true
-				}
-				if c.LimitTPM != nil && *c.LimitTPM > 0 && rv.TPM >= *c.LimitTPM {
-					rv.OverTPM = true
-				}
-				if c.LimitSessions != nil && *c.LimitSessions > 0 && rv.Sessions >= *c.LimitSessions {
-					rv.OverSessions = true
-				}
 			}
 			maskedKey := "-"
 			if c.APIKeyHint != nil && *c.APIKeyHint != "" {
@@ -2643,15 +2591,12 @@ func (s *Server) Endpoints(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			creds = append(creds, adminCredentialView{
-				ID:            c.ID,
-				Name:          c.Name,
-				APIKeyHint:    c.APIKeyHint,
-				MaskedKey:     maskedKey,
-				Status:        c.Status,
-				LimitSessions: c.LimitSessions,
-				LimitRPM:      c.LimitRPM,
-				LimitTPM:      c.LimitTPM,
-				Runtime:       rv,
+				ID:         c.ID,
+				Name:       c.Name,
+				APIKeyHint: c.APIKeyHint,
+				MaskedKey:  maskedKey,
+				Status:     c.Status,
+				Runtime:    rv,
 			})
 		}
 	default:
@@ -2682,9 +2627,6 @@ func (s *Server) Endpoints(w http.ResponseWriter, r *http.Request) {
 				AccountID:               a.AccountID,
 				Email:                   a.Email,
 				Status:                  a.Status,
-				LimitSessions:           a.LimitSessions,
-				LimitRPM:                a.LimitRPM,
-				LimitTPM:                a.LimitTPM,
 				InCooldown:              a.CooldownUntil != nil && now.Before(*a.CooldownUntil),
 				ExpiresAt:               formatTimePtrIn(a.ExpiresAt, time.RFC3339, loc),
 				LastRefreshAt:           formatTimePtrIn(a.LastRefreshAt, time.RFC3339, loc),
@@ -2712,15 +2654,6 @@ func (s *Server) Endpoints(w http.ResponseWriter, r *http.Request) {
 				rv.FailScore = stats.FailScore
 				if stats.CoolingUntil != nil {
 					rv.CoolingUntil = formatTimeIn(*stats.CoolingUntil, time.RFC3339, loc)
-				}
-				if a.LimitRPM != nil && *a.LimitRPM > 0 && rv.RPM >= *a.LimitRPM {
-					rv.OverRPM = true
-				}
-				if a.LimitTPM != nil && *a.LimitTPM > 0 && rv.TPM >= *a.LimitTPM {
-					rv.OverTPM = true
-				}
-				if a.LimitSessions != nil && *a.LimitSessions > 0 && rv.Sessions >= *a.LimitSessions {
-					rv.OverSessions = true
 				}
 				v.Runtime = rv
 			}

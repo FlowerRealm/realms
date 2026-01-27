@@ -23,7 +23,6 @@ const (
 func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, error) {
 	rows, err := s.db.QueryContext(ctx,
 		"SELECT id, type, name, `groups`, status, priority, promotion,\n"+
-			"       limit_sessions, limit_rpm, limit_tpm,\n"+
 			"       allow_service_tier, disable_store, allow_safety_identifier,\n"+
 			"       param_override,\n"+
 			"       header_override,\n"+
@@ -45,9 +44,6 @@ func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, er
 	for rows.Next() {
 		var c UpstreamChannel
 		var promotion int
-		var limitSessions sql.NullInt64
-		var limitRPM sql.NullInt64
-		var limitTPM sql.NullInt64
 		var allowServiceTier int
 		var disableStore int
 		var allowSafetyIdentifier int
@@ -59,7 +55,6 @@ func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, er
 		var requestBodyWhitelist sql.NullString
 		var lastOK int
 		if err := rows.Scan(&c.ID, &c.Type, &c.Name, &c.Groups, &c.Status, &c.Priority, &promotion,
-			&limitSessions, &limitRPM, &limitTPM,
 			&allowServiceTier, &disableStore, &allowSafetyIdentifier,
 			&paramOverride,
 			&headerOverride,
@@ -72,9 +67,6 @@ func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, er
 			return nil, fmt.Errorf("扫描 upstream_channels 失败: %w", err)
 		}
 		c.Promotion = promotion != 0
-		c.LimitSessions = nullableLimitIntPtr(limitSessions)
-		c.LimitRPM = nullableLimitIntPtr(limitRPM)
-		c.LimitTPM = nullableLimitIntPtr(limitTPM)
 		c.AllowServiceTier = allowServiceTier != 0
 		c.DisableStore = disableStore != 0
 		c.AllowSafetyIdentifier = allowSafetyIdentifier != 0
@@ -113,7 +105,7 @@ func (s *Store) CountUpstreamChannels(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
-func (s *Store) CreateUpstreamChannel(ctx context.Context, typ, name, groups string, priority int, promotion bool, limitSessions, limitRPM, limitTPM *int, allowServiceTier bool, disableStore bool, allowSafetyIdentifier bool) (int64, error) {
+func (s *Store) CreateUpstreamChannel(ctx context.Context, typ, name, groups string, priority int, promotion bool, allowServiceTier bool, disableStore bool, allowSafetyIdentifier bool) (int64, error) {
 	p := 0
 	if promotion {
 		p = 1
@@ -140,12 +132,9 @@ func (s *Store) CreateUpstreamChannel(ctx context.Context, typ, name, groups str
 	defer func() { _ = tx.Rollback() }()
 
 	res, err := tx.ExecContext(ctx,
-		"INSERT INTO upstream_channels(type, name, `groups`, status, priority, promotion, limit_sessions, limit_rpm, limit_tpm, allow_service_tier, disable_store, allow_safety_identifier, created_at, updated_at)\n"+
-			"VALUES(?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)\n",
+		"INSERT INTO upstream_channels(type, name, `groups`, status, priority, promotion, allow_service_tier, disable_store, allow_safety_identifier, created_at, updated_at)\n"+
+			"VALUES(?, ?, ?, 1, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)\n",
 		typ, name, groups, priority, p,
-		nullableIntPtr(limitSessions),
-		nullableIntPtr(limitRPM),
-		nullableIntPtr(limitTPM),
 		allowServiceTierInt,
 		disableStoreInt,
 		allowSafetyIdentifierInt,
@@ -218,9 +207,6 @@ VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamChannel, error) {
 	var c UpstreamChannel
 	var promotion int
-	var limitSessions sql.NullInt64
-	var limitRPM sql.NullInt64
-	var limitTPM sql.NullInt64
 	var allowServiceTier int
 	var disableStore int
 	var allowSafetyIdentifier int
@@ -233,7 +219,6 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 	var lastOK int
 	err := s.db.QueryRowContext(ctx,
 		"SELECT id, type, name, `groups`, status, priority, promotion,\n"+
-			"       limit_sessions, limit_rpm, limit_tpm,\n"+
 			"       allow_service_tier, disable_store, allow_safety_identifier,\n"+
 			"       param_override,\n"+
 			"       header_override,\n"+
@@ -247,7 +232,6 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 			"WHERE id=?\n",
 		id,
 	).Scan(&c.ID, &c.Type, &c.Name, &c.Groups, &c.Status, &c.Priority, &promotion,
-		&limitSessions, &limitRPM, &limitTPM,
 		&allowServiceTier, &disableStore, &allowSafetyIdentifier,
 		&paramOverride,
 		&headerOverride,
@@ -264,9 +248,6 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 		return UpstreamChannel{}, fmt.Errorf("查询 upstream_channel 失败: %w", err)
 	}
 	c.Promotion = promotion != 0
-	c.LimitSessions = nullableLimitIntPtr(limitSessions)
-	c.LimitRPM = nullableLimitIntPtr(limitRPM)
-	c.LimitTPM = nullableLimitIntPtr(limitTPM)
 	c.AllowServiceTier = allowServiceTier != 0
 	c.DisableStore = disableStore != 0
 	c.AllowSafetyIdentifier = allowSafetyIdentifier != 0
@@ -290,21 +271,6 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 	}
 	c.LastTestOK = lastOK != 0
 	return c, nil
-}
-
-func (s *Store) UpdateUpstreamChannelLimits(ctx context.Context, channelID int64, limitSessions, limitRPM, limitTPM *int) error {
-	if channelID == 0 {
-		return errors.New("channelID 不能为空")
-	}
-	_, err := s.db.ExecContext(ctx, `
-UPDATE upstream_channels
-SET limit_sessions=?, limit_rpm=?, limit_tpm=?, updated_at=CURRENT_TIMESTAMP
-WHERE id=?
-`, nullableIntPtr(limitSessions), nullableIntPtr(limitRPM), nullableIntPtr(limitTPM), channelID)
-	if err != nil {
-		return fmt.Errorf("更新 upstream_channel limits 失败: %w", err)
-	}
-	return nil
 }
 
 func (s *Store) UpdateUpstreamChannelRequestPolicy(ctx context.Context, channelID int64, allowServiceTier bool, disableStore bool, allowSafetyIdentifier bool) error {
@@ -757,7 +723,6 @@ WHERE id=?
 func (s *Store) ListOpenAICompatibleCredentialsByEndpoint(ctx context.Context, endpointID int64) ([]OpenAICompatibleCredential, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, endpoint_id, name, api_key_enc, api_key_hint, status,
-       limit_sessions, limit_rpm, limit_tpm,
        last_used_at, created_at, updated_at
 FROM openai_compatible_credentials
 WHERE endpoint_id=?
@@ -771,17 +736,10 @@ ORDER BY id DESC
 	var out []OpenAICompatibleCredential
 	for rows.Next() {
 		var c OpenAICompatibleCredential
-		var limitSessions sql.NullInt64
-		var limitRPM sql.NullInt64
-		var limitTPM sql.NullInt64
 		if err := rows.Scan(&c.ID, &c.EndpointID, &c.Name, &c.APIKeyEnc, &c.APIKeyHint, &c.Status,
-			&limitSessions, &limitRPM, &limitTPM,
 			&c.LastUsedAt, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("扫描 openai_compatible_credentials 失败: %w", err)
 		}
-		c.LimitSessions = nullableLimitIntPtr(limitSessions)
-		c.LimitRPM = nullableLimitIntPtr(limitRPM)
-		c.LimitTPM = nullableLimitIntPtr(limitTPM)
 		out = append(out, c)
 	}
 	if err := rows.Err(); err != nil {
@@ -847,21 +805,6 @@ func (s *Store) TouchOpenAICompatibleCredential(ctx context.Context, credentialI
 	_, _ = s.db.ExecContext(ctx, `UPDATE openai_compatible_credentials SET last_used_at=CURRENT_TIMESTAMP, updated_at=updated_at WHERE id=?`, credentialID)
 }
 
-func (s *Store) UpdateOpenAICompatibleCredentialLimits(ctx context.Context, credentialID int64, limitSessions, limitRPM, limitTPM *int) error {
-	if credentialID == 0 {
-		return errors.New("credentialID 不能为空")
-	}
-	_, err := s.db.ExecContext(ctx, `
-UPDATE openai_compatible_credentials
-SET limit_sessions=?, limit_rpm=?, limit_tpm=?, updated_at=CURRENT_TIMESTAMP
-WHERE id=?
-`, nullableIntPtr(limitSessions), nullableIntPtr(limitRPM), nullableIntPtr(limitTPM), credentialID)
-	if err != nil {
-		return fmt.Errorf("更新 openai_compatible_credential limits 失败: %w", err)
-	}
-	return nil
-}
-
 func (s *Store) CreateCodexOAuthPending(ctx context.Context, state string, endpointID, actorUserID int64, codeVerifier string, createdAt time.Time) error {
 	if strings.TrimSpace(state) == "" {
 		return fmt.Errorf("state 不能为空")
@@ -915,7 +858,6 @@ func (s *Store) ListCodexOAuthAccountsByEndpoint(ctx context.Context, endpointID
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, endpoint_id, account_id, email, access_token_enc, refresh_token_enc, id_token_enc,
        expires_at, last_refresh_at, status,
-       limit_sessions, limit_rpm, limit_tpm,
        cooldown_until, last_used_at,
        balance_total_granted_usd, balance_total_used_usd, balance_total_available_usd,
        balance_updated_at, balance_error,
@@ -937,9 +879,6 @@ ORDER BY id DESC
 	for rows.Next() {
 		var a CodexOAuthAccount
 		var idTokenEnc []byte
-		var limitSessions sql.NullInt64
-		var limitRPM sql.NullInt64
-		var limitTPM sql.NullInt64
 		var balGranted decimal.NullDecimal
 		var balUsed decimal.NullDecimal
 		var balAvail decimal.NullDecimal
@@ -956,7 +895,6 @@ ORDER BY id DESC
 		var quotaErr sql.NullString
 		if err := rows.Scan(&a.ID, &a.EndpointID, &a.AccountID, &a.Email, &a.AccessTokenEnc, &a.RefreshTokenEnc, &idTokenEnc,
 			&a.ExpiresAt, &a.LastRefreshAt, &a.Status,
-			&limitSessions, &limitRPM, &limitTPM,
 			&a.CooldownUntil, &a.LastUsedAt,
 			&balGranted, &balUsed, &balAvail,
 			&balUpdatedAt, &balErr,
@@ -968,9 +906,6 @@ ORDER BY id DESC
 			return nil, fmt.Errorf("扫描 codex_oauth_accounts 失败: %w", err)
 		}
 		a.IDTokenEnc = idTokenEnc
-		a.LimitSessions = nullableLimitIntPtr(limitSessions)
-		a.LimitRPM = nullableLimitIntPtr(limitRPM)
-		a.LimitTPM = nullableLimitIntPtr(limitTPM)
 		if balGranted.Valid {
 			v := balGranted.Decimal.Truncate(USDScale)
 			a.BalanceTotalGrantedUSD = &v
@@ -1155,21 +1090,6 @@ func (s *Store) UpdateCodexOAuthAccountTokens(ctx context.Context, accountID int
 	return nil
 }
 
-func (s *Store) UpdateCodexOAuthAccountLimits(ctx context.Context, accountID int64, limitSessions, limitRPM, limitTPM *int) error {
-	if accountID == 0 {
-		return errors.New("accountID 不能为空")
-	}
-	_, err := s.db.ExecContext(ctx, `
-UPDATE codex_oauth_accounts
-SET limit_sessions=?, limit_rpm=?, limit_tpm=?, updated_at=CURRENT_TIMESTAMP
-WHERE id=?
-`, nullableIntPtr(limitSessions), nullableIntPtr(limitRPM), nullableIntPtr(limitTPM), accountID)
-	if err != nil {
-		return fmt.Errorf("更新 codex_oauth_account limits 失败: %w", err)
-	}
-	return nil
-}
-
 func (s *Store) UpdateCodexOAuthAccountBalance(ctx context.Context, accountID int64, grantedUSD, usedUSD, availableUSD *decimal.Decimal, updatedAt time.Time, errMsg *string) error {
 	var errVal any
 	if errMsg != nil && strings.TrimSpace(*errMsg) != "" {
@@ -1302,21 +1222,6 @@ func nullableIntPtr(i *int) any {
 	return *i
 }
 
-func nullableLimitIntPtr(v sql.NullInt64) *int {
-	if !v.Valid {
-		return nil
-	}
-	if v.Int64 <= 0 {
-		return nil
-	}
-	maxInt := int64(^uint(0) >> 1)
-	if v.Int64 > maxInt {
-		return nil
-	}
-	n := int(v.Int64)
-	return &n
-}
-
 func looksLikeLegacyEncryptedBlob(b []byte) bool {
 	return len(b) >= 1+12 && b[0] == 1
 }
@@ -1408,16 +1313,11 @@ func (s *Store) GetOpenAICompatibleCredentialByID(ctx context.Context, credentia
 	var c OpenAICompatibleCredential
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, endpoint_id, name, api_key_enc, api_key_hint, status,
-       limit_sessions, limit_rpm, limit_tpm,
        last_used_at, created_at, updated_at
 FROM openai_compatible_credentials
 WHERE id=?
 `, credentialID)
-	var limitSessions sql.NullInt64
-	var limitRPM sql.NullInt64
-	var limitTPM sql.NullInt64
 	err := row.Scan(&c.ID, &c.EndpointID, &c.Name, &c.APIKeyEnc, &c.APIKeyHint, &c.Status,
-		&limitSessions, &limitRPM, &limitTPM,
 		&c.LastUsedAt, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1425,9 +1325,6 @@ WHERE id=?
 		}
 		return OpenAICompatibleCredential{}, fmt.Errorf("查询 openai_compatible_credential 失败: %w", err)
 	}
-	c.LimitSessions = nullableLimitIntPtr(limitSessions)
-	c.LimitRPM = nullableLimitIntPtr(limitRPM)
-	c.LimitTPM = nullableLimitIntPtr(limitTPM)
 	return c, nil
 }
 
@@ -1442,7 +1339,6 @@ func (s *Store) DeleteOpenAICompatibleCredential(ctx context.Context, credential
 func (s *Store) ListAnthropicCredentialsByEndpoint(ctx context.Context, endpointID int64) ([]AnthropicCredential, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, endpoint_id, name, api_key_enc, api_key_hint, status,
-       limit_sessions, limit_rpm, limit_tpm,
        last_used_at, created_at, updated_at
 FROM anthropic_credentials
 WHERE endpoint_id=?
@@ -1456,17 +1352,10 @@ ORDER BY id DESC
 	var out []AnthropicCredential
 	for rows.Next() {
 		var c AnthropicCredential
-		var limitSessions sql.NullInt64
-		var limitRPM sql.NullInt64
-		var limitTPM sql.NullInt64
 		if err := rows.Scan(&c.ID, &c.EndpointID, &c.Name, &c.APIKeyEnc, &c.APIKeyHint, &c.Status,
-			&limitSessions, &limitRPM, &limitTPM,
 			&c.LastUsedAt, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("扫描 anthropic_credentials 失败: %w", err)
 		}
-		c.LimitSessions = nullableLimitIntPtr(limitSessions)
-		c.LimitRPM = nullableLimitIntPtr(limitRPM)
-		c.LimitTPM = nullableLimitIntPtr(limitTPM)
 		out = append(out, c)
 	}
 	if err := rows.Err(); err != nil {
@@ -1505,16 +1394,11 @@ func (s *Store) GetAnthropicCredentialByID(ctx context.Context, credentialID int
 	var c AnthropicCredential
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, endpoint_id, name, api_key_enc, api_key_hint, status,
-       limit_sessions, limit_rpm, limit_tpm,
        last_used_at, created_at, updated_at
 FROM anthropic_credentials
 WHERE id=?
 `, credentialID)
-	var limitSessions sql.NullInt64
-	var limitRPM sql.NullInt64
-	var limitTPM sql.NullInt64
 	err := row.Scan(&c.ID, &c.EndpointID, &c.Name, &c.APIKeyEnc, &c.APIKeyHint, &c.Status,
-		&limitSessions, &limitRPM, &limitTPM,
 		&c.LastUsedAt, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1522,9 +1406,6 @@ WHERE id=?
 		}
 		return AnthropicCredential{}, fmt.Errorf("查询 anthropic_credential 失败: %w", err)
 	}
-	c.LimitSessions = nullableLimitIntPtr(limitSessions)
-	c.LimitRPM = nullableLimitIntPtr(limitRPM)
-	c.LimitTPM = nullableLimitIntPtr(limitTPM)
 	return c, nil
 }
 
@@ -1555,21 +1436,6 @@ WHERE id=?
 	}, nil
 }
 
-func (s *Store) UpdateAnthropicCredentialLimits(ctx context.Context, credentialID int64, limitSessions, limitRPM, limitTPM *int) error {
-	if credentialID == 0 {
-		return errors.New("credentialID 不能为空")
-	}
-	_, err := s.db.ExecContext(ctx, `
-UPDATE anthropic_credentials
-SET limit_sessions=?, limit_rpm=?, limit_tpm=?, updated_at=NOW()
-WHERE id=?
-`, nullableIntPtr(limitSessions), nullableIntPtr(limitRPM), nullableIntPtr(limitTPM), credentialID)
-	if err != nil {
-		return fmt.Errorf("更新 anthropic_credential limits 失败: %w", err)
-	}
-	return nil
-}
-
 func (s *Store) DeleteAnthropicCredential(ctx context.Context, credentialID int64) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM anthropic_credentials WHERE id=?`, credentialID)
 	if err != nil {
@@ -1584,7 +1450,6 @@ func (s *Store) GetCodexOAuthAccountByID(ctx context.Context, accountID int64) (
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, endpoint_id, account_id, email, access_token_enc, refresh_token_enc, id_token_enc,
        expires_at, last_refresh_at, status,
-       limit_sessions, limit_rpm, limit_tpm,
        cooldown_until, last_used_at,
        balance_total_granted_usd, balance_total_used_usd, balance_total_available_usd,
        balance_updated_at, balance_error,
@@ -1596,9 +1461,6 @@ SELECT id, endpoint_id, account_id, email, access_token_enc, refresh_token_enc, 
 FROM codex_oauth_accounts
 WHERE id=?
 `, accountID)
-	var limitSessions sql.NullInt64
-	var limitRPM sql.NullInt64
-	var limitTPM sql.NullInt64
 	var balGranted decimal.NullDecimal
 	var balUsed decimal.NullDecimal
 	var balAvail decimal.NullDecimal
@@ -1615,7 +1477,6 @@ WHERE id=?
 	var quotaErr sql.NullString
 	err := row.Scan(&a.ID, &a.EndpointID, &a.AccountID, &a.Email, &a.AccessTokenEnc, &a.RefreshTokenEnc, &idTokenEnc,
 		&a.ExpiresAt, &a.LastRefreshAt, &a.Status,
-		&limitSessions, &limitRPM, &limitTPM,
 		&a.CooldownUntil, &a.LastUsedAt,
 		&balGranted, &balUsed, &balAvail,
 		&balUpdatedAt, &balErr,
@@ -1631,9 +1492,6 @@ WHERE id=?
 		return CodexOAuthAccount{}, fmt.Errorf("查询 codex_oauth_account 失败: %w", err)
 	}
 	a.IDTokenEnc = idTokenEnc
-	a.LimitSessions = nullableLimitIntPtr(limitSessions)
-	a.LimitRPM = nullableLimitIntPtr(limitRPM)
-	a.LimitTPM = nullableLimitIntPtr(limitTPM)
 	if balGranted.Valid {
 		v := balGranted.Decimal.Truncate(USDScale)
 		a.BalanceTotalGrantedUSD = &v

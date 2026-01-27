@@ -12,7 +12,7 @@ SET @col_exists := (
 );
 SET @ddl := IF(
   @col_exists = 0,
-  'ALTER TABLE `upstream_channels` ADD COLUMN `allow_service_tier` TINYINT NOT NULL DEFAULT 0 AFTER `limit_tpm`',
+  'ALTER TABLE `upstream_channels` ADD COLUMN `allow_service_tier` TINYINT NOT NULL DEFAULT 0 AFTER `promotion`',
   'SELECT 1'
 );
 PREPARE stmt FROM @ddl;
@@ -50,4 +50,3 @@ SET @ddl := IF(
 PREPARE stmt FROM @ddl;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
-

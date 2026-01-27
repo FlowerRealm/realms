@@ -82,10 +82,6 @@ type UpstreamChannel struct {
 	Priority  int
 	Promotion bool
 
-	LimitSessions *int
-	LimitRPM      *int
-	LimitTPM      *int
-
 	AllowServiceTier      bool
 	DisableStore          bool
 	AllowSafetyIdentifier bool
@@ -114,33 +110,27 @@ type UpstreamEndpoint struct {
 }
 
 type OpenAICompatibleCredential struct {
-	ID            int64
-	EndpointID    int64
-	Name          *string
-	APIKeyEnc     []byte
-	APIKeyHint    *string
-	Status        int
-	LimitSessions *int
-	LimitRPM      *int
-	LimitTPM      *int
-	LastUsedAt    *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID         int64
+	EndpointID int64
+	Name       *string
+	APIKeyEnc  []byte
+	APIKeyHint *string
+	Status     int
+	LastUsedAt *time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 type AnthropicCredential struct {
-	ID            int64
-	EndpointID    int64
-	Name          *string
-	APIKeyEnc     []byte
-	APIKeyHint    *string
-	Status        int
-	LimitSessions *int
-	LimitRPM      *int
-	LimitTPM      *int
-	LastUsedAt    *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID         int64
+	EndpointID int64
+	Name       *string
+	APIKeyEnc  []byte
+	APIKeyHint *string
+	Status     int
+	LastUsedAt *time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 type CodexOAuthPending struct {
@@ -162,9 +152,6 @@ type CodexOAuthAccount struct {
 	ExpiresAt       *time.Time
 	LastRefreshAt   *time.Time
 	Status          int
-	LimitSessions   *int
-	LimitRPM        *int
-	LimitTPM        *int
 	CooldownUntil   *time.Time
 	LastUsedAt      *time.Time
 

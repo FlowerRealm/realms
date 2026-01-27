@@ -7,12 +7,8 @@ CREATE TABLE IF NOT EXISTS `anthropic_credentials` (
   `api_key_enc` BLOB NOT NULL,
   `api_key_hint` VARCHAR(32) NULL,
   `status` TINYINT NOT NULL DEFAULT 1,
-  `limit_sessions` INT NULL,
-  `limit_rpm` INT NULL,
-  `limit_tpm` INT NULL,
   `last_used_at` DATETIME NULL,
   `created_at` DATETIME NOT NULL,
   `updated_at` DATETIME NOT NULL,
   KEY `idx_anthropic_credentials_endpoint_id` (`endpoint_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-

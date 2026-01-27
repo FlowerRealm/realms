@@ -43,10 +43,6 @@ type Selection struct {
 
 	CredentialType CredentialType
 	CredentialID   int64
-
-	CredentialLimitSessions *int
-	CredentialLimitRPM      *int
-	CredentialLimitTPM      *int
 }
 
 func (s Selection) CredentialKey() string {
@@ -160,13 +156,9 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 	if routeKeyHash != "" {
 		if sel, ok := s.state.GetBinding(userID, routeKeyHash); ok {
 			credKey := sel.CredentialKey()
-			overRPM := sel.CredentialLimitRPM != nil && *sel.CredentialLimitRPM > 0 && s.state.RPM(credKey, now, s.rpmWindow) >= *sel.CredentialLimitRPM
-			overTPM := sel.CredentialLimitTPM != nil && *sel.CredentialLimitTPM > 0 && s.state.TPM(credKey, now, s.rpmWindow) >= *sel.CredentialLimitTPM
 			if selectionMatchesConstraints(sel, cons) &&
 				!s.state.IsChannelBanned(sel.ChannelID, now) &&
-				!s.state.IsCredentialCooling(credKey, now) &&
-				!overRPM &&
-				!overTPM {
+				!s.state.IsCredentialCooling(credKey, now) {
 				// 命中成功后 touch 续期（TTL）。
 				s.state.SetBinding(userID, routeKeyHash, sel, now.Add(s.bindingTTL))
 				s.state.RecordRPM(credKey, now)
@@ -240,7 +232,7 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 			return eps[i].ID > eps[j].ID
 		})
 		for _, ep := range eps {
-			sel, ok, err := s.selectCredential(ctx, ch, ep, now, routeKeyHash != "")
+			sel, ok, err := s.selectCredential(ctx, ch, ep, now)
 			if err != nil {
 				return Selection{}, err
 			}
@@ -275,20 +267,14 @@ func selectionMatchesConstraints(sel Selection, c Constraints) bool {
 	return true
 }
 
-func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChannel, ep store.UpstreamEndpoint, now time.Time, isNewSession bool) (Selection, bool, error) {
+func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChannel, ep store.UpstreamEndpoint, now time.Time) (Selection, bool, error) {
 	switch ch.Type {
 	case store.UpstreamTypeOpenAICompatible:
 		creds, err := s.st.ListOpenAICompatibleCredentialsByEndpoint(ctx, ep.ID)
 		if err != nil {
 			return Selection{}, false, err
 		}
-		type cand struct {
-			id            int64
-			limitSessions *int
-			limitRPM      *int
-			limitTPM      *int
-		}
-		var ids []cand
+		var ids []int64
 		for _, c := range creds {
 			if c.Status != 1 {
 				continue
@@ -297,35 +283,20 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			if s.state.IsCredentialCooling(key, now) {
 				continue
 			}
-			if c.LimitRPM != nil && *c.LimitRPM > 0 {
-				if s.state.RPM(key, now, s.rpmWindow) >= *c.LimitRPM {
-					continue
-				}
-			}
-			if c.LimitTPM != nil && *c.LimitTPM > 0 {
-				if s.state.TPM(key, now, s.rpmWindow) >= *c.LimitTPM {
-					continue
-				}
-			}
-			if isNewSession && c.LimitSessions != nil && *c.LimitSessions > 0 {
-				if s.state.CredentialSessions(key, now) >= *c.LimitSessions {
-					continue
-				}
-			}
-			ids = append(ids, cand{id: c.ID, limitSessions: c.LimitSessions, limitRPM: c.LimitRPM, limitTPM: c.LimitTPM})
+			ids = append(ids, c.ID)
 		}
 		if len(ids) == 0 {
 			return Selection{}, false, nil
 		}
 		sort.SliceStable(ids, func(i, j int) bool {
-			ki := fmt.Sprintf("%s:%d", CredentialTypeOpenAI, ids[i].id)
-			kj := fmt.Sprintf("%s:%d", CredentialTypeOpenAI, ids[j].id)
+			ki := fmt.Sprintf("%s:%d", CredentialTypeOpenAI, ids[i])
+			kj := fmt.Sprintf("%s:%d", CredentialTypeOpenAI, ids[j])
 			ri := s.state.RPM(ki, now, s.rpmWindow)
 			rj := s.state.RPM(kj, now, s.rpmWindow)
 			if ri != rj {
 				return ri < rj
 			}
-			return ids[i].id > ids[j].id
+			return ids[i] > ids[j]
 		})
 		return Selection{
 			ChannelID:             ch.ID,
@@ -343,24 +314,14 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			EndpointID:            ep.ID,
 			BaseURL:               ep.BaseURL,
 			CredentialType:        CredentialTypeOpenAI,
-			CredentialID:          ids[0].id,
-
-			CredentialLimitSessions: ids[0].limitSessions,
-			CredentialLimitRPM:      ids[0].limitRPM,
-			CredentialLimitTPM:      ids[0].limitTPM,
+			CredentialID:          ids[0],
 		}, true, nil
 	case store.UpstreamTypeAnthropic:
 		creds, err := s.st.ListAnthropicCredentialsByEndpoint(ctx, ep.ID)
 		if err != nil {
 			return Selection{}, false, err
 		}
-		type cand struct {
-			id            int64
-			limitSessions *int
-			limitRPM      *int
-			limitTPM      *int
-		}
-		var ids []cand
+		var ids []int64
 		for _, c := range creds {
 			if c.Status != 1 {
 				continue
@@ -369,35 +330,20 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			if s.state.IsCredentialCooling(key, now) {
 				continue
 			}
-			if c.LimitRPM != nil && *c.LimitRPM > 0 {
-				if s.state.RPM(key, now, s.rpmWindow) >= *c.LimitRPM {
-					continue
-				}
-			}
-			if c.LimitTPM != nil && *c.LimitTPM > 0 {
-				if s.state.TPM(key, now, s.rpmWindow) >= *c.LimitTPM {
-					continue
-				}
-			}
-			if isNewSession && c.LimitSessions != nil && *c.LimitSessions > 0 {
-				if s.state.CredentialSessions(key, now) >= *c.LimitSessions {
-					continue
-				}
-			}
-			ids = append(ids, cand{id: c.ID, limitSessions: c.LimitSessions, limitRPM: c.LimitRPM, limitTPM: c.LimitTPM})
+			ids = append(ids, c.ID)
 		}
 		if len(ids) == 0 {
 			return Selection{}, false, nil
 		}
 		sort.SliceStable(ids, func(i, j int) bool {
-			ki := fmt.Sprintf("%s:%d", CredentialTypeAnthropic, ids[i].id)
-			kj := fmt.Sprintf("%s:%d", CredentialTypeAnthropic, ids[j].id)
+			ki := fmt.Sprintf("%s:%d", CredentialTypeAnthropic, ids[i])
+			kj := fmt.Sprintf("%s:%d", CredentialTypeAnthropic, ids[j])
 			ri := s.state.RPM(ki, now, s.rpmWindow)
 			rj := s.state.RPM(kj, now, s.rpmWindow)
 			if ri != rj {
 				return ri < rj
 			}
-			return ids[i].id > ids[j].id
+			return ids[i] > ids[j]
 		})
 		return Selection{
 			ChannelID:             ch.ID,
@@ -415,24 +361,14 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			EndpointID:            ep.ID,
 			BaseURL:               ep.BaseURL,
 			CredentialType:        CredentialTypeAnthropic,
-			CredentialID:          ids[0].id,
-
-			CredentialLimitSessions: ids[0].limitSessions,
-			CredentialLimitRPM:      ids[0].limitRPM,
-			CredentialLimitTPM:      ids[0].limitTPM,
+			CredentialID:          ids[0],
 		}, true, nil
 	case store.UpstreamTypeCodexOAuth:
 		accs, err := s.st.ListCodexOAuthAccountsByEndpoint(ctx, ep.ID)
 		if err != nil {
 			return Selection{}, false, err
 		}
-		type cand struct {
-			id            int64
-			limitSessions *int
-			limitRPM      *int
-			limitTPM      *int
-		}
-		var ids []cand
+		var ids []int64
 		for _, a := range accs {
 			if a.Status != 1 {
 				continue
@@ -444,35 +380,20 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			if s.state.IsCredentialCooling(key, now) {
 				continue
 			}
-			if a.LimitRPM != nil && *a.LimitRPM > 0 {
-				if s.state.RPM(key, now, s.rpmWindow) >= *a.LimitRPM {
-					continue
-				}
-			}
-			if a.LimitTPM != nil && *a.LimitTPM > 0 {
-				if s.state.TPM(key, now, s.rpmWindow) >= *a.LimitTPM {
-					continue
-				}
-			}
-			if isNewSession && a.LimitSessions != nil && *a.LimitSessions > 0 {
-				if s.state.CredentialSessions(key, now) >= *a.LimitSessions {
-					continue
-				}
-			}
-			ids = append(ids, cand{id: a.ID, limitSessions: a.LimitSessions, limitRPM: a.LimitRPM, limitTPM: a.LimitTPM})
+			ids = append(ids, a.ID)
 		}
 		if len(ids) == 0 {
 			return Selection{}, false, nil
 		}
 		sort.SliceStable(ids, func(i, j int) bool {
-			ki := fmt.Sprintf("%s:%d", CredentialTypeCodex, ids[i].id)
-			kj := fmt.Sprintf("%s:%d", CredentialTypeCodex, ids[j].id)
+			ki := fmt.Sprintf("%s:%d", CredentialTypeCodex, ids[i])
+			kj := fmt.Sprintf("%s:%d", CredentialTypeCodex, ids[j])
 			ri := s.state.RPM(ki, now, s.rpmWindow)
 			rj := s.state.RPM(kj, now, s.rpmWindow)
 			if ri != rj {
 				return ri < rj
 			}
-			return ids[i].id > ids[j].id
+			return ids[i] > ids[j]
 		})
 		return Selection{
 			ChannelID:             ch.ID,
@@ -490,11 +411,7 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			EndpointID:            ep.ID,
 			BaseURL:               ep.BaseURL,
 			CredentialType:        CredentialTypeCodex,
-			CredentialID:          ids[0].id,
-
-			CredentialLimitSessions: ids[0].limitSessions,
-			CredentialLimitRPM:      ids[0].limitRPM,
-			CredentialLimitTPM:      ids[0].limitTPM,
+			CredentialID:          ids[0],
 		}, true, nil
 	default:
 		return Selection{}, false, nil

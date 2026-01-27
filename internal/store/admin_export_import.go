@@ -57,10 +57,6 @@ type AdminConfigUpstreamChannel struct {
 
 	Promotion bool `json:"promotion"`
 
-	LimitSessions *int `json:"limit_sessions,omitempty"`
-	LimitRPM      *int `json:"limit_rpm,omitempty"`
-	LimitTPM      *int `json:"limit_tpm,omitempty"`
-
 	AllowServiceTier      bool            `json:"allow_service_tier,omitempty"`
 	DisableStore          bool            `json:"disable_store,omitempty"`
 	AllowSafetyIdentifier bool            `json:"allow_safety_identifier,omitempty"`
@@ -208,9 +204,6 @@ func (s *Store) ExportAdminConfig(ctx context.Context) (AdminConfigExport, error
 			Status:                ch.Status,
 			Priority:              ch.Priority,
 			Promotion:             ch.Promotion,
-			LimitSessions:         ch.LimitSessions,
-			LimitRPM:              ch.LimitRPM,
-			LimitTPM:              ch.LimitTPM,
 			AllowServiceTier:      ch.AllowServiceTier,
 			DisableStore:          ch.DisableStore,
 			AllowSafetyIdentifier: ch.AllowSafetyIdentifier,
@@ -533,33 +526,33 @@ ON CONFLICT(name) DO UPDATE SET
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				stmtInsert := `
-INSERT INTO upstream_channels(type, name, ` + "`groups`" + `, status, priority, promotion, limit_sessions, limit_rpm, limit_tpm, created_at, updated_at)
-VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+INSERT INTO upstream_channels(type, name, ` + "`groups`" + `, status, priority, promotion, created_at, updated_at)
+VALUES(?, ?, '', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `
-				args := []any{typ, name, ch.Status, ch.Priority, p, nullableIntPtr(ch.LimitSessions), nullableIntPtr(ch.LimitRPM), nullableIntPtr(ch.LimitTPM)}
+				args := []any{typ, name, ch.Status, ch.Priority, p}
 				if in.Version >= 4 {
 					stmtInsert = `
-INSERT INTO upstream_channels(type, name, ` + "`groups`" + `, status, priority, promotion, limit_sessions, limit_rpm, limit_tpm, allow_service_tier, disable_store, allow_safety_identifier, param_override, header_override, status_code_mapping, created_at, updated_at)
-VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+INSERT INTO upstream_channels(type, name, ` + "`groups`" + `, status, priority, promotion, allow_service_tier, disable_store, allow_safety_identifier, param_override, header_override, status_code_mapping, created_at, updated_at)
+VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `
 					args = append(args, allowServiceTier, disableStore, allowSafetyIdentifier, nullableString(&paramOverride), nullableString(&headerOverride), nullableString(&statusCodeMapping))
 					if in.Version >= 5 {
 						stmtInsert = `
-INSERT INTO upstream_channels(type, name, ` + "`groups`" + `, status, priority, promotion, limit_sessions, limit_rpm, limit_tpm, allow_service_tier, disable_store, allow_safety_identifier, param_override, header_override, status_code_mapping, model_suffix_preserve, request_body_blacklist, request_body_whitelist, created_at, updated_at)
-VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+INSERT INTO upstream_channels(type, name, ` + "`groups`" + `, status, priority, promotion, allow_service_tier, disable_store, allow_safety_identifier, param_override, header_override, status_code_mapping, model_suffix_preserve, request_body_blacklist, request_body_whitelist, created_at, updated_at)
+VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `
 						args = append(args, nullableString(&modelSuffixPreserve), nullableString(&requestBodyBlacklist), nullableString(&requestBodyWhitelist))
 					}
 				} else if in.Version >= 3 {
 					stmtInsert = `
-INSERT INTO upstream_channels(type, name, ` + "`groups`" + `, status, priority, promotion, limit_sessions, limit_rpm, limit_tpm, allow_service_tier, disable_store, allow_safety_identifier, param_override, created_at, updated_at)
-VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+INSERT INTO upstream_channels(type, name, ` + "`groups`" + `, status, priority, promotion, allow_service_tier, disable_store, allow_safety_identifier, param_override, created_at, updated_at)
+VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `
 					args = append(args, allowServiceTier, disableStore, allowSafetyIdentifier, nullableString(&paramOverride))
 				} else if in.Version >= 2 {
 					stmtInsert = `
-INSERT INTO upstream_channels(type, name, ` + "`groups`" + `, status, priority, promotion, limit_sessions, limit_rpm, limit_tpm, allow_service_tier, disable_store, allow_safety_identifier, created_at, updated_at)
-VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+INSERT INTO upstream_channels(type, name, ` + "`groups`" + `, status, priority, promotion, allow_service_tier, disable_store, allow_safety_identifier, created_at, updated_at)
+VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `
 					args = append(args, allowServiceTier, disableStore, allowSafetyIdentifier)
 				}
@@ -579,17 +572,15 @@ VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 UPDATE upstream_channels
 SET name=COALESCE(NULLIF(?, ''), name),
     status=?, priority=?, promotion=?,
-    limit_sessions=?, limit_rpm=?, limit_tpm=?,
     updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `
-			args := []any{name, ch.Status, ch.Priority, p, nullableIntPtr(ch.LimitSessions), nullableIntPtr(ch.LimitRPM), nullableIntPtr(ch.LimitTPM), id}
+			args := []any{name, ch.Status, ch.Priority, p, id}
 			if in.Version >= 4 {
 				stmtUpdate = `
 UPDATE upstream_channels
 SET name=COALESCE(NULLIF(?, ''), name),
     status=?, priority=?, promotion=?,
-    limit_sessions=?, limit_rpm=?, limit_tpm=?,
     allow_service_tier=?, disable_store=?, allow_safety_identifier=?,
     param_override=?,
     header_override=?,
@@ -597,13 +588,12 @@ SET name=COALESCE(NULLIF(?, ''), name),
     updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `
-				args = []any{name, ch.Status, ch.Priority, p, nullableIntPtr(ch.LimitSessions), nullableIntPtr(ch.LimitRPM), nullableIntPtr(ch.LimitTPM), allowServiceTier, disableStore, allowSafetyIdentifier, nullableString(&paramOverride), nullableString(&headerOverride), nullableString(&statusCodeMapping), id}
+				args = []any{name, ch.Status, ch.Priority, p, allowServiceTier, disableStore, allowSafetyIdentifier, nullableString(&paramOverride), nullableString(&headerOverride), nullableString(&statusCodeMapping), id}
 				if in.Version >= 5 {
 					stmtUpdate = `
 UPDATE upstream_channels
 SET name=COALESCE(NULLIF(?, ''), name),
     status=?, priority=?, promotion=?,
-    limit_sessions=?, limit_rpm=?, limit_tpm=?,
     allow_service_tier=?, disable_store=?, allow_safety_identifier=?,
     param_override=?,
     header_override=?,
@@ -614,31 +604,29 @@ SET name=COALESCE(NULLIF(?, ''), name),
     updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `
-					args = []any{name, ch.Status, ch.Priority, p, nullableIntPtr(ch.LimitSessions), nullableIntPtr(ch.LimitRPM), nullableIntPtr(ch.LimitTPM), allowServiceTier, disableStore, allowSafetyIdentifier, nullableString(&paramOverride), nullableString(&headerOverride), nullableString(&statusCodeMapping), nullableString(&modelSuffixPreserve), nullableString(&requestBodyBlacklist), nullableString(&requestBodyWhitelist), id}
+					args = []any{name, ch.Status, ch.Priority, p, allowServiceTier, disableStore, allowSafetyIdentifier, nullableString(&paramOverride), nullableString(&headerOverride), nullableString(&statusCodeMapping), nullableString(&modelSuffixPreserve), nullableString(&requestBodyBlacklist), nullableString(&requestBodyWhitelist), id}
 				}
 			} else if in.Version >= 3 {
 				stmtUpdate = `
 UPDATE upstream_channels
 SET name=COALESCE(NULLIF(?, ''), name),
     status=?, priority=?, promotion=?,
-    limit_sessions=?, limit_rpm=?, limit_tpm=?,
     allow_service_tier=?, disable_store=?, allow_safety_identifier=?,
     param_override=?,
     updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `
-				args = []any{name, ch.Status, ch.Priority, p, nullableIntPtr(ch.LimitSessions), nullableIntPtr(ch.LimitRPM), nullableIntPtr(ch.LimitTPM), allowServiceTier, disableStore, allowSafetyIdentifier, nullableString(&paramOverride), id}
+				args = []any{name, ch.Status, ch.Priority, p, allowServiceTier, disableStore, allowSafetyIdentifier, nullableString(&paramOverride), id}
 			} else if in.Version >= 2 {
 				stmtUpdate = `
 UPDATE upstream_channels
 SET name=COALESCE(NULLIF(?, ''), name),
     status=?, priority=?, promotion=?,
-    limit_sessions=?, limit_rpm=?, limit_tpm=?,
     allow_service_tier=?, disable_store=?, allow_safety_identifier=?,
     updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `
-				args = []any{name, ch.Status, ch.Priority, p, nullableIntPtr(ch.LimitSessions), nullableIntPtr(ch.LimitRPM), nullableIntPtr(ch.LimitTPM), allowServiceTier, disableStore, allowSafetyIdentifier, id}
+				args = []any{name, ch.Status, ch.Priority, p, allowServiceTier, disableStore, allowSafetyIdentifier, id}
 			}
 			if _, err := tx.ExecContext(ctx, stmtUpdate, args...); err != nil {
 				return 0, fmt.Errorf("更新 upstream_channel 失败: %w", err)

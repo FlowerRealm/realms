@@ -71,9 +71,6 @@ CREATE TABLE IF NOT EXISTS `upstream_channels` (
   `status` INTEGER NOT NULL DEFAULT 1,
   `priority` INTEGER NOT NULL DEFAULT 0,
   `promotion` INTEGER NOT NULL DEFAULT 0,
-  `limit_sessions` INTEGER NULL,
-  `limit_rpm` INTEGER NULL,
-  `limit_tpm` INTEGER NULL,
   `allow_service_tier` INTEGER NOT NULL DEFAULT 0,
   `disable_store` INTEGER NOT NULL DEFAULT 0,
   `allow_safety_identifier` INTEGER NOT NULL DEFAULT 0,
@@ -108,9 +105,6 @@ CREATE TABLE IF NOT EXISTS `openai_compatible_credentials` (
   `api_key_enc` BLOB NOT NULL,
   `api_key_hint` TEXT NULL,
   `status` INTEGER NOT NULL DEFAULT 1,
-  `limit_sessions` INTEGER NULL,
-  `limit_rpm` INTEGER NULL,
-  `limit_tpm` INTEGER NULL,
   `last_used_at` DATETIME NULL,
   `created_at` DATETIME NOT NULL,
   `updated_at` DATETIME NOT NULL
@@ -128,9 +122,6 @@ CREATE TABLE IF NOT EXISTS `codex_oauth_accounts` (
   `expires_at` DATETIME NULL,
   `last_refresh_at` DATETIME NULL,
   `status` INTEGER NOT NULL DEFAULT 1,
-  `limit_sessions` INTEGER NULL,
-  `limit_rpm` INTEGER NULL,
-  `limit_tpm` INTEGER NULL,
   `cooldown_until` DATETIME NULL,
   `last_used_at` DATETIME NULL,
 
@@ -523,8 +514,8 @@ SELECT 'default', '默认分组', 1.000000, 1, 5, CURRENT_TIMESTAMP, CURRENT_TIM
 WHERE NOT EXISTS (SELECT 1 FROM channel_groups WHERE name='default' LIMIT 1);
 
 -- Seed: 内置 Codex OAuth 渠道
-INSERT INTO upstream_channels(type, name, `groups`, status, priority, promotion, limit_sessions, limit_rpm, limit_tpm, last_test_at, last_test_latency_ms, last_test_ok, created_at, updated_at)
-SELECT 'codex_oauth', 'Codex OAuth', 'default', 1, 0, 0, NULL, NULL, NULL, NULL, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+INSERT INTO upstream_channels(type, name, `groups`, status, priority, promotion, last_test_at, last_test_latency_ms, last_test_ok, created_at, updated_at)
+SELECT 'codex_oauth', 'Codex OAuth', 'default', 1, 0, 0, NULL, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM upstream_channels WHERE type='codex_oauth' LIMIT 1);
 
 -- Seed: 为内置 codex_oauth 补齐默认 endpoint（与 MySQL 迁移一致）
