@@ -35,7 +35,7 @@ func toChannelModelView(m store.ChannelModel, loc *time.Location) channelModelVi
 }
 
 func (s *Server) ChannelModels(w http.ResponseWriter, r *http.Request) {
-	u, csrf, isRoot, err := s.currentUser(r)
+	_, _, _, err := s.currentUser(r)
 	if err != nil {
 		http.Error(w, "未登录", http.StatusUnauthorized)
 		return
@@ -45,8 +45,7 @@ func (s *Server) ChannelModels(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "参数错误", http.StatusBadRequest)
 		return
 	}
-	ch, err := s.st.GetUpstreamChannelByID(r.Context(), channelID)
-	if err != nil {
+	if _, err := s.st.GetUpstreamChannelByID(r.Context(), channelID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Error(w, "Channel 不存在", http.StatusNotFound)
 			return
@@ -55,44 +54,16 @@ func (s *Server) ChannelModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loc, _ := s.adminTimeLocation(r.Context())
-	cms, err := s.st.ListChannelModelsByChannelID(r.Context(), channelID)
-	if err != nil {
-		http.Error(w, "查询失败", http.StatusInternalServerError)
-		return
-	}
-	views := make([]channelModelView, 0, len(cms))
-	for _, m := range cms {
-		views = append(views, toChannelModelView(m, loc))
-	}
+	q := r.URL.Query()
+	q.Set("open_channel_settings", fmt.Sprintf("%d", channelID))
 
-	// Provide model list for dropdown.
-	ms, _ := s.st.ListManagedModels(r.Context())
-	modelViews := make([]managedModelView, 0, len(ms))
-	for _, m := range ms {
-		modelViews = append(modelViews, toManagedModelView(m, loc))
+	target := "/admin/channels"
+	if enc := q.Encode(); enc != "" {
+		target += "?" + enc
 	}
+	target += "#models"
 
-	errMsg := strings.TrimSpace(r.URL.Query().Get("err"))
-	if len(errMsg) > 200 {
-		errMsg = errMsg[:200] + "..."
-	}
-	notice := strings.TrimSpace(r.URL.Query().Get("msg"))
-	if len(notice) > 200 {
-		notice = notice[:200] + "..."
-	}
-
-	s.render(w, "admin_channel_models", s.withFeatures(r.Context(), templateData{
-		Title:         "渠道模型绑定 - Realms",
-		Error:         errMsg,
-		Notice:        notice,
-		User:          u,
-		IsRoot:        isRoot,
-		CSRFToken:     csrf,
-		Channel:       ch,
-		ChannelModels: views,
-		ManagedModels: modelViews,
-	}))
+	http.Redirect(w, r, target, http.StatusFound)
 }
 
 func (s *Server) CreateChannelModel(w http.ResponseWriter, r *http.Request) {
@@ -123,7 +94,7 @@ func (s *Server) CreateChannelModel(w http.ResponseWriter, r *http.Request) {
 			ajaxError(w, http.StatusBadRequest, "public_id 不能为空")
 			return
 		}
-		http.Redirect(w, r, "/admin/channels/"+fmt.Sprintf("%d", channelID)+"/models?err="+url.QueryEscape("public_id 不能为空"), http.StatusFound)
+		http.Redirect(w, r, "/admin/channels?open_channel_settings="+fmt.Sprintf("%d", channelID)+"&err="+url.QueryEscape("public_id 不能为空")+"#models", http.StatusFound)
 		return
 	}
 	if upstreamModel == "" {
@@ -134,7 +105,7 @@ func (s *Server) CreateChannelModel(w http.ResponseWriter, r *http.Request) {
 			ajaxError(w, http.StatusBadRequest, "status 不合法")
 			return
 		}
-		http.Redirect(w, r, "/admin/channels/"+fmt.Sprintf("%d", channelID)+"/models?err="+url.QueryEscape("status 不合法"), http.StatusFound)
+		http.Redirect(w, r, "/admin/channels?open_channel_settings="+fmt.Sprintf("%d", channelID)+"&err="+url.QueryEscape("status 不合法")+"#models", http.StatusFound)
 		return
 	}
 
@@ -143,7 +114,7 @@ func (s *Server) CreateChannelModel(w http.ResponseWriter, r *http.Request) {
 			ajaxError(w, http.StatusBadRequest, "channel_id 不存在")
 			return
 		}
-		http.Redirect(w, r, "/admin/channels/"+fmt.Sprintf("%d", channelID)+"/models?err="+url.QueryEscape("channel_id 不存在"), http.StatusFound)
+		http.Redirect(w, r, "/admin/channels?open_channel_settings="+fmt.Sprintf("%d", channelID)+"&err="+url.QueryEscape("channel_id 不存在")+"#models", http.StatusFound)
 		return
 	}
 	if _, err := s.st.GetManagedModelByPublicID(r.Context(), publicID); err != nil {
@@ -151,7 +122,7 @@ func (s *Server) CreateChannelModel(w http.ResponseWriter, r *http.Request) {
 			ajaxError(w, http.StatusBadRequest, "public_id 不存在，请先在模型管理创建")
 			return
 		}
-		http.Redirect(w, r, "/admin/channels/"+fmt.Sprintf("%d", channelID)+"/models?err="+url.QueryEscape("public_id 不存在，请先在模型管理创建"), http.StatusFound)
+		http.Redirect(w, r, "/admin/channels?open_channel_settings="+fmt.Sprintf("%d", channelID)+"&err="+url.QueryEscape("public_id 不存在，请先在模型管理创建")+"#models", http.StatusFound)
 		return
 	}
 
@@ -165,23 +136,22 @@ func (s *Server) CreateChannelModel(w http.ResponseWriter, r *http.Request) {
 			ajaxError(w, http.StatusInternalServerError, "创建失败")
 			return
 		}
-		http.Redirect(w, r, "/admin/channels/"+fmt.Sprintf("%d", channelID)+"/models?err="+url.QueryEscape("创建失败"), http.StatusFound)
+		http.Redirect(w, r, "/admin/channels?open_channel_settings="+fmt.Sprintf("%d", channelID)+"&err="+url.QueryEscape("创建失败")+"#models", http.StatusFound)
 		return
 	}
 	if isAjax(r) {
 		ajaxOK(w, "已创建")
 		return
 	}
-	http.Redirect(w, r, "/admin/channels/"+fmt.Sprintf("%d", channelID)+"/models?msg="+url.QueryEscape("已创建"), http.StatusFound)
+	http.Redirect(w, r, "/admin/channels?open_channel_settings="+fmt.Sprintf("%d", channelID)+"&msg="+url.QueryEscape("已创建")+"#models", http.StatusFound)
 }
 
 func (s *Server) ChannelModel(w http.ResponseWriter, r *http.Request) {
-	u, csrf, isRoot, err := s.currentUser(r)
+	_, _, _, err := s.currentUser(r)
 	if err != nil {
 		http.Error(w, "未登录", http.StatusUnauthorized)
 		return
 	}
-	loc, _ := s.adminTimeLocation(r.Context())
 	channelID, err := parseInt64(r.PathValue("channel_id"))
 	if err != nil {
 		http.Error(w, "参数错误", http.StatusBadRequest)
@@ -193,7 +163,7 @@ func (s *Server) ChannelModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ch, err := s.st.GetUpstreamChannelByID(r.Context(), channelID)
+	_, err = s.st.GetUpstreamChannelByID(r.Context(), channelID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Error(w, "Channel 不存在", http.StatusNotFound)
@@ -216,27 +186,16 @@ func (s *Server) ChannelModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ms, _ := s.st.ListManagedModels(r.Context())
-	modelViews := make([]managedModelView, 0, len(ms))
-	for _, m := range ms {
-		modelViews = append(modelViews, toManagedModelView(m, loc))
-	}
+	q := r.URL.Query()
+	q.Set("open_channel_settings", fmt.Sprintf("%d", channelID))
 
-	notice := strings.TrimSpace(r.URL.Query().Get("msg"))
-	if len(notice) > 200 {
-		notice = notice[:200] + "..."
+	target := "/admin/channels"
+	if enc := q.Encode(); enc != "" {
+		target += "?" + enc
 	}
+	target += "#models"
 
-	s.render(w, "admin_channel_model_edit", s.withFeatures(r.Context(), templateData{
-		Title:         "编辑渠道模型绑定 - Realms",
-		Notice:        notice,
-		User:          u,
-		IsRoot:        isRoot,
-		CSRFToken:     csrf,
-		Channel:       ch,
-		ChannelModel:  toChannelModelView(cm, loc),
-		ManagedModels: modelViews,
-	}))
+	http.Redirect(w, r, target, http.StatusFound)
 }
 
 func (s *Server) UpdateChannelModel(w http.ResponseWriter, r *http.Request) {
@@ -309,7 +268,7 @@ func (s *Server) UpdateChannelModel(w http.ResponseWriter, r *http.Request) {
 		ajaxOK(w, "已保存")
 		return
 	}
-	http.Redirect(w, r, "/admin/channels/"+fmt.Sprintf("%d", channelID)+"/models/"+fmt.Sprintf("%d", bindingID)+"?msg="+url.QueryEscape("已保存"), http.StatusFound)
+	http.Redirect(w, r, "/admin/channels?open_channel_settings="+fmt.Sprintf("%d", channelID)+"&msg="+url.QueryEscape("已保存")+"#models", http.StatusFound)
 }
 
 func (s *Server) DeleteChannelModel(w http.ResponseWriter, r *http.Request) {
@@ -347,5 +306,5 @@ func (s *Server) DeleteChannelModel(w http.ResponseWriter, r *http.Request) {
 		ajaxOK(w, "已删除")
 		return
 	}
-	http.Redirect(w, r, "/admin/channels/"+fmt.Sprintf("%d", channelID)+"/models?msg="+url.QueryEscape("已删除"), http.StatusFound)
+	http.Redirect(w, r, "/admin/channels?open_channel_settings="+fmt.Sprintf("%d", channelID)+"&msg="+url.QueryEscape("已删除")+"#models", http.StatusFound)
 }

@@ -18,7 +18,7 @@ func TestIsChannelGroupsUpdateForm(t *testing.T) {
 		t.Fatalf("expected true when intent is update_channel_groups")
 	}
 
-	if isChannelGroupsUpdateForm(url.Values{"return_to": []string{"/admin/channels/1/endpoints#groups"}}) {
+	if isChannelGroupsUpdateForm(url.Values{"return_to": []string{"/admin/channels?open_channel_settings=1#groups"}}) {
 		t.Fatalf("expected false when only return_to is present")
 	}
 

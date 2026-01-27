@@ -819,7 +819,7 @@ func (a *App) RefreshCodexQuotasByEndpoint(w http.ResponseWriter, r *http.Reques
 		a.refreshCodexBalance(perCtx, acc.ID)
 		perCancel()
 	}
-	http.Redirect(w, r, fmt.Sprintf("/admin/channels/%d/endpoints#accounts", ch.ID), http.StatusFound)
+	http.Redirect(w, r, fmt.Sprintf("/admin/channels?open_channel_settings=%d#accounts", ch.ID), http.StatusFound)
 }
 
 func (a *App) RefreshCodexQuota(w http.ResponseWriter, r *http.Request) {
@@ -854,5 +854,5 @@ func (a *App) RefreshCodexQuota(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.refreshCodexBalance(ctx, acc.ID)
-	http.Redirect(w, r, fmt.Sprintf("/admin/channels/%d/endpoints#accounts", ch.ID), http.StatusFound)
+	http.Redirect(w, r, fmt.Sprintf("/admin/channels?open_channel_settings=%d#accounts", ch.ID), http.StatusFound)
 }

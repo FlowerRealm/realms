@@ -462,6 +462,10 @@ type adminChannelView struct {
 	Endpoint store.UpstreamEndpoint
 	Usage    adminChannelUsageView
 	Runtime  adminChannelRuntimeView
+
+	Credentials   []adminCredentialView
+	Accounts      []adminCodexAccountView
+	ChannelModels []channelModelView
 }
 
 type adminChannelUsageView struct {
@@ -2113,6 +2117,16 @@ func (s *Server) Channels(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "查询失败", http.StatusInternalServerError)
 		return
 	}
+
+	ms, err := s.st.ListManagedModels(r.Context())
+	if err != nil {
+		http.Error(w, "查询模型失败", http.StatusInternalServerError)
+		return
+	}
+	modelViews := make([]managedModelView, 0, len(ms))
+	for _, m := range ms {
+		modelViews = append(modelViews, toManagedModelView(m, loc))
+	}
 	channelNameByID := make(map[int64]string, len(channels))
 	for _, ch := range channels {
 		channelNameByID[ch.ID] = ch.Name
@@ -2126,6 +2140,169 @@ func (s *Server) Channels(w http.ResponseWriter, r *http.Request) {
 			if _, err := security.ValidateBaseURL(def); err == nil {
 				ep, _ = s.st.SetUpstreamEndpointBaseURL(r.Context(), ch.ID, def)
 			}
+		}
+
+		var channelCreds []adminCredentialView
+		switch ch.Type {
+		case store.UpstreamTypeOpenAICompatible:
+			rawCreds, err := s.st.ListOpenAICompatibleCredentialsByEndpoint(r.Context(), ep.ID)
+			if err != nil {
+				http.Error(w, "查询失败", http.StatusInternalServerError)
+				return
+			}
+			channelCreds = make([]adminCredentialView, 0, len(rawCreds))
+			for _, c := range rawCreds {
+				maskedKey := "-"
+				if c.APIKeyHint != nil && *c.APIKeyHint != "" {
+					hint := *c.APIKeyHint
+					if len(hint) > 4 {
+						maskedKey = "..." + hint[len(hint)-4:]
+					} else {
+						maskedKey = hint
+					}
+				}
+				channelCreds = append(channelCreds, adminCredentialView{
+					ID:         c.ID,
+					Name:       c.Name,
+					APIKeyHint: c.APIKeyHint,
+					MaskedKey:  maskedKey,
+					Status:     c.Status,
+					Runtime:    adminRuntimeLimitsView{},
+				})
+			}
+		case store.UpstreamTypeAnthropic:
+			rawCreds, err := s.st.ListAnthropicCredentialsByEndpoint(r.Context(), ep.ID)
+			if err != nil {
+				http.Error(w, "查询失败", http.StatusInternalServerError)
+				return
+			}
+			channelCreds = make([]adminCredentialView, 0, len(rawCreds))
+			for _, c := range rawCreds {
+				maskedKey := "-"
+				if c.APIKeyHint != nil && *c.APIKeyHint != "" {
+					hint := *c.APIKeyHint
+					if len(hint) > 4 {
+						maskedKey = "..." + hint[len(hint)-4:]
+					} else {
+						maskedKey = hint
+					}
+				}
+				channelCreds = append(channelCreds, adminCredentialView{
+					ID:         c.ID,
+					Name:       c.Name,
+					APIKeyHint: c.APIKeyHint,
+					MaskedKey:  maskedKey,
+					Status:     c.Status,
+					Runtime:    adminRuntimeLimitsView{},
+				})
+			}
+		default:
+		}
+
+		var channelAccounts []adminCodexAccountView
+		if ch.Type == store.UpstreamTypeCodexOAuth {
+			accs, err := s.st.ListCodexOAuthAccountsByEndpoint(r.Context(), ep.ID)
+			if err != nil {
+				http.Error(w, "查询失败", http.StatusInternalServerError)
+				return
+			}
+
+			now := time.Now()
+			channelAccounts = make([]adminCodexAccountView, 0, len(accs))
+			for _, a := range accs {
+				v := adminCodexAccountView{
+					ID:                      a.ID,
+					AccountID:               a.AccountID,
+					Email:                   a.Email,
+					Status:                  a.Status,
+					InCooldown:              a.CooldownUntil != nil && now.Before(*a.CooldownUntil),
+					ExpiresAt:               formatTimePtrIn(a.ExpiresAt, time.RFC3339, loc),
+					LastRefreshAt:           formatTimePtrIn(a.LastRefreshAt, time.RFC3339, loc),
+					CooldownUntil:           formatTimePtrIn(a.CooldownUntil, time.RFC3339, loc),
+					PlanType:                "-",
+					SubscriptionActiveStart: "-",
+					SubscriptionActiveUntil: "-",
+					SubscriptionDaysLeft:    "-",
+					QuotaCredits:            "-",
+					QuotaPrimary:            "-",
+					QuotaSecondary:          "-",
+					QuotaUpdatedAt:          formatTimePtrIn(a.QuotaUpdatedAt, time.RFC3339, loc),
+					QuotaPrimaryDetail:      "-",
+					QuotaSecondaryDetail:    "-",
+				}
+				if s.sched != nil {
+					rv := adminRuntimeLimitsView{
+						Available: true,
+					}
+					key := fmt.Sprintf("%s:%d", scheduler.CredentialTypeCodex, a.ID)
+					stats := s.sched.RuntimeCredentialStats(key)
+					rv.RPM = stats.RPM
+					rv.TPM = stats.TPM
+					rv.Sessions = stats.Sessions
+					rv.FailScore = stats.FailScore
+					if stats.CoolingUntil != nil {
+						rv.CoolingUntil = formatTimeIn(*stats.CoolingUntil, time.RFC3339, loc)
+					}
+					v.Runtime = rv
+				}
+				v.QuotaCredits = formatCreditsForView(a.QuotaCreditsHasCredits, a.QuotaCreditsUnlimited, a.QuotaCreditsBalance)
+				v.QuotaPrimary = formatRateLimitForView(a.QuotaPrimaryUsedPercent, a.QuotaPrimaryResetAt, loc)
+				v.QuotaSecondary = formatRateLimitForView(a.QuotaSecondaryUsedPercent, a.QuotaSecondaryResetAt, loc)
+				if a.QuotaPrimaryUsedPercent != nil {
+					v.QuotaPrimaryUsed = *a.QuotaPrimaryUsedPercent
+					v.QuotaPrimaryShow = true
+					v.QuotaPrimaryDetail = formatQuotaWindowDetail(a.QuotaPrimaryUsedPercent, a.QuotaPrimaryResetAt, codexTeamQuotaCapUSD5H, loc)
+				}
+				if a.QuotaSecondaryUsedPercent != nil {
+					v.QuotaSecondaryUsed = *a.QuotaSecondaryUsedPercent
+					v.QuotaSecondaryShow = true
+					v.QuotaSecondaryDetail = formatQuotaWindowDetail(a.QuotaSecondaryUsedPercent, a.QuotaSecondaryResetAt, codexTeamQuotaCapUSDWeek, loc)
+				}
+				if a.QuotaError != nil && strings.TrimSpace(*a.QuotaError) != "" {
+					v.QuotaError = strings.TrimSpace(*a.QuotaError)
+				}
+				sec, err := s.st.GetCodexOAuthSecret(r.Context(), a.ID)
+				if err == nil && sec.IDToken != nil && *sec.IDToken != "" {
+					if claims, err := codexoauth.ParseIDTokenClaims(*sec.IDToken); err == nil && claims != nil {
+						if pt := strings.TrimSpace(claims.PlanType); pt != "" {
+							v.PlanType = pt
+						}
+						v.SubscriptionActiveStart = formatClaimTimeIn(claims.SubscriptionActiveStart, loc)
+						v.SubscriptionActiveUntil = formatClaimTimeIn(claims.SubscriptionActiveUntil, loc)
+
+						start, startOK := getClaimFloat64(claims.SubscriptionActiveStart)
+						until, untilOK := getClaimFloat64(claims.SubscriptionActiveUntil)
+						if startOK && untilOK {
+							nowTs := float64(time.Now().Unix())
+							if nowTs >= start && nowTs < until {
+								v.SubscriptionActive = true
+								total := until - start
+								if total > 0 {
+									v.SubscriptionPercent = int(((nowTs - start) / total) * 100)
+									if v.SubscriptionPercent < 0 {
+										v.SubscriptionPercent = 0
+									}
+									if v.SubscriptionPercent > 100 {
+										v.SubscriptionPercent = 100
+									}
+								}
+								v.SubscriptionDaysLeft = formatDaysLeftSeconds(until - nowTs)
+							}
+						}
+					}
+				}
+				channelAccounts = append(channelAccounts, v)
+			}
+		}
+
+		cms, err := s.st.ListChannelModelsByChannelID(r.Context(), ch.ID)
+		if err != nil {
+			http.Error(w, "查询失败", http.StatusInternalServerError)
+			return
+		}
+		channelModels := make([]channelModelView, 0, len(cms))
+		for _, m := range cms {
+			channelModels = append(channelModels, toChannelModelView(m, loc))
 		}
 		channelRuntime := adminChannelRuntimeView{Available: s.sched != nil}
 		if s.sched != nil {
@@ -2153,7 +2330,10 @@ func (s *Server) Channels(w http.ResponseWriter, r *http.Request) {
 				Tokens:       us.Tokens,
 				CacheRatio:   fmt.Sprintf("%.1f%%", us.CacheRatio*100),
 			},
-			Runtime: channelRuntime,
+			Runtime:       channelRuntime,
+			Credentials:   channelCreds,
+			Accounts:      channelAccounts,
+			ChannelModels: channelModels,
 		})
 	}
 
@@ -2213,6 +2393,7 @@ func (s *Server) Channels(w http.ResponseWriter, r *http.Request) {
 		ChannelGroups:          channelGroups,
 		Channels:               channels,
 		ChannelViews:           cvs,
+		ManagedModels:          modelViews,
 		SchedulerRuntime:       schedulerRuntime,
 	}))
 }
@@ -2448,18 +2629,10 @@ func (s *Server) DeleteChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) Endpoints(w http.ResponseWriter, r *http.Request) {
-	u, csrf, isRoot, err := s.currentUser(r)
+	_, _, _, err := s.currentUser(r)
 	if err != nil {
 		http.Error(w, "未登录", http.StatusUnauthorized)
 		return
-	}
-	errMsg := strings.TrimSpace(r.URL.Query().Get("err"))
-	if len(errMsg) > 200 {
-		errMsg = errMsg[:200] + "..."
-	}
-	notice := strings.TrimSpace(r.URL.Query().Get("msg"))
-	if len(notice) > 200 {
-		notice = notice[:200] + "..."
 	}
 
 	channelID, err := parseInt64(r.PathValue("channel_id"))
@@ -2473,253 +2646,21 @@ func (s *Server) Endpoints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loc, _ := s.adminTimeLocation(r.Context())
-	nowRuntime := time.Now()
-	ep, err := s.st.GetUpstreamEndpointByChannelID(r.Context(), ch.ID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			baseURL := defaultEndpointBaseURL(ch.Type)
-			if _, err := security.ValidateBaseURL(baseURL); err != nil {
-				http.Error(w, "默认 base_url 不合法："+err.Error(), http.StatusInternalServerError)
-				return
-			}
-			ep, err = s.st.SetUpstreamEndpointBaseURL(r.Context(), ch.ID, baseURL)
-		}
-	}
-	if err != nil {
-		http.Error(w, "查询失败", http.StatusInternalServerError)
-		return
-	}
-
-	channelGroups, err := s.st.ListChannelGroups(r.Context())
-	if err != nil {
-		http.Error(w, "查询渠道分组失败", http.StatusInternalServerError)
-		return
-	}
-	channelGroups = mergeChannelGroupsOptions(channelGroups, splitGroups(ch.Groups))
-
-	channelRuntime := adminChannelRuntimeView{
-		Available: s.sched != nil,
-	}
-	if s.sched != nil {
-		rt := s.sched.RuntimeChannelStats(ch.ID)
-		channelRuntime.FailScore = rt.FailScore
-		channelRuntime.BanStreak = rt.BanStreak
-		if rt.BannedUntil != nil {
-			channelRuntime.BannedActive = true
-			channelRuntime.BannedUntil = formatTimeIn(*rt.BannedUntil, time.RFC3339, loc)
-			channelRuntime.BannedRemaining = formatRemainingUntilZH(*rt.BannedUntil, nowRuntime)
-		}
-		if rt.ForcedUntil != nil {
-			channelRuntime.ForcedActive = true
-			channelRuntime.ForcedUntil = formatTimeIn(*rt.ForcedUntil, time.RFC3339, loc)
-			channelRuntime.ForcedRemaining = formatRemainingUntilZH(*rt.ForcedUntil, nowRuntime)
-		}
-	}
-
-	var creds []adminCredentialView
-	switch ch.Type {
-	case store.UpstreamTypeOpenAICompatible:
-		rawCreds, err := s.st.ListOpenAICompatibleCredentialsByEndpoint(r.Context(), ep.ID)
-		if err != nil {
-			http.Error(w, "查询失败", http.StatusInternalServerError)
-			return
-		}
-		creds = make([]adminCredentialView, 0, len(rawCreds))
-		for _, c := range rawCreds {
-			rv := adminRuntimeLimitsView{
-				Available: s.sched != nil,
-			}
-			if s.sched != nil {
-				key := fmt.Sprintf("%s:%d", scheduler.CredentialTypeOpenAI, c.ID)
-				stats := s.sched.RuntimeCredentialStats(key)
-				rv.RPM = stats.RPM
-				rv.TPM = stats.TPM
-				rv.Sessions = stats.Sessions
-				rv.FailScore = stats.FailScore
-				if stats.CoolingUntil != nil {
-					rv.CoolingUntil = formatTimeIn(*stats.CoolingUntil, time.RFC3339, loc)
-				}
-			}
-			maskedKey := "-"
-			if c.APIKeyHint != nil && *c.APIKeyHint != "" {
-				hint := *c.APIKeyHint
-				if len(hint) > 4 {
-					maskedKey = "..." + hint[len(hint)-4:]
-				} else {
-					maskedKey = hint
-				}
-			}
-			creds = append(creds, adminCredentialView{
-				ID:         c.ID,
-				Name:       c.Name,
-				APIKeyHint: c.APIKeyHint,
-				MaskedKey:  maskedKey,
-				Status:     c.Status,
-				Runtime:    rv,
-			})
-		}
-	case store.UpstreamTypeAnthropic:
-		rawCreds, err := s.st.ListAnthropicCredentialsByEndpoint(r.Context(), ep.ID)
-		if err != nil {
-			http.Error(w, "查询失败", http.StatusInternalServerError)
-			return
-		}
-		creds = make([]adminCredentialView, 0, len(rawCreds))
-		for _, c := range rawCreds {
-			rv := adminRuntimeLimitsView{
-				Available: s.sched != nil,
-			}
-			if s.sched != nil {
-				key := fmt.Sprintf("%s:%d", scheduler.CredentialTypeAnthropic, c.ID)
-				stats := s.sched.RuntimeCredentialStats(key)
-				rv.RPM = stats.RPM
-				rv.TPM = stats.TPM
-				rv.Sessions = stats.Sessions
-				rv.FailScore = stats.FailScore
-				if stats.CoolingUntil != nil {
-					rv.CoolingUntil = formatTimeIn(*stats.CoolingUntil, time.RFC3339, loc)
-				}
-			}
-			maskedKey := "-"
-			if c.APIKeyHint != nil && *c.APIKeyHint != "" {
-				hint := *c.APIKeyHint
-				if len(hint) > 4 {
-					maskedKey = "..." + hint[len(hint)-4:]
-				} else {
-					maskedKey = hint
-				}
-			}
-			creds = append(creds, adminCredentialView{
-				ID:         c.ID,
-				Name:       c.Name,
-				APIKeyHint: c.APIKeyHint,
-				MaskedKey:  maskedKey,
-				Status:     c.Status,
-				Runtime:    rv,
-			})
-		}
-	default:
-	}
-
-	var accViews []adminCodexAccountView
+	hash := "#keys"
 	if ch.Type == store.UpstreamTypeCodexOAuth {
-		accs, err := s.st.ListCodexOAuthAccountsByEndpoint(r.Context(), ep.ID)
-		if err != nil {
-			http.Error(w, "查询失败", http.StatusInternalServerError)
-			return
-		}
-
-		if strings.TrimSpace(r.URL.Query().Get("oauth")) == "error" {
-			errMsg = strings.TrimSpace(r.URL.Query().Get("err"))
-			if errMsg == "" {
-				errMsg = "Codex OAuth 失败，请重试"
-			}
-			if len(errMsg) > 200 {
-				errMsg = errMsg[:200] + "..."
-			}
-		}
-
-		now := time.Now()
-		for _, a := range accs {
-			v := adminCodexAccountView{
-				ID:                      a.ID,
-				AccountID:               a.AccountID,
-				Email:                   a.Email,
-				Status:                  a.Status,
-				InCooldown:              a.CooldownUntil != nil && now.Before(*a.CooldownUntil),
-				ExpiresAt:               formatTimePtrIn(a.ExpiresAt, time.RFC3339, loc),
-				LastRefreshAt:           formatTimePtrIn(a.LastRefreshAt, time.RFC3339, loc),
-				CooldownUntil:           formatTimePtrIn(a.CooldownUntil, time.RFC3339, loc),
-				PlanType:                "-",
-				SubscriptionActiveStart: "-",
-				SubscriptionActiveUntil: "-",
-				SubscriptionDaysLeft:    "-",
-				QuotaCredits:            "-",
-				QuotaPrimary:            "-",
-				QuotaSecondary:          "-",
-				QuotaUpdatedAt:          formatTimePtrIn(a.QuotaUpdatedAt, time.RFC3339, loc),
-				QuotaPrimaryDetail:      "-",
-				QuotaSecondaryDetail:    "-",
-			}
-			if s.sched != nil {
-				rv := adminRuntimeLimitsView{
-					Available: true,
-				}
-				key := fmt.Sprintf("%s:%d", scheduler.CredentialTypeCodex, a.ID)
-				stats := s.sched.RuntimeCredentialStats(key)
-				rv.RPM = stats.RPM
-				rv.TPM = stats.TPM
-				rv.Sessions = stats.Sessions
-				rv.FailScore = stats.FailScore
-				if stats.CoolingUntil != nil {
-					rv.CoolingUntil = formatTimeIn(*stats.CoolingUntil, time.RFC3339, loc)
-				}
-				v.Runtime = rv
-			}
-			v.QuotaCredits = formatCreditsForView(a.QuotaCreditsHasCredits, a.QuotaCreditsUnlimited, a.QuotaCreditsBalance)
-			v.QuotaPrimary = formatRateLimitForView(a.QuotaPrimaryUsedPercent, a.QuotaPrimaryResetAt, loc)
-			v.QuotaSecondary = formatRateLimitForView(a.QuotaSecondaryUsedPercent, a.QuotaSecondaryResetAt, loc)
-			if a.QuotaPrimaryUsedPercent != nil {
-				v.QuotaPrimaryUsed = *a.QuotaPrimaryUsedPercent
-				v.QuotaPrimaryShow = true
-				v.QuotaPrimaryDetail = formatQuotaWindowDetail(a.QuotaPrimaryUsedPercent, a.QuotaPrimaryResetAt, codexTeamQuotaCapUSD5H, loc)
-			}
-			if a.QuotaSecondaryUsedPercent != nil {
-				v.QuotaSecondaryUsed = *a.QuotaSecondaryUsedPercent
-				v.QuotaSecondaryShow = true
-				v.QuotaSecondaryDetail = formatQuotaWindowDetail(a.QuotaSecondaryUsedPercent, a.QuotaSecondaryResetAt, codexTeamQuotaCapUSDWeek, loc)
-			}
-			if a.QuotaError != nil && strings.TrimSpace(*a.QuotaError) != "" {
-				v.QuotaError = strings.TrimSpace(*a.QuotaError)
-			}
-			sec, err := s.st.GetCodexOAuthSecret(r.Context(), a.ID)
-			if err == nil && sec.IDToken != nil && *sec.IDToken != "" {
-				if claims, err := codexoauth.ParseIDTokenClaims(*sec.IDToken); err == nil && claims != nil {
-					if pt := strings.TrimSpace(claims.PlanType); pt != "" {
-						v.PlanType = pt
-					}
-					v.SubscriptionActiveStart = formatClaimTimeIn(claims.SubscriptionActiveStart, loc)
-					v.SubscriptionActiveUntil = formatClaimTimeIn(claims.SubscriptionActiveUntil, loc)
-
-					start, startOK := getClaimFloat64(claims.SubscriptionActiveStart)
-					until, untilOK := getClaimFloat64(claims.SubscriptionActiveUntil)
-					if startOK && untilOK {
-						nowTs := float64(time.Now().Unix())
-						if nowTs >= start && nowTs < until {
-							v.SubscriptionActive = true
-							total := until - start
-							if total > 0 {
-								v.SubscriptionPercent = int(((nowTs - start) / total) * 100)
-								if v.SubscriptionPercent < 0 {
-									v.SubscriptionPercent = 0
-								}
-								if v.SubscriptionPercent > 100 {
-									v.SubscriptionPercent = 100
-								}
-							}
-							v.SubscriptionDaysLeft = formatDaysLeftSeconds(until - nowTs)
-						}
-					}
-				}
-			}
-			accViews = append(accViews, v)
-		}
+		hash = "#accounts"
 	}
-	s.render(w, "admin_endpoints", s.withFeatures(r.Context(), templateData{
-		Title:          "渠道端点 - Realms",
-		Error:          errMsg,
-		Notice:         notice,
-		User:           u,
-		IsRoot:         isRoot,
-		CSRFToken:      csrf,
-		ChannelGroups:  channelGroups,
-		Channel:        ch,
-		ChannelRuntime: channelRuntime,
-		Endpoint:       ep,
-		Credentials:    creds,
-		Accounts:       accViews,
-	}))
+
+	q := r.URL.Query()
+	q.Set("open_channel_settings", strconv.FormatInt(ch.ID, 10))
+
+	target := "/admin/channels"
+	if enc := q.Encode(); enc != "" {
+		target += "?" + enc
+	}
+	target += hash
+
+	http.Redirect(w, r, target, http.StatusFound)
 }
 
 func (s *Server) DeleteEndpoint(w http.ResponseWriter, r *http.Request) {
@@ -2748,6 +2689,10 @@ func (s *Server) CreateEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
+		if isAjax(r) {
+			ajaxError(w, http.StatusBadRequest, "表单解析失败")
+			return
+		}
 		http.Error(w, "表单解析失败", http.StatusBadRequest)
 		return
 	}
@@ -2760,19 +2705,35 @@ func (s *Server) CreateEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if ch.Type == store.UpstreamTypeCodexOAuth {
+		if isAjax(r) {
+			ajaxError(w, http.StatusBadRequest, "codex_oauth 为内置渠道，不允许修改 base_url")
+			return
+		}
 		http.Error(w, "codex_oauth 为内置渠道，不允许修改 base_url", http.StatusBadRequest)
 		return
 	}
 	baseURL := strings.TrimSpace(r.FormValue("base_url"))
 	if _, err := security.ValidateBaseURL(baseURL); err != nil {
+		if isAjax(r) {
+			ajaxError(w, http.StatusBadRequest, "base_url 不合法："+err.Error())
+			return
+		}
 		http.Error(w, "base_url 不合法："+err.Error(), http.StatusBadRequest)
 		return
 	}
 	if _, err := s.st.SetUpstreamEndpointBaseURL(r.Context(), ch.ID, baseURL); err != nil {
+		if isAjax(r) {
+			ajaxError(w, http.StatusInternalServerError, "保存失败")
+			return
+		}
 		http.Error(w, "保存失败", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, fmt.Sprintf("/admin/channels/%d/endpoints", ch.ID), http.StatusFound)
+	if isAjax(r) {
+		ajaxOK(w, "基础地址已保存")
+		return
+	}
+	http.Redirect(w, r, fmt.Sprintf("/admin/channels?open_channel_settings=%d", ch.ID), http.StatusFound)
 }
 
 func (s *Server) DeleteOpenAICredential(w http.ResponseWriter, r *http.Request) {
@@ -2800,7 +2761,7 @@ func (s *Server) DeleteOpenAICredential(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "删除失败", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, fmt.Sprintf("/admin/channels/%d/endpoints#keys", ep.ChannelID), http.StatusFound)
+	http.Redirect(w, r, fmt.Sprintf("/admin/channels?open_channel_settings=%d#keys", ep.ChannelID), http.StatusFound)
 }
 
 func (s *Server) CreateOpenAICredential(w http.ResponseWriter, r *http.Request) {
@@ -2837,7 +2798,7 @@ func (s *Server) CreateOpenAICredential(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "创建失败", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, fmt.Sprintf("/admin/channels/%d/endpoints#keys", ep.ChannelID), http.StatusFound)
+	http.Redirect(w, r, fmt.Sprintf("/admin/channels?open_channel_settings=%d#keys", ep.ChannelID), http.StatusFound)
 }
 
 func (s *Server) DeleteAnthropicCredential(w http.ResponseWriter, r *http.Request) {
@@ -2869,7 +2830,7 @@ func (s *Server) DeleteAnthropicCredential(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "删除失败", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, fmt.Sprintf("/admin/channels/%d/endpoints#keys", ep.ChannelID), http.StatusFound)
+	http.Redirect(w, r, fmt.Sprintf("/admin/channels?open_channel_settings=%d#keys", ep.ChannelID), http.StatusFound)
 }
 
 func (s *Server) CreateAnthropicCredential(w http.ResponseWriter, r *http.Request) {
@@ -2910,7 +2871,7 @@ func (s *Server) CreateAnthropicCredential(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "创建失败", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, fmt.Sprintf("/admin/channels/%d/endpoints#keys", ep.ChannelID), http.StatusFound)
+	http.Redirect(w, r, fmt.Sprintf("/admin/channels?open_channel_settings=%d#keys", ep.ChannelID), http.StatusFound)
 }
 
 func (s *Server) CodexAccounts(w http.ResponseWriter, r *http.Request) {
@@ -2930,9 +2891,11 @@ func (s *Server) CodexAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	target := fmt.Sprintf("/admin/channels/%d/endpoints", ep.ChannelID)
-	if q := strings.TrimSpace(r.URL.RawQuery); q != "" {
-		target += "?" + q
+	q := r.URL.Query()
+	q.Set("open_channel_settings", fmt.Sprintf("%d", ep.ChannelID))
+	target := "/admin/channels"
+	if enc := q.Encode(); enc != "" {
+		target += "?" + enc
 	}
 	target += "#accounts"
 	http.Redirect(w, r, target, http.StatusFound)
@@ -2963,7 +2926,7 @@ func (s *Server) DeleteCodexAccount(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "删除失败", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, fmt.Sprintf("/admin/channels/%d/endpoints#accounts", ep.ChannelID), http.StatusFound)
+	http.Redirect(w, r, fmt.Sprintf("/admin/channels?open_channel_settings=%d#accounts", ep.ChannelID), http.StatusFound)
 }
 
 func (s *Server) CreateCodexAccount(w http.ResponseWriter, r *http.Request) {
@@ -3002,7 +2965,7 @@ func (s *Server) CreateCodexAccount(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "创建失败", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, fmt.Sprintf("/admin/channels/%d/endpoints#accounts", ep.ChannelID), http.StatusFound)
+	http.Redirect(w, r, fmt.Sprintf("/admin/channels?open_channel_settings=%d#accounts", ep.ChannelID), http.StatusFound)
 }
 
 func (s *Server) StartCodexOAuth(w http.ResponseWriter, r *http.Request) {
@@ -3028,7 +2991,7 @@ func (s *Server) StartCodexOAuth(w http.ResponseWriter, r *http.Request) {
 	authURL, err := s.codexOAuth.Start(r.Context(), ep.ID, u.ID)
 	if err != nil {
 		msg := codexoauth.UserMessage(err)
-		http.Redirect(w, r, fmt.Sprintf("/admin/channels/%d/endpoints?oauth=error&err=%s#accounts", ep.ChannelID, url.QueryEscape(msg)), http.StatusFound)
+		http.Redirect(w, r, fmt.Sprintf("/admin/channels?open_channel_settings=%d&oauth=error&err=%s#accounts", ep.ChannelID, url.QueryEscape(msg)), http.StatusFound)
 		return
 	}
 	http.Redirect(w, r, authURL, http.StatusFound)
@@ -3062,7 +3025,7 @@ func (s *Server) CompleteCodexOAuth(w http.ResponseWriter, r *http.Request) {
 	parsed, err := codexoauth.ParseOAuthCallback(callbackURL)
 	if err != nil || parsed == nil {
 		msg := "回调 URL 解析失败，请粘贴浏览器地址栏中的完整 URL（包含 code/state）"
-		http.Redirect(w, r, fmt.Sprintf("/admin/channels/%d/endpoints?oauth=error&err=%s#accounts", ep.ChannelID, url.QueryEscape(msg)), http.StatusFound)
+		http.Redirect(w, r, fmt.Sprintf("/admin/channels?open_channel_settings=%d&oauth=error&err=%s#accounts", ep.ChannelID, url.QueryEscape(msg)), http.StatusFound)
 		return
 	}
 	if strings.TrimSpace(parsed.Error) != "" {
@@ -3072,15 +3035,15 @@ func (s *Server) CompleteCodexOAuth(w http.ResponseWriter, r *http.Request) {
 		} else {
 			msg += " - " + strings.TrimSpace(parsed.Error)
 		}
-		http.Redirect(w, r, fmt.Sprintf("/admin/channels/%d/endpoints?oauth=error&err=%s#accounts", ep.ChannelID, url.QueryEscape(msg)), http.StatusFound)
+		http.Redirect(w, r, fmt.Sprintf("/admin/channels?open_channel_settings=%d&oauth=error&err=%s#accounts", ep.ChannelID, url.QueryEscape(msg)), http.StatusFound)
 		return
 	}
 	if err := s.codexOAuth.Complete(r.Context(), ep.ID, u.ID, parsed.State, parsed.Code); err != nil {
 		msg := codexoauth.UserMessage(err)
-		http.Redirect(w, r, fmt.Sprintf("/admin/channels/%d/endpoints?oauth=error&err=%s#accounts", ep.ChannelID, url.QueryEscape(msg)), http.StatusFound)
+		http.Redirect(w, r, fmt.Sprintf("/admin/channels?open_channel_settings=%d&oauth=error&err=%s#accounts", ep.ChannelID, url.QueryEscape(msg)), http.StatusFound)
 		return
 	}
-	http.Redirect(w, r, fmt.Sprintf("/admin/channels/%d/endpoints#accounts", ep.ChannelID), http.StatusFound)
+	http.Redirect(w, r, fmt.Sprintf("/admin/channels?open_channel_settings=%d#accounts", ep.ChannelID), http.StatusFound)
 }
 
 func (s *Server) OAuthApps(w http.ResponseWriter, r *http.Request) {
