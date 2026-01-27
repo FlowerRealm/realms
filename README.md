@@ -204,6 +204,27 @@ make dev
 go test ./...
 ```
 
+### CI（GitHub Actions）
+
+本仓库包含一个会在每次 push 时触发的 CI（见 `.github/workflows/ci.yml`）：
+- 单测：`go test ./...`
+- E2E：Codex CLI → Realms → 上游（需要配置 GitHub Secrets）
+
+需要在仓库 Secrets 中配置（占位名，勿提交真实密钥到仓库）：
+- `REALMS_CI_UPSTREAM_BASE_URL`：上游 OpenAI 兼容 `base_url`（例如 `https://api.openai.com` 或 `https://api.openai.com/v1`）
+- `REALMS_CI_UPSTREAM_API_KEY`：上游 API Key（例如 `sk-***`）
+- `REALMS_CI_MODEL`：用于 E2E 的模型名（例如 `gpt-4.1-mini`）
+
+在本地复现 E2E（可选）：
+
+```bash
+npm install -g @openai/codex
+export REALMS_CI_UPSTREAM_BASE_URL="https://api.openai.com"
+export REALMS_CI_UPSTREAM_API_KEY="sk-***"
+export REALMS_CI_MODEL="gpt-4.1-mini"
+go test ./tests/e2e -run TestCodexCLI_E2E -count=1
+```
+
 ## 7) 版本号
 
 - 版本号文件：`internal/version/version.txt`（默认以该值作为 `GET /api/version` / `GET /healthz` 的 `version`）

@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+          cache: true
+
+      - name: Go test
+        run: go test ./...
+
+  e2e-codex:
+    runs-on: ubuntu-latest
+    needs: test
+    env:
+      REALMS_CI_ENFORCE_E2E: "1"
+      REALMS_CI_UPSTREAM_BASE_URL: ${{ secrets.REALMS_CI_UPSTREAM_BASE_URL }}
+      REALMS_CI_UPSTREAM_API_KEY: ${{ secrets.REALMS_CI_UPSTREAM_API_KEY }}
+      REALMS_CI_MODEL: ${{ secrets.REALMS_CI_MODEL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Codex CLI
+        run: npm install -g @openai/codex
+
+      - name: E2E (Codex CLI -> Realms -> Upstream)
+        run: go test ./tests/e2e -run TestCodexCLI_E2E -count=1
