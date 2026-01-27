@@ -27,6 +27,7 @@ import (
 	"realms/internal/config"
 	"realms/internal/crypto"
 	"realms/internal/icons"
+	"realms/internal/metrics"
 	"realms/internal/scheduler"
 	"realms/internal/security"
 	"realms/internal/store"
@@ -415,8 +416,8 @@ type TemplateData struct {
 	TodayUsageUSD            string
 	TodayRequests            int64
 	TodayTokens              int64
-	TodayRPM                 int
-	TodayTPM                 int
+	TodayRPM                 string
+	TodayTPM                 string
 	DashboardCharts          DashboardChartsView
 	TopupMinCNY              string
 	TopupOrders              []TopupOrderView
@@ -739,11 +740,12 @@ func (s *Server) Dashboard(w http.ResponseWriter, r *http.Request) {
 
 	todayStats, _ := s.store.GetUsageTokenStatsByUserRange(r.Context(), u.ID, todayStart, now)
 
-	// RPM/TPM (last 5 minutes)
-	fiveMinAgo := now.Add(-5 * time.Minute)
-	recentStats, _ := s.store.GetUsageTokenStatsByUserRange(r.Context(), u.ID, fiveMinAgo, now)
-	rpm := int(recentStats.Requests / 5)
-	tpm := int(recentStats.Tokens / 5)
+	// RPM/TPM: Requests/Tokens per minute (1-minute moving window; rate can be fractional).
+	window := time.Minute
+	oneMinAgo := now.Add(-window)
+	recentStats, _ := s.store.GetUsageTokenStatsByUserRange(r.Context(), u.ID, oneMinAgo, now)
+	rpm := metrics.FormatRatePerMinute(recentStats.Requests, window)
+	tpm := metrics.FormatRatePerMinute(recentStats.Tokens, window)
 
 	// Charts data (Today)
 	modelStats, _ := s.store.GetUsageStatsByModelRange(r.Context(), u.ID, todayStart, now)
@@ -1769,14 +1771,10 @@ func (s *Server) UsagePage(w http.ResponseWriter, r *http.Request) {
 
 	used := committed.Add(reserved)
 
-	// Calculate RPM / TPM (based on time since earliest start or 1 min min)
+	// Calculate RPM / TPM: requests/tokens per minute over the selected interval.
 	dur := until.Sub(since)
-	minutes := dur.Minutes()
-	if minutes < 1 {
-		minutes = 1
-	}
-	rpm := float64(tokenStats.Requests) / minutes
-	tpm := float64(tokenStats.Tokens) / minutes
+	rpm := metrics.FormatRatePerMinute(tokenStats.Requests, dur)
+	tpm := metrics.FormatRatePerMinute(tokenStats.Tokens, dur)
 
 	view := UsageWindowView{
 		Window:       "统计区间（UTC）",
@@ -1791,8 +1789,8 @@ func (s *Server) UsagePage(w http.ResponseWriter, r *http.Request) {
 		OutputTokens: tokenStats.OutputTokens,
 		CachedTokens: tokenStats.CachedInputTokens + tokenStats.CachedOutputTokens,
 		CacheHitRate: fmt.Sprintf("%.1f%%", tokenStats.CacheRatio*100),
-		RPM:          fmt.Sprintf("%.1f", rpm),
-		TPM:          fmt.Sprintf("%.1f", tpm),
+		RPM:          rpm,
+		TPM:          tpm,
 	}
 	view.LimitUSD = "-"
 

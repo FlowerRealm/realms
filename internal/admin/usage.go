@@ -8,6 +8,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	"realms/internal/metrics"
 	"realms/internal/store"
 )
 
@@ -147,12 +148,9 @@ func (s *Server) Usage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	minutes := until.Sub(since).Minutes()
-	if minutes < 1 {
-		minutes = 1
-	}
-	rpm := float64(stats.Requests) / minutes
-	tpm := float64(stats.Tokens) / minutes
+	dur := until.Sub(since)
+	rpm := metrics.FormatRatePerMinute(stats.Requests, dur)
+	tpm := metrics.FormatRatePerMinute(stats.Tokens, dur)
 
 	view := usageWindowView{
 		Window:       "统计区间",
@@ -164,8 +162,8 @@ func (s *Server) Usage(w http.ResponseWriter, r *http.Request) {
 		OutputTokens: stats.OutputTokens,
 		CachedTokens: stats.CachedInputTokens + stats.CachedOutputTokens,
 		CacheRatio:   fmt.Sprintf("%.1f%%", stats.CacheRatio*100),
-		RPM:          fmt.Sprintf("%.1f", rpm),
-		TPM:          fmt.Sprintf("%.1f", tpm),
+		RPM:          rpm,
+		TPM:          tpm,
 		CommittedUSD: formatUSDPlain(committed),
 		ReservedUSD:  formatUSDPlain(reserved),
 		TotalUSD:     formatUSDPlain(committed.Add(reserved)),
