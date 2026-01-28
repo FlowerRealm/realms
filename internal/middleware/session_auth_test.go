@@ -21,8 +21,19 @@ func TestSessionAuth_RedirectsToLoginWithNext_ForGET(t *testing.T) {
 	if rr.Code != http.StatusFound {
 		t.Fatalf("expected status %d, got %d", http.StatusFound, rr.Code)
 	}
-	if got := rr.Header().Get("Location"); got != "/login?next=%2Fdashboard%3Fx%3D1" {
-		t.Fatalf("expected Location %q, got %q", "/login?next=%2Fdashboard%3Fx%3D1", got)
+	if got := rr.Header().Get("Location"); got != "/login" {
+		t.Fatalf("expected Location %q, got %q", "/login", got)
+	}
+
+	var next string
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == "rlm_next" {
+			next = c.Value
+			break
+		}
+	}
+	if next != "/dashboard" {
+		t.Fatalf("expected next cookie %q, got %q", "/dashboard", next)
 	}
 }
 
@@ -41,5 +52,11 @@ func TestSessionAuth_RedirectsToLoginWithoutNext_ForPOST(t *testing.T) {
 	}
 	if got := rr.Header().Get("Location"); got != "/login" {
 		t.Fatalf("expected Location %q, got %q", "/login", got)
+	}
+
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == "rlm_next" {
+			t.Fatalf("expected no next cookie, got %q", c.Value)
+		}
 	}
 }

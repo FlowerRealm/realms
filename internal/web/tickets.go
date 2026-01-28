@@ -15,6 +15,7 @@ import (
 
 	"realms/internal/auth"
 	emailpkg "realms/internal/email"
+	"realms/internal/middleware"
 	"realms/internal/store"
 	ticketspkg "realms/internal/tickets"
 )
@@ -64,22 +65,25 @@ type TicketAttachmentView struct {
 }
 
 func (s *Server) TicketsPage(w http.ResponseWriter, r *http.Request) {
+	s.ticketsPageWithStatus(w, r, nil)
+}
+
+func (s *Server) TicketsOpenPage(w http.ResponseWriter, r *http.Request) {
+	status := store.TicketStatusOpen
+	s.ticketsPageWithStatus(w, r, &status)
+}
+
+func (s *Server) TicketsClosedPage(w http.ResponseWriter, r *http.Request) {
+	status := store.TicketStatusClosed
+	s.ticketsPageWithStatus(w, r, &status)
+}
+
+func (s *Server) ticketsPageWithStatus(w http.ResponseWriter, r *http.Request, statusPtr *int) {
 	p, _ := auth.PrincipalFromContext(r.Context())
 	u, err := s.store.GetUserByID(r.Context(), p.UserID)
 	if err != nil {
 		http.Error(w, "用户查询失败", http.StatusInternalServerError)
 		return
-	}
-
-	var statusPtr *int
-	switch strings.TrimSpace(r.URL.Query().Get("status")) {
-	case "open":
-		v := store.TicketStatusOpen
-		statusPtr = &v
-	case "closed":
-		v := store.TicketStatusClosed
-		statusPtr = &v
-	default:
 	}
 
 	rows, err := s.store.ListTicketsByUser(r.Context(), p.UserID, statusPtr)
@@ -105,6 +109,8 @@ func (s *Server) TicketsPage(w http.ResponseWriter, r *http.Request) {
 		Title:     "工单 - Realms",
 		User:      userViewFromUser(u),
 		CSRFToken: csrfToken(p),
+		Error:     strings.TrimSpace(middleware.FlashError(r.Context())),
+		Notice:    strings.TrimSpace(middleware.FlashNotice(r.Context())),
 		Tickets:   items,
 	}))
 }
@@ -252,6 +258,8 @@ func (s *Server) TicketDetailPage(w http.ResponseWriter, r *http.Request) {
 		Title:          fmt.Sprintf("工单 #%d - Realms", ticketID),
 		User:           userViewFromUser(u),
 		CSRFToken:      csrfToken(p),
+		Error:          strings.TrimSpace(middleware.FlashError(r.Context())),
+		Notice:         strings.TrimSpace(middleware.FlashNotice(r.Context())),
 		Ticket:         &dv,
 		TicketMessages: mv,
 	}))
@@ -281,7 +289,8 @@ func (s *Server) ReplyTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if tk.Status != store.TicketStatusOpen {
-		http.Redirect(w, r, fmt.Sprintf("/tickets/%d?msg=closed", ticketID), http.StatusFound)
+		middleware.SetFlashError(w, r, "工单已关闭，无法回复")
+		http.Redirect(w, r, fmt.Sprintf("/tickets/%d", ticketID), http.StatusFound)
 		return
 	}
 

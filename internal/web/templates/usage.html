@@ -29,7 +29,8 @@
       <button type="button" class="btn btn-sm rounded-pill text-muted px-2 mb-0 quick-range-btn" style="font-size: 0.75rem;" data-days="7" onclick="setQuickRange(7, this)">7天</button>
     </div>
 
-    <form class="d-flex align-items-center gap-2 ps-2 pe-1 mb-0" method="GET" action="/usage" id="usageFilterForm">
+    <form class="d-flex align-items-center gap-2 ps-2 pe-1 mb-0" method="POST" action="/usage/filter" id="usageFilterForm">
+      <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
       <input type="hidden" name="start" id="hiddenStart" value="{{.UsageStart}}">
       <input type="hidden" name="end" id="hiddenEnd" value="{{.UsageEnd}}">
       <select name="limit" class="form-select form-select-sm border-0 bg-transparent pe-4 mb-0 text-muted" style="width: auto; font-size: 0.85rem; box-shadow: none;">
@@ -243,7 +244,11 @@
                         </div>
                         <div class="col-6 col-lg-3">
                           <div class="text-muted smaller">上游渠道</div>
-                          <div class="font-monospace">{{.UpstreamChannelID}}</div>
+                          {{if .UpstreamChannelName}}
+                            <div class="fw-bold">{{.UpstreamChannelName}}</div>
+                          {{else}}
+                            <div class="text-muted">-</div>
+                          {{end}}
                         </div>
 
                         <div class="col-12 col-lg-6">
@@ -335,14 +340,14 @@
           <ul class="pagination justify-content-center mb-0">
             <!-- 回到最新 (首页) -->
             <li class="page-item {{if not .UsageCursorActive}}disabled{{end}}">
-              <a class="page-link" href="/usage?start={{.UsageStart}}&end={{.UsageEnd}}&limit={{.UsageLimit}}" aria-label="First">
+              <a class="page-link" href="/usage" aria-label="First">
                 <span aria-hidden="true"><span class="material-symbols-rounded">first_page</span> 最新</span>
               </a>
             </li>
             
             <!-- 上一页 (较新) -> after_id -->
             <li class="page-item {{if not .UsagePrevAfterID}}disabled{{end}}">
-              <a class="page-link" href="{{if .UsagePrevAfterID}}/usage?start={{.UsageStart}}&end={{.UsageEnd}}&limit={{.UsageLimit}}&after_id={{.UsagePrevAfterID}}{{else}}#{{end}}">
+              <a class="page-link" href="{{if .UsagePrevAfterID}}/usage/after/{{.UsagePrevAfterID}}{{else}}#{{end}}">
                 <span class="material-symbols-rounded">chevron_left</span> 上一页
               </a>
             </li>
@@ -355,7 +360,7 @@
 
             <!-- 下一页 (较早) -> before_id -->
             <li class="page-item {{if not .UsageNextBeforeID}}disabled{{end}}">
-              <a class="page-link" href="{{if .UsageNextBeforeID}}/usage?start={{.UsageStart}}&end={{.UsageEnd}}&limit={{.UsageLimit}}&before_id={{.UsageNextBeforeID}}{{else}}#{{end}}">
+              <a class="page-link" href="{{if .UsageNextBeforeID}}/usage/before/{{.UsageNextBeforeID}}{{else}}#{{end}}">
                 下一页 <span class="material-symbols-rounded">chevron_right</span>
               </a>
             </li>

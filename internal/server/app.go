@@ -210,10 +210,18 @@ func (a *App) routes() {
 	a.mux.HandleFunc("HEAD /favicon.ico", a.handleFaviconICO)
 
 	a.mux.Handle("GET /{$}", http.HandlerFunc(a.web.Index))
-	a.mux.Handle("GET /login", http.HandlerFunc(a.web.LoginPage))
-	a.mux.Handle("POST /login", http.HandlerFunc(a.web.Login))
-	a.mux.Handle("GET /register", http.HandlerFunc(a.web.RegisterPage))
-	a.mux.Handle("POST /register", http.HandlerFunc(a.web.Register))
+	webPublicChain := func(h http.Handler) http.Handler {
+		return middleware.Chain(h,
+			middleware.RequestID,
+			middleware.AccessLog,
+			middleware.StripWebQuery,
+			middleware.FlashFromCookies,
+		)
+	}
+	a.mux.Handle("GET /login", webPublicChain(http.HandlerFunc(a.web.LoginPage)))
+	a.mux.Handle("POST /login", webPublicChain(http.HandlerFunc(a.web.Login)))
+	a.mux.Handle("GET /register", webPublicChain(http.HandlerFunc(a.web.RegisterPage)))
+	a.mux.Handle("POST /register", webPublicChain(http.HandlerFunc(a.web.Register)))
 
 	publicChain := func(h http.Handler) http.Handler {
 		return middleware.Chain(h,
@@ -283,6 +291,8 @@ func (a *App) routes() {
 			middleware.RequestID,
 			middleware.AccessLog,
 			middleware.SessionAuth(a.store, web.SessionCookieName),
+			middleware.StripWebQuery,
+			middleware.FlashFromCookies,
 		)
 	}
 	webFeatureChain := func(featureKey string, h http.Handler) http.Handler {
@@ -291,6 +301,8 @@ func (a *App) routes() {
 			middleware.AccessLog,
 			middleware.FeatureGateEffective(a.store, selfMode, featureKey),
 			middleware.SessionAuth(a.store, web.SessionCookieName),
+			middleware.StripWebQuery,
+			middleware.FlashFromCookies,
 		)
 	}
 	webCSRFChain := func(h http.Handler) http.Handler {
@@ -298,6 +310,8 @@ func (a *App) routes() {
 			middleware.RequestID,
 			middleware.AccessLog,
 			middleware.SessionAuth(a.store, web.SessionCookieName),
+			middleware.StripWebQuery,
+			middleware.FlashFromCookies,
 			middleware.CSRF(),
 		)
 	}
@@ -307,6 +321,8 @@ func (a *App) routes() {
 			middleware.AccessLog,
 			middleware.FeatureGateEffective(a.store, selfMode, featureKey),
 			middleware.SessionAuth(a.store, web.SessionCookieName),
+			middleware.StripWebQuery,
+			middleware.FlashFromCookies,
 			middleware.CSRF(),
 		)
 	}
@@ -317,6 +333,8 @@ func (a *App) routes() {
 			middleware.AccessLog,
 			middleware.FeatureGateEffective(a.store, selfMode, featureKey),
 			middleware.SessionAuth(a.store, web.SessionCookieName),
+			middleware.StripWebQuery,
+			middleware.FlashFromCookies,
 			middleware.MaxBytes(ticketUploadLimit),
 			middleware.CSRF(),
 		)
@@ -501,9 +519,14 @@ func (a *App) routes() {
 		a.mux.Handle("GET /topup", webFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.web.TopupPage)))
 	}
 	a.mux.Handle("GET /usage", webFeatureChain(store.SettingFeatureDisableWebUsage, http.HandlerFunc(a.web.UsagePage)))
+	a.mux.Handle("GET /usage/before/{cursor_id}", webFeatureChain(store.SettingFeatureDisableWebUsage, http.HandlerFunc(a.web.UsageBeforePage)))
+	a.mux.Handle("GET /usage/after/{cursor_id}", webFeatureChain(store.SettingFeatureDisableWebUsage, http.HandlerFunc(a.web.UsageAfterPage)))
 	a.mux.Handle("GET /usage/events/{event_id}/detail", webFeatureChain(store.SettingFeatureDisableWebUsage, http.HandlerFunc(a.web.UsageEventDetailAPI)))
+	a.mux.Handle("POST /usage/filter", webCSRFFeatureChain(store.SettingFeatureDisableWebUsage, http.HandlerFunc(a.web.UsageFilter)))
 	if !selfMode {
 		a.mux.Handle("GET /tickets", webFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.web.TicketsPage)))
+		a.mux.Handle("GET /tickets/open", webFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.web.TicketsOpenPage)))
+		a.mux.Handle("GET /tickets/closed", webFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.web.TicketsClosedPage)))
 		a.mux.Handle("GET /tickets/new", webFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.web.TicketNewPage)))
 		a.mux.Handle("POST /tickets/new", webUploadFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.web.CreateTicket)))
 		a.mux.Handle("GET /tickets/{ticket_id}", webFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.web.TicketDetailPage)))
@@ -517,6 +540,8 @@ func (a *App) routes() {
 		a.mux.Handle("POST /subscription/purchase", webCSRFFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.web.PurchaseSubscription)))
 		a.mux.Handle("POST /topup/create", webCSRFFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.web.CreateTopupOrder)))
 		a.mux.Handle("GET /pay/{kind}/{order_id}", webFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.web.PayPage)))
+		a.mux.Handle("GET /pay/{kind}/{order_id}/success", webFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.web.PayReturnSuccess)))
+		a.mux.Handle("GET /pay/{kind}/{order_id}/cancel", webFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.web.PayReturnCancel)))
 		a.mux.Handle("POST /pay/{kind}/{order_id}/start", webCSRFFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.web.StartPayment)))
 		a.mux.Handle("POST /pay/{kind}/{order_id}/cancel", webCSRFFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.web.CancelPayOrder)))
 	}

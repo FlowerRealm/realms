@@ -28,6 +28,7 @@ import (
 	"realms/internal/crypto"
 	"realms/internal/icons"
 	"realms/internal/metrics"
+	"realms/internal/middleware"
 	"realms/internal/scheduler"
 	"realms/internal/security"
 	"realms/internal/store"
@@ -292,28 +293,29 @@ type UsageWindowView struct {
 }
 
 type UsageEventView struct {
-	ID                int64
-	Time              string
-	Endpoint          string
-	Method            string
-	Model             string
-	StatusCode        string
-	LatencyMS         string
-	InputTokens       string
-	OutputTokens      string
-	CachedTokens      string
-	RequestBytes      string
-	ResponseBytes     string
-	CostUSD           string
-	State             string
-	StateLabel        string
-	StateBadgeClass   string
-	RequestID         string
-	UpstreamChannelID string
-	Error             string
-	ErrorClass        string
-	ErrorMessage      string
-	IsStream          bool
+	ID                  int64
+	Time                string
+	Endpoint            string
+	Method              string
+	Model               string
+	StatusCode          string
+	LatencyMS           string
+	InputTokens         string
+	OutputTokens        string
+	CachedTokens        string
+	RequestBytes        string
+	ResponseBytes       string
+	CostUSD             string
+	State               string
+	StateLabel          string
+	StateBadgeClass     string
+	RequestID           string
+	UpstreamChannelID   string
+	UpstreamChannelName string
+	Error               string
+	ErrorClass          string
+	ErrorMessage        string
+	IsStream            bool
 }
 
 type ModelView struct {
@@ -506,11 +508,11 @@ func (s *Server) Index(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) LoginPage(w http.ResponseWriter, r *http.Request) {
-	notice := strings.TrimSpace(r.URL.Query().Get("msg"))
+	notice := strings.TrimSpace(middleware.FlashNotice(r.Context()))
 	if len(notice) > 200 {
 		notice = notice[:200] + "..."
 	}
-	next := sanitizeNextPath(r.URL.Query().Get("next"))
+	next := sanitizeNextPath(middleware.NextPathFromCookie(r))
 	s.Render(w, "page_login", TemplateData{
 		Title:         "登录 - Realms",
 		Notice:        notice,
@@ -546,6 +548,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "创建会话失败", http.StatusInternalServerError)
 		return
 	}
+	middleware.ClearNextPathCookie(w, r)
 	target := "/dashboard"
 	if next != "" {
 		target = next
@@ -1043,11 +1046,11 @@ func (s *Server) TopupPage(w http.ResponseWriter, r *http.Request) {
 		views = append(views, v)
 	}
 
-	notice := strings.TrimSpace(r.URL.Query().Get("msg"))
+	notice := strings.TrimSpace(middleware.FlashNotice(r.Context()))
 	if len(notice) > 200 {
 		notice = notice[:200] + "..."
 	}
-	errMsg := strings.TrimSpace(r.URL.Query().Get("err"))
+	errMsg := strings.TrimSpace(middleware.FlashError(r.Context()))
 	if len(errMsg) > 200 {
 		errMsg = errMsg[:200] + "..."
 	}
@@ -1114,32 +1117,38 @@ func (s *Server) CreateTopupOrder(w http.ResponseWriter, r *http.Request) {
 	amountRaw := strings.TrimSpace(r.FormValue("amount_cny"))
 	amountCNY, err := parseCNY(amountRaw)
 	if err != nil {
-		http.Redirect(w, r, "/topup?err="+url.QueryEscape("金额不合法（示例：10.00）："+err.Error()), http.StatusFound)
+		middleware.SetFlashError(w, r, "金额不合法（示例：10.00）："+err.Error())
+		http.Redirect(w, r, "/topup", http.StatusFound)
 		return
 	}
 	if amountCNY.LessThanOrEqual(decimal.Zero) {
-		http.Redirect(w, r, "/topup?err="+url.QueryEscape("金额必须大于 0"), http.StatusFound)
+		middleware.SetFlashError(w, r, "金额必须大于 0")
+		http.Redirect(w, r, "/topup", http.StatusFound)
 		return
 	}
 
 	cfg := s.billingConfigEffective(r.Context())
 	minTopupCNY := cfg.MinTopupCNY
 	if minTopupCNY.GreaterThan(decimal.Zero) && amountCNY.LessThan(minTopupCNY) {
-		http.Redirect(w, r, "/topup?err="+url.QueryEscape("金额不能小于最低充值："+formatCNY(minTopupCNY)), http.StatusFound)
+		middleware.SetFlashError(w, r, "金额不能小于最低充值："+formatCNY(minTopupCNY))
+		http.Redirect(w, r, "/topup", http.StatusFound)
 		return
 	}
 	if cfg.CreditUSDPerCNY.LessThanOrEqual(decimal.Zero) {
-		http.Redirect(w, r, "/topup?err="+url.QueryEscape("未配置充值入账比例"), http.StatusFound)
+		middleware.SetFlashError(w, r, "未配置充值入账比例")
+		http.Redirect(w, r, "/topup", http.StatusFound)
 		return
 	}
 	creditUSD := amountCNY.Mul(cfg.CreditUSDPerCNY).Truncate(store.USDScale)
 
 	o, err := s.store.CreateTopupOrder(r.Context(), u.ID, amountCNY, creditUSD, time.Now())
 	if err != nil {
-		http.Redirect(w, r, "/topup?err="+url.QueryEscape("创建订单失败："+err.Error()), http.StatusFound)
+		middleware.SetFlashError(w, r, "创建订单失败："+err.Error())
+		http.Redirect(w, r, "/topup", http.StatusFound)
 		return
 	}
-	http.Redirect(w, r, "/pay/topup/"+strconv.FormatInt(o.ID, 10)+"?msg="+url.QueryEscape("订单已创建，请选择支付方式"), http.StatusFound)
+	middleware.SetFlashNotice(w, r, "订单已创建，请选择支付方式")
+	http.Redirect(w, r, "/pay/topup/"+strconv.FormatInt(o.ID, 10), http.StatusFound)
 }
 
 func (s *Server) PayPage(w http.ResponseWriter, r *http.Request) {
@@ -1157,11 +1166,11 @@ func (s *Server) PayPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	notice := strings.TrimSpace(r.URL.Query().Get("msg"))
+	notice := strings.TrimSpace(middleware.FlashNotice(r.Context()))
 	if len(notice) > 200 {
 		notice = notice[:200] + "..."
 	}
-	errMsg := strings.TrimSpace(r.URL.Query().Get("err"))
+	errMsg := strings.TrimSpace(middleware.FlashError(r.Context()))
 	if len(errMsg) > 200 {
 		errMsg = errMsg[:200] + "..."
 	}
@@ -1296,6 +1305,28 @@ func (s *Server) PayPage(w http.ResponseWriter, r *http.Request) {
 	}))
 }
 
+func (s *Server) PayReturnSuccess(w http.ResponseWriter, r *http.Request) {
+	kind := strings.TrimSpace(r.PathValue("kind"))
+	orderID, err := parseInt64(strings.TrimSpace(r.PathValue("order_id")))
+	if err != nil || orderID <= 0 {
+		http.NotFound(w, r)
+		return
+	}
+	middleware.SetFlashNotice(w, r, "支付已完成，正在入账/生效，请稍后刷新查看状态。")
+	http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10), http.StatusFound)
+}
+
+func (s *Server) PayReturnCancel(w http.ResponseWriter, r *http.Request) {
+	kind := strings.TrimSpace(r.PathValue("kind"))
+	orderID, err := parseInt64(strings.TrimSpace(r.PathValue("order_id")))
+	if err != nil || orderID <= 0 {
+		http.NotFound(w, r)
+		return
+	}
+	middleware.SetFlashNotice(w, r, "已取消支付。")
+	http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10), http.StatusFound)
+}
+
 func (s *Server) CancelPayOrder(w http.ResponseWriter, r *http.Request) {
 	p, _ := auth.PrincipalFromContext(r.Context())
 	u, err := s.store.GetUserByID(r.Context(), p.UserID)
@@ -1318,7 +1349,8 @@ func (s *Server) CancelPayOrder(w http.ResponseWriter, r *http.Request) {
 				http.NotFound(w, r)
 				return
 			}
-			http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape(err.Error()), http.StatusFound)
+			middleware.SetFlashError(w, r, err.Error())
+			http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10), http.StatusFound)
 			return
 		}
 	case "topup":
@@ -1327,7 +1359,8 @@ func (s *Server) CancelPayOrder(w http.ResponseWriter, r *http.Request) {
 				http.NotFound(w, r)
 				return
 			}
-			http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape(err.Error()), http.StatusFound)
+			middleware.SetFlashError(w, r, err.Error())
+			http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10), http.StatusFound)
 			return
 		}
 	default:
@@ -1335,7 +1368,8 @@ func (s *Server) CancelPayOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?msg="+url.QueryEscape("订单已取消。若您已完成支付，请联系管理员处理退款。"), http.StatusFound)
+	middleware.SetFlashNotice(w, r, "订单已取消。若您已完成支付，请联系管理员处理退款。")
+	http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10), http.StatusFound)
 }
 
 func (s *Server) StartPayment(w http.ResponseWriter, r *http.Request) {
@@ -1353,12 +1387,18 @@ func (s *Server) StartPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	payURL := "/pay/" + kind + "/" + strconv.FormatInt(orderID, 10)
+	redirectPayError := func(msg string) {
+		middleware.SetFlashError(w, r, msg)
+		http.Redirect(w, r, payURL, http.StatusFound)
+	}
+
 	paymentChannelIDRaw := strings.TrimSpace(r.FormValue("payment_channel_id"))
 	paymentChannelID := int64(0)
 	if paymentChannelIDRaw != "" {
 		id, err := parseInt64(paymentChannelIDRaw)
 		if err != nil || id <= 0 {
-			http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("支付渠道不合法"), http.StatusFound)
+			redirectPayError("支付渠道不合法")
 			return
 		}
 		paymentChannelID = id
@@ -1366,7 +1406,7 @@ func (s *Server) StartPayment(w http.ResponseWriter, r *http.Request) {
 
 	method := strings.ToLower(strings.TrimSpace(r.FormValue("method")))
 	if paymentChannelID == 0 && method == "" {
-		http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("请选择支付方式"), http.StatusFound)
+		redirectPayError("请选择支付方式")
 		return
 	}
 
@@ -1391,7 +1431,7 @@ func (s *Server) StartPayment(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if o.Status != store.SubscriptionOrderStatusPending {
-			http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("订单状态不可支付"), http.StatusFound)
+			redirectPayError("订单状态不可支付")
 			return
 		}
 
@@ -1421,7 +1461,7 @@ func (s *Server) StartPayment(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if o.Status != store.TopupOrderStatusPending {
-			http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("订单状态不可支付"), http.StatusFound)
+			redirectPayError("订单状态不可支付")
 			return
 		}
 
@@ -1434,38 +1474,38 @@ func (s *Server) StartPayment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if amountCNY.LessThanOrEqual(decimal.Zero) {
-		http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("订单金额不合法"), http.StatusFound)
+		redirectPayError("订单金额不合法")
 		return
 	}
 
 	unitAmount, err := cnyToMinorUnits(amountCNY)
 	if err != nil || unitAmount <= 0 {
-		http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("订单金额不合法"), http.StatusFound)
+		redirectPayError("订单金额不合法")
 		return
 	}
 
-	successURL := baseURL + "/pay/" + kind + "/" + strconv.FormatInt(orderID, 10) + "?msg=" + url.QueryEscape("支付已完成，正在入账/生效，请稍后刷新查看状态。")
-	cancelURL := baseURL + "/pay/" + kind + "/" + strconv.FormatInt(orderID, 10) + "?msg=" + url.QueryEscape("已取消支付。")
+	successURL := baseURL + "/pay/" + kind + "/" + strconv.FormatInt(orderID, 10) + "/success"
+	cancelURL := baseURL + "/pay/" + kind + "/" + strconv.FormatInt(orderID, 10) + "/cancel"
 
 	if paymentChannelID > 0 {
 		ch, err := s.store.GetPaymentChannelByID(r.Context(), paymentChannelID)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("支付渠道不存在"), http.StatusFound)
+				redirectPayError("支付渠道不存在")
 				return
 			}
 			http.Error(w, "支付渠道查询失败", http.StatusInternalServerError)
 			return
 		}
 		if ch.Status != 1 {
-			http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("支付渠道未启用"), http.StatusFound)
+			redirectPayError("支付渠道未启用")
 			return
 		}
 
 		switch ch.Type {
 		case store.PaymentChannelTypeStripe:
 			if ch.StripeSecretKey == nil || strings.TrimSpace(*ch.StripeSecretKey) == "" || ch.StripeWebhookSecret == nil || strings.TrimSpace(*ch.StripeWebhookSecret) == "" {
-				http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("Stripe 渠道未配置或不可用"), http.StatusFound)
+				redirectPayError("Stripe 渠道未配置或不可用")
 				return
 			}
 			currency := "cny"
@@ -1501,14 +1541,14 @@ func (s *Server) StartPayment(w http.ResponseWriter, r *http.Request) {
 			}
 			sess, err := stripeCheckout.New(params)
 			if err != nil || strings.TrimSpace(sess.URL) == "" {
-				http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("创建 Stripe 支付失败"), http.StatusFound)
+				redirectPayError("创建 Stripe 支付失败")
 				return
 			}
 			http.Redirect(w, r, sess.URL, http.StatusFound)
 			return
 		case store.PaymentChannelTypeEPay:
 			if ch.EPayGateway == nil || strings.TrimSpace(*ch.EPayGateway) == "" || ch.EPayPartnerID == nil || strings.TrimSpace(*ch.EPayPartnerID) == "" || ch.EPayKey == nil || strings.TrimSpace(*ch.EPayKey) == "" {
-				http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("EPay 渠道未配置或不可用"), http.StatusFound)
+				redirectPayError("EPay 渠道未配置或不可用")
 				return
 			}
 
@@ -1519,7 +1559,7 @@ func (s *Server) StartPayment(w http.ResponseWriter, r *http.Request) {
 			switch epayType {
 			case "alipay", "wxpay", "qqpay":
 			default:
-				http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("EPay 支付类型不支持"), http.StatusFound)
+				redirectPayError("EPay 支付类型不支持")
 				return
 			}
 
@@ -1528,18 +1568,18 @@ func (s *Server) StartPayment(w http.ResponseWriter, r *http.Request) {
 				Key:       strings.TrimSpace(*ch.EPayKey),
 			}, strings.TrimSpace(*ch.EPayGateway))
 			if err != nil {
-				http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("EPay 配置错误"), http.StatusFound)
+				redirectPayError("EPay 配置错误")
 				return
 			}
 
 			notifyURL, err := url.Parse(baseURL + "/api/pay/epay/notify/" + strconv.FormatInt(paymentChannelID, 10))
 			if err != nil {
-				http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("回调 URL 配置错误"), http.StatusFound)
+				redirectPayError("回调 URL 配置错误")
 				return
 			}
 			returnURL, err := url.Parse(baseURL + "/pay/" + kind + "/" + strconv.FormatInt(orderID, 10))
 			if err != nil {
-				http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("回跳 URL 配置错误"), http.StatusFound)
+				redirectPayError("回跳 URL 配置错误")
 				return
 			}
 
@@ -1554,13 +1594,13 @@ func (s *Server) StartPayment(w http.ResponseWriter, r *http.Request) {
 				ReturnUrl:      returnURL,
 			})
 			if err != nil {
-				http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("创建 EPay 支付失败"), http.StatusFound)
+				redirectPayError("创建 EPay 支付失败")
 				return
 			}
 
 			u2, err := url.Parse(purchaseURL)
 			if err != nil {
-				http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("创建 EPay 支付失败"), http.StatusFound)
+				redirectPayError("创建 EPay 支付失败")
 				return
 			}
 			q := u2.Query()
@@ -1572,7 +1612,7 @@ func (s *Server) StartPayment(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, u2.String(), http.StatusFound)
 			return
 		default:
-			http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("支付渠道类型不支持"), http.StatusFound)
+			redirectPayError("支付渠道类型不支持")
 			return
 		}
 	}
@@ -1582,7 +1622,7 @@ func (s *Server) StartPayment(w http.ResponseWriter, r *http.Request) {
 	case "stripe":
 		cfg := payCfg.Stripe
 		if !cfg.Enable || strings.TrimSpace(cfg.SecretKey) == "" || strings.TrimSpace(cfg.WebhookSecret) == "" {
-			http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("Stripe 未配置或未启用"), http.StatusFound)
+			redirectPayError("Stripe 未配置或未启用")
 			return
 		}
 		cfg.Currency = strings.ToLower(strings.TrimSpace(cfg.Currency))
@@ -1616,7 +1656,7 @@ func (s *Server) StartPayment(w http.ResponseWriter, r *http.Request) {
 
 		sess, err := stripeCheckout.New(params)
 		if err != nil || strings.TrimSpace(sess.URL) == "" {
-			http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("创建 Stripe 支付失败"), http.StatusFound)
+			redirectPayError("创建 Stripe 支付失败")
 			return
 		}
 		http.Redirect(w, r, sess.URL, http.StatusFound)
@@ -1624,7 +1664,7 @@ func (s *Server) StartPayment(w http.ResponseWriter, r *http.Request) {
 	case "epay":
 		cfg := payCfg.EPay
 		if !cfg.Enable || strings.TrimSpace(cfg.Gateway) == "" || strings.TrimSpace(cfg.PartnerID) == "" || strings.TrimSpace(cfg.Key) == "" {
-			http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("EPay 未配置或未启用"), http.StatusFound)
+			redirectPayError("EPay 未配置或未启用")
 			return
 		}
 
@@ -1635,7 +1675,7 @@ func (s *Server) StartPayment(w http.ResponseWriter, r *http.Request) {
 		switch epayType {
 		case "alipay", "wxpay", "qqpay":
 		default:
-			http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("EPay 支付类型不支持"), http.StatusFound)
+			redirectPayError("EPay 支付类型不支持")
 			return
 		}
 
@@ -1644,18 +1684,18 @@ func (s *Server) StartPayment(w http.ResponseWriter, r *http.Request) {
 			Key:       cfg.Key,
 		}, cfg.Gateway)
 		if err != nil {
-			http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("EPay 配置错误"), http.StatusFound)
+			redirectPayError("EPay 配置错误")
 			return
 		}
 
 		notifyURL, err := url.Parse(baseURL + "/api/pay/epay/notify")
 		if err != nil {
-			http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("回调 URL 配置错误"), http.StatusFound)
+			redirectPayError("回调 URL 配置错误")
 			return
 		}
 		returnURL, err := url.Parse(baseURL + "/pay/" + kind + "/" + strconv.FormatInt(orderID, 10))
 		if err != nil {
-			http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("回跳 URL 配置错误"), http.StatusFound)
+			redirectPayError("回跳 URL 配置错误")
 			return
 		}
 
@@ -1670,13 +1710,13 @@ func (s *Server) StartPayment(w http.ResponseWriter, r *http.Request) {
 			ReturnUrl:      returnURL,
 		})
 		if err != nil {
-			http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("创建 EPay 支付失败"), http.StatusFound)
+			redirectPayError("创建 EPay 支付失败")
 			return
 		}
 
 		u2, err := url.Parse(purchaseURL)
 		if err != nil {
-			http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("创建 EPay 支付失败"), http.StatusFound)
+			redirectPayError("创建 EPay 支付失败")
 			return
 		}
 		q := u2.Query()
@@ -1688,12 +1728,59 @@ func (s *Server) StartPayment(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, u2.String(), http.StatusFound)
 		return
 	default:
-		http.Redirect(w, r, "/pay/"+kind+"/"+strconv.FormatInt(orderID, 10)+"?err="+url.QueryEscape("支付方式不支持"), http.StatusFound)
+		redirectPayError("支付方式不支持")
 		return
 	}
 }
 
 func (s *Server) UsagePage(w http.ResponseWriter, r *http.Request) {
+	s.usagePageWithCursor(w, r, nil, nil)
+}
+
+func (s *Server) UsageBeforePage(w http.ResponseWriter, r *http.Request) {
+	id, err := parseInt64(strings.TrimSpace(r.PathValue("cursor_id")))
+	if err != nil || id <= 0 {
+		http.NotFound(w, r)
+		return
+	}
+	s.usagePageWithCursor(w, r, &id, nil)
+}
+
+func (s *Server) UsageAfterPage(w http.ResponseWriter, r *http.Request) {
+	id, err := parseInt64(strings.TrimSpace(r.PathValue("cursor_id")))
+	if err != nil || id <= 0 {
+		http.NotFound(w, r)
+		return
+	}
+	s.usagePageWithCursor(w, r, nil, &id)
+}
+
+func (s *Server) UsageFilter(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "表单解析失败", http.StatusBadRequest)
+		return
+	}
+
+	start := strings.TrimSpace(r.FormValue("start"))
+	end := strings.TrimSpace(r.FormValue("end"))
+
+	limit := 0
+	if v := strings.TrimSpace(r.FormValue("limit")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			limit = n
+		}
+	}
+
+	if start == "" && end == "" && limit <= 0 {
+		middleware.ClearUsageFilterCookies(w, r)
+	} else {
+		middleware.SetUsageFilterCookies(w, r, start, end, limit)
+	}
+
+	http.Redirect(w, r, "/usage", http.StatusFound)
+}
+
+func (s *Server) usagePageWithCursor(w http.ResponseWriter, r *http.Request, beforeID *int64, afterID *int64) {
 	p, _ := auth.PrincipalFromContext(r.Context())
 	u, err := s.store.GetUserByID(r.Context(), p.UserID)
 	if err != nil {
@@ -1701,21 +1788,23 @@ func (s *Server) UsagePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	resetFilter := func(errMsg string) {
+		middleware.ClearUsageFilterCookies(w, r)
+		middleware.SetFlashError(w, r, errMsg)
+		http.Redirect(w, r, "/usage", http.StatusFound)
+	}
+
 	now := time.Now().UTC()
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	todayStr := todayStart.Format("2006-01-02")
 
-	q := r.URL.Query()
-	startStr := strings.TrimSpace(q.Get("start"))
-	endStr := strings.TrimSpace(q.Get("end"))
+	startStr := strings.TrimSpace(middleware.UsageStartFromCookie(r))
+	endStr := strings.TrimSpace(middleware.UsageEndFromCookie(r))
 	limit := 50
-	if v := strings.TrimSpace(q.Get("limit")); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			http.Error(w, "limit 不合法", http.StatusBadRequest)
-			return
+	if v := strings.TrimSpace(middleware.UsageLimitFromCookie(r)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			limit = n
 		}
-		limit = n
 	}
 	if limit < 10 {
 		limit = 10
@@ -1729,18 +1818,19 @@ func (s *Server) UsagePage(w http.ResponseWriter, r *http.Request) {
 	if endStr == "" {
 		endStr = startStr
 	}
+
 	since, err := time.Parse("2006-01-02", startStr)
 	if err != nil {
-		http.Error(w, "start 不合法（格式：YYYY-MM-DD）", http.StatusBadRequest)
+		resetFilter("start 不合法（格式：YYYY-MM-DD）")
 		return
 	}
 	endDate, err := time.Parse("2006-01-02", endStr)
 	if err != nil {
-		http.Error(w, "end 不合法（格式：YYYY-MM-DD）", http.StatusBadRequest)
+		resetFilter("end 不合法（格式：YYYY-MM-DD）")
 		return
 	}
 	if since.After(endDate) {
-		http.Error(w, "start 不能晚于 end", http.StatusBadRequest)
+		resetFilter("start 不能晚于 end")
 		return
 	}
 	if endDate.After(todayStart) {
@@ -1794,34 +1884,20 @@ func (s *Server) UsagePage(w http.ResponseWriter, r *http.Request) {
 	}
 	view.LimitUSD = "-"
 
-	var beforeID *int64
-	if v := strings.TrimSpace(q.Get("before_id")); v != "" {
-		id, err := parseInt64(v)
-		if err != nil || id <= 0 {
-			http.Error(w, "before_id 不合法", http.StatusBadRequest)
-			return
-		}
-		beforeID = &id
-	}
-	var afterID *int64
-	if v := strings.TrimSpace(q.Get("after_id")); v != "" {
-		id, err := parseInt64(v)
-		if err != nil || id <= 0 {
-			http.Error(w, "after_id 不合法", http.StatusBadRequest)
-			return
-		}
-		afterID = &id
-	}
-	if beforeID != nil && afterID != nil {
-		http.Error(w, "before_id 与 after_id 不能同时使用", http.StatusBadRequest)
-		return
-	}
-
 	events, err := s.store.ListUsageEventsByUserRange(r.Context(), u.ID, since, until, limit, beforeID, afterID)
 	if err != nil {
 		http.Error(w, "查询请求明细失败", http.StatusInternalServerError)
 		return
 	}
+
+	channelNameByID := map[int64]string{}
+	if channels, err := s.store.ListUpstreamChannels(r.Context()); err == nil {
+		channelNameByID = make(map[int64]string, len(channels))
+		for _, ch := range channels {
+			channelNameByID[ch.ID] = ch.Name
+		}
+	}
+
 	var eventViews []UsageEventView
 	for _, e := range events {
 		endpoint := "-"
@@ -1893,8 +1969,12 @@ func (s *Server) UsagePage(w http.ResponseWriter, r *http.Request) {
 			stateBadge = "bg-secondary-subtle text-secondary border border-secondary-subtle"
 		}
 		upstreamChannelID := "-"
+		upstreamChannelName := ""
 		if e.UpstreamChannelID != nil && *e.UpstreamChannelID > 0 {
 			upstreamChannelID = strconv.FormatInt(*e.UpstreamChannelID, 10)
+			if name := strings.TrimSpace(channelNameByID[*e.UpstreamChannelID]); name != "" {
+				upstreamChannelName = name
+			}
 		}
 		errClass := ""
 		if e.ErrorClass != nil && strings.TrimSpace(*e.ErrorClass) != "" {
@@ -1921,28 +2001,29 @@ func (s *Server) UsagePage(w http.ResponseWriter, r *http.Request) {
 		}
 
 		eventViews = append(eventViews, UsageEventView{
-			ID:                e.ID,
-			Time:              e.Time.UTC().Format("2006-01-02 15:04:05"),
-			Endpoint:          endpoint,
-			Method:            method,
-			Model:             model,
-			StatusCode:        statusCode,
-			LatencyMS:         latencyMS,
-			InputTokens:       inTok,
-			OutputTokens:      outTok,
-			CachedTokens:      cachedTok,
-			RequestBytes:      reqBytes,
-			ResponseBytes:     respBytes,
-			CostUSD:           cost,
-			State:             e.State,
-			StateLabel:        stateLabel,
-			StateBadgeClass:   stateBadge,
-			RequestID:         e.RequestID,
-			UpstreamChannelID: upstreamChannelID,
-			Error:             errText,
-			ErrorClass:        errClass,
-			ErrorMessage:      errMsg,
-			IsStream:          e.IsStream,
+			ID:                  e.ID,
+			Time:                e.Time.UTC().Format("2006-01-02 15:04:05"),
+			Endpoint:            endpoint,
+			Method:              method,
+			Model:               model,
+			StatusCode:          statusCode,
+			LatencyMS:           latencyMS,
+			InputTokens:         inTok,
+			OutputTokens:        outTok,
+			CachedTokens:        cachedTok,
+			RequestBytes:        reqBytes,
+			ResponseBytes:       respBytes,
+			CostUSD:             cost,
+			State:               e.State,
+			StateLabel:          stateLabel,
+			StateBadgeClass:     stateBadge,
+			RequestID:           e.RequestID,
+			UpstreamChannelID:   upstreamChannelID,
+			UpstreamChannelName: upstreamChannelName,
+			Error:               errText,
+			ErrorClass:          errClass,
+			ErrorMessage:        errMsg,
+			IsStream:            e.IsStream,
 		})
 	}
 	nextBeforeID := ""
@@ -1963,6 +2044,8 @@ func (s *Server) UsagePage(w http.ResponseWriter, r *http.Request) {
 	s.Render(w, "page_usage", s.withFeatures(r.Context(), TemplateData{
 		Title:             "用量统计 - Realms",
 		User:              userViewFromUser(u),
+		Notice:            strings.TrimSpace(middleware.FlashNotice(r.Context())),
+		Error:             strings.TrimSpace(middleware.FlashError(r.Context())),
 		CSRFToken:         csrfToken(p),
 		BaseURL:           s.baseURLFromRequest(r),
 		UsageWindows:      []UsageWindowView{view},
@@ -1998,7 +2081,8 @@ func (s *Server) PurchaseSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	msg := fmt.Sprintf("订单 #%d 已创建（%s - %s），请选择支付方式。", o.ID, plan.Name, formatCNY(plan.PriceCNY))
-	http.Redirect(w, r, "/pay/subscription/"+strconv.FormatInt(o.ID, 10)+"?msg="+url.QueryEscape(msg), http.StatusFound)
+	middleware.SetFlashNotice(w, r, msg)
+	http.Redirect(w, r, "/pay/subscription/"+strconv.FormatInt(o.ID, 10), http.StatusFound)
 }
 
 func (s *Server) subscriptionPage(w http.ResponseWriter, r *http.Request, errMsg string) {
@@ -2163,7 +2247,7 @@ func (s *Server) subscriptionPage(w http.ResponseWriter, r *http.Request, errMsg
 		orderViews = append(orderViews, v)
 	}
 
-	notice := strings.TrimSpace(r.URL.Query().Get("msg"))
+	notice := strings.TrimSpace(middleware.FlashNotice(r.Context()))
 	if len(notice) > 200 {
 		notice = notice[:200] + "..."
 	}
@@ -2367,11 +2451,10 @@ func (s *Server) forceLogoutUser(w http.ResponseWriter, r *http.Request, userID 
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
-	target := "/login"
 	if strings.TrimSpace(msg) != "" {
-		target = "/login?msg=" + url.QueryEscape(msg)
+		middleware.SetFlashNotice(w, r, msg)
 	}
-	http.Redirect(w, r, target, http.StatusFound)
+	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
 func (s *Server) renderAccountPage(w http.ResponseWriter, r *http.Request, u store.User, errMsg string) {
@@ -2446,7 +2529,10 @@ func sanitizeNextPath(raw string) string {
 	if u.IsAbs() || u.Host != "" || u.Scheme != "" {
 		return ""
 	}
-	return u.String()
+	if strings.TrimSpace(u.Path) == "" {
+		return ""
+	}
+	return u.Path
 }
 
 func parseInt64(s string) (int64, error) {

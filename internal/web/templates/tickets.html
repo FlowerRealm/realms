@@ -17,8 +17,8 @@
   <div class="card-body p-0">
     <div class="p-3 border-bottom d-flex gap-2 bg-light rounded-top">
       <a class="btn btn-sm btn-white border " href="/tickets">全部</a>
-      <a class="btn btn-sm btn-white border " href="/tickets?status=open">进行中</a>
-      <a class="btn btn-sm btn-white border " href="/tickets?status=closed">已关闭</a>
+      <a class="btn btn-sm btn-white border " href="/tickets/open">进行中</a>
+      <a class="btn btn-sm btn-white border " href="/tickets/closed">已关闭</a>
     </div>
 
     {{if not .Tickets}}
@@ -63,4 +63,3 @@
   </div>
 </div>
 {{end}}
-

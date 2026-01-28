@@ -4,30 +4,26 @@ package middleware
 import (
 	"database/sql"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"realms/internal/auth"
 	"realms/internal/store"
 )
 
-func loginRedirectTarget(r *http.Request, base string) string {
-	if r == nil || r.URL == nil {
-		return base
+func setNextForLoginRedirect(w http.ResponseWriter, r *http.Request) {
+	if w == nil || r == nil || r.URL == nil {
+		return
 	}
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
 	default:
-		return base
+		return
 	}
-	next := strings.TrimSpace(r.URL.RequestURI())
-	if next == "" || !strings.HasPrefix(next, "/") {
-		return base
+	next := strings.TrimSpace(r.URL.Path)
+	if next == "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") {
+		return
 	}
-	if strings.HasPrefix(next, "//") {
-		return base
-	}
-	return base + "?next=" + url.QueryEscape(next)
+	SetNextPathCookie(w, r, next)
 }
 
 func SessionAuth(st *store.Store, cookieName string) Middleware {
@@ -35,14 +31,16 @@ func SessionAuth(st *store.Store, cookieName string) Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			c, err := r.Cookie(cookieName)
 			if err != nil || c.Value == "" {
-				http.Redirect(w, r, loginRedirectTarget(r, "/login"), http.StatusFound)
+				setNextForLoginRedirect(w, r)
+				http.Redirect(w, r, "/login", http.StatusFound)
 				return
 			}
 			sess, err := st.GetSessionByRaw(r.Context(), c.Value)
 			if err != nil {
 				if err == sql.ErrNoRows {
 					http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", MaxAge: -1})
-					http.Redirect(w, r, loginRedirectTarget(r, "/login"), http.StatusFound)
+					setNextForLoginRedirect(w, r)
+					http.Redirect(w, r, "/login", http.StatusFound)
 					return
 				}
 				http.Error(w, "会话查询失败", http.StatusInternalServerError)
@@ -56,7 +54,8 @@ func SessionAuth(st *store.Store, cookieName string) Middleware {
 			if user.Status != 1 {
 				_ = st.DeleteSessionByRaw(r.Context(), c.Value)
 				http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", MaxAge: -1})
-				http.Redirect(w, r, loginRedirectTarget(r, "/login"), http.StatusFound)
+				setNextForLoginRedirect(w, r)
+				http.Redirect(w, r, "/login", http.StatusFound)
 				return
 			}
 			csrf := strings.TrimSpace(sess.CSRFToken)
