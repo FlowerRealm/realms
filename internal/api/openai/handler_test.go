@@ -51,7 +51,7 @@ func TestResponses_Stream_ExtractsUsageFromSSE(t *testing.T) {
 	}
 
 	doer := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
-		body := "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":3,\"output_tokens\":4,\"input_tokens_details\":{\"cached_tokens\":1}}}}\n\n" +
+		body := "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":3,\"output_tokens\":4,\"total_tokens\":7,\"input_tokens_details\":{\"cached_tokens\":1}}}}\n\n" +
 			"data: [DONE]\n\n"
 		return &http.Response{
 			StatusCode: http.StatusOK,

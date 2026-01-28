@@ -94,6 +94,7 @@ func main() {
 		usage := map[string]any{
 			"input_tokens":  inputTokens,
 			"output_tokens": outputTokens,
+			"total_tokens":  inputTokens + outputTokens,
 			"input_tokens_details": map[string]any{
 				"cached_tokens": cachedTokens,
 			},
