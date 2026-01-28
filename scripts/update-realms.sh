@@ -48,10 +48,9 @@ git fetch origin master
 git rebase origin/master
 after="$(git rev-parse --short HEAD)"
 
-echo "[INFO] 重建并重启（docker compose up -d --build）..."
-build_commit="$(git rev-parse --short HEAD 2>/dev/null || echo "none")"
-build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-REALMS_COMMIT="${build_commit}" REALMS_BUILD_DATE="${build_date}" $DOCKER compose up -d --build
+echo "[INFO] 拉取并重启（docker compose pull + up -d）..."
+$DOCKER compose pull realms
+$DOCKER compose up -d
 
 port="18080"
 if [ -f .env ]; then

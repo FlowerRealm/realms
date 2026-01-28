@@ -1,7 +1,7 @@
 # Realms 部署指南
 
 本文只提供“可直接复制运行”的部署命令。  
-环境变量与 `.env` 的详细配置项说明请先阅读：[`README.md`](../README.md) 与 [`.env.example`](../.env.example)。
+环境变量与 `.env` 的详细配置项说明请先阅读：[`README.md`](https://github.com/FlowerRealm/realms/blob/master/README.md) 与 [`.env.example`](https://github.com/FlowerRealm/realms/blob/master/.env.example)。
 
 ## 从 0 开始（Docker Compose，一键）
 
@@ -10,20 +10,21 @@ git clone "https://github.com/FlowerRealm/realms.git"
 cd "realms"
 
 cp ".env.example" ".env"
-docker compose up -d --build
+docker compose pull realms
+docker compose up -d
 
-curl -fsS "http://localhost:8080/healthz"
+curl -fsS "http://127.0.0.1:18080/healthz"
 ```
 
 首次初始化（必须做一次）：
 
-1) 打开：`http://localhost:8080/`  
+1) 打开：`http://127.0.0.1:18080/`  
 2) 注册并登录（`REALMS_ALLOW_OPEN_REGISTRATION=true` 时允许注册）  
 3) **第一个注册用户会成为 `root`**  
 4) 初始化完成后建议把 `REALMS_ALLOW_OPEN_REGISTRATION` 改为 `false`，并重启：
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
 ## 方式 A：Docker Compose（推荐，单机一键）
@@ -43,7 +44,7 @@ MYSQL_DATABASE=realms
 
 REALMS_ENV=prod
 REALMS_ADDR=:8080
-REALMS_DB_DSN_DOCKER=root:root@tcp(mysql:3306)/realms?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci
+REALMS_DB_DSN_DOCKER=root:root@tcp(mysql:3306)/realms?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci&time_zone=%27%2B00%3A00%27
 
 REALMS_ALLOW_OPEN_REGISTRATION=true
 REALMS_DISABLE_SECURE_COOKIES=true
@@ -52,15 +53,21 @@ EOF
 
 然后（按需）编辑 `.env`（至少确认/修改）：
 - `MYSQL_ROOT_PASSWORD` / `MYSQL_DATABASE`
+- `MYSQL_HOST_PORT`（可选：MySQL 暴露到宿主机的端口，默认 `3306`）
+- `MYSQL_BIND_IP`（可选：MySQL 绑定地址；默认 `0.0.0.0` 对外监听；如不需要对外访问建议改为 `127.0.0.1`）
+- `REALMS_IMAGE`（可选：默认 `flowerrealm/realms`，如需固定版本请写 `flowerrealm/realms:<tag>`）
 - `REALMS_ALLOW_OPEN_REGISTRATION`（建议仅初始化阶段临时开启）
 - `REALMS_DISABLE_SECURE_COOKIES`（纯 HTTP 场景一般需要 `true`）
 
 > 如果你改了 `MYSQL_ROOT_PASSWORD` 或 `MYSQL_DATABASE`，请同步修改 `REALMS_DB_DSN_DOCKER` 里的用户名/密码/库名。
+>
+> ⚠️ 注意：对外暴露 MySQL 端口有安全风险。公网部署请务必通过防火墙限制来源 IP、关闭 root 远程登录/使用最小权限账号，并设置强密码。
 
 ### 2) 启动（后台）
 
 ```bash
-docker compose up -d --build
+docker compose pull realms
+docker compose up -d
 ```
 
 ### 3) 查看状态 / 日志
@@ -79,18 +86,18 @@ docker compose down
 ### 5) 验证服务可用
 
 ```bash
-curl -fsS "http://localhost:8080/healthz"
+curl -fsS "http://127.0.0.1:18080/healthz"
 ```
 
 ### 6) 首次初始化（必须做一次）
 
-1) 打开：`http://localhost:8080/`  
+1) 打开：`http://127.0.0.1:18080/`  
 2) 注册并登录（`REALMS_ALLOW_OPEN_REGISTRATION=true` 时允许注册）  
 3) **第一个注册用户会成为 `root`**  
 4) 初始化完成后，建议把 `REALMS_ALLOW_OPEN_REGISTRATION` 改为 `false`，并重启：
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
 ## 日常维护（Docker Compose）
@@ -101,7 +108,8 @@ docker compose up -d --build
 cd "realms"
 git checkout "master" # 如果你的默认分支是 main，请改为 main
 git pull --rebase
-docker compose up -d --build
+docker compose pull realms
+docker compose up -d
 docker compose logs -f realms
 ```
 
@@ -111,9 +119,13 @@ docker compose logs -f realms
 
 ```bash
 cd "realms"
-git fetch --all --tags
-git checkout "<TAG_OR_COMMIT>"
-docker compose up -d --build
+# 通过镜像 tag 回滚（将 <TAG> 替换为目标版本；如 v1.2.3）。
+#
+# REALMS_IMAGE 会被 docker-compose.yml 读取：默认是 flowerrealm/realms。
+# 你也可以直接写入 .env：REALMS_IMAGE=flowerrealm/realms:<TAG>
+export REALMS_IMAGE="flowerrealm/realms:<TAG>"
+docker compose pull realms
+docker compose up -d
 docker compose logs -f realms
 ```
 
@@ -165,7 +177,8 @@ docker compose up -d mysql
 until docker compose exec -T mysql sh -lc 'mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent'; do sleep 1; done
 
 cat "~/backup.sql" | docker compose exec -T mysql sh -lc 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD"'
-docker compose up -d --build realms
+docker compose pull realms
+docker compose up -d realms
 ```
 
 ## 方式 B：Docker（仅 Realms，外部 MySQL）

@@ -259,7 +259,13 @@
                      <div class="text-danger smaller mt-1" title="{{.Error}}"><i class="ri-error-warning-line"></i> 错误</div>
                    {{end}}
                 </td>
-                <td class="text-center font-monospace text-muted">{{.UpstreamChannelID}}</td>
+                <td class="text-center text-nowrap" title="{{.UpstreamChannelID}}">
+                  {{if .UpstreamChannelName}}
+                    <span class="badge bg-light text-dark border fw-normal">{{.UpstreamChannelName}}</span>
+                  {{else}}
+                    <span class="text-muted">-</span>
+                  {{end}}
+                </td>
                 <td class="pe-4 font-monospace text-muted small user-select-all" onclick="event.stopPropagation();" style="max-width: 120px; overflow: hidden; text-overflow: ellipsis;" title="{{.RequestID}}">{{.RequestID}}</td>
               </tr>
               <tr class="rlm-usage-detail-row">
@@ -277,7 +283,11 @@
                         </div>
                         <div class="col-6 col-lg-3">
                           <div class="text-muted smaller">渠道</div>
-                          <div class="font-monospace">{{.UpstreamChannelID}}</div>
+                          {{if .UpstreamChannelName}}
+                            <div class="fw-bold" title="{{.UpstreamChannelID}}">{{.UpstreamChannelName}}</div>
+                          {{else}}
+                            <div class="text-muted">-</div>
+                          {{end}}
                         </div>
 
                         <div class="col-12 col-lg-6">

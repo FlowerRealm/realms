@@ -558,7 +558,6 @@ func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {
 		OK      bool   `json:"ok"`
 		Env     string `json:"env"`
 		Version string `json:"version"`
-		Commit  string `json:"commit"`
 		Date    string `json:"date"`
 
 		DBOK bool `json:"db_ok"`
@@ -583,7 +582,6 @@ func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {
 		OK:                    true,
 		Env:                   a.cfg.Env,
 		Version:               a.version.Version,
-		Commit:                a.version.Commit,
 		Date:                  a.version.Date,
 		DBOK:                  dbOK,
 		AllowOpenRegistration: a.cfg.Security.AllowOpenRegistration,
@@ -619,14 +617,12 @@ func (a *App) handleVersion(w http.ResponseWriter, r *http.Request) {
 		OK      bool   `json:"ok"`
 		Env     string `json:"env"`
 		Version string `json:"version"`
-		Commit  string `json:"commit"`
 		Date    string `json:"date"`
 	}
 	out := resp{
 		OK:      true,
 		Env:     a.cfg.Env,
 		Version: a.version.Version,
-		Commit:  a.version.Commit,
 		Date:    a.version.Date,
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

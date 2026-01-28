@@ -1,0 +1,31 @@
+site_name: Realms
+site_description: OpenAI 风格 API 中转（OpenAI 兼容 + 管理后台）
+repo_url: https://github.com/FlowerRealm/realms
+repo_name: FlowerRealm/realms
+
+theme:
+  name: material
+  language: zh
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+
+nav:
+  - 首页: index.md
+  - 部署指南: USAGE.md
+  - API 手册: api.md
+  - 架构: arch.md
+  - 数据: data.md
+  - 版本与更新: versioning.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - footnotes
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+

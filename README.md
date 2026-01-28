@@ -9,6 +9,7 @@ Realms 是一个 Go 单体服务（`net/http`），对外提供 **OpenAI 兼容*
 
 ## 文档
 
+- 在线文档（GitHub Pages）：https://flowerrealm.github.io/realms/
 - 配置示例：[`config.example.yaml`](config.example.yaml)
 - 贡献指南：[`CONTRIBUTING.md`](CONTRIBUTING.md)
 - 安全政策：[`SECURITY.md`](SECURITY.md)
@@ -34,8 +35,13 @@ Realms 是一个 Go 单体服务（`net/http`），对外提供 **OpenAI 兼容*
 - `db.driver=mysql`
 - `db.dsn=...`
 
-`make dev` 会在检测到 `127.0.0.1:3306` 未监听时，自动尝试用 docker compose 启动 MySQL 容器。  
-如需禁用该行为，可在环境变量或 `.env` 中设置：`REALMS_DEV_MYSQL=skip`。
+`make dev` 默认会同时启动两套环境：
+- 本地（正常模式）：`http://127.0.0.1:8080/`（air 热重载）
+- Docker（self_mode）：`http://127.0.0.1:7080/`（独立 docker compose project，数据库隔离）
+
+其中，本地环境会在检测到 `127.0.0.1:3306` 未监听时，自动尝试用 docker compose 启动 MySQL 容器。  
+如需禁用本地自动拉起 MySQL，可在环境变量或 `.env` 中设置：`REALMS_DEV_MYSQL=skip`。  
+如需禁用 Docker self_mode，可设置：`REALMS_DEV_DOCKER_SELF=skip`（仅启动本地）。
 
 > 说明：仅当你选择使用 MySQL（`db.driver=mysql` 或配置了 `db.dsn`）时，`make dev` 才会尝试拉起 MySQL 容器。SQLite 默认配置下不会启动 MySQL。
 
@@ -45,10 +51,21 @@ Realms 是一个 Go 单体服务（`net/http`），对外提供 **OpenAI 兼容*
 docker compose up -d mysql
 ```
 
+Docker self_mode（`make dev` 额外启动的一套）默认使用 project：`realms-dev-self`。如需停止：
+
+```bash
+docker compose -p realms-dev-self down
+```
+
+可选覆盖（环境变量或 `.env`）：
+- `REALMS_DEV_DOCKER_HTTP_PORT`（默认 `7080`）
+- `REALMS_DEV_DOCKER_MYSQL_HOST_PORT`（默认 `7306`）
+- `REALMS_DEV_DOCKER_PROJECT`（默认 `realms-dev-self`）
+
 > 提示：如果你的机器上 **3306 已被其他 MySQL 占用**，`docker-compose.yml` 的端口映射会冲突。  
 > 这时可以：
 > 1) 复用现有 MySQL（确保存在 `realms` 数据库）；或  
-> 2) 修改 `docker-compose.yml` 将宿主端口改为其他端口（如 `13306`），并同步更新 `config.yaml` 的 `db.dsn`。
+> 2) 在 `.env` 中设置 `MYSQL_HOST_PORT=13306`（可选 `MYSQL_BIND_IP=127.0.0.1` 仅本机监听），并同步更新 `config.yaml` 的 `db.dsn`（例如 `127.0.0.1:13306`）。
 
 ### 2. 启动 Realms
 
@@ -208,12 +225,14 @@ go test ./...
 
 本仓库包含一个会在每次 push 时触发的 CI（见 `.github/workflows/ci.yml`）：
 - 单测：`go test ./...`
-- E2E：Codex CLI → Realms → 上游（需要配置 GitHub Secrets）
+- E2E：Codex CLI → Realms → 上游（需要配置 GitHub Secrets），用于验证真实链路与用量统计落库
 
 需要在仓库 Secrets 中配置（占位名，勿提交真实密钥到仓库）：
 - `REALMS_CI_UPSTREAM_BASE_URL`：上游 OpenAI 兼容 `base_url`（例如 `https://api.openai.com` 或 `https://api.openai.com/v1`）
 - `REALMS_CI_UPSTREAM_API_KEY`：上游 API Key（例如 `sk-***`）
 - `REALMS_CI_MODEL`：用于 E2E 的模型名（例如 `gpt-4.1-mini`）
+
+> 说明：E2E 同时包含一个“fake upstream”的用例，用于更稳定地覆盖 `cached_tokens` 的解析与落库；真实上游用例也会执行两次请求并要求第二次命中缓存（`cached_input_tokens > 0`）。
 
 在本地复现 E2E（可选）：
 
@@ -227,7 +246,9 @@ go test ./tests/e2e -run TestCodexCLI_E2E -count=1
 
 ## 7) 版本号
 
-- 版本号文件：`internal/version/version.txt`（默认以该值作为 `GET /api/version` / `GET /healthz` 的 `version`）
-- 查询版本（公开）：`GET /api/version`
-- 健康检查（公开，含版本）：`GET /healthz`
+- 运行时构建信息（公开）：
+  - 查询版本：`GET /api/version`
+  - 健康检查（含版本/DB 状态）：`GET /healthz`
+- release 构建建议通过 `-ldflags -X` 注入版本信息（Docker 发布链路已支持 `REALMS_VERSION/REALMS_BUILD_DATE`）。
+- 最新发布版本（latest）由 GitHub Pages 提供（`version.json` / `version.txt`），用于外部查询与升级提示（见 `.github/workflows/pages.yml`）。
 - Web 控制台与管理后台会在页脚展示版本信息（来源：`/api/version`）

@@ -4,8 +4,10 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-realms}
-    # 不暴露到宿主机：避免与现有 MySQL 冲突，也减少攻击面
+    # MySQL 端口暴露（默认对外监听，便于外部工具/其他主机访问；注意自行做好防火墙与强口令）。
     command: ["--default-authentication-plugin=mysql_native_password"]
+    ports:
+      - "${MYSQL_BIND_IP:-0.0.0.0}:${MYSQL_HOST_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -16,13 +18,8 @@ services:
     restart: unless-stopped
 
   realms:
-    build:
-      context: .
-      args:
-        REALMS_BUILD_TAGS: ${REALMS_BUILD_TAGS:-}
-        REALMS_VERSION: ${REALMS_VERSION:-}
-        REALMS_COMMIT: ${REALMS_COMMIT:-none}
-        REALMS_BUILD_DATE: ${REALMS_BUILD_DATE:-unknown}
+    # 默认从 Docker Hub 拉取预构建镜像（可通过 REALMS_IMAGE 覆盖为私有仓库/指定 tag/本地构建镜像）。
+    image: ${REALMS_IMAGE:-flowerrealm/realms}
     depends_on:
       mysql:
         condition: service_healthy
@@ -30,7 +27,8 @@ services:
       - .env
     environment:
       REALMS_ENV: ${REALMS_ENV:-prod}
-      REALMS_DB_DSN: ${REALMS_DB_DSN_DOCKER:-root:root@tcp(mysql:3306)/realms?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci}
+      REALMS_SELF_MODE_ENABLE: ${REALMS_SELF_MODE_ENABLE:-false}
+      REALMS_DB_DSN: ${REALMS_DB_DSN_DOCKER:-root:root@tcp(mysql:3306)/realms?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci&time_zone=%27%2B00%3A00%27}
       REALMS_ALLOW_OPEN_REGISTRATION: ${REALMS_ALLOW_OPEN_REGISTRATION:-true}
       REALMS_DISABLE_SECURE_COOKIES: ${REALMS_DISABLE_SECURE_COOKIES:-true}
     ports:

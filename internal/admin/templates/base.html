@@ -762,29 +762,24 @@
             let buildInfo = null;
             let buildInfoReq = null;
 
-            function formatBuildInfo(data) {
-              try {
-                const version = (data && data.version ? data.version : "").toString().trim();
-                if (!version) return null;
-                const commit = (data && data.commit ? data.commit : "").toString().trim();
-                const date = (data && data.date ? data.date : "").toString().trim();
-                const env = (data && data.env ? data.env : "").toString().trim();
+	            function formatBuildInfo(data) {
+	              try {
+	                const version = (data && data.version ? data.version : "").toString().trim();
+	                if (!version) return null;
+	                const date = (data && data.date ? data.date : "").toString().trim();
+	                const env = (data && data.env ? data.env : "").toString().trim();
 
-                let label = version;
-                if (commit && commit !== "none") {
-                  label += " (" + commit.slice(0, 7) + ")";
-                }
+	                let label = version;
 
-                const titleParts = [];
-                if (env) titleParts.push("env: " + env);
-                if (commit && commit !== "none") titleParts.push("commit: " + commit);
-                if (date && date !== "unknown") titleParts.push("build: " + date);
+	                const titleParts = [];
+	                if (env) titleParts.push("env: " + env);
+	                if (date && date !== "unknown") titleParts.push("build: " + date);
 
-                return { label: label, title: titleParts.join(" · ") };
-              } catch (e) {
-                return null;
-              }
-            }
+	                return { label: label, title: titleParts.join(" · ") };
+	              } catch (e) {
+	                return null;
+	              }
+	            }
 
             function fetchBuildInfoOnce() {
               if (buildInfo) return Promise.resolve(buildInfo);

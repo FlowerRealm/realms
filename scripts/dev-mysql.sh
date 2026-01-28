@@ -9,7 +9,7 @@ if [[ "${REALMS_DEV_MYSQL:-}" =~ ^(0|false|no|off|skip)$ ]]; then
 fi
 
 MYSQL_HOST="${REALMS_DEV_MYSQL_HOST:-127.0.0.1}"
-MYSQL_PORT="${REALMS_DEV_MYSQL_PORT:-3306}"
+MYSQL_PORT="${REALMS_DEV_MYSQL_PORT:-${MYSQL_HOST_PORT:-3306}}"
 MYSQL_SERVICE="${REALMS_DEV_MYSQL_SERVICE:-mysql}"
 
 is_listening() {
@@ -46,7 +46,6 @@ fi
 echo ">> 启动 MySQL（docker compose: ${MYSQL_SERVICE}）"
 if ! "${DOCKER_COMPOSE[@]}" up -d "${MYSQL_SERVICE}"; then
   echo "!! 启动 docker MySQL 失败" >&2
-  echo "   - 如果本机 3306 已被占用：请修改 docker-compose.yml 端口映射或复用现有 MySQL" >&2
+  echo "   - 如果本机端口已被占用：请在 .env 设置 MYSQL_HOST_PORT=13306（或复用现有 MySQL）" >&2
   exit 1
 fi
-

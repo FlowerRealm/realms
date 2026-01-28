@@ -60,7 +60,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             REALMS_VERSION=${{ github.ref_name }}
-            REALMS_COMMIT=${{ github.sha }}
             REALMS_BUILD_DATE=${{ steps.build_date.outputs.value }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

@@ -1,0 +1,99 @@
+name: pages
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - "*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install MkDocs
+        run: pip install mkdocs mkdocs-material
+
+      - name: Build site
+        run: mkdocs build --strict --site-url "${{ steps.pages.outputs.base_url }}"
+
+      - name: Write version.json
+        shell: bash
+        env:
+          DOCS_BASE_URL: ${{ steps.pages.outputs.base_url }}
+        run: |
+          set -euo pipefail
+
+          latest="0.0.0"
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            latest="${GITHUB_REF_NAME}"
+          else
+            if git describe --tags --abbrev=0 >/dev/null 2>&1; then
+              latest="$(git describe --tags --abbrev=0)"
+            fi
+          fi
+
+          released_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          docs="${DOCS_BASE_URL:-}"
+          if [[ -z "${docs}" ]]; then
+            repo="${GITHUB_REPOSITORY:-FlowerRealm/realms}"
+            owner="${repo%%/*}"
+            repo_name="${repo#*/}"
+            docs="https://${owner}.github.io/${repo_name}/"
+          fi
+
+          repo="${GITHUB_REPOSITORY:-FlowerRealm/realms}"
+          docker_image="flowerrealm/realms:${latest}"
+
+          cat > site/version.json <<EOF
+          {
+            "latest": "${latest}",
+            "released_at": "${released_at}",
+            "repo": "${repo}",
+            "docs": "${docs}",
+            "docker_image": "${docker_image}"
+          }
+          EOF
+
+          printf "%s\n" "${latest}" > site/version.txt
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

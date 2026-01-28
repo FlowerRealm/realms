@@ -99,7 +99,12 @@ func OpenSQLite(path string) (*sql.DB, error) {
 }
 
 func openMySQL(dsn string) (*sql.DB, error) {
-	db, err := sql.Open("mysql", dsn)
+	normalized, err := normalizeMySQLDSN(dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	db, err := sql.Open("mysql", normalized)
 	if err != nil {
 		return nil, fmt.Errorf("sql.Open: %w", err)
 	}
@@ -107,6 +112,25 @@ func openMySQL(dsn string) (*sql.DB, error) {
 	db.SetMaxOpenConns(20)
 	db.SetMaxIdleConns(10)
 	return db, nil
+}
+
+func normalizeMySQLDSN(dsn string) (string, error) {
+	cfg, err := mysql.ParseDSN(dsn)
+	if err != nil {
+		return "", fmt.Errorf("mysql.ParseDSN: %w", err)
+	}
+
+	// Realms 统一以 UTC 存储/查询 DATETIME，并确保 MySQL 会话时区为 UTC：
+	// - loc: 影响驱动对 DATE/DATETIME 的解析与编码（parseTime=true）
+	// - time_zone: 影响 CURRENT_TIMESTAMP / NOW() 等 MySQL 时间函数
+	cfg.ParseTime = true
+	cfg.Loc = time.UTC
+	if cfg.Params == nil {
+		cfg.Params = map[string]string{}
+	}
+	cfg.Params["time_zone"] = "'+00:00'"
+
+	return cfg.FormatDSN(), nil
 }
 
 func pingMySQLOnce(db *sql.DB) error {

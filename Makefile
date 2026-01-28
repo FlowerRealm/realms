@@ -10,7 +10,7 @@ AIR := $(TOOLS_BIN)/air
 help:
 	@echo "Targets:"
 	@echo "  make tools   安装开发工具（air，安装到 .tmp/bin）"
-	@echo "  make dev     开发热重载（仅在配置 MySQL 时自动启动 MySQL docker 容器）"
+	@echo "  make dev     开发热重载（本地:8080 正常模式 + Docker:7080 self_mode；DB 隔离）"
 	@echo "  make test    运行测试"
 	@echo "  make fmt     gofmt（按包目录）"
 	@echo "  make tidy    go mod tidy"

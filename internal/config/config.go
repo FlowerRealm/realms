@@ -74,7 +74,7 @@ type DBConfig struct {
 	// - 当 dsn 非空且 driver 为空：推断为 mysql
 	// - 其他情况默认 sqlite
 	Driver string `yaml:"driver"`
-	// DSN 仅用于 MySQL（示例：user:pass@tcp(127.0.0.1:3306)/realms?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci）
+	// DSN 仅用于 MySQL（示例：user:pass@tcp(127.0.0.1:3306)/realms?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci&time_zone=%27%2B00%3A00%27）
 	DSN string `yaml:"dsn"`
 	// SQLitePath 是 SQLite 数据库文件路径（可包含 DSN query，如 ?_busy_timeout=30000）。
 	SQLitePath string `yaml:"sqlite_path"`

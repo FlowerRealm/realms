@@ -9,6 +9,9 @@ dist/
 /vendor/
 /coverage.out
 
+# MkDocs build output
+/site/
+
 # 根目录本地编译产物
 /main
 /realms

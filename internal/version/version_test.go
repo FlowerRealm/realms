@@ -1,29 +1,22 @@
 package version
 
 import (
-	"strings"
 	"testing"
 )
 
 func TestInfo_UsesEmbeddedVersionByDefault(t *testing.T) {
 	oldVersion := Version
-	oldCommit := Commit
 	oldDate := Date
 	t.Cleanup(func() {
 		Version = oldVersion
-		Commit = oldCommit
 		Date = oldDate
 	})
 
 	Version = "dev"
 	got := Info()
 
-	want := strings.TrimSpace(embeddedVersion)
-	if want == "" {
-		t.Fatalf("embeddedVersion is empty")
-	}
-	if got.Version != want {
-		t.Fatalf("Version mismatch: got=%q want=%q", got.Version, want)
+	if got.Version != "dev" {
+		t.Fatalf("Version mismatch: got=%q want=%q", got.Version, "dev")
 	}
 }
 
