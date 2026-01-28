@@ -1394,9 +1394,19 @@
 	    // 页面加载后：支持通过 query 或 sessionStorage 自动打开弹窗并定位分区
 	    ;(function () {
 	      try {
-	        var params = new URLSearchParams(window.location.search || '')
+	        var url = new URL(window.location.href)
+	        var params = url.searchParams
 	        var channelID = (params.get('open_channel_settings') || '').trim()
-	        var hash = (window.location.hash || '').trim()
+	        var hash = (url.hash || '').trim()
+	        var shouldCleanURL = false
+
+	        // 这些 query 参数仅用于“触发一次”的 UI 行为或提示，处理完成后应从地址栏移除，避免污染浏览体验。
+	        ;['open_channel_settings', 'msg', 'err', 'oauth', 'requery'].forEach(function (key) {
+	          if (params.has(key)) {
+	            params.delete(key)
+	            shouldCleanURL = true
+	          }
+	        })
 	        if (!channelID) {
 	          var raw = sessionStorage.getItem(channelSettingsReopenKey) || ''
 	          if (raw) {
@@ -1407,6 +1417,13 @@
 	          sessionStorage.removeItem(channelSettingsReopenKey)
 	        }
 	        if (channelID) openChannelSettings(channelID, hash)
+
+	        if (shouldCleanURL && window.history && window.history.replaceState) {
+	          var qs = params.toString()
+	          var cleanURL = url.pathname + (qs ? '?' + qs : '') + hash
+	          var currentURL = window.location.pathname + window.location.search + window.location.hash
+	          if (cleanURL !== currentURL) window.history.replaceState(null, '', cleanURL)
+	        }
 	      } catch (e) {}
 	    })()
 
