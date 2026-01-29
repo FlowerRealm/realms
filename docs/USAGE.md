@@ -3,6 +3,51 @@
 本文只提供“可直接复制运行”的部署命令。  
 环境变量与 `.env` 的详细配置项说明请先阅读：[`README.md`](https://github.com/FlowerRealm/realms/blob/master/README.md) 与 [`.env.example`](https://github.com/FlowerRealm/realms/blob/master/.env.example)。
 
+## 方式 0：安装包（Deb/Windows/macOS）
+
+从 GitHub Releases 下载对应版本的安装包/二进制产物（建议使用 tag，例如 `v1.2.3`）：
+- Debian/Ubuntu：`realms_<TAG>_linux_amd64.deb` / `realms_<TAG>_linux_arm64.deb`
+- Windows：`realms_<TAG>_windows_amd64.zip`（内含 `realms.exe`）
+- macOS：`realms_<TAG>_darwin_arm64.tar.gz`（Apple Silicon）/ `realms_<TAG>_darwin_amd64.tar.gz`（Intel）
+
+> 说明：`.deb` 默认按 SQLite（单机）配置并以 systemd 服务启动；Docker Compose 依然是推荐方式（尤其是需要 MySQL/更复杂依赖时）。
+
+### Debian/Ubuntu（.deb，systemd）
+
+```bash
+sudo dpkg -i "./realms_<TAG>_linux_amd64.deb"
+
+# 默认监听 :8080；修改配置后重启服务
+sudoedit "/etc/realms/realms.env"
+sudo systemctl restart "realms"
+
+# 验证
+curl -fsS "http://127.0.0.1:8080/healthz"
+```
+
+### Windows（zip/realms.exe）
+
+1) 解压 `realms_<TAG>_windows_amd64.zip`  
+2) 在解压目录执行（或手动复制/重命名）：
+
+```powershell
+Copy-Item ".env.example" ".env"
+.\realms.exe
+```
+
+### macOS（tar.gz）
+
+```bash
+tar -xzf "./realms_<TAG>_darwin_arm64.tar.gz"
+cd "realms_<TAG>_darwin_arm64"
+
+# 安装到 PATH（示例：/usr/local/bin）
+sudo install -m 0755 "./realms" "/usr/local/bin/realms"
+
+cp ".env.example" ".env"
+realms
+```
+
 ## 从 0 开始（Docker Compose，一键）
 
 ```bash

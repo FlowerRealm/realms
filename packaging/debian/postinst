@@ -1,0 +1,41 @@
+#!/bin/sh
+set -e
+
+ensure_user() {
+  if id -u realms >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if command -v adduser >/dev/null 2>&1; then
+    adduser --system --group --home /var/lib/realms --no-create-home realms >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  if command -v useradd >/dev/null 2>&1; then
+    useradd --system --home-dir /var/lib/realms --shell /usr/sbin/nologin realms >/dev/null 2>&1 || true
+    return 0
+  fi
+}
+
+ensure_dirs() {
+  mkdir -p /var/lib/realms/data
+  mkdir -p /var/lib/realms/data/tickets
+  chown -R realms:realms /var/lib/realms || true
+  chmod 0750 /var/lib/realms || true
+}
+
+reload_and_start() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return 0
+  fi
+
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl enable realms.service >/dev/null 2>&1 || true
+  systemctl restart realms.service >/dev/null 2>&1 || true
+}
+
+ensure_user
+ensure_dirs
+reload_and_start
+
+exit 0

@@ -16,6 +16,14 @@ Realms 是一个 Go 单体服务（`net/http`），对外提供 **OpenAI 兼容*
 - 行为准则：[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
 - 许可证：[`LICENSE`](LICENSE)
 
+## 安装方式（非 Docker）
+
+- **Debian/Ubuntu（.deb）**：从 GitHub Releases 下载 `realms_<TAG>_linux_amd64.deb`（或 `arm64`），安装后默认以 systemd 服务启动（配置：`/etc/realms/realms.env`；数据：`/var/lib/realms`）。
+- **Windows（.zip 内含 realms.exe）**：从 GitHub Releases 下载 `realms_<TAG>_windows_amd64.zip`，解压后将 `.env.example` 复制为 `.env` 并运行 `realms.exe`。
+- **macOS（.tar.gz）**：从 GitHub Releases 下载 `realms_<TAG>_darwin_arm64.tar.gz`（Apple Silicon）或 `realms_<TAG>_darwin_amd64.tar.gz`（Intel），解压后将 `realms` 放到 PATH（例如 `/usr/local/bin`）并运行。
+
+更完整的部署命令见：`docs/USAGE.md`（Docker Compose 依然是推荐方式）。
+
 ## 1) 快速开始（本地）
 
 ### 前置
