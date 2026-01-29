@@ -44,8 +44,8 @@ func (p *SubscriptionProvider) Reserve(ctx context.Context, in ReserveInput) (Re
 	}
 
 	var baseReservedUSD decimal.Decimal
-	if in.Model != nil && in.MaxOutputTokens != nil && *in.MaxOutputTokens > 0 {
-		c, err := estimateCostUSD(ctx, p.st, in.Model, nil, nil, nil, nil, in.MaxOutputTokens)
+	if in.Model != nil && ((in.InputTokens != nil && *in.InputTokens > 0) || (in.MaxOutputTokens != nil && *in.MaxOutputTokens > 0)) {
+		c, err := estimateCostUSD(ctx, p.st, in.Model, in.InputTokens, nil, nil, nil, in.MaxOutputTokens)
 		if err != nil {
 			return ReserveResult{}, err
 		}

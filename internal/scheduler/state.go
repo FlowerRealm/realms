@@ -2,6 +2,7 @@
 package scheduler
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
@@ -42,8 +43,14 @@ type State struct {
 	channelBanUntil  map[int64]time.Time
 	channelBanStreak map[int64]int
 
-	forcedChannelID    int64
-	forcedChannelUntil time.Time
+	channelProbeDueAt      map[int64]time.Time
+	channelProbeClaimUntil map[int64]time.Time
+
+	channelPointerID      int64
+	channelPointerRing    []int64
+	channelPointerIndex   map[int64]int
+	channelPointerMovedAt time.Time
+	channelPointerReason  string
 
 	lastSuccessSel Selection
 	lastSuccessAt  time.Time
@@ -51,59 +58,135 @@ type State struct {
 
 func NewState() *State {
 	return &State{
-		binding:            make(map[string]bindingEntry),
-		affinity:           make(map[string]affinityEntry),
-		rpm:                make(map[string][]time.Time),
-		tokens:             make(map[string][]tokenEvent),
-		credentialSessions: make(map[string]int),
-		credentialCooldown: make(map[string]time.Time),
-		channelFails:       make(map[int64]int),
-		credFails:          make(map[string]int),
-		channelBanUntil:    make(map[int64]time.Time),
-		channelBanStreak:   make(map[int64]int),
+		binding:                make(map[string]bindingEntry),
+		affinity:               make(map[string]affinityEntry),
+		rpm:                    make(map[string][]time.Time),
+		tokens:                 make(map[string][]tokenEvent),
+		credentialSessions:     make(map[string]int),
+		credentialCooldown:     make(map[string]time.Time),
+		channelFails:           make(map[int64]int),
+		credFails:              make(map[string]int),
+		channelBanUntil:        make(map[int64]time.Time),
+		channelBanStreak:       make(map[int64]int),
+		channelProbeDueAt:      make(map[int64]time.Time),
+		channelProbeClaimUntil: make(map[int64]time.Time),
+		channelPointerIndex:    make(map[int64]int),
 	}
 }
 
-func (s *State) SetForcedChannel(channelID int64, until time.Time) {
+func (s *State) SetChannelPointer(channelID int64) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if channelID <= 0 || until.IsZero() || time.Now().After(until) {
-		s.forcedChannelID = 0
-		s.forcedChannelUntil = time.Time{}
+	if channelID <= 0 {
+		s.channelPointerID = 0
 		return
 	}
-	s.forcedChannelID = channelID
-	s.forcedChannelUntil = until
+	s.channelPointerID = channelID
 }
 
-func (s *State) ForcedChannel(now time.Time) (int64, time.Time, bool) {
+func (s *State) ChannelPointer(now time.Time) (int64, bool) {
 	if s == nil {
-		return 0, time.Time{}, false
+		return 0, false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.forcedChannelID <= 0 || s.forcedChannelUntil.IsZero() {
-		return 0, time.Time{}, false
+
+	if len(s.channelPointerRing) > 0 {
+		if _, ok := s.channelPointerIndex[s.channelPointerID]; !ok {
+			s.channelPointerID = s.channelPointerRing[0]
+			s.channelPointerMovedAt = now
+			s.channelPointerReason = "invalid"
+		}
+		for i := 0; i < len(s.channelPointerRing); i++ {
+			if s.channelPointerID <= 0 {
+				break
+			}
+			until, ok := s.channelBanUntil[s.channelPointerID]
+			if ok && now.Before(until) {
+				s.advanceChannelPointerLocked(now, "ban")
+				continue
+			}
+			break
+		}
 	}
-	if now.After(s.forcedChannelUntil) {
-		s.forcedChannelID = 0
-		s.forcedChannelUntil = time.Time{}
-		return 0, time.Time{}, false
+
+	if s.channelPointerID <= 0 {
+		return 0, false
 	}
-	return s.forcedChannelID, s.forcedChannelUntil, true
+	return s.channelPointerID, true
 }
 
-func (s *State) ClearForcedChannel() {
+func (s *State) ClearChannelPointer() {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.forcedChannelID = 0
-	s.forcedChannelUntil = time.Time{}
+	s.channelPointerID = 0
+}
+
+func (s *State) SetChannelPointerRing(ring []int64) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.channelPointerRing = append(s.channelPointerRing[:0], ring...)
+	clear(s.channelPointerIndex)
+	for i, id := range s.channelPointerRing {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := s.channelPointerIndex[id]; ok {
+			continue
+		}
+		s.channelPointerIndex[id] = i
+	}
+}
+
+func (s *State) ChannelPointerRing() []int64 {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.channelPointerRing) == 0 {
+		return nil
+	}
+	return append([]int64(nil), s.channelPointerRing...)
+}
+
+func (s *State) advanceChannelPointerLocked(now time.Time, reason string) bool {
+	if s.channelPointerID <= 0 || len(s.channelPointerRing) == 0 {
+		return false
+	}
+	startIdx, ok := s.channelPointerIndex[s.channelPointerID]
+	if !ok {
+		s.channelPointerID = s.channelPointerRing[0]
+		s.channelPointerMovedAt = now
+		s.channelPointerReason = "invalid"
+		return true
+	}
+	for step := 1; step <= len(s.channelPointerRing); step++ {
+		idx := (startIdx + step) % len(s.channelPointerRing)
+		nextID := s.channelPointerRing[idx]
+		if nextID <= 0 {
+			continue
+		}
+		until, ok := s.channelBanUntil[nextID]
+		if ok && now.Before(until) {
+			continue
+		}
+		s.channelPointerID = nextID
+		s.channelPointerMovedAt = now
+		s.channelPointerReason = reason
+		return true
+	}
+	return false
 }
 
 func (s *State) RecordLastSuccess(sel Selection, at time.Time) {
@@ -358,6 +441,10 @@ func (s *State) IsChannelBanned(channelID int64, now time.Time) bool {
 	}
 	if now.After(until) {
 		delete(s.channelBanUntil, channelID)
+		if _, ok := s.channelProbeDueAt[channelID]; !ok {
+			s.channelProbeDueAt[channelID] = now
+		}
+		delete(s.channelProbeClaimUntil, channelID)
 		return false
 	}
 	return true
@@ -371,6 +458,8 @@ func (s *State) ClearChannelBan(channelID int64) {
 	defer s.mu.Unlock()
 	delete(s.channelBanUntil, channelID)
 	delete(s.channelBanStreak, channelID)
+	delete(s.channelProbeDueAt, channelID)
+	delete(s.channelProbeClaimUntil, channelID)
 }
 
 func (s *State) BanChannel(channelID int64, now time.Time, base time.Duration) time.Time {
@@ -403,8 +492,192 @@ func (s *State) BanChannel(channelID int64, now time.Time, base time.Duration) t
 	if newUntil.Before(start) {
 		newUntil = start.Add(24 * time.Hour)
 	}
+	maxUntil := now.Add(10 * time.Minute)
+	if newUntil.After(maxUntil) {
+		newUntil = maxUntil
+	}
 	s.channelBanUntil[channelID] = newUntil
+	if s.channelPointerID == channelID {
+		s.advanceChannelPointerLocked(now, "ban")
+	}
 	return newUntil
+}
+
+func (s *State) BanChannelImmediate(channelID int64, now time.Time, base time.Duration) time.Time {
+	if channelID == 0 || base <= 0 {
+		return now
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	streak := s.channelBanStreak[channelID] + 1
+	// 溢出保护：避免不受控的指数/线性增长导致 duration 过大。
+	if streak > 20 {
+		streak = 20
+	}
+	s.channelBanStreak[channelID] = streak
+
+	start := now
+	if until, ok := s.channelBanUntil[channelID]; ok && until.After(now) {
+		start = until
+	}
+	inc := base * time.Duration(streak)
+	newUntil := start.Add(inc)
+	if newUntil.Before(start) {
+		newUntil = start.Add(24 * time.Hour)
+	}
+	maxUntil := now.Add(10 * time.Minute)
+	if newUntil.After(maxUntil) {
+		newUntil = maxUntil
+	}
+	s.channelBanUntil[channelID] = newUntil
+	if s.channelPointerID == channelID {
+		s.advanceChannelPointerLocked(now, "ban")
+	}
+	return newUntil
+}
+
+func (s *State) IsChannelProbePending(channelID int64, now time.Time) bool {
+	if s == nil || channelID == 0 {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.channelProbeDueAt[channelID]; !ok {
+		return false
+	}
+	if until, ok := s.channelProbeClaimUntil[channelID]; ok {
+		if now.After(until) {
+			delete(s.channelProbeClaimUntil, channelID)
+		} else {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *State) IsChannelProbeDue(channelID int64) bool {
+	if s == nil || channelID == 0 {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.channelProbeDueAt[channelID]
+	return ok
+}
+
+func (s *State) TryClaimChannelProbe(channelID int64, now time.Time, ttl time.Duration) bool {
+	if s == nil || channelID == 0 {
+		return false
+	}
+	if ttl <= 0 {
+		ttl = 30 * time.Second
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.channelProbeDueAt[channelID]; !ok {
+		return false
+	}
+	if until, ok := s.channelProbeClaimUntil[channelID]; ok {
+		if now.After(until) {
+			delete(s.channelProbeClaimUntil, channelID)
+		} else {
+			return false
+		}
+	}
+	until := now.Add(ttl)
+	if until.Before(now) {
+		until = now.Add(30 * time.Second)
+	}
+	s.channelProbeClaimUntil[channelID] = until
+	return true
+}
+
+func (s *State) ReleaseChannelProbeClaim(channelID int64) {
+	if s == nil || channelID == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.channelProbeClaimUntil, channelID)
+}
+
+func (s *State) ClearChannelProbe(channelID int64) {
+	if s == nil || channelID == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.channelProbeDueAt, channelID)
+	delete(s.channelProbeClaimUntil, channelID)
+}
+
+func (s *State) ListProbeDueChannels(now time.Time, limit int) []int64 {
+	if s == nil {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	type item struct {
+		id int64
+		at time.Time
+	}
+	ready := make([]item, 0, len(s.channelProbeDueAt))
+	for channelID, dueAt := range s.channelProbeDueAt {
+		if until, ok := s.channelProbeClaimUntil[channelID]; ok {
+			if now.After(until) {
+				delete(s.channelProbeClaimUntil, channelID)
+			} else {
+				continue
+			}
+		}
+		ready = append(ready, item{id: channelID, at: dueAt})
+	}
+	sort.SliceStable(ready, func(i, j int) bool {
+		if ready[i].at.Equal(ready[j].at) {
+			return ready[i].id < ready[j].id
+		}
+		return ready[i].at.Before(ready[j].at)
+	})
+	if len(ready) < limit {
+		limit = len(ready)
+	}
+	out := make([]int64, 0, limit)
+	for i := 0; i < limit; i++ {
+		out = append(out, ready[i].id)
+	}
+	return out
+}
+
+func (s *State) ResetChannelFailScore(channelID int64) {
+	if s == nil || channelID == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.channelFails, channelID)
+}
+
+func (s *State) SweepExpiredChannelBans(now time.Time) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for channelID, until := range s.channelBanUntil {
+		if now.After(until) {
+			delete(s.channelBanUntil, channelID)
+			if _, ok := s.channelProbeDueAt[channelID]; !ok {
+				s.channelProbeDueAt[channelID] = now
+			}
+			delete(s.channelProbeClaimUntil, channelID)
+		}
+	}
 }
 
 func itoa64(n int64) string {

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/joho/godotenv"
 
 	"realms/internal/config"
 	"realms/internal/obs"
@@ -22,7 +23,9 @@ import (
 )
 
 func main() {
-	cfg, err := config.Load("config.yaml")
+	_ = godotenv.Load()
+
+	cfg, err := config.LoadFromEnv()
 	if err != nil {
 		slog.Error("加载配置失败", "err", err)
 		os.Exit(1)
@@ -65,12 +68,8 @@ func main() {
 	}
 
 	httpServer := &http.Server{
-		Addr:              cfg.Server.Addr,
-		Handler:           app.Handler(),
-		ReadHeaderTimeout: cfg.Server.ReadHeaderTimeout,
-		ReadTimeout:       cfg.Server.ReadTimeout,
-		WriteTimeout:      cfg.Server.WriteTimeout,
-		IdleTimeout:       cfg.Server.IdleTimeout,
+		Addr:    cfg.Server.Addr,
+		Handler: app.Handler(),
 	}
 
 	var oauthServer *http.Server
@@ -84,12 +83,8 @@ func main() {
 		callbackAddr := strings.TrimSpace(cfg.CodexOAuth.CallbackListenAddr)
 		if callbackAddr != "" && !sameTCPPort(cfg.Server.Addr, callbackAddr) {
 			oauthServer = &http.Server{
-				Addr:              callbackAddr,
-				Handler:           h,
-				ReadHeaderTimeout: 5 * time.Second,
-				ReadTimeout:       30 * time.Second,
-				WriteTimeout:      30 * time.Second,
-				IdleTimeout:       2 * time.Minute,
+				Addr:    callbackAddr,
+				Handler: h,
 			}
 			ln, err := net.Listen("tcp", oauthServer.Addr)
 			if err != nil {

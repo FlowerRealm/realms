@@ -10,7 +10,7 @@ Realms 是一个 Go 单体服务（`net/http`），对外提供 **OpenAI 兼容*
 ## 文档
 
 - 在线文档（GitHub Pages）：https://flowerrealm.github.io/realms/
-- 配置示例：[`config.example.yaml`](config.example.yaml)
+- 环境变量示例：[`.env.example`](.env.example)
 - 贡献指南：[`CONTRIBUTING.md`](CONTRIBUTING.md)
 - 安全政策：[`SECURITY.md`](SECURITY.md)
 - 行为准则：[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
@@ -27,13 +27,13 @@ Realms 是一个 Go 单体服务（`net/http`），对外提供 **OpenAI 兼容*
 
 #### SQLite（默认，本地/单机部署）
 
-默认使用 SQLite（配置见 `config.example.yaml` 的 `db.driver` / `db.sqlite_path`）。首次启动会自动创建数据库文件并初始化 schema。
+默认使用 SQLite（无需配置文件）。首次启动会自动创建数据库文件并初始化 schema。
+如需覆盖 SQLite 数据库路径，可通过环境变量设置：`REALMS_DB_DRIVER=sqlite`、`REALMS_SQLITE_PATH=...`。
 
 #### MySQL（可选，本地开发）
 
-如需使用 MySQL，请在 `config.yaml` 中设置：
-- `db.driver=mysql`
-- `db.dsn=...`
+如需使用 MySQL，请在 `.env`（或环境变量）中设置：
+- `REALMS_DB_DSN=...`（设置该值即可推断使用 MySQL；也可以显式设置 `REALMS_DB_DRIVER=mysql`）
 
 `make dev` 默认会同时启动两套环境：
 - 本地（正常模式）：`http://127.0.0.1:8080/`（air 热重载）
@@ -43,7 +43,7 @@ Realms 是一个 Go 单体服务（`net/http`），对外提供 **OpenAI 兼容*
 如需禁用本地自动拉起 MySQL，可在环境变量或 `.env` 中设置：`REALMS_DEV_MYSQL=skip`。  
 如需禁用 Docker self_mode，可设置：`REALMS_DEV_DOCKER_SELF=skip`（仅启动本地）。
 
-> 说明：仅当你选择使用 MySQL（`db.driver=mysql` 或配置了 `db.dsn`）时，`make dev` 才会尝试拉起 MySQL 容器。SQLite 默认配置下不会启动 MySQL。
+> 说明：仅当你选择使用 MySQL（`REALMS_DB_DRIVER=mysql` 或配置了 `REALMS_DB_DSN`）时，`make dev` 才会尝试拉起 MySQL 容器。SQLite 默认配置下不会启动 MySQL。
 
 如需手动启动：
 
@@ -65,16 +65,16 @@ docker compose -p realms-dev-self down
 > 提示：如果你的机器上 **3306 已被其他 MySQL 占用**，`docker-compose.yml` 的端口映射会冲突。  
 > 这时可以：
 > 1) 复用现有 MySQL（确保存在 `realms` 数据库）；或  
-> 2) 在 `.env` 中设置 `MYSQL_HOST_PORT=13306`（可选 `MYSQL_BIND_IP=127.0.0.1` 仅本机监听），并同步更新 `config.yaml` 的 `db.dsn`（例如 `127.0.0.1:13306`）。
+> 2) 在 `.env` 中设置 `MYSQL_HOST_PORT=13306`（可选 `MYSQL_BIND_IP=127.0.0.1` 仅本机监听），并同步更新 `.env` 的 `REALMS_DB_DSN`（例如 `127.0.0.1:13306`）。
 
 ### 2. 启动 Realms
 
 ```bash
-cp config.example.yaml config.yaml
-go run ./cmd/realms -config config.yaml
+cp .env.example .env
+go run ./cmd/realms
 ```
 
-> 说明：默认配置文件路径为 `config.yaml`，因此也可以直接运行编译产物：`./realms` 或容器内 `/realms`。
+> 说明：服务启动会尝试自动加载当前目录的 `.env`（若存在）；也可以通过系统环境变量直接注入配置。编译产物：`./realms` 或容器内 `/realms`。
 
 首次启动会自动执行内置迁移（`internal/store/migrations/*.sql`）。  
 当 `db.driver=mysql`：

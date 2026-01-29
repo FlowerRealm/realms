@@ -5,12 +5,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"realms/internal/admin"
 	openaiapi "realms/internal/api/openai"
 	"realms/internal/config"
-	"realms/internal/limits"
 	"realms/internal/quota"
 	"realms/internal/store"
 	"realms/internal/upstream"
@@ -64,16 +62,15 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 		t.Fatalf("admin.NewServer failed: %v", err)
 	}
 
-	openaiHandler := openaiapi.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, false, nil, nil, nil, cfg.Limits.DefaultMaxOutputTokens, upstream.SSEPumpOptions{})
+	openaiHandler := openaiapi.NewHandler(nil, nil, nil, nil, nil, nil, false, nil, nil, nil, upstream.SSEPumpOptions{})
 
 	app := &App{
-		cfg:         cfg,
-		store:       st,
-		web:         webServer,
-		admin:       adminServer,
-		openai:      openaiHandler,
-		tokenLimits: limits.NewTokenLimits(1, 1),
-		mux:         http.NewServeMux(),
+		cfg:    cfg,
+		store:  st,
+		web:    webServer,
+		admin:  adminServer,
+		openai: openaiHandler,
+		mux:    http.NewServeMux(),
 	}
 	app.routes()
 	return app
@@ -83,10 +80,6 @@ func TestRoutes_SelfMode_DisablesBillingAndTickets(t *testing.T) {
 	cfg := config.Config{
 		SelfMode: config.SelfModeConfig{Enable: true},
 		Security: config.SecurityConfig{SubscriptionOrderWebhookSecret: "secret"},
-		Limits: config.LimitsConfig{
-			MaxBodyBytes:       1 << 20,
-			MaxRequestDuration: 2 * time.Second,
-		},
 	}
 	app := newTestApp(t, cfg)
 
@@ -127,10 +120,6 @@ func TestRoutes_DefaultMode_KeepsSubscriptionOrderWebhook(t *testing.T) {
 	cfg := config.Config{
 		SelfMode: config.SelfModeConfig{Enable: false},
 		Security: config.SecurityConfig{SubscriptionOrderWebhookSecret: "secret"},
-		Limits: config.LimitsConfig{
-			MaxBodyBytes:       1 << 20,
-			MaxRequestDuration: 2 * time.Second,
-		},
 	}
 	app := newTestApp(t, cfg)
 
@@ -150,10 +139,6 @@ func TestRoutes_DefaultMode_EnablesBillingAndTickets(t *testing.T) {
 	cfg := config.Config{
 		SelfMode: config.SelfModeConfig{Enable: false},
 		Security: config.SecurityConfig{SubscriptionOrderWebhookSecret: "secret"},
-		Limits: config.LimitsConfig{
-			MaxBodyBytes:       1 << 20,
-			MaxRequestDuration: 2 * time.Second,
-		},
 	}
 	app := newTestApp(t, cfg)
 
@@ -190,10 +175,6 @@ func TestRoutes_NoChatFeature(t *testing.T) {
 	cfg := config.Config{
 		SelfMode: config.SelfModeConfig{Enable: false},
 		Security: config.SecurityConfig{SubscriptionOrderWebhookSecret: "secret"},
-		Limits: config.LimitsConfig{
-			MaxBodyBytes:       1 << 20,
-			MaxRequestDuration: 2 * time.Second,
-		},
 	}
 	app := newTestApp(t, cfg)
 
@@ -216,12 +197,7 @@ func TestRoutes_NoChatFeature(t *testing.T) {
 }
 
 func TestRoutes_Assets_IconAndFavicon(t *testing.T) {
-	cfg := config.Config{
-		Limits: config.LimitsConfig{
-			MaxBodyBytes:       1 << 20,
-			MaxRequestDuration: 2 * time.Second,
-		},
-	}
+	cfg := config.Config{}
 	app := newTestApp(t, cfg)
 
 	t.Run("GET /assets/realms_icon.svg", func(t *testing.T) {
@@ -256,20 +232,8 @@ func TestRoutes_Assets_IconAndFavicon(t *testing.T) {
 func TestQuotaProviderForConfig(t *testing.T) {
 	st := store.New(nil)
 
-	cfg := config.Config{
-		SelfMode: config.SelfModeConfig{Enable: true},
-		Limits: config.LimitsConfig{
-			MaxRequestDuration: 1 * time.Second,
-		},
-	}
-	qp := quotaProviderForConfig(st, cfg)
-	if _, ok := qp.(*quota.FeatureProvider); !ok {
-		t.Fatalf("expected *quota.FeatureProvider, got %T", qp)
-	}
-
-	cfg.SelfMode.Enable = false
-	qp = quotaProviderForConfig(st, cfg)
-	if _, ok := qp.(*quota.FeatureProvider); !ok {
-		t.Fatalf("expected *quota.FeatureProvider, got %T", qp)
+	qp := quotaProvider(st)
+	if _, ok := qp.(*quota.FreeProvider); !ok {
+		t.Fatalf("expected *quota.FreeProvider, got %T", qp)
 	}
 }

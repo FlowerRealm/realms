@@ -14,9 +14,11 @@ import (
 )
 
 type SSEPumpOptions struct {
-	// MaxLineBytes 控制单行最大长度（用于 bufio.Scanner）。超过该值会触发 bufio.ErrTooLong。
+	// MaxLineBytes 控制单行最大长度（用于 bufio.Scanner）。
+	// - > 0：启用最大行长度限制；超过该值会触发 bufio.ErrTooLong
+	// - <= 0：不限制行长度（以 bufio.Reader 读取，避免 Scanner 限制）
 	MaxLineBytes int
-	// InitialLineBytes 控制 scanner 初始 buffer（避免频繁扩容）。
+	// InitialLineBytes 控制行读取的初始 buffer（避免频繁扩容）。
 	InitialLineBytes int
 
 	// PingInterval 为 0 表示禁用 ping；否则周期性向下游写入 SSE 注释行保持连接活跃。
@@ -49,11 +51,11 @@ func PumpSSE(ctx context.Context, w http.ResponseWriter, upstreamBody io.ReadClo
 	}
 
 	maxLine := opts.MaxLineBytes
-	if maxLine <= 0 {
-		maxLine = 4 << 20 // 4MB
-	}
 	initialLine := opts.InitialLineBytes
-	if initialLine <= 0 || initialLine > maxLine {
+	if initialLine <= 0 {
+		initialLine = 64 << 10
+	}
+	if maxLine > 0 && initialLine > maxLine {
 		initialLine = minInt(64<<10, maxLine)
 	}
 
@@ -78,31 +80,75 @@ func PumpSSE(ctx context.Context, w http.ResponseWriter, upstreamBody io.ReadClo
 		defer wg.Done()
 		defer close(lineCh)
 
-		sc := bufio.NewScanner(upstreamBody)
-		sc.Buffer(make([]byte, 0, initialLine), maxLine)
-		sc.Split(bufio.ScanLines)
+		if maxLine > 0 {
+			sc := bufio.NewScanner(upstreamBody)
+			sc.Buffer(make([]byte, 0, initialLine), maxLine)
+			sc.Split(bufio.ScanLines)
 
-		for sc.Scan() {
-			line := sc.Text()
-			select {
-			case lineCh <- line:
-			case <-stopCh:
+			for sc.Scan() {
+				line := sc.Text()
 				select {
-				case errCh <- errors.New("stopped"):
-				default:
+				case lineCh <- line:
+				case <-stopCh:
+					select {
+					case errCh <- errors.New("stopped"):
+					default:
+					}
+					return
+				case <-ctx.Done():
+					select {
+					case errCh <- ctx.Err():
+					default:
+					}
+					return
 				}
-				return
-			case <-ctx.Done():
+			}
+			select {
+			case errCh <- sc.Err():
+			default:
+			}
+			return
+		}
+
+		br := bufio.NewReaderSize(upstreamBody, initialLine)
+		for {
+			b, err := br.ReadBytes('\n')
+			if len(b) > 0 {
+				// ScanLines 的行为：返回值不包含 '\n'，但会保留 '\r'（上游可能是 CRLF）。
+				if b[len(b)-1] == '\n' {
+					b = b[:len(b)-1]
+				}
+				line := string(b)
 				select {
-				case errCh <- ctx.Err():
+				case lineCh <- line:
+				case <-stopCh:
+					select {
+					case errCh <- errors.New("stopped"):
+					default:
+					}
+					return
+				case <-ctx.Done():
+					select {
+					case errCh <- ctx.Err():
+					default:
+					}
+					return
+				}
+			}
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					select {
+					case errCh <- nil:
+					default:
+					}
+					return
+				}
+				select {
+				case errCh <- err:
 				default:
 				}
 				return
 			}
-		}
-		select {
-		case errCh <- sc.Err():
-		default:
 		}
 	}()
 

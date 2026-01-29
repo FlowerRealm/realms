@@ -1061,6 +1061,16 @@ type ChannelUsageStats struct {
 	CommittedUSD       decimal.Decimal
 }
 
+type CredentialUsageStats struct {
+	CredentialID int64
+	Requests     int64
+	Success      int64
+	Failure      int64
+	InputTokens  int64
+	OutputTokens int64
+	LastSeenAt   time.Time
+}
+
 func (s *Store) GetUsageStatsByChannelRange(ctx context.Context, since, until time.Time) ([]ChannelUsageStats, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT
@@ -1113,6 +1123,70 @@ GROUP BY upstream_channel_id
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("遍历渠道用量失败: %w", err)
+	}
+	return out, nil
+}
+
+func (s *Store) GetUsageStatsByCredentialForChannelRange(ctx context.Context, channelID int64, since, until time.Time) ([]CredentialUsageStats, error) {
+	if channelID <= 0 {
+		return nil, fmt.Errorf("channelID 不合法")
+	}
+
+	lastSeenExpr := "MAX(UNIX_TIMESTAMP(time))"
+	if s.dialect == DialectSQLite {
+		// SQLite: time 通常以 `YYYY-MM-DD HH:MM:SS` 存储，strftime('%s', time) 返回 epoch seconds（TEXT）。
+		lastSeenExpr = "MAX(CAST(strftime('%s', time) AS INTEGER))"
+	}
+
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
+SELECT
+  upstream_credential_id,
+  COUNT(1),
+  SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END),
+  SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 0 ELSE 1 END),
+  SUM(CASE WHEN input_tokens IS NOT NULL THEN input_tokens ELSE 0 END),
+  SUM(CASE WHEN output_tokens IS NOT NULL THEN output_tokens ELSE 0 END),
+  %s
+FROM usage_events
+WHERE upstream_channel_id=? AND upstream_credential_id IS NOT NULL AND time >= ? AND time < ?
+GROUP BY upstream_credential_id
+ORDER BY COUNT(1) DESC, upstream_credential_id DESC
+`, lastSeenExpr), channelID, since, until)
+	if err != nil {
+		return nil, fmt.Errorf("按凭证统计用量失败: %w", err)
+	}
+	defer rows.Close()
+
+	var out []CredentialUsageStats
+	for rows.Next() {
+		var row CredentialUsageStats
+		var success sql.NullInt64
+		var failure sql.NullInt64
+		var inputTokens sql.NullInt64
+		var outputTokens sql.NullInt64
+		var lastSeenUnix sql.NullInt64
+		if err := rows.Scan(&row.CredentialID, &row.Requests, &success, &failure, &inputTokens, &outputTokens, &lastSeenUnix); err != nil {
+			return nil, fmt.Errorf("扫描凭证用量失败: %w", err)
+		}
+		if success.Valid {
+			row.Success = success.Int64
+		}
+		if failure.Valid {
+			row.Failure = failure.Int64
+		}
+		if inputTokens.Valid {
+			row.InputTokens = inputTokens.Int64
+		}
+		if outputTokens.Valid {
+			row.OutputTokens = outputTokens.Int64
+		}
+		if lastSeenUnix.Valid && lastSeenUnix.Int64 > 0 {
+			row.LastSeenAt = time.Unix(lastSeenUnix.Int64, 0).UTC()
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历凭证用量失败: %w", err)
 	}
 	return out, nil
 }

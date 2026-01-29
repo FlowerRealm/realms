@@ -1,4 +1,4 @@
-// Package config 负责读取并合并服务配置（文件 + 环境变量覆盖），避免在业务代码里散落解析逻辑。
+// Package config 负责读取并合并服务配置（环境变量为主，可选读取 YAML 配置），避免在业务代码里散落解析逻辑。
 package config
 
 import (
@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
-	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
@@ -20,7 +19,6 @@ type Config struct {
 	Server     ServerConfig     `yaml:"server"`
 	DB         DBConfig         `yaml:"db"`
 	Security   SecurityConfig   `yaml:"security"`
-	Limits     LimitsConfig     `yaml:"limits"`
 	Debug      DebugConfig      `yaml:"debug"`
 	Billing    BillingConfig    `yaml:"billing"`
 	Payment    PaymentConfig    `yaml:"payment"`
@@ -61,12 +59,8 @@ type SelfModeConfig struct {
 }
 
 type ServerConfig struct {
-	Addr              string        `yaml:"addr"`
-	PublicBaseURL     string        `yaml:"public_base_url"`
-	ReadHeaderTimeout time.Duration `yaml:"read_header_timeout"`
-	ReadTimeout       time.Duration `yaml:"read_timeout"`
-	WriteTimeout      time.Duration `yaml:"write_timeout"`
-	IdleTimeout       time.Duration `yaml:"idle_timeout"`
+	Addr          string `yaml:"addr"`
+	PublicBaseURL string `yaml:"public_base_url"`
 }
 
 type DBConfig struct {
@@ -92,39 +86,13 @@ type SecurityConfig struct {
 	SubscriptionOrderWebhookSecret string `yaml:"subscription_order_webhook_secret"`
 }
 
-type LimitsConfig struct {
-	MaxBodyBytes       int64         `yaml:"max_body_bytes"`
-	MaxRequestDuration time.Duration `yaml:"max_request_duration"`
-	// MaxStreamDuration 仅用于流式（SSE）请求的“最大总时长”上限；0 表示不限制（由 idle 超时兜底）。
-	MaxStreamDuration time.Duration `yaml:"max_stream_duration"`
-
-	MaxInflightPerToken       int `yaml:"max_inflight_per_token"`
-	MaxSSEConnectionsPerToken int `yaml:"max_sse_connections_per_token"`
-	MaxInflightPerCredential  int `yaml:"max_inflight_per_credential"`
-	DefaultMaxOutputTokens    int `yaml:"default_max_output_tokens"`
-
-	// StreamIdleTimeout 控制上游 SSE 在长时间无输出时的中断阈值；0 表示不启用 idle 超时。
-	StreamIdleTimeout time.Duration `yaml:"stream_idle_timeout"`
-	// SSEPingInterval 控制向下游发送 SSE ping 的间隔；0 表示不发送 ping。
-	SSEPingInterval time.Duration `yaml:"sse_ping_interval"`
-	// SSEMaxEventBytes 控制 SSE 单行最大长度（Scanner 上限）；过小会导致大事件行断流。
-	SSEMaxEventBytes int64 `yaml:"sse_max_event_bytes"`
-
-	UpstreamRequestTimeout       time.Duration `yaml:"upstream_request_timeout"`
-	UpstreamDialTimeout          time.Duration `yaml:"upstream_dial_timeout"`
-	UpstreamTLSHandshakeTimeout  time.Duration `yaml:"upstream_tls_handshake_timeout"`
-	UpstreamResponseHeaderTimout time.Duration `yaml:"upstream_response_header_timeout"`
-}
-
 type DebugConfig struct {
 	ProxyLog ProxyLogConfig `yaml:"proxy_log"`
 }
 
 type ProxyLogConfig struct {
-	Enable   bool   `yaml:"enable"`
-	Dir      string `yaml:"dir"`
-	MaxBytes int64  `yaml:"max_bytes"`
-	MaxFiles int    `yaml:"max_files"`
+	Enable bool   `yaml:"enable"`
+	Dir    string `yaml:"dir"`
 }
 
 type BillingConfig struct {
@@ -172,11 +140,6 @@ type CodexOAuthConfig struct {
 	AuthorizeURL string `yaml:"authorize_url"`
 	TokenURL     string `yaml:"token_url"`
 
-	// HTTPTimeout 是 Codex OAuth 相关 HTTP 请求（token exchange / quota refresh 等）的总超时（含 TLS 握手）。
-	HTTPTimeout time.Duration `yaml:"http_timeout"`
-	// TLSHandshakeTimeout 是 TLS 握手超时；网络较慢或代理较慢时可适当调大以避免握手超时失败。
-	TLSHandshakeTimeout time.Duration `yaml:"tls_handshake_timeout"`
-
 	// RequestPassthrough 表示 Codex OAuth 请求是否“直通上游”（不改写 URL path 与 request body）。
 	// 默认 true：保持与 Codex CLI 的请求形态一致，把兼容性与校验交给上游处理。
 	RequestPassthrough bool `yaml:"request_passthrough"`
@@ -189,35 +152,22 @@ type CodexOAuthConfig struct {
 }
 
 type TicketsConfig struct {
-	AttachmentsDir string        `yaml:"attachments_dir"`
-	AttachmentTTL  time.Duration `yaml:"attachment_ttl"`
-	MaxUploadBytes int64         `yaml:"max_upload_bytes"`
+	AttachmentsDir string `yaml:"attachments_dir"`
 }
 
-func Load(path string) (Config, error) {
-	return load(path, true)
-}
-
-// LoadFromFile 与 Load 的区别是：不会应用环境变量覆盖（env overrides）。
-// 用途：在“写回配置文件”前做严格校验，避免环境变量掩盖配置文件本身的问题。
-func LoadFromFile(path string) (Config, error) {
-	return load(path, false)
-}
-
-func load(path string, applyEnv bool) (Config, error) {
+// LoadFromEnv 仅从环境变量加载配置（不读取任何配置文件）。
+func LoadFromEnv() (Config, error) {
 	cfg := defaultConfig()
-	b, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return Config{}, fmt.Errorf("读取配置文件: %w", err)
-	}
-	if len(b) > 0 {
-		if err := yaml.Unmarshal(b, &cfg); err != nil {
-			return Config{}, fmt.Errorf("解析 YAML: %w", err)
-		}
-	}
-	if applyEnv {
-		applyEnvOverrides(&cfg)
-	}
+	applyEnvOverrides(&cfg)
+	return normalizeAndValidate(cfg)
+}
+
+// Load 等价于 LoadFromEnv（为便于调用保留别名）。
+func Load() (Config, error) {
+	return LoadFromEnv()
+}
+
+func normalizeAndValidate(cfg Config) (Config, error) {
 	publicBaseURL, err := NormalizeHTTPBaseURL(cfg.Server.PublicBaseURL, "server.public_base_url")
 	if err != nil {
 		return Config{}, err
@@ -256,12 +206,6 @@ func load(path string, applyEnv bool) (Config, error) {
 	if cfg.Tickets.AttachmentsDir == "" {
 		cfg.Tickets.AttachmentsDir = "./data/tickets"
 	}
-	if cfg.Tickets.AttachmentTTL <= 0 {
-		cfg.Tickets.AttachmentTTL = 7 * 24 * time.Hour
-	}
-	if cfg.Tickets.MaxUploadBytes <= 0 {
-		cfg.Tickets.MaxUploadBytes = 100 << 20
-	}
 
 	cfg.AppSettingsDefaults.SiteBaseURL = strings.TrimSpace(cfg.AppSettingsDefaults.SiteBaseURL)
 	siteBaseURL, err := NormalizeHTTPBaseURL(cfg.AppSettingsDefaults.SiteBaseURL, "app_settings_defaults.site_base_url")
@@ -280,18 +224,6 @@ func load(path string, applyEnv bool) (Config, error) {
 	cfg.Debug.ProxyLog.Dir = strings.TrimSpace(cfg.Debug.ProxyLog.Dir)
 	if cfg.Debug.ProxyLog.Dir == "" {
 		cfg.Debug.ProxyLog.Dir = "./out/proxy"
-	}
-	if cfg.Debug.ProxyLog.MaxBytes <= 0 {
-		cfg.Debug.ProxyLog.MaxBytes = 128 << 10
-	}
-	if cfg.Debug.ProxyLog.MaxBytes > 10<<20 {
-		cfg.Debug.ProxyLog.MaxBytes = 10 << 20
-	}
-	if cfg.Debug.ProxyLog.MaxFiles <= 0 {
-		cfg.Debug.ProxyLog.MaxFiles = 200
-	}
-	if cfg.Debug.ProxyLog.MaxFiles > 2000 {
-		cfg.Debug.ProxyLog.MaxFiles = 2000
 	}
 
 	return cfg, nil
@@ -352,34 +284,12 @@ func defaultConfig() Config {
 			Enable: false,
 		},
 		Server: ServerConfig{
-			Addr:              ":8080",
-			ReadHeaderTimeout: 5 * time.Second,
-			ReadTimeout:       30 * time.Second,
-			WriteTimeout:      0,
-			IdleTimeout:       2 * time.Minute,
-		},
-		Limits: LimitsConfig{
-			MaxBodyBytes:                 4 << 20,
-			MaxRequestDuration:           2 * time.Minute,
-			MaxStreamDuration:            30 * time.Minute,
-			MaxInflightPerToken:          8,
-			MaxSSEConnectionsPerToken:    4,
-			MaxInflightPerCredential:     16,
-			DefaultMaxOutputTokens:       1024,
-			StreamIdleTimeout:            2 * time.Minute,
-			SSEPingInterval:              0,
-			SSEMaxEventBytes:             4 << 20,
-			UpstreamRequestTimeout:       2 * time.Minute,
-			UpstreamDialTimeout:          10 * time.Second,
-			UpstreamTLSHandshakeTimeout:  10 * time.Second,
-			UpstreamResponseHeaderTimout: 30 * time.Second,
+			Addr: ":8080",
 		},
 		Debug: DebugConfig{
 			ProxyLog: ProxyLogConfig{
-				Enable:   false,
-				Dir:      "./out/proxy",
-				MaxBytes: 128 << 10,
-				MaxFiles: 200,
+				Enable: false,
+				Dir:    "./out/proxy",
 			},
 		},
 		Billing: BillingConfig{
@@ -410,22 +320,18 @@ func defaultConfig() Config {
 			Enable: false,
 		},
 		CodexOAuth: CodexOAuthConfig{
-			Enable:              true,
-			ClientID:            "app_EMoamEEZ73f0CkXaXp7hrann",
-			AuthorizeURL:        "https://auth.openai.com/oauth/authorize",
-			TokenURL:            "https://auth.openai.com/oauth/token",
-			HTTPTimeout:         2 * time.Minute,
-			TLSHandshakeTimeout: 60 * time.Second,
-			RequestPassthrough:  true,
-			CallbackListenAddr:  "",
-			RedirectURI:         "http://localhost:1455/auth/callback",
-			Scope:               "openid email profile offline_access",
-			Prompt:              "login",
+			Enable:             true,
+			ClientID:           "app_EMoamEEZ73f0CkXaXp7hrann",
+			AuthorizeURL:       "https://auth.openai.com/oauth/authorize",
+			TokenURL:           "https://auth.openai.com/oauth/token",
+			RequestPassthrough: true,
+			CallbackListenAddr: "",
+			RedirectURI:        "http://localhost:1455/auth/callback",
+			Scope:              "openid email profile offline_access",
+			Prompt:             "login",
 		},
 		Tickets: TicketsConfig{
 			AttachmentsDir: "./data/tickets",
-			AttachmentTTL:  7 * 24 * time.Hour,
-			MaxUploadBytes: 100 << 20, // 100MB
 		},
 		AppSettingsDefaults: AppSettingsDefaultsConfig{
 			AdminTimeZone: "Asia/Shanghai",
@@ -447,26 +353,6 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("REALMS_PUBLIC_BASE_URL"); v != "" {
 		cfg.Server.PublicBaseURL = v
-	}
-	if v := os.Getenv("REALMS_SERVER_READ_HEADER_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Server.ReadHeaderTimeout = d
-		}
-	}
-	if v := os.Getenv("REALMS_SERVER_READ_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Server.ReadTimeout = d
-		}
-	}
-	if v := os.Getenv("REALMS_SERVER_WRITE_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Server.WriteTimeout = d
-		}
-	}
-	if v := os.Getenv("REALMS_SERVER_IDLE_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Server.IdleTimeout = d
-		}
 	}
 	if v := os.Getenv("REALMS_DB_DRIVER"); v != "" {
 		cfg.DB.Driver = v
@@ -499,77 +385,6 @@ func applyEnvOverrides(cfg *Config) {
 		cfg.Security.SubscriptionOrderWebhookSecret = v
 	}
 
-	if v := os.Getenv("REALMS_LIMITS_MAX_BODY_BYTES"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			cfg.Limits.MaxBodyBytes = n
-		}
-	}
-	if v := os.Getenv("REALMS_LIMITS_MAX_REQUEST_DURATION"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Limits.MaxRequestDuration = d
-		}
-	}
-	if v := os.Getenv("REALMS_LIMITS_MAX_STREAM_DURATION"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Limits.MaxStreamDuration = d
-		}
-	}
-	if v := os.Getenv("REALMS_LIMITS_MAX_INFLIGHT_PER_TOKEN"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Limits.MaxInflightPerToken = n
-		}
-	}
-	if v := os.Getenv("REALMS_LIMITS_MAX_SSE_CONNECTIONS_PER_TOKEN"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Limits.MaxSSEConnectionsPerToken = n
-		}
-	}
-	if v := os.Getenv("REALMS_LIMITS_MAX_INFLIGHT_PER_CREDENTIAL"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Limits.MaxInflightPerCredential = n
-		}
-	}
-	if v := os.Getenv("REALMS_LIMITS_DEFAULT_MAX_OUTPUT_TOKENS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Limits.DefaultMaxOutputTokens = n
-		}
-	}
-	if v := os.Getenv("REALMS_LIMITS_STREAM_IDLE_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Limits.StreamIdleTimeout = d
-		}
-	}
-	if v := os.Getenv("REALMS_LIMITS_SSE_PING_INTERVAL"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Limits.SSEPingInterval = d
-		}
-	}
-	if v := os.Getenv("REALMS_LIMITS_SSE_MAX_EVENT_BYTES"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			cfg.Limits.SSEMaxEventBytes = n
-		}
-	}
-	if v := os.Getenv("REALMS_LIMITS_UPSTREAM_REQUEST_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Limits.UpstreamRequestTimeout = d
-		}
-	}
-	if v := os.Getenv("REALMS_LIMITS_UPSTREAM_DIAL_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Limits.UpstreamDialTimeout = d
-		}
-	}
-	if v := os.Getenv("REALMS_LIMITS_UPSTREAM_TLS_HANDSHAKE_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Limits.UpstreamTLSHandshakeTimeout = d
-		}
-	}
-	if v := os.Getenv("REALMS_LIMITS_UPSTREAM_RESPONSE_HEADER_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Limits.UpstreamResponseHeaderTimout = d
-		}
-	}
-
 	if v := os.Getenv("REALMS_DEBUG_PROXY_LOG_ENABLE"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			cfg.Debug.ProxyLog.Enable = b
@@ -577,16 +392,6 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("REALMS_DEBUG_PROXY_LOG_DIR"); v != "" {
 		cfg.Debug.ProxyLog.Dir = v
-	}
-	if v := os.Getenv("REALMS_DEBUG_PROXY_LOG_MAX_BYTES"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			cfg.Debug.ProxyLog.MaxBytes = n
-		}
-	}
-	if v := os.Getenv("REALMS_DEBUG_PROXY_LOG_MAX_FILES"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Debug.ProxyLog.MaxFiles = n
-		}
 	}
 
 	if v := os.Getenv("REALMS_BILLING_ENABLE_PAY_AS_YOU_GO"); v != "" {
@@ -728,16 +533,6 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("REALMS_TICKETS_ATTACHMENTS_DIR"); v != "" {
 		cfg.Tickets.AttachmentsDir = v
 	}
-	if v := os.Getenv("REALMS_TICKETS_ATTACHMENT_TTL"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Tickets.AttachmentTTL = d
-		}
-	}
-	if v := os.Getenv("REALMS_TICKETS_MAX_UPLOAD_BYTES"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			cfg.Tickets.MaxUploadBytes = n
-		}
-	}
 
 	if v := os.Getenv("REALMS_CODEX_OAUTH_ENABLE"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
@@ -752,16 +547,6 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("REALMS_CODEX_OAUTH_TOKEN_URL"); v != "" {
 		cfg.CodexOAuth.TokenURL = v
-	}
-	if v := os.Getenv("REALMS_CODEX_OAUTH_HTTP_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.CodexOAuth.HTTPTimeout = d
-		}
-	}
-	if v := os.Getenv("REALMS_CODEX_OAUTH_TLS_HANDSHAKE_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.CodexOAuth.TLSHandshakeTimeout = d
-		}
 	}
 	if v := os.Getenv("REALMS_CODEX_OAUTH_REQUEST_PASSTHROUGH"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {

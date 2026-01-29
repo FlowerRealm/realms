@@ -21,13 +21,16 @@ func BodyCache(maxBytes int64) Middleware {
 			}
 			defer r.Body.Close()
 
-			lr := io.LimitReader(r.Body, maxBytes+1)
-			b, err := io.ReadAll(lr)
+			var reader io.Reader = r.Body
+			if maxBytes > 0 {
+				reader = io.LimitReader(r.Body, maxBytes+1)
+			}
+			b, err := io.ReadAll(reader)
 			if err != nil {
 				http.Error(w, "读取请求体失败", http.StatusBadRequest)
 				return
 			}
-			if int64(len(b)) > maxBytes {
+			if maxBytes > 0 && int64(len(b)) > maxBytes {
 				http.Error(w, "请求体过大", http.StatusRequestEntityTooLarge)
 				return
 			}

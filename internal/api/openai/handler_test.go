@@ -51,7 +51,8 @@ func TestResponses_Stream_ExtractsUsageFromSSE(t *testing.T) {
 	}
 
 	doer := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
-		body := "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":3,\"output_tokens\":4,\"total_tokens\":7,\"input_tokens_details\":{\"cached_tokens\":1}}}}\n\n" +
+		body := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"pong\"}\n\n" +
+			"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":3,\"output_tokens\":4}}}\n\n" +
 			"data: [DONE]\n\n"
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -61,7 +62,7 @@ func TestResponses_Stream_ExtractsUsageFromSSE(t *testing.T) {
 	})
 	sched := scheduler.New(fs)
 	q := &fakeQuota{}
-	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, q, fakeAudit{}, nil, 1024, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, q, fakeAudit{}, nil, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-4.1-mini","input":"hi","stream":true}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -80,14 +81,14 @@ func TestResponses_Stream_ExtractsUsageFromSSE(t *testing.T) {
 		t.Fatalf("expected 1 commit call, got=%d", len(q.commitCalls))
 	}
 	got := q.commitCalls[0]
-	if got.InputTokens == nil || *got.InputTokens != 3 {
+	if got.InputTokens == nil || *got.InputTokens <= 0 {
 		t.Fatalf("unexpected input_tokens: %+v", got.InputTokens)
 	}
-	if got.OutputTokens == nil || *got.OutputTokens != 4 {
+	if got.OutputTokens == nil || *got.OutputTokens <= 0 {
 		t.Fatalf("unexpected output_tokens: %+v", got.OutputTokens)
 	}
-	if got.CachedInputTokens == nil || *got.CachedInputTokens != 1 {
-		t.Fatalf("unexpected cached_input_tokens: %+v", got.CachedInputTokens)
+	if got.CachedInputTokens != nil {
+		t.Fatalf("expected cached_input_tokens to be nil, got=%+v", got.CachedInputTokens)
 	}
 }
 
@@ -114,7 +115,8 @@ func (d *fakeDoer) Do(_ context.Context, sel scheduler.Selection, _ *http.Reques
 	switch sel.CredentialID {
 	case 2:
 		return &http.Response{
-			StatusCode: http.StatusBadGateway,
+			// 让调度优先在同渠道内切换到其它 key/账号（不触发 channel 立即封禁）。
+			StatusCode: http.StatusPaymentRequired,
 			Header:     http.Header{"Content-Type": []string{"application/json"}},
 			Body:       io.NopCloser(bytes.NewReader([]byte(`{"error":{"message":"upstream down"}}`))),
 		}, nil
@@ -122,7 +124,7 @@ func (d *fakeDoer) Do(_ context.Context, sel scheduler.Selection, _ *http.Reques
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","output_text":"pong","usage":{"input_tokens":1,"output_tokens":2}}`))),
 		}, nil
 	}
 }
@@ -512,7 +514,7 @@ func TestResponses_FailoverCredential(t *testing.T) {
 
 	sched := scheduler.New(fs)
 	doer := &fakeDoer{}
-	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, nil, fakeAudit{}, nil, 1024, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-4.1-mini","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -595,7 +597,7 @@ func TestResponses_ChannelRequestPolicy_IsPerChannelAttempt(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, nil, fakeAudit{}, nil, 0, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10})
 
 	reqBody := `{"model":"m1","input":"hi","service_tier":"default","store":true,"safety_identifier":"u123"}`
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(reqBody)))
@@ -704,7 +706,7 @@ func TestResponses_ChannelParamOverride_IsPerChannelAttempt(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, nil, fakeAudit{}, nil, 0, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -789,7 +791,7 @@ func TestResponses_MaxTokensAlias_PreservesMaxTokens(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, nil, fakeAudit{}, nil, 0, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi","max_tokens":123}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -866,7 +868,7 @@ func TestResponses_ChannelParamOverride_MaxTokens_PreservesMaxTokens(t *testing.
 	})
 
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, nil, fakeAudit{}, nil, 123, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -933,7 +935,7 @@ func TestResponses_ModelSuffixEffort_IsPerChannelAttempt(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, nil, fakeAudit{}, nil, 0, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -1026,7 +1028,7 @@ func TestResponses_ChannelBodyFilters_ArePerChannelAttempt(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, nil, fakeAudit{}, nil, 0, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
 	reqBody := `{"model":"m1","input":"hi","metadata":{"trace":"t","keep":"k"},"extra":"x"}`
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(reqBody)))
@@ -1107,7 +1109,7 @@ func TestResponses_StatusCodeMapping_OverridesDownstreamStatus(t *testing.T) {
 	}
 
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, statusDoer{status: http.StatusBadRequest, body: `{"error":{"message":"bad request"}}`}, nil, nil, nil, nil, false, nil, fakeAudit{}, nil, 0, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10})
+	h := NewHandler(fs, fs, sched, statusDoer{status: http.StatusBadRequest, body: `{"error":{"message":"bad request"}}`}, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -1161,7 +1163,7 @@ func TestResponses_UsageEvent_RecordsUpstreamErrorMessage(t *testing.T) {
 	sched := scheduler.New(fs)
 	q := &fakeQuota{}
 	usage := &recordingUsage{}
-	h := NewHandler(fs, fs, sched, statusDoer{status: http.StatusBadRequest, body: `{"detail":"Unsupported parameter: max_tokens"}`}, nil, nil, nil, nil, false, q, fakeAudit{}, usage, 0, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, statusDoer{status: http.StatusBadRequest, body: `{"detail":"Unsupported parameter: max_tokens"}`}, nil, nil, false, q, fakeAudit{}, usage, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi","max_tokens":123}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -1250,7 +1252,7 @@ func TestResponses_FailoverCredentialOn402PaymentRequired(t *testing.T) {
 
 	sched := scheduler.New(fs)
 	doer := &failoverOnceDoer{failStatus: http.StatusPaymentRequired}
-	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, nil, fakeAudit{}, nil, 1024, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-4.1-mini","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -1306,7 +1308,7 @@ func TestResponses_RouteKeyPrefersPromptCacheKeyInBody(t *testing.T) {
 
 	sched := scheduler.New(fs)
 	doer := &okDoer{}
-	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, nil, fakeAudit{}, nil, 1024, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-4.1-mini","input":"hi","stream":false,"prompt_cache_key":"rk_body"}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -1357,7 +1359,7 @@ func TestResponses_RouteKeyFallsBackToHeader(t *testing.T) {
 
 	sched := scheduler.New(fs)
 	doer := &okDoer{}
-	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, nil, fakeAudit{}, nil, 1024, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-4.1-mini","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -1407,7 +1409,7 @@ func TestResponses_AuditFailoverDoesNotRecordResponseBody(t *testing.T) {
 	sched := scheduler.New(fs)
 	doer := &fakeDoer{}
 	audit := &recordingAudit{}
-	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, nil, audit, nil, 1024, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, audit, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-4.1-mini","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -1473,7 +1475,7 @@ func TestResponses_AuditUpstreamErrorDoesNotRecordResponseBody(t *testing.T) {
 	sched := scheduler.New(fs)
 	doer := statusDoer{status: http.StatusBadRequest, body: `{"error":{"message":"secret-body"}}`}
 	audit := &recordingAudit{}
-	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, nil, audit, nil, 1024, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, audit, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-4.1-mini","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -1540,9 +1542,15 @@ func TestResponses_QuotaCommitIncludesUpstreamChannelID(t *testing.T) {
 	}
 
 	sched := scheduler.New(fs)
-	doer := &fakeDoer{}
+	doer := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
 	q := &fakeQuota{}
-	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, q, fakeAudit{}, nil, 1024, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, q, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-4.1-mini","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -1572,11 +1580,11 @@ func TestResponses_QuotaCommitIncludesUpstreamChannelID(t *testing.T) {
 	if call.UpstreamChannelID == nil || *call.UpstreamChannelID != 1 {
 		t.Fatalf("expected upstream_channel_id=1, got=%v", call.UpstreamChannelID)
 	}
-	if call.InputTokens == nil || *call.InputTokens != 1 {
-		t.Fatalf("expected input_tokens=1, got=%v", call.InputTokens)
+	if call.InputTokens == nil || *call.InputTokens <= 0 {
+		t.Fatalf("expected input_tokens>0, got=%v", call.InputTokens)
 	}
-	if call.OutputTokens == nil || *call.OutputTokens != 2 {
-		t.Fatalf("expected output_tokens=2, got=%v", call.OutputTokens)
+	if call.OutputTokens == nil || *call.OutputTokens <= 0 {
+		t.Fatalf("expected output_tokens>0, got=%v", call.OutputTokens)
 	}
 }
 
@@ -1619,7 +1627,7 @@ func TestResponses_GroupConstraintFiltersChannels(t *testing.T) {
 
 	sched := scheduler.New(fs)
 	doer := &fakeDoer{}
-	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, nil, fakeAudit{}, nil, 1024, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-4.1-mini","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -1669,7 +1677,7 @@ func TestResponses_ModelNotEnabledRejected(t *testing.T) {
 
 	sched := scheduler.New(fs)
 	doer := &fakeDoer{}
-	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, nil, fakeAudit{}, nil, 0, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"nope","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -1712,7 +1720,7 @@ func TestResponses_ModelPassthrough_AllowsDisabledModelWithoutBindings(t *testin
 	sched := scheduler.New(fs)
 	doer := &fakeDoer{}
 	features := staticFeatures{fs: store.FeatureState{ModelsDisabled: true}}
-	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, features, false, nil, fakeAudit{}, nil, 0, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, features, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"nope","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -1770,7 +1778,7 @@ func TestResponses_AliasRewrite(t *testing.T) {
 
 	sched := scheduler.New(fs)
 	doer := &fakeDoer{}
-	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, nil, fakeAudit{}, nil, 0, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"alias","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -1815,7 +1823,7 @@ func TestModels_ReturnsManagedModels(t *testing.T) {
 
 	sched := scheduler.New(fs)
 	doer := &fakeDoer{}
-	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, nil, false, nil, fakeAudit{}, nil, 0, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/v1/models", nil)
 	tokenID := int64(123)

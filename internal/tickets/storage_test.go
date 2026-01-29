@@ -47,12 +47,12 @@ func TestStorageResolve(t *testing.T) {
 	}
 }
 
-func TestStorageSaveRespectsLimit(t *testing.T) {
+func TestStorageSave(t *testing.T) {
 	base := t.TempDir()
 	s := NewStorage(base)
 
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	res, err := s.Save(now, strings.NewReader("abc"), 3)
+	res, err := s.Save(now, strings.NewReader("abc"))
 	if err != nil {
 		t.Fatalf("expected save ok, got err=%v", err)
 	}
@@ -72,15 +72,5 @@ func TestStorageSaveRespectsLimit(t *testing.T) {
 	}
 	if string(b) != "abc" {
 		t.Fatalf("unexpected file content: %q", string(b))
-	}
-
-	_, err = s.Save(now, strings.NewReader("abcd"), 3)
-	if err == nil {
-		t.Fatalf("expected oversize error")
-	}
-	entries, err := os.ReadDir(filepath.Join(base, "20260101"))
-	if err == nil && len(entries) != 1 {
-		// 第一次 Save 已经创建了 1 个文件；第二次不能留下额外残留。
-		t.Fatalf("unexpected dir entries after oversize save: %d", len(entries))
 	}
 }

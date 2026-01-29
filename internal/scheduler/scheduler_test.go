@@ -73,7 +73,7 @@ func TestSelect_PromotionBeatsPriority(t *testing.T) {
 	}
 }
 
-func TestSelect_ForcedChannelBeatsPromotion(t *testing.T) {
+func TestSelect_PinnedChannelBeatsPromotion(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
 			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0, Promotion: true},
@@ -97,14 +97,15 @@ func TestSelect_ForcedChannelBeatsPromotion(t *testing.T) {
 		},
 	}
 	s := New(fs)
-	s.state.SetForcedChannel(2, time.Now().Add(5*time.Minute))
+	s.state.SetChannelPointerRing([]int64{2, 1})
+	s.PinChannel(2)
 
 	sel, err := s.Select(context.Background(), 10, "")
 	if err != nil {
 		t.Fatalf("Select err: %v", err)
 	}
 	if sel.ChannelID != 2 {
-		t.Fatalf("expected forced channel=2, got=%d", sel.ChannelID)
+		t.Fatalf("expected pinned channel=2, got=%d", sel.ChannelID)
 	}
 }
 
@@ -142,17 +143,140 @@ func TestSelect_AffinityBeatsPriority(t *testing.T) {
 	}
 }
 
-func TestSortCandidates_ForcedChannelFirst(t *testing.T) {
-	in := map[int64]channelCandidate{
-		1: {ChannelID: 1, Priority: 0, Promotion: true},
-		2: {ChannelID: 2, Priority: 100, Promotion: false},
+func TestState_IsChannelBanned_ExpiredMarksProbeDue(t *testing.T) {
+	st := NewState()
+	now := time.Now()
+
+	st.mu.Lock()
+	st.channelBanUntil[1] = now.Add(-1 * time.Second)
+	st.mu.Unlock()
+
+	if st.IsChannelBanned(1, now) {
+		t.Fatalf("expected channel to be unbanned when expired")
 	}
-	out := sortCandidates(in, 2, func(int64) int { return 0 })
-	if len(out) != 2 {
-		t.Fatalf("expected 2 candidates, got=%d", len(out))
+	if !st.IsChannelProbePending(1, now) {
+		t.Fatalf("expected expired ban to mark probe due")
 	}
-	if out[0].ChannelID != 2 {
-		t.Fatalf("expected forced channel first, got=%d", out[0].ChannelID)
+}
+
+func TestState_BanChannelClampedToTenMinutes(t *testing.T) {
+	st := NewState()
+	now := time.Now()
+
+	st.mu.Lock()
+	st.channelBanUntil[1] = now.Add(20 * time.Minute)
+	st.channelBanStreak[1] = 10
+	st.mu.Unlock()
+
+	until := st.BanChannel(1, now, 2*time.Minute)
+	if until.After(now.Add(10 * time.Minute)) {
+		t.Fatalf("expected ban_until to be clamped to <=10m, got=%v", until.Sub(now))
+	}
+
+	st.mu.Lock()
+	stored := st.channelBanUntil[1]
+	st.mu.Unlock()
+	if stored.After(now.Add(10 * time.Minute)) {
+		t.Fatalf("expected stored ban_until to be clamped to <=10m, got=%v", stored.Sub(now))
+	}
+}
+
+func TestState_ListProbeDueChannels_RespectsClaimAndOrder(t *testing.T) {
+	st := NewState()
+	now := time.Now()
+
+	st.mu.Lock()
+	st.channelProbeDueAt[1] = now.Add(-2 * time.Second)
+	st.channelProbeDueAt[2] = now.Add(-1 * time.Second)
+	st.channelProbeDueAt[3] = now.Add(-3 * time.Second)
+	st.channelProbeClaimUntil[2] = now.Add(10 * time.Second) // active claim
+	st.channelProbeClaimUntil[3] = now.Add(-1 * time.Second) // expired claim
+	st.mu.Unlock()
+
+	got := st.ListProbeDueChannels(now, 10)
+	if len(got) != 2 || got[0] != 3 || got[1] != 1 {
+		t.Fatalf("unexpected probe due channels: %+v", got)
+	}
+
+	got1 := st.ListProbeDueChannels(now, 1)
+	if len(got1) != 1 || got1[0] != 3 {
+		t.Fatalf("unexpected probe due channels with limit=1: %+v", got1)
+	}
+
+	st.mu.Lock()
+	_, ok := st.channelProbeClaimUntil[3]
+	st.mu.Unlock()
+	if ok {
+		t.Fatalf("expected expired claim to be cleared")
+	}
+}
+
+func TestSelect_ProbeChannelBeatsPromotionAndIsSingleFlight(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0, Promotion: false},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 100, Promotion: true},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+			2: {
+				{ID: 21, ChannelID: 2, BaseURL: "https://b.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+			},
+			21: {
+				{ID: 211, EndpointID: 21, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+
+	s.state.mu.Lock()
+	s.state.channelProbeDueAt[1] = time.Now()
+	s.state.mu.Unlock()
+
+	first, err := s.Select(context.Background(), 10, "")
+	if err != nil {
+		t.Fatalf("Select err: %v", err)
+	}
+	if first.ChannelID != 1 {
+		t.Fatalf("expected probe channel=1 to be selected first, got=%d", first.ChannelID)
+	}
+
+	second, err := s.Select(context.Background(), 10, "")
+	if err != nil {
+		t.Fatalf("Select err: %v", err)
+	}
+	if second.ChannelID != 2 {
+		t.Fatalf("expected second select to skip claimed probe and pick channel=2, got=%d", second.ChannelID)
+	}
+}
+
+func TestReport_SuccessResetsChannelFailScoreAndClearsProbe(t *testing.T) {
+	s := New(&fakeStore{})
+	sel := Selection{ChannelID: 1, CredentialType: CredentialTypeOpenAI, CredentialID: 1}
+
+	s.state.mu.Lock()
+	s.state.channelProbeDueAt[1] = time.Now()
+	s.state.channelProbeClaimUntil[1] = time.Now().Add(1 * time.Minute)
+	s.state.mu.Unlock()
+
+	s.Report(sel, Result{Success: false, Retriable: false})
+	if got := s.state.ChannelFailScore(1); got == 0 {
+		t.Fatalf("expected channel fail score to increase after failure")
+	}
+
+	s.Report(sel, Result{Success: true})
+	if got := s.state.ChannelFailScore(1); got != 0 {
+		t.Fatalf("expected channel fail score to be reset after success, got=%d", got)
+	}
+	if s.state.IsChannelProbeDue(1) {
+		t.Fatalf("expected probe state to be cleared after report")
 	}
 }
 
@@ -235,6 +359,61 @@ func TestSelect_BindingWinsIfNotCooling(t *testing.T) {
 	}
 	if sel.CredentialID != 2 {
 		t.Fatalf("expected credential=2 due to binding, got=%d", sel.CredentialID)
+	}
+}
+
+func TestSelect_PinnedChannelOverridesBinding(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 100},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+			2: {
+				{ID: 21, ChannelID: 2, BaseURL: "https://b.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+			},
+			21: {
+				{ID: 211, EndpointID: 21, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+	s.state.SetChannelPointerRing([]int64{2, 1})
+
+	routeKeyHash := s.RouteKeyHash("abc")
+	s.state.SetBinding(10, routeKeyHash, Selection{
+		ChannelID:      1,
+		ChannelType:    store.UpstreamTypeOpenAICompatible,
+		EndpointID:     11,
+		BaseURL:        "https://a.example",
+		CredentialType: CredentialTypeOpenAI,
+		CredentialID:   111,
+	}, time.Now().Add(10*time.Minute))
+
+	s.PinChannel(2)
+
+	sel, err := s.Select(context.Background(), 10, routeKeyHash)
+	if err != nil {
+		t.Fatalf("Select err: %v", err)
+	}
+	if sel.ChannelID != 2 {
+		t.Fatalf("expected channel=2 due to pinned channel, got=%+v", sel)
+	}
+
+	got, ok := s.state.GetBinding(10, routeKeyHash)
+	if !ok {
+		t.Fatalf("expected binding to be set after select")
+	}
+	if got.ChannelID != 2 {
+		t.Fatalf("expected binding channel=2 after select, got=%+v", got)
 	}
 }
 

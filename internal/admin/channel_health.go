@@ -139,6 +139,10 @@ type channelTestStore interface {
 	UpdateUpstreamChannelTest(ctx context.Context, channelID int64, ok bool, latencyMS int) error
 }
 
+func RunChannelTest(ctx context.Context, st channelTestStore, exec UpstreamDoer, ch store.UpstreamChannel, specified []store.ChannelModel) (string, error) {
+	return runChannelTest(ctx, st, exec, ch, specified)
+}
+
 func runChannelTest(ctx context.Context, st channelTestStore, exec UpstreamDoer, ch store.UpstreamChannel, specified []store.ChannelModel) (string, error) {
 	candidates, auto, err := gatherChannelTestModels(ctx, st, ch, specified)
 	if err != nil {

@@ -53,4 +53,3 @@ func TestUsageTemplates_ContainExpandableDetails(t *testing.T) {
 		})
 	}
 }
-

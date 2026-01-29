@@ -41,12 +41,12 @@
 <div class="card border-0 shadow-sm mb-4">
   <div class="card-body py-3 d-flex flex-wrap gap-2 align-items-center">
     <span class="text-muted small">智能调度</span>
-    {{if .SchedulerRuntime.ForcedActive}}
+    {{if .SchedulerRuntime.PinnedActive}}
       <span class="badge bg-warning-subtle text-warning-emphasis border">
-        最高优先级：{{.SchedulerRuntime.ForcedChannel}}（剩余 {{.SchedulerRuntime.ForcedRemaining}}）
+        渠道指针：{{.SchedulerRuntime.PinnedChannel}}
       </span>
     {{else}}
-      <span class="badge bg-light text-muted border">最高优先级：-</span>
+      <span class="badge bg-light text-muted border">渠道指针：-</span>
     {{end}}
     {{if .SchedulerRuntime.LastSuccessActive}}
       <span class="badge bg-light text-dark border">
@@ -143,21 +143,18 @@
 	          </td>
 	          <td>
 	            <div class="d-flex flex-column gap-1">
-	              <div class="d-flex align-items-center gap-2">
-	                {{if .Channel.Promotion}}
-	                <span class="badge bg-light text-warning border small" title="推荐渠道"><i class="ri-star-fill me-1"></i>推荐</span>
-	                {{else}}
-	                <span class="text-muted small">-</span>
-	                {{end}}
-	                {{if and .Runtime.Available .Runtime.ForcedActive}}
-	                <span class="badge bg-warning-subtle text-warning-emphasis border small" title="到期 {{.Runtime.ForcedUntil}}">5分钟最高</span>
-	                {{end}}
-	              </div>
-	              {{if and .Runtime.Available .Runtime.ForcedActive}}
-	                <small class="text-muted" style="font-size: 0.75em;">剩余 {{.Runtime.ForcedRemaining}}</small>
-	              {{end}}
-	            </div>
-	          </td>
+		              <div class="d-flex align-items-center gap-2">
+		                {{if .Channel.Promotion}}
+		                <span class="badge bg-light text-warning border small" title="推荐渠道"><i class="ri-star-fill me-1"></i>推荐</span>
+		                {{else}}
+		                <span class="text-muted small">-</span>
+		                {{end}}
+		                {{if and .Runtime.Available .Runtime.PinnedActive}}
+		                <span class="badge bg-primary-subtle text-primary-emphasis border small" title="当前渠道指针">指针</span>
+		                {{end}}
+		              </div>
+		            </div>
+		          </td>
           <td>
 	            {{if .Channel.LastTestAt}}
 	              <div class="d-flex flex-column">
@@ -179,6 +176,9 @@
 	          </td>
 	          <td class="text-end">
             <div class="d-flex gap-1 justify-content-end">
+              <a href="/admin/channels/{{.Channel.ID}}/detail" class="btn btn-sm btn-light border text-secondary" title="查看密钥/账号用量">
+                <i class="ri-line-chart-line me-1"></i>详情
+              </a>
               <form method="POST" action="/admin/channels/test" data-ajax="1" data-ajax-reload="1">
                 <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
                 <input type="hidden" name="_intent" value="test_channel" />
@@ -190,8 +190,8 @@
               <form method="POST" action="/admin/channels/{{.Channel.ID}}/promote" data-ajax="1" data-ajax-reload="1">
                 <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
                 <input type="hidden" name="return_to" value="/admin/channels" />
-                <button class="btn btn-sm btn-light border text-warning" type="submit" title="5分钟最高优先级">
-                  <i class="ri-rocket-2-line me-1"></i>5分钟最高
+                <button class="btn btn-sm btn-light border text-primary" type="submit" title="设为当前渠道指针（将清除该渠道封禁）">
+                  <i class="ri-rocket-2-line me-1"></i>设为当前
                 </button>
               </form>
               {{if ne .Channel.Type "codex_oauth"}}

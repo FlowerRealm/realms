@@ -11,8 +11,8 @@ Realms 是一个 Go 单体服务（`net/http`），对外提供 **OpenAI 兼容*
 ## 快速开始（本地）
 
 ```bash
-cp config.example.yaml config.yaml
-go run ./cmd/realms -config config.yaml
+cp .env.example .env
+go run ./cmd/realms
 ```
 
 首次启动会自动执行内置迁移（SQLite）或迁移脚本（MySQL）。启动后：
@@ -28,4 +28,3 @@ go run ./cmd/realms -config config.yaml
 - 数据面接口：见「API 手册」
 - 健康检查：`GET /healthz`
 - 构建信息：`GET /api/version`
-

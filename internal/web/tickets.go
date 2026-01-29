@@ -402,21 +402,12 @@ func (s *Server) saveTicketAttachments(now time.Time, uploaderUserID *int64, fil
 	if len(files) == 0 {
 		return nil, nil, ""
 	}
-	if len(files) > ticketMaxAttachments {
-		return nil, nil, "附件数量过多"
-	}
-
-	var total int64
 	for _, fh := range files {
 		if fh == nil {
 			continue
 		}
 		if fh.Size <= 0 {
 			return nil, nil, "附件为空文件"
-		}
-		total += fh.Size
-		if total > s.ticketsCfg.MaxUploadBytes {
-			return nil, nil, "附件总大小超过限制"
 		}
 	}
 
@@ -433,7 +424,7 @@ func (s *Server) saveTicketAttachments(now time.Time, uploaderUserID *int64, fil
 		}
 		func() {
 			defer func() { _ = src.Close() }()
-			res, err := s.ticketStorage.Save(now, src, s.ticketsCfg.MaxUploadBytes)
+			res, err := s.ticketStorage.Save(now, src)
 			if err != nil {
 				s.deleteSavedAttachments(saved)
 				inputs = nil
@@ -447,7 +438,7 @@ func (s *Server) saveTicketAttachments(now time.Time, uploaderUserID *int64, fil
 				ct = truncateASCII(ct, 255)
 				ctPtr = &ct
 			}
-			expiresAt := now.Add(s.ticketsCfg.AttachmentTTL)
+			expiresAt := time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
 			inputs = append(inputs, store.TicketAttachmentInput{
 				UploaderUserID: uploaderUserID,
 				OriginalName:   sanitizeOriginalName(fh.Filename),
@@ -459,7 +450,7 @@ func (s *Server) saveTicketAttachments(now time.Time, uploaderUserID *int64, fil
 			})
 		}()
 		if inputs == nil {
-			return nil, nil, "保存附件失败（请检查大小限制与磁盘空间）"
+			return nil, nil, "保存附件失败（请检查磁盘空间）"
 		}
 	}
 	return inputs, saved, ""

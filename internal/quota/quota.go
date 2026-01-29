@@ -25,6 +25,7 @@ type ReserveInput struct {
 	UserID          int64
 	TokenID         int64
 	Model           *string
+	InputTokens     *int64
 	MaxOutputTokens *int64
 }
 
@@ -66,8 +67,8 @@ func (p *UsageProvider) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 	if reservedUSD.LessThanOrEqual(decimal.Zero) {
 		reservedUSD = decimal.NewFromInt(1).Div(decimal.NewFromInt(1000)) // 0.001 USD
 	}
-	if in.Model != nil && in.MaxOutputTokens != nil && *in.MaxOutputTokens > 0 {
-		c, err := estimateCostUSD(ctx, p.st, in.Model, nil, nil, nil, nil, in.MaxOutputTokens)
+	if in.Model != nil && ((in.InputTokens != nil && *in.InputTokens > 0) || (in.MaxOutputTokens != nil && *in.MaxOutputTokens > 0)) {
+		c, err := estimateCostUSD(ctx, p.st, in.Model, in.InputTokens, nil, nil, nil, in.MaxOutputTokens)
 		if err != nil {
 			return ReserveResult{}, err
 		}

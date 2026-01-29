@@ -5,10 +5,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 )
 
-func (s *Server) PromoteChannel5Min(w http.ResponseWriter, r *http.Request) {
+func (s *Server) PinChannel(w http.ResponseWriter, r *http.Request) {
 	_, _, isRoot, err := s.currentUser(r)
 	if err != nil {
 		if isAjax(r) {
@@ -64,11 +63,18 @@ func (s *Server) PromoteChannel5Min(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	until := s.sched.ForceChannelFor(ch.ID, 5*time.Minute)
+	if err := s.sched.RefreshPinnedRing(r.Context(), s.st); err != nil {
+		if isAjax(r) {
+			ajaxError(w, http.StatusBadGateway, "构建渠道指针失败："+err.Error())
+			return
+		}
+		http.Redirect(w, r, returnTo+"?err="+url.QueryEscape("构建渠道指针失败："+err.Error()), http.StatusFound)
+		return
+	}
+	s.sched.PinChannel(ch.ID)
 	s.sched.ClearChannelBan(ch.ID)
 
-	loc, _ := s.adminTimeLocation(r.Context())
-	msg := fmt.Sprintf("已设置 %s 为 5 分钟最高优先级（到期 %s）", ch.Name, formatTimeIn(until, "15:04:05", loc))
+	msg := fmt.Sprintf("已将当前渠道指针指向 %s (#%d)", ch.Name, ch.ID)
 	if isAjax(r) {
 		ajaxOK(w, msg)
 		return

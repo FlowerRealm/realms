@@ -234,9 +234,14 @@ func runCodexE2E(t *testing.T, e2eCfg codexE2EConfig) {
 		t.Fatalf("CreateUserToken: %v", err)
 	}
 
-	appCfg, err := config.LoadFromFile(filepath.Join(dir, "config-does-not-exist.yaml"))
+	// e2e 测试应当与外部环境变量解耦：清空可能影响 Load() 的配置项。
+	t.Setenv("REALMS_DB_DRIVER", "")
+	t.Setenv("REALMS_DB_DSN", "")
+	t.Setenv("REALMS_SQLITE_PATH", "")
+
+	appCfg, err := config.Load()
 	if err != nil {
-		t.Fatalf("LoadFromFile: %v", err)
+		t.Fatalf("Load: %v", err)
 	}
 	appCfg.Env = "dev"
 	appCfg.DB.Driver = "sqlite"

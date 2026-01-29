@@ -30,6 +30,12 @@ type GroupRouter struct {
 	cursors          map[int64]*groupCursor
 	activePath       map[int64]struct{}
 	excludedChannels map[int64]struct{}
+
+	lastSelectedChannelID int64
+	lastSelectedStreak    int
+
+	channelRingLoaded bool
+	channelRing       []int64
 }
 
 type groupCursor struct {
@@ -71,6 +77,17 @@ func (r *GroupRouter) Next(ctx context.Context) (Selection, error) {
 		return Selection{}, errors.New("default 分组已禁用")
 	}
 
+	if _, ok := r.sched.PinnedChannel(); ok {
+		sel, err := r.nextFromPinnedRing(ctx)
+		if err != nil {
+			if errors.Is(err, errGroupExhausted) {
+				return Selection{}, errors.New("上游不可用")
+			}
+			return Selection{}, err
+		}
+		return sel, nil
+	}
+
 	sel, err := r.nextFromGroup(ctx, root.ID)
 	if err != nil {
 		if errors.Is(err, errGroupExhausted) {
@@ -79,6 +96,63 @@ func (r *GroupRouter) Next(ctx context.Context) (Selection, error) {
 		return Selection{}, err
 	}
 	return sel, nil
+}
+
+func (r *GroupRouter) nextFromPinnedRing(ctx context.Context) (Selection, error) {
+	if r.st == nil || r.sched == nil || r.sched.state == nil {
+		return Selection{}, errGroupExhausted
+	}
+
+	if !r.channelRingLoaded {
+		ring, err := buildDefaultChannelRing(ctx, r.st)
+		if err != nil {
+			return Selection{}, err
+		}
+		r.channelRing = ring
+		r.channelRingLoaded = true
+		r.sched.state.SetChannelPointerRing(ring)
+	}
+	if len(r.channelRing) == 0 {
+		return Selection{}, errGroupExhausted
+	}
+
+	now := time.Now()
+	pointerID, ok := r.sched.PinnedChannel()
+	if !ok || pointerID <= 0 {
+		return Selection{}, errGroupExhausted
+	}
+
+	startIdx := 0
+	for i, id := range r.channelRing {
+		if id == pointerID {
+			startIdx = i
+			break
+		}
+	}
+
+	// 指针模式：按 ring 从指针位置开始遍历一圈（到底从头再来），直到找到可用渠道。
+	for step := 0; step < len(r.channelRing); step++ {
+		chID := r.channelRing[(startIdx+step)%len(r.channelRing)]
+		if chID <= 0 {
+			continue
+		}
+		if _, excluded := r.excludedChannels[chID]; excluded {
+			continue
+		}
+		if r.sched.state.IsChannelBanned(chID, now) {
+			continue
+		}
+		cons := r.cons
+		cons.RequireChannelID = chID
+		sel, err := r.sched.SelectWithConstraints(ctx, r.userID, r.routeKeyHash, cons)
+		if err != nil {
+			r.excludedChannels[chID] = struct{}{}
+			continue
+		}
+		return sel, nil
+	}
+
+	return Selection{}, errGroupExhausted
 }
 
 func (r *GroupRouter) cursorForGroup(ctx context.Context, groupID int64) (*groupCursor, error) {
@@ -137,18 +211,42 @@ func (r *GroupRouter) nextFromGroup(ctx context.Context, groupID int64) (Selecti
 	if len(cands) == 0 {
 		return Selection{}, errGroupExhausted
 	}
-	forcedID := int64(0)
-	if r.sched != nil {
-		if id, _, ok := r.sched.ForcedChannel(time.Now()); ok {
-			forcedID = id
-		}
+	now := time.Now()
+	if r.sched != nil && r.sched.state != nil {
+		r.sched.state.SweepExpiredChannelBans(now)
 	}
-	ordered := sortCandidates(cands, forcedID, func(channelID int64) int {
+	ordered := sortCandidates(cands, func(channelID int64) bool {
+		if r.sched == nil || r.sched.state == nil {
+			return false
+		}
+		return r.sched.state.IsChannelProbePending(channelID, now)
+	}, func(channelID int64) int {
 		if r.sched == nil || r.sched.state == nil {
 			return 0
 		}
 		return r.sched.state.ChannelFailScore(channelID)
 	})
+
+	// failover 时给同一渠道一定重试机会，然后再切换到“下一个”渠道（若存在）。
+	// 典型场景：同渠道多 key/账号可接管；或短暂抖动下重试可恢复。
+	const maxConsecutiveSameChannel = 2
+	if r.lastSelectedChannelID != 0 && r.lastSelectedStreak >= maxConsecutiveSameChannel && len(ordered) > 1 {
+		reordered := make([]channelCandidate, 0, len(ordered))
+		deferred := channelCandidate{}
+		hasDeferred := false
+		for _, cand := range ordered {
+			if cand.ChannelID == r.lastSelectedChannelID {
+				deferred = cand
+				hasDeferred = true
+				continue
+			}
+			reordered = append(reordered, cand)
+		}
+		if hasDeferred {
+			reordered = append(reordered, deferred)
+		}
+		ordered = reordered
+	}
 
 	for _, cand := range ordered {
 		cons := r.cons
@@ -163,6 +261,12 @@ func (r *GroupRouter) nextFromGroup(ctx context.Context, groupID int64) (Selecti
 			if sc, err := r.cursorForGroup(ctx, cand.SourceGroupID); err == nil {
 				sc.attemptsUsed++
 			}
+		}
+		if cand.ChannelID == r.lastSelectedChannelID {
+			r.lastSelectedStreak++
+		} else {
+			r.lastSelectedChannelID = cand.ChannelID
+			r.lastSelectedStreak = 1
 		}
 		return sel, nil
 	}
@@ -252,18 +356,17 @@ func (r *GroupRouter) collectCandidates(ctx context.Context, groupID int64, out 
 	return nil
 }
 
-func sortCandidates(in map[int64]channelCandidate, forcedChannelID int64, failScore func(channelID int64) int) []channelCandidate {
+func sortCandidates(in map[int64]channelCandidate, isProbePending func(channelID int64) bool, failScore func(channelID int64) int) []channelCandidate {
 	out := make([]channelCandidate, 0, len(in))
 	for _, c := range in {
 		out = append(out, c)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		if forcedChannelID != 0 {
-			if out[i].ChannelID == forcedChannelID && out[j].ChannelID != forcedChannelID {
-				return true
-			}
-			if out[j].ChannelID == forcedChannelID && out[i].ChannelID != forcedChannelID {
-				return false
+		if isProbePending != nil {
+			pi := isProbePending(out[i].ChannelID)
+			pj := isProbePending(out[j].ChannelID)
+			if pi != pj {
+				return pi
 			}
 		}
 		if out[i].Promotion != out[j].Promotion {

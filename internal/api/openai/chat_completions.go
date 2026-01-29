@@ -36,7 +36,7 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	payload, err := sanitizeChatCompletionsPayload(body, h.defaultMaxOutputTokens)
+	payload, err := sanitizeChatCompletionsPayload(body, 0)
 	if err != nil {
 		if errors.Is(err, errInvalidJSON) {
 			http.Error(w, "请求体不是有效 JSON", http.StatusBadRequest)

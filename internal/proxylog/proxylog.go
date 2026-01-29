@@ -8,17 +8,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
 )
 
 type Config struct {
-	Enable   bool
-	Dir      string
-	MaxBytes int64
-	MaxFiles int
+	Enable bool
+	Dir    string
 }
 
 type Entry struct {
@@ -57,12 +54,6 @@ func New(cfg Config) *Writer {
 	if cfg.Dir == "" {
 		cfg.Dir = "./out/proxy"
 	}
-	if cfg.MaxBytes <= 0 {
-		cfg.MaxBytes = 128 << 10
-	}
-	if cfg.MaxFiles <= 0 {
-		cfg.MaxFiles = 200
-	}
 	return &Writer{cfg: cfg}
 }
 
@@ -80,8 +71,8 @@ func (w *Writer) WriteFailure(ctx context.Context, entry Entry) {
 	if entry.Time.IsZero() {
 		entry.Time = time.Now()
 	}
-	b, ok := w.marshalWithinLimit(entry)
-	if !ok {
+	b, err := json.Marshal(entry)
+	if err != nil {
 		return
 	}
 
@@ -96,7 +87,6 @@ func (w *Writer) WriteFailure(ctx context.Context, entry Entry) {
 		return
 	}
 	_ = os.Rename(tmp, dst)
-	w.cleanupOldFiles(dir)
 }
 
 func (w *Writer) buildFilename(entry Entry) string {
@@ -106,54 +96,6 @@ func (w *Writer) buildFilename(entry Entry) string {
 		req = randHex(8)
 	}
 	return fmt.Sprintf("%s_%s.json", ts, req)
-}
-
-func (w *Writer) marshalWithinLimit(entry Entry) ([]byte, bool) {
-	max := w.cfg.MaxBytes
-	if max <= 0 {
-		max = 128 << 10
-	}
-	trim := func(s string, n int) string {
-		s = strings.TrimSpace(s)
-		if n <= 0 || s == "" {
-			return s
-		}
-		if len(s) <= n {
-			return s
-		}
-		return s[:n] + "…"
-	}
-
-	b, err := json.Marshal(entry)
-	if err == nil && int64(len(b)) <= max {
-		return b, true
-	}
-
-	// 降级：逐步截断长字段，优先保留结构字段。
-	entry.ErrorMsg = trim(entry.ErrorMsg, 400)
-	entry.UpstreamBaseURL = trim(entry.UpstreamBaseURL, 200)
-	entry.Path = trim(entry.Path, 120)
-	entry.Method = trim(entry.Method, 16)
-	entry.ChannelType = trim(entry.ChannelType, 32)
-	entry.CredentialType = trim(entry.CredentialType, 32)
-	entry.ErrorClass = trim(entry.ErrorClass, 64)
-	if entry.Model != nil {
-		m := trim(*entry.Model, 128)
-		entry.Model = &m
-	}
-	b, err = json.Marshal(entry)
-	if err == nil && int64(len(b)) <= max {
-		return b, true
-	}
-
-	// 最后降级：去掉错误信息/URL，确保写盘不爆。
-	entry.ErrorMsg = ""
-	entry.UpstreamBaseURL = ""
-	b, err = json.Marshal(entry)
-	if err == nil && int64(len(b)) <= max {
-		return b, true
-	}
-	return nil, false
 }
 
 func sanitizeFilenameComponent(s string, maxLen int) string {
@@ -191,43 +133,4 @@ func randHex(n int) string {
 		return "rand"
 	}
 	return hex.EncodeToString(b)
-}
-
-func (w *Writer) cleanupOldFiles(dir string) {
-	max := w.cfg.MaxFiles
-	if max <= 0 {
-		return
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	type f struct {
-		name    string
-		modTime time.Time
-	}
-	var files []f
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if !strings.HasSuffix(name, ".json") {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		files = append(files, f{name: name, modTime: info.ModTime()})
-	}
-	if len(files) <= max {
-		return
-	}
-	sort.SliceStable(files, func(i, j int) bool {
-		return files[i].modTime.Before(files[j].modTime)
-	})
-	for _, ff := range files[:len(files)-max] {
-		_ = os.Remove(filepath.Join(dir, ff.name))
-	}
 }

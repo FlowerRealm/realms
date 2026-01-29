@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"realms/internal/auth"
-	"realms/internal/limits"
 	"realms/internal/middleware"
 	"realms/internal/proxylog"
 	"realms/internal/quota"
@@ -40,9 +39,7 @@ type Handler struct {
 	sched  *scheduler.Scheduler
 	exec   Doer
 
-	tokenLimits *limits.TokenLimits
-	credLimits  *limits.CredentialLimits
-	proxyLog    *proxylog.Writer
+	proxyLog *proxylog.Writer
 
 	features FeatureResolver
 	selfMode bool
@@ -50,8 +47,6 @@ type Handler struct {
 	quota quota.Provider
 	audit AuditSink
 	usage UsageEventSink
-
-	defaultMaxOutputTokens int
 
 	sseOpts upstream.SSEPumpOptions
 }
@@ -68,22 +63,19 @@ type UsageEventSink interface {
 	FinalizeUsageEvent(ctx context.Context, in store.FinalizeUsageEventInput) error
 }
 
-func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *scheduler.Scheduler, exec Doer, tokenLimits *limits.TokenLimits, credLimits *limits.CredentialLimits, proxyLog *proxylog.Writer, features FeatureResolver, selfMode bool, qp quota.Provider, audit AuditSink, usage UsageEventSink, defaultMaxOutputTokens int, sseOpts upstream.SSEPumpOptions) *Handler {
+func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *scheduler.Scheduler, exec Doer, proxyLog *proxylog.Writer, features FeatureResolver, selfMode bool, qp quota.Provider, audit AuditSink, usage UsageEventSink, sseOpts upstream.SSEPumpOptions) *Handler {
 	return &Handler{
-		models:                 models,
-		groups:                 groups,
-		sched:                  sched,
-		exec:                   exec,
-		tokenLimits:            tokenLimits,
-		credLimits:             credLimits,
-		proxyLog:               proxyLog,
-		features:               features,
-		selfMode:               selfMode,
-		quota:                  qp,
-		audit:                  audit,
-		usage:                  usage,
-		defaultMaxOutputTokens: defaultMaxOutputTokens,
-		sseOpts:                sseOpts,
+		models:   models,
+		groups:   groups,
+		sched:    sched,
+		exec:     exec,
+		proxyLog: proxyLog,
+		features: features,
+		selfMode: selfMode,
+		quota:    qp,
+		audit:    audit,
+		usage:    usage,
+		sseOpts:  sseOpts,
 	}
 }
 
@@ -170,10 +162,6 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	if maxOut == nil {
 		maxOut = intFromAny(payload["max_completion_tokens"])
-	}
-	if maxOut == nil && h.defaultMaxOutputTokens > 0 {
-		v := int64(h.defaultMaxOutputTokens)
-		maxOut = &v
 	}
 
 	freeMode := h.selfMode
@@ -451,18 +439,6 @@ func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p aut
 func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel scheduler.Selection, body []byte, wantStream bool, model *string, p auth.Principal, usageID int64, reqStart time.Time, reqBytes int64) bool {
 	attemptStart := time.Now()
 
-	credKey := sel.CredentialKey()
-	if h.credLimits != nil {
-		if !h.credLimits.Acquire(credKey) {
-			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: true, ErrorClass: "credential_concurrency"})
-			h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, 0, "credential_concurrency", time.Since(attemptStart))
-			return false
-		}
-	}
-	if h.credLimits != nil {
-		defer h.credLimits.Release(credKey)
-	}
-
 	resp, err := h.exec.Do(r.Context(), sel, r, body)
 	if err != nil {
 		h.sched.Report(sel, scheduler.Result{Success: false, Retriable: true, ErrorClass: "network"})
@@ -482,10 +458,13 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, "upstream_status", time.Since(attemptStart))
 			return false
 		}
+		if h.sched != nil {
+			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: false, StatusCode: resp.StatusCode, ErrorClass: "upstream_status"})
+		}
 		h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, "upstream_status", time.Since(attemptStart))
 		cw := &countingResponseWriter{ResponseWriter: w}
 		downstreamStatus := resetStatusCode(resp.StatusCode, sel.StatusCodeMapping)
-		bodyBytes, _ := readLimited(resp.Body, 8<<20)
+		bodyBytes, _ := readLimited(resp.Body, 0)
 		copyResponseHeaders(cw.Header(), resp.Header)
 		cw.WriteHeader(downstreamStatus)
 		n, _ := cw.Write(bodyBytes)
@@ -516,23 +495,6 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			seen      bool
 		}
 		var acc usageAcc
-
-		tokenID := p.TokenID
-		if tokenID != nil && h.tokenLimits != nil {
-			if !h.tokenLimits.AcquireSSE(*tokenID) {
-				cw := &countingResponseWriter{ResponseWriter: w}
-				http.Error(cw, "SSE 连接超限", http.StatusTooManyRequests)
-				h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, model, http.StatusTooManyRequests, "sse_limit", time.Since(attemptStart))
-				if usageID != 0 && h.quota != nil {
-					bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-					_ = h.quota.Void(bookCtx, usageID)
-					cancel()
-				}
-				h.finalizeUsageEvent(r, usageID, &sel, http.StatusTooManyRequests, "sse_limit", "SSE 连接超限", time.Since(reqStart), true, reqBytes, cw.bytes)
-				return true
-			}
-			defer h.tokenLimits.ReleaseSSE(*tokenID)
-		}
 
 		cw := &countingResponseWriter{ResponseWriter: w}
 		copyResponseHeaders(cw.Header(), resp.Header)
@@ -623,7 +585,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 	}
 
 	// 非流式：完整转发并尝试提取 usage。
-	bodyBytes, err := readLimited(resp.Body, 8<<20)
+	bodyBytes, err := readLimited(resp.Body, 0)
 	if err != nil {
 		h.sched.Report(sel, scheduler.Result{Success: false, Retriable: true, ErrorClass: "read_upstream"})
 		h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, 0, "read_upstream", time.Since(attemptStart))
@@ -675,7 +637,7 @@ func (h *Handler) copyNonStreamResponse(w http.ResponseWriter, resp *http.Respon
 }
 
 func (h *Handler) copyNonStreamResponseWithStatus(w http.ResponseWriter, resp *http.Response, status int) int64 {
-	bodyBytes, _ := readLimited(resp.Body, 8<<20)
+	bodyBytes, _ := readLimited(resp.Body, 0)
 	copyResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(status)
 	n, _ := w.Write(bodyBytes)
@@ -932,6 +894,9 @@ func trimSummary(s string) string {
 }
 
 func readLimited(r io.Reader, max int64) ([]byte, error) {
+	if max <= 0 {
+		return io.ReadAll(r)
+	}
 	var buf bytes.Buffer
 	_, err := io.CopyN(&buf, r, max+1)
 	if err != nil && !errors.Is(err, io.EOF) {
@@ -958,6 +923,9 @@ func copyResponseHeaders(dst, src http.Header) {
 func isRetriableStatus(code int) bool {
 	switch code {
 	case http.StatusTooManyRequests, http.StatusRequestTimeout, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		// 常见为上游 base_url/path 不匹配或渠道能力缺失；切换 channel 有意义。
 		return true
 	case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden:
 		// 很多场景是凭据失效/配额/余额问题，切换 key/账号有意义。

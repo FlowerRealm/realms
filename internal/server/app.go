@@ -19,7 +19,6 @@ import (
 	"realms/internal/assets"
 	"realms/internal/codexoauth"
 	"realms/internal/config"
-	"realms/internal/limits"
 	"realms/internal/middleware"
 	"realms/internal/proxylog"
 	"realms/internal/quota"
@@ -45,9 +44,9 @@ type App struct {
 	admin         *admin.Server
 	codexOAuth    *codexoauth.Flow
 	codexClient   *codexoauth.Client
+	exec          *upstream.Executor
 	openai        *openaiapi.Handler
 	sched         *scheduler.Scheduler
-	tokenLimits   *limits.TokenLimits
 	version       version.BuildInfo
 	ticketStorage *tickets.Storage
 	mux           *http.ServeMux
@@ -65,12 +64,13 @@ func NewApp(opts AppOptions) (*App, error) {
 	if strings.TrimSpace(opts.Config.AppSettingsDefaults.SiteBaseURL) != "" {
 		publicBaseURL = strings.TrimRight(strings.TrimSpace(opts.Config.AppSettingsDefaults.SiteBaseURL), "/")
 	}
+	sessionCookieName := web.SessionCookieNameForSelfMode(opts.Config.SelfMode.Enable)
 
 	var oauthFlow *codexoauth.Flow
 	var codexClient *codexoauth.Client
 	if opts.Config.CodexOAuth.Enable {
 		codexClient = codexoauth.NewClient(opts.Config.CodexOAuth)
-		oauthFlow = codexoauth.NewFlow(st, codexClient, web.SessionCookieName, localBaseURL(opts.Config))
+		oauthFlow = codexoauth.NewFlow(st, codexClient, sessionCookieName, localBaseURL(opts.Config))
 	}
 
 	ticketStorage := tickets.NewStorage(opts.Config.Tickets.AttachmentsDir)
@@ -115,24 +115,13 @@ func NewApp(opts AppOptions) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	tokenLimits := limits.NewTokenLimits(opts.Config.Limits.MaxInflightPerToken, opts.Config.Limits.MaxSSEConnectionsPerToken)
-	credLimits := limits.NewCredentialLimits(opts.Config.Limits.MaxInflightPerCredential)
 	proxyLog := proxylog.New(proxylog.Config{
-		Enable:   opts.Config.Env == "dev" && opts.Config.Debug.ProxyLog.Enable,
-		Dir:      opts.Config.Debug.ProxyLog.Dir,
-		MaxBytes: opts.Config.Debug.ProxyLog.MaxBytes,
-		MaxFiles: opts.Config.Debug.ProxyLog.MaxFiles,
+		Enable: opts.Config.Env == "dev" && opts.Config.Debug.ProxyLog.Enable,
+		Dir:    opts.Config.Debug.ProxyLog.Dir,
 	})
-	qp := quotaProviderForConfig(st, opts.Config)
-	sseMaxEventBytes := int(opts.Config.Limits.SSEMaxEventBytes)
-	if int64(sseMaxEventBytes) != opts.Config.Limits.SSEMaxEventBytes || sseMaxEventBytes < 0 {
-		sseMaxEventBytes = 0
-	}
-	openaiHandler := openaiapi.NewHandler(st, st, sched, exec, tokenLimits, credLimits, proxyLog, st, opts.Config.SelfMode.Enable, qp, st, st, opts.Config.Limits.DefaultMaxOutputTokens, upstream.SSEPumpOptions{
-		MaxLineBytes:     sseMaxEventBytes,
+	qp := quotaProvider(st)
+	openaiHandler := openaiapi.NewHandler(st, st, sched, exec, proxyLog, st, opts.Config.SelfMode.Enable, qp, st, st, upstream.SSEPumpOptions{
 		InitialLineBytes: 64 << 10,
-		PingInterval:     opts.Config.Limits.SSEPingInterval,
-		IdleTimeout:      opts.Config.Limits.StreamIdleTimeout,
 	})
 
 	app := &App{
@@ -143,9 +132,9 @@ func NewApp(opts AppOptions) (*App, error) {
 		admin:         adminServer,
 		codexOAuth:    oauthFlow,
 		codexClient:   codexClient,
+		exec:          exec,
 		openai:        openaiHandler,
 		sched:         sched,
-		tokenLimits:   tokenLimits,
 		version:       opts.Version,
 		ticketStorage: ticketStorage,
 		mux:           http.NewServeMux(),
@@ -157,11 +146,9 @@ func NewApp(opts AppOptions) (*App, error) {
 	return app, nil
 }
 
-func quotaProviderForConfig(st *store.Store, cfg config.Config) quota.Provider {
-	reserveTTL := cfg.Limits.MaxRequestDuration + 30*time.Second
-	normal := quota.NewHybridProvider(st, reserveTTL, cfg.Billing.EnablePayAsYouGo)
-	free := quota.NewFreeProvider(st, reserveTTL)
-	return quota.NewFeatureProvider(st, cfg.SelfMode.Enable, normal, free)
+func quotaProvider(st *store.Store) quota.Provider {
+	reserveTTL := 2*time.Minute + 30*time.Second
+	return quota.NewFreeProvider(st, reserveTTL)
 }
 
 func (a *App) Handler() http.Handler {
@@ -201,6 +188,7 @@ func localBaseURL(cfg config.Config) string {
 
 func (a *App) routes() {
 	selfMode := a.cfg.SelfMode.Enable
+	sessionCookieName := web.SessionCookieNameForSelfMode(selfMode)
 
 	a.mux.HandleFunc("GET /healthz", a.handleHealthz)
 	a.mux.HandleFunc("GET /api/version", a.handleVersion)
@@ -227,8 +215,7 @@ func (a *App) routes() {
 		return middleware.Chain(h,
 			middleware.RequestID,
 			middleware.AccessLog,
-			middleware.RequestTimeout(a.cfg.Limits.MaxRequestDuration),
-			middleware.BodyCache(a.cfg.Limits.MaxBodyBytes),
+			middleware.BodyCache(0),
 		)
 	}
 	a.mux.Handle("POST /oauth/token", publicChain(http.HandlerFunc(a.web.OAuthToken)))
@@ -236,9 +223,8 @@ func (a *App) routes() {
 		return middleware.Chain(h,
 			middleware.RequestID,
 			middleware.AccessLog,
-			middleware.RequestTimeout(a.cfg.Limits.MaxRequestDuration),
 			middleware.FeatureGateEffective(a.store, selfMode, featureKey),
-			middleware.BodyCache(a.cfg.Limits.MaxBodyBytes),
+			middleware.BodyCache(0),
 		)
 	}
 
@@ -260,9 +246,7 @@ func (a *App) routes() {
 			middleware.RequestID,
 			middleware.AccessLog,
 			middleware.TokenAuth(a.store),
-			middleware.TokenInflightLimiter(a.tokenLimits),
-			middleware.BodyCache(a.cfg.Limits.MaxBodyBytes),
-			middleware.StreamAwareRequestTimeout(a.cfg.Limits.MaxRequestDuration, a.cfg.Limits.MaxStreamDuration),
+			middleware.BodyCache(0),
 		)
 	}
 	apiFeatureChain := func(featureKey string, h http.Handler) http.Handler {
@@ -271,9 +255,7 @@ func (a *App) routes() {
 			middleware.AccessLog,
 			middleware.FeatureGateEffective(a.store, selfMode, featureKey),
 			middleware.TokenAuth(a.store),
-			middleware.TokenInflightLimiter(a.tokenLimits),
-			middleware.BodyCache(a.cfg.Limits.MaxBodyBytes),
-			middleware.StreamAwareRequestTimeout(a.cfg.Limits.MaxRequestDuration, a.cfg.Limits.MaxStreamDuration),
+			middleware.BodyCache(0),
 		)
 	}
 	a.mux.Handle("POST /v1/responses", apiChain(http.HandlerFunc(a.openai.Responses)))
@@ -290,7 +272,7 @@ func (a *App) routes() {
 		return middleware.Chain(h,
 			middleware.RequestID,
 			middleware.AccessLog,
-			middleware.SessionAuth(a.store, web.SessionCookieName),
+			middleware.SessionAuth(a.store, sessionCookieName),
 			middleware.StripWebQuery,
 			middleware.FlashFromCookies,
 		)
@@ -300,7 +282,7 @@ func (a *App) routes() {
 			middleware.RequestID,
 			middleware.AccessLog,
 			middleware.FeatureGateEffective(a.store, selfMode, featureKey),
-			middleware.SessionAuth(a.store, web.SessionCookieName),
+			middleware.SessionAuth(a.store, sessionCookieName),
 			middleware.StripWebQuery,
 			middleware.FlashFromCookies,
 		)
@@ -309,7 +291,7 @@ func (a *App) routes() {
 		return middleware.Chain(h,
 			middleware.RequestID,
 			middleware.AccessLog,
-			middleware.SessionAuth(a.store, web.SessionCookieName),
+			middleware.SessionAuth(a.store, sessionCookieName),
 			middleware.StripWebQuery,
 			middleware.FlashFromCookies,
 			middleware.CSRF(),
@@ -320,22 +302,20 @@ func (a *App) routes() {
 			middleware.RequestID,
 			middleware.AccessLog,
 			middleware.FeatureGateEffective(a.store, selfMode, featureKey),
-			middleware.SessionAuth(a.store, web.SessionCookieName),
+			middleware.SessionAuth(a.store, sessionCookieName),
 			middleware.StripWebQuery,
 			middleware.FlashFromCookies,
 			middleware.CSRF(),
 		)
 	}
-	ticketUploadLimit := a.cfg.Tickets.MaxUploadBytes + (4 << 20) // 预留少量 multipart 开销
 	webUploadFeatureChain := func(featureKey string, h http.Handler) http.Handler {
 		return middleware.Chain(h,
 			middleware.RequestID,
 			middleware.AccessLog,
 			middleware.FeatureGateEffective(a.store, selfMode, featureKey),
-			middleware.SessionAuth(a.store, web.SessionCookieName),
+			middleware.SessionAuth(a.store, sessionCookieName),
 			middleware.StripWebQuery,
 			middleware.FlashFromCookies,
-			middleware.MaxBytes(ticketUploadLimit),
 			middleware.CSRF(),
 		)
 	}
@@ -343,7 +323,7 @@ func (a *App) routes() {
 		return middleware.Chain(h,
 			middleware.RequestID,
 			middleware.AccessLog,
-			middleware.SessionAuth(a.store, web.SessionCookieName),
+			middleware.SessionAuth(a.store, sessionCookieName),
 			middleware.RequireRoles(store.UserRoleRoot),
 			middleware.CSRF(),
 		)
@@ -353,7 +333,7 @@ func (a *App) routes() {
 			middleware.RequestID,
 			middleware.AccessLog,
 			middleware.FeatureGateEffective(a.store, selfMode, featureKey),
-			middleware.SessionAuth(a.store, web.SessionCookieName),
+			middleware.SessionAuth(a.store, sessionCookieName),
 			middleware.RequireRoles(store.UserRoleRoot),
 			middleware.CSRF(),
 		)
@@ -364,7 +344,7 @@ func (a *App) routes() {
 			middleware.AccessLog,
 			middleware.FeatureGateEffective(a.store, selfMode, featureKey1),
 			middleware.FeatureGateEffective(a.store, selfMode, featureKey2),
-			middleware.SessionAuth(a.store, web.SessionCookieName),
+			middleware.SessionAuth(a.store, sessionCookieName),
 			middleware.RequireRoles(store.UserRoleRoot),
 			middleware.CSRF(),
 		)
@@ -376,13 +356,13 @@ func (a *App) routes() {
 			middleware.FeatureGateEffective(a.store, selfMode, featureKey),
 			middleware.SessionAuth(a.store, web.SessionCookieName),
 			middleware.RequireRoles(store.UserRoleRoot),
-			middleware.MaxBytes(ticketUploadLimit),
 			middleware.CSRF(),
 		)
 	}
 
 	a.mux.Handle("GET /admin", adminChain(http.HandlerFunc(a.admin.Home)))
 	a.mux.Handle("GET /admin/channels", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.Channels)))
+	a.mux.Handle("GET /admin/channels/{channel_id}/detail", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.ChannelDetail)))
 	a.mux.Handle("POST /admin/channels", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.CreateChannel)))
 	a.mux.Handle("POST /admin/channels/{channel_id}", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.UpdateChannel)))
 	a.mux.Handle("POST /admin/channels/{channel_id}/request_policy", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.UpdateChannelRequestPolicy)))
@@ -406,7 +386,7 @@ func (a *App) routes() {
 	// 兼容：部分前端/代理可能无法正确透传 path 参数，允许从表单 channel_id 读取。
 	a.mux.Handle("POST /admin/channels/test", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.TestChannel)))
 	a.mux.Handle("POST /admin/channels/{channel_id}/test", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.TestChannel)))
-	a.mux.Handle("POST /admin/channels/{channel_id}/promote", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.PromoteChannel5Min)))
+	a.mux.Handle("POST /admin/channels/{channel_id}/promote", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.PinChannel)))
 	a.mux.Handle("POST /admin/channels/{channel_id}/delete", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.DeleteChannel)))
 	a.mux.Handle("GET /admin/channels/{channel_id}/models", adminFeatureChain2(store.SettingFeatureDisableAdminChannels, store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.ChannelModels)))
 	a.mux.Handle("POST /admin/channels/{channel_id}/models", adminFeatureChain2(store.SettingFeatureDisableAdminChannels, store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.CreateChannelModel)))
@@ -563,15 +543,6 @@ func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {
 		DBOK bool `json:"db_ok"`
 
 		AllowOpenRegistration bool `json:"allow_open_registration"`
-
-		Limits struct {
-			MaxBodyBytes              int64  `json:"max_body_bytes"`
-			MaxRequestDuration        string `json:"max_request_duration"`
-			DefaultMaxOutputTokens    int    `json:"default_max_output_tokens"`
-			MaxInflightPerToken       int    `json:"max_inflight_per_token"`
-			MaxSSEConnectionsPerToken int    `json:"max_sse_connections_per_token"`
-			MaxInflightPerCredential  int    `json:"max_inflight_per_credential"`
-		} `json:"limits"`
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
@@ -586,12 +557,6 @@ func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {
 		DBOK:                  dbOK,
 		AllowOpenRegistration: a.cfg.Security.AllowOpenRegistration,
 	}
-	out.Limits.MaxBodyBytes = a.cfg.Limits.MaxBodyBytes
-	out.Limits.MaxRequestDuration = a.cfg.Limits.MaxRequestDuration.String()
-	out.Limits.DefaultMaxOutputTokens = a.cfg.Limits.DefaultMaxOutputTokens
-	out.Limits.MaxInflightPerToken = a.cfg.Limits.MaxInflightPerToken
-	out.Limits.MaxSSEConnectionsPerToken = a.cfg.Limits.MaxSSEConnectionsPerToken
-	out.Limits.MaxInflightPerCredential = a.cfg.Limits.MaxInflightPerCredential
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(out)
@@ -632,10 +597,59 @@ func (a *App) handleVersion(w http.ResponseWriter, r *http.Request) {
 func (a *App) bootstrap() error {
 	go a.usageCleanupLoop()
 	go a.codexBalanceRefreshLoop()
+	go a.channelAutoProbeLoop()
 	if !a.cfg.SelfMode.Enable {
 		go a.ticketAttachmentsCleanupLoop()
 	}
 	return nil
+}
+
+func (a *App) channelAutoProbeLoop() {
+	if a.sched == nil || a.store == nil || a.exec == nil {
+		return
+	}
+
+	const (
+		tick       = 5 * time.Second
+		claimTTL   = 2 * time.Minute
+		maxPerTick = 1
+	)
+
+	ticker := time.NewTicker(tick)
+	defer ticker.Stop()
+	for range ticker.C {
+		now := time.Now()
+		a.sched.SweepExpiredChannelBans(now)
+
+		ids := a.sched.ListProbeDueChannels(now, maxPerTick)
+		for _, channelID := range ids {
+			if channelID <= 0 {
+				continue
+			}
+			if !a.sched.TryClaimChannelProbe(channelID, now, claimTTL) {
+				continue
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), claimTTL)
+			ch, err := a.store.GetUpstreamChannelByID(ctx, channelID)
+			if err != nil || ch.ID <= 0 || ch.Status != 1 {
+				a.sched.ClearChannelProbe(channelID)
+				cancel()
+				continue
+			}
+
+			_, err = admin.RunChannelTest(ctx, a.store, a.exec, ch, nil)
+			cancel()
+			if err == nil {
+				a.sched.ClearChannelBan(channelID)
+				a.sched.ResetChannelFailScore(channelID)
+				continue
+			}
+
+			a.sched.ClearChannelProbe(channelID)
+			a.sched.BanChannelImmediate(channelID, time.Now(), 30*time.Second)
+		}
+	}
 }
 
 func (a *App) usageCleanupLoop() {

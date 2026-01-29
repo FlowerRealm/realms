@@ -369,6 +369,11 @@ type templateData struct {
 	UsageCursorActive bool
 	UsageLimit        int
 
+	ChannelUsageWindow string
+	ChannelUsageSince  string
+	ChannelUsageUntil  string
+	ChannelKeyUsage    []adminChannelKeyUsageView
+
 	Channels         []store.UpstreamChannel
 	ChannelViews     []adminChannelView
 	SchedulerRuntime adminSchedulerRuntimeView
@@ -494,19 +499,15 @@ type adminChannelRuntimeView struct {
 	BanStreak       int
 	BannedActive    bool
 
-	ForcedUntil     string
-	ForcedRemaining string
-	ForcedActive    bool
+	PinnedActive bool
 }
 
 type adminSchedulerRuntimeView struct {
 	Available bool
 
-	ForcedActive    bool
-	ForcedChannelID int64
-	ForcedChannel   string
-	ForcedUntil     string
-	ForcedRemaining string
+	PinnedActive    bool
+	PinnedChannelID int64
+	PinnedChannel   string
 
 	LastSuccessActive    bool
 	LastSuccessChannelID int64
@@ -2314,11 +2315,7 @@ func (s *Server) Channels(w http.ResponseWriter, r *http.Request) {
 				channelRuntime.BannedUntil = formatTimeIn(*rt.BannedUntil, time.RFC3339, loc)
 				channelRuntime.BannedRemaining = formatRemainingUntilZH(*rt.BannedUntil, nowRuntime)
 			}
-			if rt.ForcedUntil != nil {
-				channelRuntime.ForcedActive = true
-				channelRuntime.ForcedUntil = formatTimeIn(*rt.ForcedUntil, time.RFC3339, loc)
-				channelRuntime.ForcedRemaining = formatRemainingUntilZH(*rt.ForcedUntil, nowRuntime)
-			}
+			channelRuntime.PinnedActive = rt.Pointer
 		}
 
 		us := usageByChannelID[ch.ID]
@@ -2358,16 +2355,14 @@ func (s *Server) Channels(w http.ResponseWriter, r *http.Request) {
 	}
 	schedulerRuntime := adminSchedulerRuntimeView{Available: s.sched != nil}
 	if s.sched != nil {
-		if id, until, ok := s.sched.ForcedChannel(nowRuntime); ok {
-			schedulerRuntime.ForcedActive = true
-			schedulerRuntime.ForcedChannelID = id
+		if id, ok := s.sched.PinnedChannel(); ok {
+			schedulerRuntime.PinnedActive = true
+			schedulerRuntime.PinnedChannelID = id
 			if name := strings.TrimSpace(channelNameByID[id]); name != "" {
-				schedulerRuntime.ForcedChannel = fmt.Sprintf("%s (#%d)", name, id)
+				schedulerRuntime.PinnedChannel = fmt.Sprintf("%s (#%d)", name, id)
 			} else {
-				schedulerRuntime.ForcedChannel = fmt.Sprintf("渠道 #%d", id)
+				schedulerRuntime.PinnedChannel = fmt.Sprintf("渠道 #%d", id)
 			}
-			schedulerRuntime.ForcedUntil = formatTimeIn(until, time.RFC3339, loc)
-			schedulerRuntime.ForcedRemaining = formatRemainingUntilZH(until, nowRuntime)
 		}
 		if sel, at, ok := s.sched.LastSuccess(); ok {
 			schedulerRuntime.LastSuccessActive = true

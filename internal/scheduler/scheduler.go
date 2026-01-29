@@ -59,11 +59,12 @@ type Result struct {
 type Scheduler struct {
 	st UpstreamStore
 
-	state        *State
-	affinityTTL  time.Duration
-	bindingTTL   time.Duration
-	rpmWindow    time.Duration
-	cooldownBase time.Duration
+	state         *State
+	affinityTTL   time.Duration
+	bindingTTL    time.Duration
+	rpmWindow     time.Duration
+	cooldownBase  time.Duration
+	probeClaimTTL time.Duration
 }
 
 type Constraints struct {
@@ -83,29 +84,47 @@ type UpstreamStore interface {
 
 func New(st UpstreamStore) *Scheduler {
 	return &Scheduler{
-		st:           st,
-		state:        NewState(),
-		affinityTTL:  30 * time.Minute,
-		bindingTTL:   30 * time.Minute,
-		rpmWindow:    60 * time.Second,
-		cooldownBase: 30 * time.Second,
+		st:            st,
+		state:         NewState(),
+		affinityTTL:   30 * time.Minute,
+		bindingTTL:    30 * time.Minute,
+		rpmWindow:     60 * time.Second,
+		cooldownBase:  30 * time.Second,
+		probeClaimTTL: 30 * time.Second,
 	}
 }
 
-func (s *Scheduler) ForceChannelFor(channelID int64, d time.Duration) time.Time {
-	if s == nil || s.state == nil || channelID <= 0 || d <= 0 {
-		return time.Time{}
-	}
-	until := time.Now().Add(d)
-	s.state.SetForcedChannel(channelID, until)
-	return until
-}
-
-func (s *Scheduler) ForcedChannel(now time.Time) (int64, time.Time, bool) {
+func (s *Scheduler) PinChannel(channelID int64) {
 	if s == nil || s.state == nil {
-		return 0, time.Time{}, false
+		return
 	}
-	return s.state.ForcedChannel(now)
+	s.state.SetChannelPointer(channelID)
+}
+
+func (s *Scheduler) PinnedChannel() (int64, bool) {
+	if s == nil || s.state == nil {
+		return 0, false
+	}
+	return s.state.ChannelPointer(time.Now())
+}
+
+func (s *Scheduler) ClearPinnedChannel() {
+	if s == nil || s.state == nil {
+		return
+	}
+	s.state.ClearChannelPointer()
+}
+
+func (s *Scheduler) RefreshPinnedRing(ctx context.Context, st ChannelGroupStore) error {
+	if s == nil || s.state == nil {
+		return nil
+	}
+	ring, err := buildDefaultChannelRing(ctx, st)
+	if err != nil {
+		return err
+	}
+	s.state.SetChannelPointerRing(ring)
+	return nil
 }
 
 func (s *Scheduler) ClearChannelBan(channelID int64) {
@@ -113,6 +132,55 @@ func (s *Scheduler) ClearChannelBan(channelID int64) {
 		return
 	}
 	s.state.ClearChannelBan(channelID)
+}
+
+func (s *Scheduler) BanChannel(channelID int64, now time.Time, base time.Duration) time.Time {
+	if s == nil || s.state == nil {
+		return now
+	}
+	return s.state.BanChannel(channelID, now, base)
+}
+
+func (s *Scheduler) BanChannelImmediate(channelID int64, now time.Time, base time.Duration) time.Time {
+	if s == nil || s.state == nil {
+		return now
+	}
+	return s.state.BanChannelImmediate(channelID, now, base)
+}
+
+func (s *Scheduler) ResetChannelFailScore(channelID int64) {
+	if s == nil || s.state == nil {
+		return
+	}
+	s.state.ResetChannelFailScore(channelID)
+}
+
+func (s *Scheduler) SweepExpiredChannelBans(now time.Time) {
+	if s == nil || s.state == nil {
+		return
+	}
+	s.state.SweepExpiredChannelBans(now)
+}
+
+func (s *Scheduler) ListProbeDueChannels(now time.Time, limit int) []int64 {
+	if s == nil || s.state == nil {
+		return nil
+	}
+	return s.state.ListProbeDueChannels(now, limit)
+}
+
+func (s *Scheduler) TryClaimChannelProbe(channelID int64, now time.Time, ttl time.Duration) bool {
+	if s == nil || s.state == nil {
+		return false
+	}
+	return s.state.TryClaimChannelProbe(channelID, now, ttl)
+}
+
+func (s *Scheduler) ClearChannelProbe(channelID int64) {
+	if s == nil || s.state == nil {
+		return
+	}
+	s.state.ClearChannelProbe(channelID)
 }
 
 func (s *Scheduler) LastSuccess() (Selection, time.Time, bool) {
@@ -152,17 +220,28 @@ func (s *Scheduler) Select(ctx context.Context, userID int64, routeKeyHash strin
 func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, routeKeyHash string, cons Constraints) (Selection, error) {
 	now := time.Now()
 
+	pointerID, pointerOK := s.state.ChannelPointer(now)
+	pointerRing := s.state.ChannelPointerRing()
+	pointerRelevant := pointerOK && pointerID != 0 && cons.RequireChannelID == 0 && len(pointerRing) > 0
+
 	// 1) 会话粘性：命中绑定则优先
-	if routeKeyHash != "" {
+	if routeKeyHash != "" && !pointerRelevant {
 		if sel, ok := s.state.GetBinding(userID, routeKeyHash); ok {
 			credKey := sel.CredentialKey()
 			if selectionMatchesConstraints(sel, cons) &&
 				!s.state.IsChannelBanned(sel.ChannelID, now) &&
-				!s.state.IsCredentialCooling(credKey, now) {
-				// 命中成功后 touch 续期（TTL）。
-				s.state.SetBinding(userID, routeKeyHash, sel, now.Add(s.bindingTTL))
-				s.state.RecordRPM(credKey, now)
-				return sel, nil
+				!s.state.IsCredentialCooling(credKey, now) &&
+				s.state.ChannelFailScore(sel.ChannelID) == 0 {
+				// 若该 channel 处于“封禁到期待探测”，先抢占 probe，避免并发探测风暴。
+				if s.state.IsChannelProbeDue(sel.ChannelID) && !s.state.TryClaimChannelProbe(sel.ChannelID, now, s.probeClaimTTL) {
+					// 已绑定但不可用：清理绑定，避免 session 永久占用导致 limits 失真。
+					s.state.ClearBinding(userID, routeKeyHash)
+				} else {
+					// 命中成功后 touch 续期（TTL）。
+					s.state.SetBinding(userID, routeKeyHash, sel, now.Add(s.bindingTTL))
+					s.state.RecordRPM(credKey, now)
+					return sel, nil
+				}
 			}
 			// 已绑定但不可用：清理绑定，避免 session 永久占用导致 limits 失真。
 			s.state.ClearBinding(userID, routeKeyHash)
@@ -206,16 +285,65 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 	}
 
 	affinityChannelID, affinityOK := s.state.GetAffinity(userID, now)
-	forcedChannelID, _, forcedOK := s.state.ForcedChannel(now)
-	if !forcedOK {
-		forcedChannelID = 0
+	if affinityOK && s.state.ChannelFailScore(affinityChannelID) > 0 {
+		affinityOK = false
 	}
-	ordered := orderChannels(candidates, forcedChannelID, affinityChannelID, affinityOK, s.state.ChannelFailScore)
+	var ordered []store.UpstreamChannel
+	if pointerRelevant {
+		byID := make(map[int64]store.UpstreamChannel, len(candidates))
+		for _, ch := range candidates {
+			byID[ch.ID] = ch
+		}
+		startIdx := 0
+		for i, id := range pointerRing {
+			if id == pointerID {
+				startIdx = i
+				break
+			}
+		}
+		ordered = make([]store.UpstreamChannel, 0, len(candidates))
+		for step := 0; step < len(pointerRing); step++ {
+			id := pointerRing[(startIdx+step)%len(pointerRing)]
+			if ch, ok := byID[id]; ok {
+				ordered = append(ordered, ch)
+			}
+		}
+		if len(ordered) == 0 {
+			ordered = orderChannels(candidates, affinityChannelID, affinityOK, func(channelID int64) bool {
+				return s.state.IsChannelProbePending(channelID, now)
+			}, s.state.ChannelFailScore)
+		} else if len(ordered) < len(candidates) {
+			seen := make(map[int64]struct{}, len(ordered))
+			for _, ch := range ordered {
+				seen[ch.ID] = struct{}{}
+			}
+			for _, ch := range candidates {
+				if _, ok := seen[ch.ID]; ok {
+					continue
+				}
+				ordered = append(ordered, ch)
+			}
+		}
+	} else {
+		ordered = orderChannels(candidates, affinityChannelID, affinityOK, func(channelID int64) bool {
+			return s.state.IsChannelProbePending(channelID, now)
+		}, s.state.ChannelFailScore)
+	}
 
 	// 3) 选择 endpoint + credential
 	for _, ch := range ordered {
+		claimedProbe := false
+		if s.state.IsChannelProbeDue(ch.ID) {
+			if !s.state.TryClaimChannelProbe(ch.ID, now, s.probeClaimTTL) {
+				continue
+			}
+			claimedProbe = true
+		}
 		endpoints, err := s.st.ListUpstreamEndpointsByChannel(ctx, ch.ID)
 		if err != nil {
+			if claimedProbe {
+				s.state.ReleaseChannelProbeClaim(ch.ID)
+			}
 			return Selection{}, err
 		}
 		var eps []store.UpstreamEndpoint
@@ -234,6 +362,9 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 		for _, ep := range eps {
 			sel, ok, err := s.selectCredential(ctx, ch, ep, now)
 			if err != nil {
+				if claimedProbe {
+					s.state.ReleaseChannelProbeClaim(ch.ID)
+				}
 				return Selection{}, err
 			}
 			if ok {
@@ -244,6 +375,9 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 				s.state.SetAffinity(userID, ch.ID, now.Add(s.affinityTTL))
 				return sel, nil
 			}
+		}
+		if claimedProbe {
+			s.state.ReleaseChannelProbeClaim(ch.ID)
 		}
 	}
 	return Selection{}, errors.New("未找到可用上游 credential/account")
@@ -443,10 +577,12 @@ func channelInAnyGroup(groups string, allowed map[string]struct{}) bool {
 
 func (s *Scheduler) Report(sel Selection, res Result) {
 	now := time.Now()
+	s.state.ClearChannelProbe(sel.ChannelID)
 	if res.Success {
 		s.state.RecordChannelResult(sel.ChannelID, true)
 		s.state.RecordCredentialResult(sel.CredentialKey(), true)
 		s.state.ClearChannelBan(sel.ChannelID)
+		s.state.ResetChannelFailScore(sel.ChannelID)
 		s.state.RecordLastSuccess(sel, now)
 		return
 	}
@@ -458,8 +594,33 @@ func (s *Scheduler) Report(sel Selection, res Result) {
 			cooldown = s.cooldownBase * 2
 		}
 		s.state.SetCredentialCooling(sel.CredentialKey(), now.Add(cooldown))
-		s.state.BanChannel(sel.ChannelID, now, cooldown)
+		if shouldBanChannelImmediately(res) {
+			s.state.BanChannelImmediate(sel.ChannelID, now, cooldown)
+		} else {
+			s.state.BanChannel(sel.ChannelID, now, cooldown)
+		}
 	}
+}
+
+func shouldBanChannelImmediately(res Result) bool {
+	// 不对“凭据层”失败做立即封禁：优先让同渠道其他 key/账号接管。
+	switch res.StatusCode {
+	case http.StatusTooManyRequests, http.StatusUnauthorized, http.StatusForbidden, http.StatusPaymentRequired:
+		return false
+	}
+
+	// 连接/读写类异常通常是渠道整体不可用，立即封禁可更快切换到其它渠道。
+	switch res.ErrorClass {
+	case "network", "read_upstream", "stream_idle_timeout", "stream_read_error", "stream_first_byte_timeout":
+		return true
+	case "upstream_status":
+		// 常见为 base_url/path/能力问题：切换 channel 更有意义。
+		if res.StatusCode == http.StatusNotFound || res.StatusCode == http.StatusMethodNotAllowed {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (s *Scheduler) RecordTokens(credentialKey string, tokens int) {
@@ -472,14 +633,14 @@ func (s *Scheduler) RecordTokens(credentialKey string, tokens int) {
 	s.state.RecordTokens(credentialKey, time.Now(), tokens)
 }
 
-func orderChannels(chs []store.UpstreamChannel, forcedChannelID int64, affinityChannelID int64, affinityOK bool, failScore func(channelID int64) int) []store.UpstreamChannel {
+func orderChannels(chs []store.UpstreamChannel, affinityChannelID int64, affinityOK bool, isProbePending func(channelID int64) bool, failScore func(channelID int64) int) []store.UpstreamChannel {
 	seen := make(map[int64]struct{}, len(chs))
-	var forced []store.UpstreamChannel
+	var probed []store.UpstreamChannel
 	var promoted []store.UpstreamChannel
 	var normal []store.UpstreamChannel
 	for _, c := range chs {
-		if forcedChannelID != 0 && c.ID == forcedChannelID {
-			forced = append(forced, c)
+		if isProbePending != nil && isProbePending(c.ID) {
+			probed = append(probed, c)
 			continue
 		}
 		if c.Promotion {
@@ -488,6 +649,12 @@ func orderChannels(chs []store.UpstreamChannel, forcedChannelID int64, affinityC
 			normal = append(normal, c)
 		}
 	}
+	sort.SliceStable(probed, func(i, j int) bool {
+		if probed[i].Priority != probed[j].Priority {
+			return probed[i].Priority > probed[j].Priority
+		}
+		return failScore(probed[i].ID) < failScore(probed[j].ID)
+	})
 	sort.SliceStable(promoted, func(i, j int) bool {
 		if promoted[i].Priority != promoted[j].Priority {
 			return promoted[i].Priority > promoted[j].Priority
@@ -502,7 +669,7 @@ func orderChannels(chs []store.UpstreamChannel, forcedChannelID int64, affinityC
 	})
 
 	var out []store.UpstreamChannel
-	for _, c := range forced {
+	for _, c := range probed {
 		out = append(out, c)
 		seen[c.ID] = struct{}{}
 	}

@@ -19,6 +19,7 @@ dist/
 # 本地配置与密钥
 .env
 .env.bak.*
+config.yaml
 docker-compose.override.yml
 docker-compose.override.yaml
 

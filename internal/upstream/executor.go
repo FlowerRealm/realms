@@ -52,14 +52,14 @@ func NewExecutor(st *store.Store, cfg config.Config) *Executor {
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
-			Timeout:   cfg.Limits.UpstreamDialTimeout,
+			Timeout:   0,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   cfg.Limits.UpstreamTLSHandshakeTimeout,
-		ResponseHeaderTimeout: cfg.Limits.UpstreamResponseHeaderTimout,
+		TLSHandshakeTimeout:   0,
+		ResponseHeaderTimeout: 0,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 	client := &http.Client{
@@ -76,7 +76,7 @@ func NewExecutor(st *store.Store, cfg config.Config) *Executor {
 	return &Executor{
 		st:                      st,
 		client:                  client,
-		upstreamTimeout:         cfg.Limits.UpstreamRequestTimeout,
+		upstreamTimeout:         0,
 		codexOAuth:              codexClient,
 		codexRequestPassthrough: cfg.CodexOAuth.RequestPassthrough,
 		lastRefresh:             make(map[int64]time.Time),

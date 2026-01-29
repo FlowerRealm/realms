@@ -1,0 +1,227 @@
+package scheduler
+
+import (
+	"context"
+	"database/sql"
+	"testing"
+	"time"
+
+	"realms/internal/store"
+)
+
+type fakeGroupStore struct {
+	groupsByID   map[int64]store.ChannelGroup
+	groupsByName map[string]store.ChannelGroup
+	members      map[int64][]store.ChannelGroupMemberDetail
+}
+
+func (f *fakeGroupStore) GetChannelGroupByName(_ context.Context, name string) (store.ChannelGroup, error) {
+	g, ok := f.groupsByName[name]
+	if !ok {
+		return store.ChannelGroup{}, sql.ErrNoRows
+	}
+	return g, nil
+}
+
+func (f *fakeGroupStore) GetChannelGroupByID(_ context.Context, id int64) (store.ChannelGroup, error) {
+	g, ok := f.groupsByID[id]
+	if !ok {
+		return store.ChannelGroup{}, sql.ErrNoRows
+	}
+	return g, nil
+}
+
+func (f *fakeGroupStore) ListChannelGroupMembers(_ context.Context, parentGroupID int64) ([]store.ChannelGroupMemberDetail, error) {
+	return f.members[parentGroupID], nil
+}
+
+func ptrString(v string) *string {
+	return &v
+}
+
+func ptrInt64(v int64) *int64 {
+	return &v
+}
+
+func ptrInt(v int) *int {
+	return &v
+}
+
+func TestGroupRouter_Next_AllowsOneRetryThenSwitchesChannel(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 100},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+			2: {
+				{ID: 21, ChannelID: 2, BaseURL: "https://b.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 101, EndpointID: 11, Status: 1},
+			},
+			21: {
+				{ID: 201, EndpointID: 21, Status: 1},
+				{ID: 202, EndpointID: 21, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+
+	root := store.ChannelGroup{
+		ID:          1,
+		Name:        store.DefaultGroupName,
+		MaxAttempts: 10,
+		Status:      1,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	gs := &fakeGroupStore{
+		groupsByID:   map[int64]store.ChannelGroup{1: root},
+		groupsByName: map[string]store.ChannelGroup{store.DefaultGroupName: root},
+		members: map[int64][]store.ChannelGroupMemberDetail{
+			1: {
+				{
+					MemberID:            1,
+					ParentGroupID:       1,
+					MemberChannelID:     ptrInt64(2),
+					MemberChannelType:   ptrString(store.UpstreamTypeOpenAICompatible),
+					MemberChannelGroups: ptrString(store.DefaultGroupName),
+					Priority:            100,
+					Promotion:           false,
+					CreatedAt:           time.Now(),
+					UpdatedAt:           time.Now(),
+				},
+				{
+					MemberID:            2,
+					ParentGroupID:       1,
+					MemberChannelID:     ptrInt64(1),
+					MemberChannelType:   ptrString(store.UpstreamTypeOpenAICompatible),
+					MemberChannelGroups: ptrString(store.DefaultGroupName),
+					Priority:            0,
+					Promotion:           false,
+					CreatedAt:           time.Now(),
+					UpdatedAt:           time.Now(),
+				},
+			},
+		},
+	}
+
+	router := NewGroupRouter(gs, s, 10, "", Constraints{})
+	first, err := router.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next err: %v", err)
+	}
+	if first.ChannelID != 2 {
+		t.Fatalf("expected first to pick higher priority channel=2, got=%d", first.ChannelID)
+	}
+
+	second, err := router.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next err: %v", err)
+	}
+	if second.ChannelID != 2 {
+		t.Fatalf("expected second to retry the same channel=2, got=%d", second.ChannelID)
+	}
+
+	third, err := router.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next err: %v", err)
+	}
+	if third.ChannelID != 1 {
+		t.Fatalf("expected third to switch to next channel=1, got=%d", third.ChannelID)
+	}
+}
+
+func TestGroupRouter_Next_PinnedRingAdvancesOnBanAndWraps(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+			2: {
+				{ID: 21, ChannelID: 2, BaseURL: "https://b.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 101, EndpointID: 11, Status: 1},
+			},
+			21: {
+				{ID: 201, EndpointID: 21, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+	s.PinChannel(2)
+
+	root := store.ChannelGroup{
+		ID:          1,
+		Name:        store.DefaultGroupName,
+		MaxAttempts: 10,
+		Status:      1,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	gs := &fakeGroupStore{
+		groupsByID:   map[int64]store.ChannelGroup{1: root},
+		groupsByName: map[string]store.ChannelGroup{store.DefaultGroupName: root},
+		members: map[int64][]store.ChannelGroupMemberDetail{
+			1: {
+				{
+					MemberID:            1,
+					ParentGroupID:       1,
+					MemberChannelID:     ptrInt64(1),
+					MemberChannelType:   ptrString(store.UpstreamTypeOpenAICompatible),
+					MemberChannelGroups: ptrString(store.DefaultGroupName),
+					MemberChannelStatus: ptrInt(1),
+					Priority:            0,
+					Promotion:           false,
+					CreatedAt:           time.Now(),
+					UpdatedAt:           time.Now(),
+				},
+				{
+					MemberID:            2,
+					ParentGroupID:       1,
+					MemberChannelID:     ptrInt64(2),
+					MemberChannelType:   ptrString(store.UpstreamTypeOpenAICompatible),
+					MemberChannelGroups: ptrString(store.DefaultGroupName),
+					MemberChannelStatus: ptrInt(1),
+					Priority:            0,
+					Promotion:           false,
+					CreatedAt:           time.Now(),
+					UpdatedAt:           time.Now(),
+				},
+			},
+		},
+	}
+
+	router := NewGroupRouter(gs, s, 10, "", Constraints{})
+	first, err := router.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next err: %v", err)
+	}
+	if first.ChannelID != 2 {
+		t.Fatalf("expected first to start from pinned channel=2, got=%d", first.ChannelID)
+	}
+
+	// 触发 ban（立即封禁），指针应自动轮到下一个（并回绕到 channel=1）。
+	s.Report(first, Result{Success: false, Retriable: true, ErrorClass: "network"})
+
+	second, err := router.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next err: %v", err)
+	}
+	if second.ChannelID != 1 {
+		t.Fatalf("expected pinned pointer to wrap to channel=1 after ban, got=%d", second.ChannelID)
+	}
+}

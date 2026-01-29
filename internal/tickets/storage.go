@@ -30,12 +30,9 @@ type SaveResult struct {
 	SizeBytes int64
 }
 
-func (s *Storage) Save(now time.Time, src io.Reader, maxBytes int64) (SaveResult, error) {
+func (s *Storage) Save(now time.Time, src io.Reader) (SaveResult, error) {
 	if strings.TrimSpace(s.baseDir) == "" {
 		return SaveResult{}, errors.New("附件目录未配置")
-	}
-	if maxBytes <= 0 {
-		return SaveResult{}, errors.New("附件大小限制非法")
 	}
 
 	now = now.UTC()
@@ -63,14 +60,10 @@ func (s *Storage) Save(now time.Time, src io.Reader, maxBytes int64) (SaveResult
 		_ = f.Close()
 	}()
 
-	n, err := io.Copy(f, io.LimitReader(src, maxBytes+1))
+	n, err := io.Copy(f, src)
 	if err != nil {
 		_ = os.Remove(tmpPath)
 		return SaveResult{}, fmt.Errorf("写入附件失败: %w", err)
-	}
-	if n > maxBytes {
-		_ = os.Remove(tmpPath)
-		return SaveResult{}, errors.New("附件超过大小限制")
 	}
 	if err := f.Close(); err != nil {
 		_ = os.Remove(tmpPath)

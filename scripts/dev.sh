@@ -74,12 +74,6 @@ elif [[ "${REALMS_DB_DRIVER:-}" =~ ^sqlite$ ]]; then
 elif [[ -n "${REALMS_DB_DSN:-}" ]]; then
   # 兼容旧配置：仅设置 db.dsn 时推断为 mysql。
   should_start_mysql=1
-elif [[ -f "./config.yaml" ]]; then
-  if grep -Eq '^[[:space:]]*driver:[[:space:]]*"?mysql"?' "./config.yaml"; then
-    should_start_mysql=1
-  elif grep -Eq '^[[:space:]]*dsn:[[:space:]]*"?[^"#[:space:]]' "./config.yaml"; then
-    should_start_mysql=1
-  fi
 fi
 
 if [[ "${should_start_mysql}" -eq 1 ]]; then

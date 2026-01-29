@@ -16,8 +16,8 @@ func RelaySSE(ctx context.Context, w http.ResponseWriter, upstreamBody io.Reader
 		return relaySSENoClose(ctx, w, upstreamBody)
 	}
 	_, err := PumpSSE(ctx, w, rc, SSEPumpOptions{
-		// RelaySSE 作为兼容入口，使用保守默认值；上层可直接调用 PumpSSE 自定义参数。
-		MaxLineBytes:     4 << 20,
+		// RelaySSE 作为兼容入口：不做行长度限制，避免误伤超长 event/data。
+		MaxLineBytes:     0,
 		InitialLineBytes: 64 << 10,
 		PingInterval:     0,
 		IdleTimeout:      0,

@@ -63,35 +63,27 @@ func cloneDefaultTransport() *http.Transport {
 	return &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
+			Timeout:   0,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
+		TLSHandshakeTimeout:   0,
+		ExpectContinueTimeout: 0,
 	}
 }
 
 func NewClient(cfg config.CodexOAuthConfig) *Client {
 	t := cloneDefaultTransport()
-	if cfg.TLSHandshakeTimeout > 0 {
-		t.TLSHandshakeTimeout = cfg.TLSHandshakeTimeout
-	} else {
-		t.TLSHandshakeTimeout = 60 * time.Second
-	}
-
-	timeout := cfg.HTTPTimeout
-	if timeout <= 0 {
-		timeout = 2 * time.Minute
-	}
+	// 移除超时限制：Dial/TLS/HTTP 均允许无限等待。
+	t.DialContext = (&net.Dialer{Timeout: 0, KeepAlive: 30 * time.Second}).DialContext
 
 	c := &Client{
 		cfg: cfg,
 		http: &http.Client{
 			Transport: t,
-			Timeout:   timeout,
+			Timeout:   0,
 		},
 		refreshBackoffs: []time.Duration{2 * time.Second, 5 * time.Second},
 	}
