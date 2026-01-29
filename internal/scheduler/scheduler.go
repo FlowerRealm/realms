@@ -108,6 +108,13 @@ func (s *Scheduler) PinnedChannel() (int64, bool) {
 	return s.state.ChannelPointer(time.Now())
 }
 
+func (s *Scheduler) PinnedChannelInfo() (int64, time.Time, string, bool) {
+	if s == nil || s.state == nil {
+		return 0, time.Time{}, "", false
+	}
+	return s.state.ChannelPointerInfo(time.Now())
+}
+
 func (s *Scheduler) ClearPinnedChannel() {
 	if s == nil || s.state == nil {
 		return
@@ -181,13 +188,6 @@ func (s *Scheduler) ClearChannelProbe(channelID int64) {
 		return
 	}
 	s.state.ClearChannelProbe(channelID)
-}
-
-func (s *Scheduler) LastSuccess() (Selection, time.Time, bool) {
-	if s == nil || s.state == nil {
-		return Selection{}, time.Time{}, false
-	}
-	return s.state.LastSuccess()
 }
 
 func (s *Scheduler) RouteKeyHash(routeKey string) string {
@@ -583,7 +583,6 @@ func (s *Scheduler) Report(sel Selection, res Result) {
 		s.state.RecordCredentialResult(sel.CredentialKey(), true)
 		s.state.ClearChannelBan(sel.ChannelID)
 		s.state.ResetChannelFailScore(sel.ChannelID)
-		s.state.RecordLastSuccess(sel, now)
 		return
 	}
 	s.state.RecordChannelResult(sel.ChannelID, false)

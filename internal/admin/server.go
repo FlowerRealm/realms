@@ -508,11 +508,7 @@ type adminSchedulerRuntimeView struct {
 	PinnedActive    bool
 	PinnedChannelID int64
 	PinnedChannel   string
-
-	LastSuccessActive    bool
-	LastSuccessChannelID int64
-	LastSuccessChannel   string
-	LastSuccessAt        string
+	PinnedNote      string
 }
 
 type adminCredentialView struct {
@@ -2355,7 +2351,7 @@ func (s *Server) Channels(w http.ResponseWriter, r *http.Request) {
 	}
 	schedulerRuntime := adminSchedulerRuntimeView{Available: s.sched != nil}
 	if s.sched != nil {
-		if id, ok := s.sched.PinnedChannel(); ok {
+		if id, movedAt, reason, ok := s.sched.PinnedChannelInfo(); ok {
 			schedulerRuntime.PinnedActive = true
 			schedulerRuntime.PinnedChannelID = id
 			if name := strings.TrimSpace(channelNameByID[id]); name != "" {
@@ -2363,16 +2359,30 @@ func (s *Server) Channels(w http.ResponseWriter, r *http.Request) {
 			} else {
 				schedulerRuntime.PinnedChannel = fmt.Sprintf("渠道 #%d", id)
 			}
-		}
-		if sel, at, ok := s.sched.LastSuccess(); ok {
-			schedulerRuntime.LastSuccessActive = true
-			schedulerRuntime.LastSuccessChannelID = sel.ChannelID
-			if name := strings.TrimSpace(channelNameByID[sel.ChannelID]); name != "" {
-				schedulerRuntime.LastSuccessChannel = fmt.Sprintf("%s (#%d)", name, sel.ChannelID)
-			} else if sel.ChannelID > 0 {
-				schedulerRuntime.LastSuccessChannel = fmt.Sprintf("渠道 #%d", sel.ChannelID)
+
+			reasonText := ""
+			switch strings.TrimSpace(reason) {
+			case "manual":
+				reasonText = "手动设置"
+			case "ban":
+				reasonText = "因封禁轮转"
+			case "invalid":
+				reasonText = "指针无效修正"
+			default:
+				reasonText = strings.TrimSpace(reason)
 			}
-			schedulerRuntime.LastSuccessAt = formatTimeIn(at, "2006-01-02 15:04:05", loc)
+			movedAtText := ""
+			if !movedAt.IsZero() {
+				movedAtText = formatTimeIn(movedAt, "2006-01-02 15:04:05", loc)
+			}
+			switch {
+			case movedAtText != "" && reasonText != "":
+				schedulerRuntime.PinnedNote = "更新时间：" + movedAtText + "；原因：" + reasonText
+			case movedAtText != "":
+				schedulerRuntime.PinnedNote = "更新时间：" + movedAtText
+			case reasonText != "":
+				schedulerRuntime.PinnedNote = "原因：" + reasonText
+			}
 		}
 	}
 	s.render(w, "admin_channels", s.withFeatures(r.Context(), templateData{

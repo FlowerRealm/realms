@@ -51,9 +51,6 @@ type State struct {
 	channelPointerIndex   map[int64]int
 	channelPointerMovedAt time.Time
 	channelPointerReason  string
-
-	lastSuccessSel Selection
-	lastSuccessAt  time.Time
 }
 
 func NewState() *State {
@@ -80,11 +77,18 @@ func (s *State) SetChannelPointer(channelID int64) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	now := time.Now()
 	if channelID <= 0 {
+		if s.channelPointerID != 0 {
+			s.channelPointerMovedAt = now
+			s.channelPointerReason = "clear"
+		}
 		s.channelPointerID = 0
 		return
 	}
 	s.channelPointerID = channelID
+	s.channelPointerMovedAt = now
+	s.channelPointerReason = "manual"
 }
 
 func (s *State) ChannelPointer(now time.Time) (int64, bool) {
@@ -93,7 +97,20 @@ func (s *State) ChannelPointer(now time.Time) (int64, bool) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	id, _, _, ok := s.channelPointerLocked(now)
+	return id, ok
+}
 
+func (s *State) ChannelPointerInfo(now time.Time) (int64, time.Time, string, bool) {
+	if s == nil {
+		return 0, time.Time{}, "", false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.channelPointerLocked(now)
+}
+
+func (s *State) channelPointerLocked(now time.Time) (int64, time.Time, string, bool) {
 	if len(s.channelPointerRing) > 0 {
 		if _, ok := s.channelPointerIndex[s.channelPointerID]; !ok {
 			s.channelPointerID = s.channelPointerRing[0]
@@ -114,9 +131,9 @@ func (s *State) ChannelPointer(now time.Time) (int64, bool) {
 	}
 
 	if s.channelPointerID <= 0 {
-		return 0, false
+		return 0, time.Time{}, "", false
 	}
-	return s.channelPointerID, true
+	return s.channelPointerID, s.channelPointerMovedAt, s.channelPointerReason, true
 }
 
 func (s *State) ClearChannelPointer() {
@@ -125,6 +142,11 @@ func (s *State) ClearChannelPointer() {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.channelPointerID != 0 {
+		now := time.Now()
+		s.channelPointerMovedAt = now
+		s.channelPointerReason = "clear"
+	}
 	s.channelPointerID = 0
 }
 
@@ -187,28 +209,6 @@ func (s *State) advanceChannelPointerLocked(now time.Time, reason string) bool {
 		return true
 	}
 	return false
-}
-
-func (s *State) RecordLastSuccess(sel Selection, at time.Time) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.lastSuccessSel = sel
-	s.lastSuccessAt = at
-}
-
-func (s *State) LastSuccess() (Selection, time.Time, bool) {
-	if s == nil {
-		return Selection{}, time.Time{}, false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.lastSuccessAt.IsZero() {
-		return Selection{}, time.Time{}, false
-	}
-	return s.lastSuccessSel, s.lastSuccessAt, true
 }
 
 func (s *State) bindingKey(userID int64, routeKeyHash string) string {

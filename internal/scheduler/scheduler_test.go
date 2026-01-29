@@ -109,6 +109,62 @@ func TestSelect_PinnedChannelBeatsPromotion(t *testing.T) {
 	}
 }
 
+func TestPinnedChannelInfo_Manual(t *testing.T) {
+	s := New(&fakeStore{})
+	s.PinChannel(2)
+
+	id, movedAt, reason, ok := s.PinnedChannelInfo()
+	if !ok {
+		t.Fatalf("expected pinned channel to be active")
+	}
+	if id != 2 {
+		t.Fatalf("expected pinned channel=2, got=%d", id)
+	}
+	if movedAt.IsZero() {
+		t.Fatalf("expected movedAt to be set")
+	}
+	if reason != "manual" {
+		t.Fatalf("expected reason=manual, got=%q", reason)
+	}
+}
+
+func TestPinnedChannelInfo_BanRotationSetsReason(t *testing.T) {
+	s := New(&fakeStore{})
+	s.state.SetChannelPointerRing([]int64{1, 2})
+	s.PinChannel(1)
+
+	now := time.Now()
+	s.BanChannelImmediate(1, now, 10*time.Second)
+
+	id, _, reason, ok := s.PinnedChannelInfo()
+	if !ok {
+		t.Fatalf("expected pinned channel to be active")
+	}
+	if id != 2 {
+		t.Fatalf("expected pinned channel to rotate to channel=2, got=%d", id)
+	}
+	if reason != "ban" {
+		t.Fatalf("expected reason=ban, got=%q", reason)
+	}
+}
+
+func TestChannelPointerInfo_InvalidPointerCorrected(t *testing.T) {
+	st := NewState()
+	st.SetChannelPointerRing([]int64{1, 2})
+	st.SetChannelPointer(9)
+
+	id, _, reason, ok := st.ChannelPointerInfo(time.Now())
+	if !ok {
+		t.Fatalf("expected pointer to be active")
+	}
+	if id != 1 {
+		t.Fatalf("expected pointer to be corrected to channel=1, got=%d", id)
+	}
+	if reason != "invalid" {
+		t.Fatalf("expected reason=invalid, got=%q", reason)
+	}
+}
+
 func TestSelect_AffinityBeatsPriority(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
@@ -277,20 +333,6 @@ func TestReport_SuccessResetsChannelFailScoreAndClearsProbe(t *testing.T) {
 	}
 	if s.state.IsChannelProbeDue(1) {
 		t.Fatalf("expected probe state to be cleared after report")
-	}
-}
-
-func TestReport_RecordsLastSuccess(t *testing.T) {
-	s := New(&fakeStore{})
-	sel := Selection{ChannelID: 9, CredentialType: CredentialTypeOpenAI, CredentialID: 1}
-	s.Report(sel, Result{Success: true})
-
-	got, _, ok := s.LastSuccess()
-	if !ok {
-		t.Fatalf("expected last success to be recorded")
-	}
-	if got.ChannelID != 9 {
-		t.Fatalf("expected channel=9, got=%d", got.ChannelID)
 	}
 }
 

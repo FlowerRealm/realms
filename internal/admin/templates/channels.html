@@ -42,18 +42,11 @@
   <div class="card-body py-3 d-flex flex-wrap gap-2 align-items-center">
     <span class="text-muted small">智能调度</span>
     {{if .SchedulerRuntime.PinnedActive}}
-      <span class="badge bg-warning-subtle text-warning-emphasis border">
+      <span class="badge bg-warning-subtle text-warning-emphasis border"{{if .SchedulerRuntime.PinnedNote}} title="{{.SchedulerRuntime.PinnedNote}}"{{end}}>
         渠道指针：{{.SchedulerRuntime.PinnedChannel}}
       </span>
     {{else}}
       <span class="badge bg-light text-muted border">渠道指针：-</span>
-    {{end}}
-    {{if .SchedulerRuntime.LastSuccessActive}}
-      <span class="badge bg-light text-dark border">
-        当前在用：{{.SchedulerRuntime.LastSuccessChannel}}（{{.SchedulerRuntime.LastSuccessAt}}）
-      </span>
-    {{else}}
-      <span class="badge bg-light text-muted border">当前在用：-</span>
     {{end}}
   </div>
 </div>
@@ -73,11 +66,10 @@
       <thead class="bg-light">
         <tr>
           <th style="width: 5%;"></th> <!-- 拖拽把手 -->
-          <th style="width: 35%;">渠道详情</th>
+          <th style="width: 40%;">渠道详情</th>
           <th style="width: 10%;">状态</th>
-          <th style="width: 10%;">属性</th>
           <th style="width: 15%;">健康状况</th>
-          <th class="text-end" style="width: 25%;">操作</th>
+          <th class="text-end" style="width: 30%;">操作</th>
         </tr>
       </thead>
       <tbody id="channels-table-body">
@@ -141,20 +133,6 @@
 	              </div>
 	            {{end}}
 	          </td>
-	          <td>
-	            <div class="d-flex flex-column gap-1">
-		              <div class="d-flex align-items-center gap-2">
-		                {{if .Channel.Promotion}}
-		                <span class="badge bg-light text-warning border small" title="推荐渠道"><i class="ri-star-fill me-1"></i>推荐</span>
-		                {{else}}
-		                <span class="text-muted small">-</span>
-		                {{end}}
-		                {{if and .Runtime.Available .Runtime.PinnedActive}}
-		                <span class="badge bg-primary-subtle text-primary-emphasis border small" title="当前渠道指针">指针</span>
-		                {{end}}
-		              </div>
-		            </div>
-		          </td>
           <td>
 	            {{if .Channel.LastTestAt}}
 	              <div class="d-flex flex-column">
@@ -174,7 +152,7 @@
               <span class="text-muted small">未测试</span>
             {{end}}
 	          </td>
-	          <td class="text-end">
+	          <td class="text-end text-nowrap">
             <div class="d-flex gap-1 justify-content-end">
               <a href="/admin/channels/{{.Channel.ID}}/detail" class="btn btn-sm btn-light border text-secondary" title="查看密钥/账号用量">
                 <i class="ri-line-chart-line me-1"></i>详情
@@ -187,13 +165,13 @@
                   <i class="ri-flashlight-line me-1"></i>测试
                 </button>
               </form>
-              <form method="POST" action="/admin/channels/{{.Channel.ID}}/promote" data-ajax="1" data-ajax-reload="1">
-                <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
-                <input type="hidden" name="return_to" value="/admin/channels" />
-                <button class="btn btn-sm btn-light border text-primary" type="submit" title="设为当前渠道指针（将清除该渠道封禁）">
-                  <i class="ri-rocket-2-line me-1"></i>设为当前
-                </button>
-              </form>
+	              <form method="POST" action="/admin/channels/{{.Channel.ID}}/promote" data-ajax="1" data-ajax-reload="1">
+	                <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+	                <input type="hidden" name="return_to" value="/admin/channels" />
+	                <button class="btn btn-sm btn-light border text-primary" type="submit" title="设为渠道指针（将清除该渠道封禁）">
+	                  <i class="ri-rocket-2-line me-1"></i>设为指针
+	                </button>
+	              </form>
               {{if ne .Channel.Type "codex_oauth"}}
               <form method="POST" action="/admin/channels/{{.Channel.ID}}/delete" data-ajax="1" data-ajax-reload="1" onsubmit="return confirm('确认删除渠道 {{.Channel.Name}}? 此操作不可撤销。')">
                 <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
@@ -209,7 +187,7 @@
           </td>
 	        </tr>
 
-	        <tr class="channel-settings-modal-row"><td colspan="6" class="p-0 border-0"><!-- 渠道设置弹窗（整合行内图标操作） --><div class="modal fade" id="channelSettingsModal-{{.Channel.ID}}" tabindex="-1" aria-hidden="true">
+	        <tr class="channel-settings-modal-row"><td colspan="5" class="p-0 border-0"><!-- 渠道设置弹窗（整合行内图标操作） --><div class="modal fade" id="channelSettingsModal-{{.Channel.ID}}" tabindex="-1" aria-hidden="true">
 	          <div class="modal-dialog modal-lg modal-dialog-scrollable">
 	            <div class="modal-content border-0 shadow">
 	              <div class="modal-header">
