@@ -87,6 +87,13 @@ func (s *State) SetChannelPointer(channelID int64) {
 		return
 	}
 	s.channelPointerID = channelID
+	// 若 ring 已存在但不包含该 channel，则把它追加进 ring，避免后续读取时被判定为 invalid 而自动回退。
+	if len(s.channelPointerRing) > 0 {
+		if _, ok := s.channelPointerIndex[s.channelPointerID]; !ok {
+			s.channelPointerIndex[s.channelPointerID] = len(s.channelPointerRing)
+			s.channelPointerRing = append(s.channelPointerRing, s.channelPointerID)
+		}
+	}
 	s.channelPointerMovedAt = now
 	s.channelPointerReason = "manual"
 }
@@ -167,6 +174,14 @@ func (s *State) SetChannelPointerRing(ring []int64) {
 			continue
 		}
 		s.channelPointerIndex[id] = i
+	}
+	// 指针可能指向“非 default ring” 的 channel（例如手动 pin 到某个不在默认组的 channel）。
+	// 为保证指针实时生效，这里确保 ring 中至少包含当前指针 channel。
+	if s.channelPointerID > 0 {
+		if _, ok := s.channelPointerIndex[s.channelPointerID]; !ok {
+			s.channelPointerIndex[s.channelPointerID] = len(s.channelPointerRing)
+			s.channelPointerRing = append(s.channelPointerRing, s.channelPointerID)
+		}
 	}
 }
 

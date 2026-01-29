@@ -30,6 +30,11 @@ type SSEPumpOptions struct {
 type SSEPumpHooks struct {
 	// OnData 在遇到 `data:` 行时触发（已剥离 `data:` 前缀并 trim 空白）。
 	OnData func(data string)
+	// TransformData 用于按“事件边界（空行）”对 data payload 做变换：
+	// - 入参 data 为聚合后的 event payload（多行 data: 以 "\n" 拼接）
+	// - 返回非空 slice 表示用返回值替换该事件（每个元素会被写为一个独立的 data: 事件）
+	// - 返回 nil/空 slice 表示不替换（透传原始事件）
+	TransformData func(data string) ([]string, error)
 }
 
 type SSEPumpResult struct {
@@ -207,18 +212,74 @@ func PumpSSE(ctx context.Context, w http.ResponseWriter, upstreamBody io.ReadClo
 	// SSE 事件允许多行 data:，规范要求将多行按 "\n" 连接后视为一个事件 payload。
 	// 这里按事件边界（空行）聚合，避免上游把 JSON 拆成多行导致下游解析/计费统计丢失。
 	var (
-		eventData strings.Builder
-		hasData   bool
+		eventLines     []string
+		eventData      strings.Builder
+		hasData        bool
+		hasNonDataLine bool
 	)
-	flushEventData := func() {
-		if !hasData || hooks.OnData == nil {
-			eventData.Reset()
-			hasData = false
-			return
+
+	isTransformSafeLine := func(line string) bool {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			return true
 		}
-		hooks.OnData(eventData.String())
+		if strings.HasPrefix(trimmed, "data:") {
+			return true
+		}
+		if strings.HasPrefix(trimmed, ":") {
+			return true
+		}
+		return false
+	}
+
+	resetEventBuf := func() {
+		eventLines = eventLines[:0]
 		eventData.Reset()
 		hasData = false
+		hasNonDataLine = false
+	}
+
+	flushEvent := func() error {
+		// 先对齐旧行为：仅在有聚合 data 时触发 OnData。
+		agg := ""
+		if hasData {
+			agg = eventData.String()
+		}
+
+		// 可变换事件：仅对“纯 data/注释行事件”生效，避免丢失 event:/id:/retry: 等字段。
+		if agg != "" && hooks.TransformData != nil && !hasNonDataLine {
+			outs, err := hooks.TransformData(agg)
+			if err == nil && len(outs) > 0 {
+				writeMu.Lock()
+				defer writeMu.Unlock()
+				for _, out := range outs {
+					if hooks.OnData != nil {
+						hooks.OnData(out)
+					}
+					if _, werr := io.WriteString(w, "data: "+out+"\n\n"); werr != nil {
+						return werr
+					}
+					flusher.Flush()
+				}
+				resetEventBuf()
+				return nil
+			}
+		}
+
+		if agg != "" && hooks.OnData != nil {
+			hooks.OnData(agg)
+		}
+
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		for _, l := range eventLines {
+			if _, werr := io.WriteString(w, l+"\n"); werr != nil {
+				return werr
+			}
+		}
+		flusher.Flush()
+		resetEventBuf()
+		return nil
 	}
 
 	for {
@@ -237,10 +298,14 @@ func PumpSSE(ctx context.Context, w http.ResponseWriter, upstreamBody io.ReadClo
 			if !ok {
 				err := <-errCh
 				if err == nil {
-					flushEventData()
-					writeMu.Lock()
-					flusher.Flush()
-					writeMu.Unlock()
+					if len(eventLines) > 0 {
+						if werr := flushEvent(); werr != nil {
+							res.ErrorClass = "client_disconnect"
+							stop()
+							wg.Wait()
+							return res, werr
+						}
+					}
 					stop()
 					wg.Wait()
 					return res, nil
@@ -286,6 +351,10 @@ func PumpSSE(ctx context.Context, w http.ResponseWriter, upstreamBody io.ReadClo
 			resetIdle()
 
 			data := strings.TrimSuffix(line, "\r")
+			eventLines = append(eventLines, line)
+			if !isTransformSafeLine(data) {
+				hasNonDataLine = true
+			}
 			if v := parseSSEDataLine(data); v != "" && v != "[DONE]" {
 				if hasData {
 					eventData.WriteByte('\n')
@@ -294,20 +363,12 @@ func PumpSSE(ctx context.Context, w http.ResponseWriter, upstreamBody io.ReadClo
 				hasData = true
 			}
 			if strings.TrimSpace(data) == "" {
-				flushEventData()
-			}
-
-			writeMu.Lock()
-			_, werr := io.WriteString(w, line+"\n")
-			if werr == nil && strings.TrimSpace(data) == "" {
-				flusher.Flush()
-			}
-			writeMu.Unlock()
-			if werr != nil {
-				res.ErrorClass = "client_disconnect"
-				stop()
-				wg.Wait()
-				return res, werr
+				if werr := flushEvent(); werr != nil {
+					res.ErrorClass = "client_disconnect"
+					stop()
+					wg.Wait()
+					return res, werr
+				}
 			}
 		case <-idleTimerC(idleTimer):
 			res.ErrorClass = "stream_idle_timeout"

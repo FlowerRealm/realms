@@ -28,15 +28,23 @@ type Selection struct {
 	ChannelType   string
 	ChannelGroups string
 
-	AllowServiceTier      bool
-	DisableStore          bool
-	AllowSafetyIdentifier bool
-	ParamOverride         string
-	HeaderOverride        string
-	StatusCodeMapping     string
-	ModelSuffixPreserve   string
-	RequestBodyBlacklist  string
-	RequestBodyWhitelist  string
+	AllowServiceTier       bool
+	DisableStore           bool
+	AllowSafetyIdentifier  bool
+	OpenAIOrganization     *string
+	AutoBan                bool
+	ForceFormat            bool
+	ThinkingToContent      bool
+	PassThroughBodyEnabled bool
+	Proxy                  string
+	SystemPrompt           string
+	SystemPromptOverride   bool
+	ParamOverride          string
+	HeaderOverride         string
+	StatusCodeMapping      string
+	ModelSuffixPreserve    string
+	RequestBodyBlacklist   string
+	RequestBodyWhitelist   string
 
 	EndpointID int64
 	BaseURL    string
@@ -433,22 +441,30 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			return ids[i] > ids[j]
 		})
 		return Selection{
-			ChannelID:             ch.ID,
-			ChannelType:           ch.Type,
-			ChannelGroups:         ch.Groups,
-			AllowServiceTier:      ch.AllowServiceTier,
-			DisableStore:          ch.DisableStore,
-			AllowSafetyIdentifier: ch.AllowSafetyIdentifier,
-			ParamOverride:         ch.ParamOverride,
-			HeaderOverride:        ch.HeaderOverride,
-			StatusCodeMapping:     ch.StatusCodeMapping,
-			ModelSuffixPreserve:   ch.ModelSuffixPreserve,
-			RequestBodyBlacklist:  ch.RequestBodyBlacklist,
-			RequestBodyWhitelist:  ch.RequestBodyWhitelist,
-			EndpointID:            ep.ID,
-			BaseURL:               ep.BaseURL,
-			CredentialType:        CredentialTypeOpenAI,
-			CredentialID:          ids[0],
+			ChannelID:              ch.ID,
+			ChannelType:            ch.Type,
+			ChannelGroups:          ch.Groups,
+			AllowServiceTier:       ch.AllowServiceTier,
+			DisableStore:           ch.DisableStore,
+			AllowSafetyIdentifier:  ch.AllowSafetyIdentifier,
+			OpenAIOrganization:     ch.OpenAIOrganization,
+			AutoBan:                ch.AutoBan,
+			ForceFormat:            ch.Setting.ForceFormat,
+			ThinkingToContent:      ch.Setting.ThinkingToContent,
+			PassThroughBodyEnabled: ch.Setting.PassThroughBodyEnabled,
+			Proxy:                  ch.Setting.Proxy,
+			SystemPrompt:           ch.Setting.SystemPrompt,
+			SystemPromptOverride:   ch.Setting.SystemPromptOverride,
+			ParamOverride:          ch.ParamOverride,
+			HeaderOverride:         ch.HeaderOverride,
+			StatusCodeMapping:      ch.StatusCodeMapping,
+			ModelSuffixPreserve:    ch.ModelSuffixPreserve,
+			RequestBodyBlacklist:   ch.RequestBodyBlacklist,
+			RequestBodyWhitelist:   ch.RequestBodyWhitelist,
+			EndpointID:             ep.ID,
+			BaseURL:                ep.BaseURL,
+			CredentialType:         CredentialTypeOpenAI,
+			CredentialID:           ids[0],
 		}, true, nil
 	case store.UpstreamTypeAnthropic:
 		creds, err := s.st.ListAnthropicCredentialsByEndpoint(ctx, ep.ID)
@@ -480,22 +496,30 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			return ids[i] > ids[j]
 		})
 		return Selection{
-			ChannelID:             ch.ID,
-			ChannelType:           ch.Type,
-			ChannelGroups:         ch.Groups,
-			AllowServiceTier:      ch.AllowServiceTier,
-			DisableStore:          ch.DisableStore,
-			AllowSafetyIdentifier: ch.AllowSafetyIdentifier,
-			ParamOverride:         ch.ParamOverride,
-			HeaderOverride:        ch.HeaderOverride,
-			StatusCodeMapping:     ch.StatusCodeMapping,
-			ModelSuffixPreserve:   ch.ModelSuffixPreserve,
-			RequestBodyBlacklist:  ch.RequestBodyBlacklist,
-			RequestBodyWhitelist:  ch.RequestBodyWhitelist,
-			EndpointID:            ep.ID,
-			BaseURL:               ep.BaseURL,
-			CredentialType:        CredentialTypeAnthropic,
-			CredentialID:          ids[0],
+			ChannelID:              ch.ID,
+			ChannelType:            ch.Type,
+			ChannelGroups:          ch.Groups,
+			AllowServiceTier:       ch.AllowServiceTier,
+			DisableStore:           ch.DisableStore,
+			AllowSafetyIdentifier:  ch.AllowSafetyIdentifier,
+			OpenAIOrganization:     ch.OpenAIOrganization,
+			AutoBan:                ch.AutoBan,
+			ForceFormat:            ch.Setting.ForceFormat,
+			ThinkingToContent:      ch.Setting.ThinkingToContent,
+			PassThroughBodyEnabled: ch.Setting.PassThroughBodyEnabled,
+			Proxy:                  ch.Setting.Proxy,
+			SystemPrompt:           ch.Setting.SystemPrompt,
+			SystemPromptOverride:   ch.Setting.SystemPromptOverride,
+			ParamOverride:          ch.ParamOverride,
+			HeaderOverride:         ch.HeaderOverride,
+			StatusCodeMapping:      ch.StatusCodeMapping,
+			ModelSuffixPreserve:    ch.ModelSuffixPreserve,
+			RequestBodyBlacklist:   ch.RequestBodyBlacklist,
+			RequestBodyWhitelist:   ch.RequestBodyWhitelist,
+			EndpointID:             ep.ID,
+			BaseURL:                ep.BaseURL,
+			CredentialType:         CredentialTypeAnthropic,
+			CredentialID:           ids[0],
 		}, true, nil
 	case store.UpstreamTypeCodexOAuth:
 		accs, err := s.st.ListCodexOAuthAccountsByEndpoint(ctx, ep.ID)
@@ -530,22 +554,30 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			return ids[i] > ids[j]
 		})
 		return Selection{
-			ChannelID:             ch.ID,
-			ChannelType:           ch.Type,
-			ChannelGroups:         ch.Groups,
-			AllowServiceTier:      ch.AllowServiceTier,
-			DisableStore:          ch.DisableStore,
-			AllowSafetyIdentifier: ch.AllowSafetyIdentifier,
-			ParamOverride:         ch.ParamOverride,
-			HeaderOverride:        ch.HeaderOverride,
-			StatusCodeMapping:     ch.StatusCodeMapping,
-			ModelSuffixPreserve:   ch.ModelSuffixPreserve,
-			RequestBodyBlacklist:  ch.RequestBodyBlacklist,
-			RequestBodyWhitelist:  ch.RequestBodyWhitelist,
-			EndpointID:            ep.ID,
-			BaseURL:               ep.BaseURL,
-			CredentialType:        CredentialTypeCodex,
-			CredentialID:          ids[0],
+			ChannelID:              ch.ID,
+			ChannelType:            ch.Type,
+			ChannelGroups:          ch.Groups,
+			AllowServiceTier:       ch.AllowServiceTier,
+			DisableStore:           ch.DisableStore,
+			AllowSafetyIdentifier:  ch.AllowSafetyIdentifier,
+			OpenAIOrganization:     ch.OpenAIOrganization,
+			AutoBan:                ch.AutoBan,
+			ForceFormat:            ch.Setting.ForceFormat,
+			ThinkingToContent:      ch.Setting.ThinkingToContent,
+			PassThroughBodyEnabled: ch.Setting.PassThroughBodyEnabled,
+			Proxy:                  ch.Setting.Proxy,
+			SystemPrompt:           ch.Setting.SystemPrompt,
+			SystemPromptOverride:   ch.Setting.SystemPromptOverride,
+			ParamOverride:          ch.ParamOverride,
+			HeaderOverride:         ch.HeaderOverride,
+			StatusCodeMapping:      ch.StatusCodeMapping,
+			ModelSuffixPreserve:    ch.ModelSuffixPreserve,
+			RequestBodyBlacklist:   ch.RequestBodyBlacklist,
+			RequestBodyWhitelist:   ch.RequestBodyWhitelist,
+			EndpointID:             ep.ID,
+			BaseURL:                ep.BaseURL,
+			CredentialType:         CredentialTypeCodex,
+			CredentialID:           ids[0],
 		}, true, nil
 	default:
 		return Selection{}, false, nil
@@ -593,10 +625,12 @@ func (s *Scheduler) Report(sel Selection, res Result) {
 			cooldown = s.cooldownBase * 2
 		}
 		s.state.SetCredentialCooling(sel.CredentialKey(), now.Add(cooldown))
-		if shouldBanChannelImmediately(res) {
-			s.state.BanChannelImmediate(sel.ChannelID, now, cooldown)
-		} else {
-			s.state.BanChannel(sel.ChannelID, now, cooldown)
+		if sel.AutoBan {
+			if shouldBanChannelImmediately(res) {
+				s.state.BanChannelImmediate(sel.ChannelID, now, cooldown)
+			} else {
+				s.state.BanChannel(sel.ChannelID, now, cooldown)
+			}
 		}
 	}
 }

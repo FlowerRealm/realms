@@ -148,7 +148,7 @@ func TestPinnedChannelInfo_BanRotationSetsReason(t *testing.T) {
 	}
 }
 
-func TestChannelPointerInfo_InvalidPointerCorrected(t *testing.T) {
+func TestChannelPointerInfo_PointerOutsideRingIsKept(t *testing.T) {
 	st := NewState()
 	st.SetChannelPointerRing([]int64{1, 2})
 	st.SetChannelPointer(9)
@@ -157,11 +157,11 @@ func TestChannelPointerInfo_InvalidPointerCorrected(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected pointer to be active")
 	}
-	if id != 1 {
-		t.Fatalf("expected pointer to be corrected to channel=1, got=%d", id)
+	if id != 9 {
+		t.Fatalf("expected pointer to stay at channel=9, got=%d", id)
 	}
-	if reason != "invalid" {
-		t.Fatalf("expected reason=invalid, got=%q", reason)
+	if reason != "manual" {
+		t.Fatalf("expected reason=manual, got=%q", reason)
 	}
 }
 

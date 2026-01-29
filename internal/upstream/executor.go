@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/proxy"
+
 	"realms/internal/codexoauth"
 	"realms/internal/config"
 	"realms/internal/scheduler"
@@ -29,7 +31,9 @@ import (
 type Executor struct {
 	st upstreamStore
 
-	client *http.Client
+	client    *http.Client
+	clientsMu sync.Mutex
+	clients   map[string]*http.Client
 
 	upstreamTimeout time.Duration
 
@@ -49,19 +53,10 @@ type upstreamStore interface {
 }
 
 func NewExecutor(st *store.Store, cfg config.Config) *Executor {
-	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   0,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   0,
-		ResponseHeaderTimeout: 0,
-		ExpectContinueTimeout: 1 * time.Second,
-	}
+	transport := defaultTransportWithProxy(http.ProxyFromEnvironment, (&net.Dialer{
+		Timeout:   0,
+		KeepAlive: 30 * time.Second,
+	}).DialContext)
 	client := &http.Client{
 		Transport: transport,
 		Timeout:   0,
@@ -76,6 +71,7 @@ func NewExecutor(st *store.Store, cfg config.Config) *Executor {
 	return &Executor{
 		st:                      st,
 		client:                  client,
+		clients:                 make(map[string]*http.Client),
 		upstreamTimeout:         0,
 		codexOAuth:              codexClient,
 		codexRequestPassthrough: cfg.CodexOAuth.RequestPassthrough,
@@ -100,7 +96,8 @@ func (e *Executor) Do(ctx context.Context, sel scheduler.Selection, downstream *
 		}
 		return nil, err
 	}
-	resp, err := e.client.Do(req)
+	client := e.clientForSelection(sel)
+	resp, err := client.Do(req)
 	if err != nil {
 		if cancel != nil {
 			cancel()
@@ -205,6 +202,121 @@ func (e *Executor) Do(ctx context.Context, sel scheduler.Selection, downstream *
 		resp.Body = cancelOnClose(resp.Body, cancel)
 	}
 	return resp, nil
+}
+
+func defaultTransportWithProxy(proxyFn func(*http.Request) (*url.URL, error), dialContext func(ctx context.Context, network, addr string) (net.Conn, error)) *http.Transport {
+	return &http.Transport{
+		Proxy:               proxyFn,
+		DialContext:         dialContext,
+		ForceAttemptHTTP2:   true,
+		MaxIdleConns:        100,
+		IdleConnTimeout:     90 * time.Second,
+		TLSHandshakeTimeout: 0,
+		// 对 SSE/长连接类请求，不使用 header timeout（由上层 timeout/idle 控制）。
+		ResponseHeaderTimeout: 0,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+}
+
+func (e *Executor) clientForSelection(sel scheduler.Selection) *http.Client {
+	raw := strings.TrimSpace(sel.Proxy)
+	if raw == "" {
+		return e.client
+	}
+	// 显式禁用代理：对齐 new-api 的“按渠道设置 proxy”的语义，同时保留 env 代理默认值。
+	if strings.EqualFold(raw, "direct") || strings.EqualFold(raw, "none") {
+		return e.clientForProxyKey("direct", func() (*http.Client, error) {
+			dialer := &net.Dialer{Timeout: 0, KeepAlive: 30 * time.Second}
+			tr := defaultTransportWithProxy(nil, dialer.DialContext)
+			return &http.Client{
+				Transport: tr,
+				Timeout:   0,
+				CheckRedirect: func(req *http.Request, via []*http.Request) error {
+					return http.ErrUseLastResponse
+				},
+			}, nil
+		})
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil {
+		// 回退：proxy 配置错误时，不阻断请求（保持 env proxy 行为）。
+		return e.client
+	}
+
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+		return e.clientForProxyKey(u.String(), func() (*http.Client, error) {
+			dialer := &net.Dialer{Timeout: 0, KeepAlive: 30 * time.Second}
+			tr := defaultTransportWithProxy(http.ProxyURL(u), dialer.DialContext)
+			return &http.Client{
+				Transport: tr,
+				Timeout:   0,
+				CheckRedirect: func(req *http.Request, via []*http.Request) error {
+					return http.ErrUseLastResponse
+				},
+			}, nil
+		})
+	case "socks5", "socks5h":
+		return e.clientForProxyKey(u.String(), func() (*http.Client, error) {
+			host := u.Host
+			if !strings.Contains(host, ":") {
+				host += ":1080"
+			}
+			var auth *proxy.Auth
+			if u.User != nil {
+				pass, _ := u.User.Password()
+				auth = &proxy.Auth{User: u.User.Username(), Password: pass}
+			}
+			baseDialer := &net.Dialer{Timeout: 0, KeepAlive: 30 * time.Second}
+			d, err := proxy.SOCKS5("tcp", host, auth, baseDialer)
+			if err != nil {
+				return nil, err
+			}
+			dialContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
+				// proxy.Dialer 没有 DialContext；这里遵循 ctx 的取消语义（弱保证）。
+				type dialRes struct {
+					c   net.Conn
+					err error
+				}
+				ch := make(chan dialRes, 1)
+				go func() {
+					c, err := d.Dial(network, addr)
+					ch <- dialRes{c: c, err: err}
+				}()
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case r := <-ch:
+					return r.c, r.err
+				}
+			}
+			tr := defaultTransportWithProxy(nil, dialContext)
+			return &http.Client{
+				Transport: tr,
+				Timeout:   0,
+				CheckRedirect: func(req *http.Request, via []*http.Request) error {
+					return http.ErrUseLastResponse
+				},
+			}, nil
+		})
+	default:
+		return e.client
+	}
+}
+
+func (e *Executor) clientForProxyKey(key string, factory func() (*http.Client, error)) *http.Client {
+	e.clientsMu.Lock()
+	defer e.clientsMu.Unlock()
+	if c, ok := e.clients[key]; ok && c != nil {
+		return c
+	}
+	c, err := factory()
+	if err != nil {
+		return e.client
+	}
+	e.clients[key] = c
+	return c
 }
 
 type restoringReadCloser struct {
@@ -582,6 +694,10 @@ func (e *Executor) buildRequestWithCodexPassthrough(ctx context.Context, sel sch
 	req.Header.Del("X-Api-Key")
 	req.Header.Del("x-api-key")
 	req.Header.Del("Accept-Encoding")
+
+	if sel.CredentialType == scheduler.CredentialTypeOpenAI && sel.OpenAIOrganization != nil && strings.TrimSpace(*sel.OpenAIOrganization) != "" {
+		req.Header.Set("OpenAI-Organization", strings.TrimSpace(*sel.OpenAIOrganization))
+	}
 
 	switch sel.CredentialType {
 	case scheduler.CredentialTypeOpenAI:

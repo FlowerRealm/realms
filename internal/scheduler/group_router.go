@@ -108,9 +108,9 @@ func (r *GroupRouter) nextFromPinnedRing(ctx context.Context) (Selection, error)
 		if err != nil {
 			return Selection{}, err
 		}
-		r.channelRing = ring
-		r.channelRingLoaded = true
 		r.sched.state.SetChannelPointerRing(ring)
+		r.channelRing = r.sched.state.ChannelPointerRing()
+		r.channelRingLoaded = true
 	}
 	if len(r.channelRing) == 0 {
 		return Selection{}, errGroupExhausted

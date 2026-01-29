@@ -24,6 +24,7 @@ func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, er
 	rows, err := s.db.QueryContext(ctx,
 		"SELECT id, type, name, `groups`, status, priority, promotion,\n"+
 			"       allow_service_tier, disable_store, allow_safety_identifier,\n"+
+			"       openai_organization, test_model, tag, remark, weight, auto_ban, setting,\n"+
 			"       param_override,\n"+
 			"       header_override,\n"+
 			"       status_code_mapping,\n"+
@@ -47,6 +48,13 @@ func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, er
 		var allowServiceTier int
 		var disableStore int
 		var allowSafetyIdentifier int
+		var openAIOrganization sql.NullString
+		var testModel sql.NullString
+		var tag sql.NullString
+		var remark sql.NullString
+		var weight int
+		var autoBan int
+		var setting sql.NullString
 		var paramOverride sql.NullString
 		var headerOverride sql.NullString
 		var statusCodeMapping sql.NullString
@@ -56,6 +64,7 @@ func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, er
 		var lastOK int
 		if err := rows.Scan(&c.ID, &c.Type, &c.Name, &c.Groups, &c.Status, &c.Priority, &promotion,
 			&allowServiceTier, &disableStore, &allowSafetyIdentifier,
+			&openAIOrganization, &testModel, &tag, &remark, &weight, &autoBan, &setting,
 			&paramOverride,
 			&headerOverride,
 			&statusCodeMapping,
@@ -70,6 +79,29 @@ func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, er
 		c.AllowServiceTier = allowServiceTier != 0
 		c.DisableStore = disableStore != 0
 		c.AllowSafetyIdentifier = allowSafetyIdentifier != 0
+		if openAIOrganization.Valid && strings.TrimSpace(openAIOrganization.String) != "" {
+			v := strings.TrimSpace(openAIOrganization.String)
+			c.OpenAIOrganization = &v
+		}
+		if testModel.Valid && strings.TrimSpace(testModel.String) != "" {
+			v := strings.TrimSpace(testModel.String)
+			c.TestModel = &v
+		}
+		if tag.Valid && strings.TrimSpace(tag.String) != "" {
+			v := strings.TrimSpace(tag.String)
+			c.Tag = &v
+		}
+		if remark.Valid && strings.TrimSpace(remark.String) != "" {
+			v := strings.TrimSpace(remark.String)
+			c.Remark = &v
+		}
+		c.Weight = weight
+		c.AutoBan = autoBan != 0
+		if setting.Valid && strings.TrimSpace(setting.String) != "" && strings.TrimSpace(setting.String) != "{}" {
+			if err := json.Unmarshal([]byte(setting.String), &c.Setting); err != nil {
+				return nil, fmt.Errorf("解析 upstream_channels.setting 失败: %w", err)
+			}
+		}
 		if paramOverride.Valid {
 			c.ParamOverride = strings.TrimSpace(paramOverride.String)
 		}
@@ -210,6 +242,13 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 	var allowServiceTier int
 	var disableStore int
 	var allowSafetyIdentifier int
+	var openAIOrganization sql.NullString
+	var testModel sql.NullString
+	var tag sql.NullString
+	var remark sql.NullString
+	var weight int
+	var autoBan int
+	var setting sql.NullString
 	var paramOverride sql.NullString
 	var headerOverride sql.NullString
 	var statusCodeMapping sql.NullString
@@ -220,6 +259,7 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 	err := s.db.QueryRowContext(ctx,
 		"SELECT id, type, name, `groups`, status, priority, promotion,\n"+
 			"       allow_service_tier, disable_store, allow_safety_identifier,\n"+
+			"       openai_organization, test_model, tag, remark, weight, auto_ban, setting,\n"+
 			"       param_override,\n"+
 			"       header_override,\n"+
 			"       status_code_mapping,\n"+
@@ -233,6 +273,7 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 		id,
 	).Scan(&c.ID, &c.Type, &c.Name, &c.Groups, &c.Status, &c.Priority, &promotion,
 		&allowServiceTier, &disableStore, &allowSafetyIdentifier,
+		&openAIOrganization, &testModel, &tag, &remark, &weight, &autoBan, &setting,
 		&paramOverride,
 		&headerOverride,
 		&statusCodeMapping,
@@ -251,6 +292,29 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 	c.AllowServiceTier = allowServiceTier != 0
 	c.DisableStore = disableStore != 0
 	c.AllowSafetyIdentifier = allowSafetyIdentifier != 0
+	if openAIOrganization.Valid && strings.TrimSpace(openAIOrganization.String) != "" {
+		v := strings.TrimSpace(openAIOrganization.String)
+		c.OpenAIOrganization = &v
+	}
+	if testModel.Valid && strings.TrimSpace(testModel.String) != "" {
+		v := strings.TrimSpace(testModel.String)
+		c.TestModel = &v
+	}
+	if tag.Valid && strings.TrimSpace(tag.String) != "" {
+		v := strings.TrimSpace(tag.String)
+		c.Tag = &v
+	}
+	if remark.Valid && strings.TrimSpace(remark.String) != "" {
+		v := strings.TrimSpace(remark.String)
+		c.Remark = &v
+	}
+	c.Weight = weight
+	c.AutoBan = autoBan != 0
+	if setting.Valid && strings.TrimSpace(setting.String) != "" && strings.TrimSpace(setting.String) != "{}" {
+		if err := json.Unmarshal([]byte(setting.String), &c.Setting); err != nil {
+			return UpstreamChannel{}, fmt.Errorf("解析 upstream_channels.setting 失败: %w", err)
+		}
+	}
 	if paramOverride.Valid {
 		c.ParamOverride = strings.TrimSpace(paramOverride.String)
 	}

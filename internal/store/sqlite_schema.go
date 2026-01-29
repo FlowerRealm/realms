@@ -20,6 +20,9 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 		if err := ensureSQLiteUpstreamChannelRequestPolicyColumns(db); err != nil {
 			return err
 		}
+		if err := ensureSQLiteUpstreamChannelNewAPISettingsColumns(db); err != nil {
+			return err
+		}
 		if err := ensureSQLiteUpstreamChannelParamOverrideColumn(db); err != nil {
 			return err
 		}

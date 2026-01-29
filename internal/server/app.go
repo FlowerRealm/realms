@@ -372,6 +372,8 @@ func (a *App) routes() {
 	a.mux.Handle("POST /admin/channels/{channel_id}/model_suffix_preserve", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.UpdateChannelModelSuffixPreserve)))
 	a.mux.Handle("POST /admin/channels/{channel_id}/request_body_blacklist", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.UpdateChannelRequestBodyBlacklist)))
 	a.mux.Handle("POST /admin/channels/{channel_id}/request_body_whitelist", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.UpdateChannelRequestBodyWhitelist)))
+	a.mux.Handle("POST /admin/channels/{channel_id}/meta", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.UpdateChannelNewAPIMeta)))
+	a.mux.Handle("POST /admin/channels/{channel_id}/setting", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.UpdateChannelNewAPISetting)))
 	a.mux.Handle("GET /admin/channel-groups", adminFeatureChain(store.SettingFeatureDisableAdminChannelGroups, http.HandlerFunc(a.admin.ChannelGroups)))
 	a.mux.Handle("POST /admin/channel-groups", adminFeatureChain(store.SettingFeatureDisableAdminChannelGroups, http.HandlerFunc(a.admin.CreateChannelGroup)))
 	a.mux.Handle("POST /admin/channel-groups/{group_id}", adminFeatureChain(store.SettingFeatureDisableAdminChannelGroups, http.HandlerFunc(a.admin.UpdateChannelGroup)))

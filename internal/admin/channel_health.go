@@ -227,6 +227,11 @@ func gatherChannelTestModels(ctx context.Context, st channelTestStore, ch store.
 		return out, false, nil
 	}
 
+	if ch.TestModel != nil && strings.TrimSpace(*ch.TestModel) != "" {
+		m := strings.TrimSpace(*ch.TestModel)
+		return []channelTestModel{{PublicID: m, UpstreamModel: m}}, false, nil
+	}
+
 	cms, err := st.ListChannelModelsByChannelID(ctx, ch.ID)
 	if err != nil {
 		return nil, false, fmt.Errorf("查询渠道模型绑定失败: %w", err)

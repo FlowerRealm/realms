@@ -12,7 +12,7 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-const AdminConfigExportVersion = 5
+const AdminConfigExportVersion = 6
 
 type AdminConfigExport struct {
 	Version    int       `json:"version"`
@@ -56,6 +56,14 @@ type AdminConfigUpstreamChannel struct {
 	Priority int    `json:"priority"`
 
 	Promotion bool `json:"promotion"`
+
+	OpenAIOrganization *string         `json:"openai_organization,omitempty"`
+	TestModel          *string         `json:"test_model,omitempty"`
+	Tag                *string         `json:"tag,omitempty"`
+	Remark             *string         `json:"remark,omitempty"`
+	Weight             *int            `json:"weight,omitempty"`
+	AutoBan            *bool           `json:"auto_ban,omitempty"`
+	Setting            json.RawMessage `json:"setting,omitempty"`
 
 	AllowServiceTier      bool            `json:"allow_service_tier,omitempty"`
 	DisableStore          bool            `json:"disable_store,omitempty"`
@@ -173,6 +181,25 @@ func (s *Store) ExportAdminConfig(ctx context.Context) (AdminConfigExport, error
 	out.UpstreamEndpoints = make([]AdminConfigUpstreamEndpoint, 0, len(channels))
 	out.ChannelModels = make([]AdminConfigChannelModel, 0, len(channels))
 	for _, ch := range channels {
+		var weight *int
+		if ch.Weight != 0 {
+			v := ch.Weight
+			weight = &v
+		}
+		var autoBan *bool
+		if !ch.AutoBan {
+			v := ch.AutoBan
+			autoBan = &v
+		}
+
+		var setting json.RawMessage
+		if b, err := json.Marshal(ch.Setting); err == nil {
+			raw := strings.TrimSpace(string(b))
+			if raw != "" && raw != "{}" {
+				setting = json.RawMessage(raw)
+			}
+		}
+
 		var paramOverride json.RawMessage
 		if strings.TrimSpace(ch.ParamOverride) != "" {
 			paramOverride = json.RawMessage(strings.TrimSpace(ch.ParamOverride))
@@ -204,6 +231,13 @@ func (s *Store) ExportAdminConfig(ctx context.Context) (AdminConfigExport, error
 			Status:                ch.Status,
 			Priority:              ch.Priority,
 			Promotion:             ch.Promotion,
+			OpenAIOrganization:    ch.OpenAIOrganization,
+			TestModel:             ch.TestModel,
+			Tag:                   ch.Tag,
+			Remark:                ch.Remark,
+			Weight:                weight,
+			AutoBan:               autoBan,
+			Setting:               setting,
 			AllowServiceTier:      ch.AllowServiceTier,
 			DisableStore:          ch.DisableStore,
 			AllowSafetyIdentifier: ch.AllowSafetyIdentifier,
@@ -502,6 +536,41 @@ ON CONFLICT(name) DO UPDATE SET
 		modelSuffixPreserve := strings.TrimSpace(string(ch.ModelSuffixPreserve))
 		requestBodyBlacklist := strings.TrimSpace(string(ch.RequestBodyBlacklist))
 		requestBodyWhitelist := strings.TrimSpace(string(ch.RequestBodyWhitelist))
+		openAIOrganization := ""
+		if ch.OpenAIOrganization != nil {
+			openAIOrganization = strings.TrimSpace(*ch.OpenAIOrganization)
+		}
+		testModel := ""
+		if ch.TestModel != nil {
+			testModel = strings.TrimSpace(*ch.TestModel)
+		}
+		tag := ""
+		if ch.Tag != nil {
+			tag = strings.TrimSpace(*ch.Tag)
+		}
+		remark := ""
+		if ch.Remark != nil {
+			remark = strings.TrimSpace(*ch.Remark)
+		}
+		weight := 0
+		if ch.Weight != nil {
+			weight = *ch.Weight
+		}
+		autoBan := true
+		if ch.AutoBan != nil {
+			autoBan = *ch.AutoBan
+		}
+		autoBanInt := 0
+		if autoBan {
+			autoBanInt = 1
+		}
+		setting := strings.TrimSpace(string(ch.Setting))
+		if setting != "" {
+			var parsed UpstreamChannelSetting
+			if err := json.Unmarshal([]byte(setting), &parsed); err != nil {
+				return 0, fmt.Errorf("setting 不是有效 JSON: %w", err)
+			}
+		}
 		if in.Version >= 5 {
 			normalized, err := normalizeStringJSONArray(modelSuffixPreserve)
 			if err != nil {
@@ -542,6 +611,18 @@ INSERT INTO upstream_channels(type, name, ` + "`groups`" + `, status, priority, 
 VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `
 						args = append(args, nullableString(&modelSuffixPreserve), nullableString(&requestBodyBlacklist), nullableString(&requestBodyWhitelist))
+						if in.Version >= 6 {
+							stmtInsert = `
+INSERT INTO upstream_channels(type, name, ` + "`groups`" + `, status, priority, promotion, openai_organization, test_model, tag, remark, weight, auto_ban, setting, allow_service_tier, disable_store, allow_safety_identifier, param_override, header_override, status_code_mapping, model_suffix_preserve, request_body_blacklist, request_body_whitelist, created_at, updated_at)
+VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+`
+							args = []any{typ, name, ch.Status, ch.Priority, p,
+								nullableString(&openAIOrganization), nullableString(&testModel), nullableString(&tag), nullableString(&remark), weight, autoBanInt, nullableString(&setting),
+								allowServiceTier, disableStore, allowSafetyIdentifier,
+								nullableString(&paramOverride), nullableString(&headerOverride), nullableString(&statusCodeMapping),
+								nullableString(&modelSuffixPreserve), nullableString(&requestBodyBlacklist), nullableString(&requestBodyWhitelist),
+							}
+						}
 					}
 				} else if in.Version >= 3 {
 					stmtInsert = `
@@ -605,6 +686,36 @@ SET name=COALESCE(NULLIF(?, ''), name),
 WHERE id=?
 `
 					args = []any{name, ch.Status, ch.Priority, p, allowServiceTier, disableStore, allowSafetyIdentifier, nullableString(&paramOverride), nullableString(&headerOverride), nullableString(&statusCodeMapping), nullableString(&modelSuffixPreserve), nullableString(&requestBodyBlacklist), nullableString(&requestBodyWhitelist), id}
+					if in.Version >= 6 {
+						stmtUpdate = `
+UPDATE upstream_channels
+SET name=COALESCE(NULLIF(?, ''), name),
+    status=?, priority=?, promotion=?,
+    openai_organization=?,
+    test_model=?,
+    tag=?,
+    remark=?,
+    weight=?,
+    auto_ban=?,
+    setting=?,
+    allow_service_tier=?, disable_store=?, allow_safety_identifier=?,
+    param_override=?,
+    header_override=?,
+    status_code_mapping=?,
+    model_suffix_preserve=?,
+    request_body_blacklist=?,
+    request_body_whitelist=?,
+    updated_at=CURRENT_TIMESTAMP
+WHERE id=?
+`
+						args = []any{name, ch.Status, ch.Priority, p,
+							nullableString(&openAIOrganization), nullableString(&testModel), nullableString(&tag), nullableString(&remark), weight, autoBanInt, nullableString(&setting),
+							allowServiceTier, disableStore, allowSafetyIdentifier,
+							nullableString(&paramOverride), nullableString(&headerOverride), nullableString(&statusCodeMapping),
+							nullableString(&modelSuffixPreserve), nullableString(&requestBodyBlacklist), nullableString(&requestBodyWhitelist),
+							id,
+						}
+					}
 				}
 			} else if in.Version >= 3 {
 				stmtUpdate = `

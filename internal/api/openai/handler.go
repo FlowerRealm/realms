@@ -143,6 +143,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "请求体为空", http.StatusBadRequest)
 		return
 	}
+	rawBody := body
 
 	payload, err := sanitizeResponsesPayload(body)
 	if err != nil {
@@ -199,7 +200,11 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		rewriteBody = func(sel scheduler.Selection) ([]byte, error) {
+			if sel.PassThroughBodyEnabled {
+				return rawBody, nil
+			}
 			out := clonePayload(payload)
+			applyChannelSystemPromptToResponsesPayload(out, sel)
 			raw, err := json.Marshal(out)
 			if err != nil {
 				return nil, err
@@ -259,12 +264,16 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		}
 
 		rewriteBody = func(sel scheduler.Selection) ([]byte, error) {
+			if sel.PassThroughBodyEnabled {
+				return rawBody, nil
+			}
 			up, ok := upstreamByChannel[sel.ChannelID]
 			if !ok {
 				return nil, errors.New("选中渠道未配置该模型")
 			}
 			out := clonePayload(payload)
 			out["model"] = up
+			applyChannelSystemPromptToResponsesPayload(out, sel)
 			raw, err := json.Marshal(out)
 			if err != nil {
 				return nil, err
@@ -504,7 +513,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		}
 		cw.WriteHeader(resp.StatusCode)
 
-		pumpRes, _ := upstream.PumpSSE(r.Context(), cw, resp.Body, h.sseOpts, upstream.SSEPumpHooks{
+		hooks := upstream.SSEPumpHooks{
 			OnData: func(data string) {
 				// 避免对每个 delta 事件反复 JSON 解析：仅在疑似包含 usage 时尝试。
 				if !strings.Contains(data, "usage") && !strings.Contains(data, "input_tokens") && !strings.Contains(data, "prompt_tokens") {
@@ -536,7 +545,12 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 					acc.seen = true
 				}
 			},
-		})
+		}
+		if sel.ThinkingToContent {
+			hooks.TransformData = newThinkingToContentTransformer()
+		}
+
+		pumpRes, _ := upstream.PumpSSE(r.Context(), cw, resp.Body, h.sseOpts, hooks)
 
 		if usageID != 0 && h.quota != nil {
 			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

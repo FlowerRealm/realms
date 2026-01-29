@@ -740,15 +740,123 @@
                           <button type="submit" class="btn btn-primary btn-sm mt-3">
                             <i class="ri-save-line me-1"></i>保存分组
                           </button>
-                        </form>
-                      </div>
-                    </div>
+	                        </form>
+	                      </div>
+	                    </div>
 
-	                  <!-- 请求字段策略 -->
+	                  <!-- 渠道属性（new-api 对齐） -->
 	                  <div class="card border-0 shadow-sm">
 	                    <div class="card-header bg-white fw-bold py-3">
-	                      <div id="channelSettingsCollapseRequestPolicy-{{.Channel.ID}}">请求字段策略</div>
+	                      <div id="channelSettingsCollapseMeta-{{.Channel.ID}}">渠道属性（new-api 对齐）</div>
 	                    </div>
+	                    <div class="card-body">
+	                      <form method="POST" action="/admin/channels/{{.Channel.ID}}/meta" data-ajax="1" data-ajax-reload="1">
+	                        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+	                        <input type="hidden" name="return_to" value="/admin/channels" />
+
+	                        <div class="row g-3">
+	                          {{if eq .Channel.Type "openai_compatible"}}
+	                          <div class="col-md-6">
+	                            <label class="form-label fw-medium">OpenAI Organization（openai_organization）</label>
+	                            <input name="openai_organization" type="text" class="form-control font-monospace" value="{{if .Channel.OpenAIOrganization}}{{.Channel.OpenAIOrganization}}{{end}}" placeholder="org_xxx" />
+	                            <div class="form-text small text-muted">会注入到上游请求头 <code>OpenAI-Organization</code>；可被 Header Override 覆盖。</div>
+	                          </div>
+	                          {{end}}
+	                          <div class="col-md-6">
+	                            <label class="form-label fw-medium">默认测试模型（test_model）</label>
+	                            <input name="test_model" type="text" class="form-control font-monospace" value="{{if .Channel.TestModel}}{{.Channel.TestModel}}{{end}}" placeholder="留空=自动选择" />
+	                            <div class="form-text small text-muted">用于“测试”按钮：优先级高于模型绑定与默认值。</div>
+	                          </div>
+	                          <div class="col-md-6">
+	                            <label class="form-label fw-medium">Tag（tag）</label>
+	                            <input name="tag" type="text" class="form-control" value="{{if .Channel.Tag}}{{.Channel.Tag}}{{end}}" placeholder="例如：prod-1" />
+	                            <div class="form-text small text-muted">用于标记/检索（仅保存，不参与调度）。</div>
+	                          </div>
+	                          <div class="col-md-6">
+	                            <label class="form-label fw-medium">Weight（weight）</label>
+	                            <input name="weight" type="number" min="0" class="form-control" value="{{.Channel.Weight}}" />
+	                            <div class="form-text small text-muted">对齐 new-api 字段；当前不参与调度（Realms 调度以分组/优先级/推荐为准）。</div>
+	                          </div>
+	                          <div class="col-md-6">
+	                            <label class="form-label fw-medium">Auto Ban（auto_ban）</label>
+	                            <select name="auto_ban" class="form-select">
+	                              <option value="1" {{if .Channel.AutoBan}}selected{{end}}>启用</option>
+	                              <option value="0" {{if not .Channel.AutoBan}}selected{{end}}>禁用</option>
+	                            </select>
+	                            <div class="form-text small text-muted">禁用后：失败不会封禁该渠道（credential 冷却仍生效）。</div>
+	                          </div>
+	                          <div class="col-12">
+	                            <label class="form-label fw-medium">备注（remark）</label>
+	                            <input name="remark" type="text" class="form-control" value="{{if .Channel.Remark}}{{.Channel.Remark}}{{end}}" placeholder="可选" />
+	                            <div class="form-text small text-muted">仅用于管理面备注（对齐 new-api）。</div>
+	                          </div>
+	                        </div>
+
+	                        <button type="submit" class="btn btn-primary btn-sm mt-3">
+	                          <i class="ri-save-line me-1"></i>保存
+	                        </button>
+	                      </form>
+	                    </div>
+	                  </div>
+
+	                  <!-- 渠道额外设置（new-api setting） -->
+	                  <div class="card border-0 shadow-sm">
+	                    <div class="card-header bg-white fw-bold py-3">
+	                      <div id="channelSettingsCollapseSetting-{{.Channel.ID}}">渠道额外设置（new-api setting）</div>
+	                    </div>
+	                    <div class="card-body">
+	                      <form method="POST" action="/admin/channels/{{.Channel.ID}}/setting" data-ajax="1" data-ajax-reload="1">
+	                        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
+	                        <input type="hidden" name="return_to" value="/admin/channels" />
+
+	                        <div class="d-flex flex-column gap-2">
+		                          <div class="form-check">
+		                            <input class="form-check-input" type="checkbox" name="force_format" value="1" id="setting_force_format_{{.Channel.ID}}" {{if .Channel.Setting.ForceFormat}}checked{{end}} />
+		                            <label class="form-check-label" for="setting_force_format_{{.Channel.ID}}">force_format</label>
+		                            <div class="form-text small text-muted">对齐 new-api 字段；当前 Realms 未实现该行为（仅保存，不影响转发）。</div>
+		                          </div>
+		                          <div class="form-check">
+		                            <input class="form-check-input" type="checkbox" name="thinking_to_content" value="1" id="setting_thinking_to_content_{{.Channel.ID}}" {{if .Channel.Setting.ThinkingToContent}}checked{{end}} />
+		                            <label class="form-check-label" for="setting_thinking_to_content_{{.Channel.ID}}">thinking_to_content</label>
+	                            <div class="form-text small text-muted">将流式 <code>reasoning_content</code> 转为 <code>&lt;think&gt;...&lt;/think&gt;</code> 并拼接到 <code>content</code> 中返回。</div>
+	                          </div>
+	                          <div class="form-check">
+	                            <input class="form-check-input" type="checkbox" name="pass_through_body_enabled" value="1" id="setting_pass_through_body_{{.Channel.ID}}" {{if .Channel.Setting.PassThroughBodyEnabled}}checked{{end}} />
+	                            <label class="form-check-label" for="setting_pass_through_body_{{.Channel.ID}}">pass_through_body_enabled</label>
+	                            <div class="form-text small text-muted">启用后：该渠道将直接透传原始请求体（不再应用模型改写/策略/黑白名单/参数改写/系统提示）。</div>
+	                          </div>
+	                        </div>
+
+	                        <div class="mt-3">
+	                          <label class="form-label fw-medium">proxy</label>
+	                          <input name="proxy" type="text" class="form-control font-monospace" value="{{.Channel.Setting.Proxy}}" placeholder="http(s)://host:port 或 socks5://host:port；留空=继承环境代理；direct=禁用" />
+	                          <div class="form-text small text-muted">按渠道指定上游网络代理（对齐 new-api）。</div>
+	                        </div>
+
+	                        <div class="mt-3">
+	                          <label class="form-label fw-medium">system_prompt</label>
+	                          <textarea name="system_prompt" class="form-control font-monospace" rows="4" placeholder="可选：统一注入系统提示">{{.Channel.Setting.SystemPrompt}}</textarea>
+	                          <div class="form-text small text-muted">对 <code>/v1/chat/completions</code> 注入 system 消息；对 <code>/v1/responses</code> 注入 instructions。</div>
+	                        </div>
+
+	                        <div class="form-check mt-2">
+	                          <input class="form-check-input" type="checkbox" name="system_prompt_override" value="1" id="setting_system_prompt_override_{{.Channel.ID}}" {{if .Channel.Setting.SystemPromptOverride}}checked{{end}} />
+	                          <label class="form-check-label" for="setting_system_prompt_override_{{.Channel.ID}}">system_prompt_override</label>
+	                          <div class="form-text small text-muted">当请求已包含 system/instructions 时：是否将 <code>system_prompt</code> 拼接到最前。</div>
+	                        </div>
+
+	                        <button type="submit" class="btn btn-primary btn-sm mt-3">
+	                          <i class="ri-save-line me-1"></i>保存
+	                        </button>
+	                      </form>
+	                    </div>
+	                  </div>
+
+		                  <!-- 请求字段策略 -->
+		                  <div class="card border-0 shadow-sm">
+		                    <div class="card-header bg-white fw-bold py-3">
+		                      <div id="channelSettingsCollapseRequestPolicy-{{.Channel.ID}}">请求字段策略</div>
+		                    </div>
 	                    <div class="card-body">
 	                        <form method="POST" action="/admin/channels/{{.Channel.ID}}/request_policy" data-ajax="1" data-ajax-reload="1">
 	                          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}" />
@@ -1049,15 +1157,17 @@
 	      return m ? m[1] : ''
 	    }
 
-	    function collapseIDFromHash(channelID, hash) {
-	      if (!channelID) return ''
-	      if (!hash) return ''
-	      if (hash === '#keys') return 'channelSettingsCollapseKeys-' + channelID
-	      if (hash === '#accounts') return 'channelSettingsCollapseAccounts-' + channelID
-	      if (hash === '#models') return 'channelSettingsCollapseModels-' + channelID
-	      if (hash === '#groups') return 'channelSettingsCollapseGroups-' + channelID
-	      return ''
-	    }
+		    function collapseIDFromHash(channelID, hash) {
+		      if (!channelID) return ''
+		      if (!hash) return ''
+		      if (hash === '#keys') return 'channelSettingsCollapseKeys-' + channelID
+		      if (hash === '#accounts') return 'channelSettingsCollapseAccounts-' + channelID
+		      if (hash === '#models') return 'channelSettingsCollapseModels-' + channelID
+		      if (hash === '#groups') return 'channelSettingsCollapseGroups-' + channelID
+		      if (hash === '#meta') return 'channelSettingsCollapseMeta-' + channelID
+		      if (hash === '#setting') return 'channelSettingsCollapseSetting-' + channelID
+		      return ''
+		    }
 
 		    function showCollapseByID(collapseID) {
 		      var el = document.getElementById(collapseID)

@@ -33,6 +33,7 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 		writeAnthropicError(w, http.StatusBadRequest, "请求体为空")
 		return
 	}
+	rawBody := body
 
 	payload, err := sanitizeMessagesPayload(body, 0)
 	if err != nil {
@@ -85,7 +86,11 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		rewriteBody = func(sel scheduler.Selection) ([]byte, error) {
+			if sel.PassThroughBodyEnabled {
+				return rawBody, nil
+			}
 			out := clonePayload(payload)
+			applyChannelSystemPromptToMessagesPayload(out, sel)
 			raw, err := json.Marshal(out)
 			if err != nil {
 				return nil, err
@@ -144,12 +149,16 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 		}
 
 		rewriteBody = func(sel scheduler.Selection) ([]byte, error) {
+			if sel.PassThroughBodyEnabled {
+				return rawBody, nil
+			}
 			up, ok := upstreamByChannel[sel.ChannelID]
 			if !ok {
 				return nil, errors.New("选中渠道未配置该模型")
 			}
 			out := clonePayload(payload)
 			out["model"] = up
+			applyChannelSystemPromptToMessagesPayload(out, sel)
 			raw, err := json.Marshal(out)
 			if err != nil {
 				return nil, err

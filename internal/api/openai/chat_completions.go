@@ -35,6 +35,7 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "请求体为空", http.StatusBadRequest)
 		return
 	}
+	rawBody := body
 
 	payload, err := sanitizeChatCompletionsPayload(body, 0)
 	if err != nil {
@@ -89,7 +90,11 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 			}
 		}
 		rewriteBody = func(sel scheduler.Selection) ([]byte, error) {
+			if sel.PassThroughBodyEnabled {
+				return rawBody, nil
+			}
 			out := clonePayload(payload)
+			applyChannelSystemPromptToChatCompletionsPayload(out, sel)
 			raw, err := json.Marshal(out)
 			if err != nil {
 				return nil, err
@@ -152,12 +157,16 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 		}
 
 		rewriteBody = func(sel scheduler.Selection) ([]byte, error) {
+			if sel.PassThroughBodyEnabled {
+				return rawBody, nil
+			}
 			up, ok := upstreamByChannel[sel.ChannelID]
 			if !ok {
 				return nil, errors.New("选中渠道未配置该模型")
 			}
 			out := clonePayload(payload)
 			out["model"] = up
+			applyChannelSystemPromptToChatCompletionsPayload(out, sel)
 			raw, err := json.Marshal(out)
 			if err != nil {
 				return nil, err

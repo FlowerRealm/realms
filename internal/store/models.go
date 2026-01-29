@@ -85,6 +85,13 @@ type UpstreamChannel struct {
 	AllowServiceTier      bool
 	DisableStore          bool
 	AllowSafetyIdentifier bool
+	OpenAIOrganization    *string
+	TestModel             *string
+	Tag                   *string
+	Remark                *string
+	Weight                int
+	AutoBan               bool
+	Setting               UpstreamChannelSetting
 	ParamOverride         string
 	HeaderOverride        string
 	StatusCodeMapping     string
@@ -97,6 +104,15 @@ type UpstreamChannel struct {
 	LastTestOK        bool
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+}
+
+type UpstreamChannelSetting struct {
+	ForceFormat            bool   `json:"force_format,omitempty"`
+	ThinkingToContent      bool   `json:"thinking_to_content,omitempty"`
+	Proxy                  string `json:"proxy,omitempty"`
+	PassThroughBodyEnabled bool   `json:"pass_through_body_enabled,omitempty"`
+	SystemPrompt           string `json:"system_prompt,omitempty"`
+	SystemPromptOverride   bool   `json:"system_prompt_override,omitempty"`
 }
 
 type UpstreamEndpoint struct {
