@@ -35,32 +35,14 @@ Realms 是一个 Go 单体服务（`net/http`），对外提供 **OpenAI 兼容*
 如需使用 MySQL，请在 `.env`（或环境变量）中设置：
 - `REALMS_DB_DSN=...`（设置该值即可推断使用 MySQL；也可以显式设置 `REALMS_DB_DRIVER=mysql`）
 
-`make dev` 默认会同时启动两套环境：
-- 本地（正常模式）：`http://127.0.0.1:8080/`（air 热重载）
-- Docker（self_mode）：`http://127.0.0.1:7080/`（独立 docker compose project，数据库隔离）
+`make dev` 仅启动本地（正常模式）：`http://127.0.0.1:8080/`（air 热重载）。  
+`make dev` 不会自动启动 Docker / MySQL；如你选择使用 MySQL，请先自行启动 MySQL（本机或 docker compose）。
 
-其中，本地环境会在检测到 `127.0.0.1:3306` 未监听时，自动尝试用 docker compose 启动 MySQL 容器。  
-如需禁用本地自动拉起 MySQL，可在环境变量或 `.env` 中设置：`REALMS_DEV_MYSQL=skip`。  
-如需禁用 Docker self_mode，可设置：`REALMS_DEV_DOCKER_SELF=skip`（仅启动本地）。
-
-> 说明：仅当你选择使用 MySQL（`REALMS_DB_DRIVER=mysql` 或配置了 `REALMS_DB_DSN`）时，`make dev` 才会尝试拉起 MySQL 容器。SQLite 默认配置下不会启动 MySQL。
-
-如需手动启动：
+如需用 docker compose 启动 MySQL（可选）：
 
 ```bash
 docker compose up -d mysql
 ```
-
-Docker self_mode（`make dev` 额外启动的一套）默认使用 project：`realms-dev-self`。如需停止：
-
-```bash
-docker compose -p realms-dev-self down
-```
-
-可选覆盖（环境变量或 `.env`）：
-- `REALMS_DEV_DOCKER_HTTP_PORT`（默认 `7080`）
-- `REALMS_DEV_DOCKER_MYSQL_HOST_PORT`（默认 `7306`）
-- `REALMS_DEV_DOCKER_PROJECT`（默认 `realms-dev-self`）
 
 > 提示：如果你的机器上 **3306 已被其他 MySQL 占用**，`docker-compose.yml` 的端口映射会冲突。  
 > 这时可以：
