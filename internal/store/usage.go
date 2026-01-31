@@ -1252,7 +1252,7 @@ type TimeSeriesUsageStats struct {
 }
 
 func (s *Store) GetUsageTimeSeriesRange(ctx context.Context, userID int64, since, until time.Time) ([]TimeSeriesUsageStats, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	query := `
 SELECT
   DATE_FORMAT(time, '%Y-%m-%d %H:00:00') as hr,
   COUNT(1),
@@ -1262,7 +1262,22 @@ FROM usage_events
 WHERE user_id=? AND time >= ? AND time < ?
 GROUP BY hr
 ORDER BY hr ASC
-`, UsageStateCommitted, userID, since, until)
+`
+	if s.dialect == DialectSQLite {
+		query = `
+SELECT
+  STRFTIME('%Y-%m-%d %H:00:00', time) as hr,
+  COUNT(1),
+  SUM(input_tokens + output_tokens),
+  SUM(CASE WHEN state=? THEN committed_usd ELSE 0 END)
+FROM usage_events
+WHERE user_id=? AND time >= ? AND time < ?
+GROUP BY hr
+ORDER BY hr ASC
+`
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, UsageStateCommitted, userID, since, until)
 	if err != nil {
 		return nil, fmt.Errorf("查询时间序列失败: %w", err)
 	}

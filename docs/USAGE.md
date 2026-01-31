@@ -3,6 +3,16 @@
 本文只提供“可直接复制运行”的部署命令。  
 环境变量与 `.env` 的详细配置项说明请先阅读：[`README.md`](https://github.com/FlowerRealm/realms/blob/master/README.md) 与 [`.env.example`](https://github.com/FlowerRealm/realms/blob/master/.env.example)。
 
+## 关于前后端分离（默认同源）
+
+Realms 的前端工程位于 `web/`，后端提供 `/api/*` 与 `/v1/*`；但对部署来说，默认推荐 **同源一体**：前后端由同一台服务器（同域名/端口）提供服务（更简单、也避免跨域 Cookie 问题）。
+
+- 使用官方 Docker 镜像：已内置前端构建产物（同源可直接访问 `/login`）
+- 前后端分离（外置前端）时：使用后端专用镜像 `flowerrealm/realms:backend`（或固定版本 `flowerrealm/realms:<TAG>-backend`），并设置 `FRONTEND_BASE_URL`
+- 使用裸机二进制/安装包：需要自行构建 `web/dist`（或设置 `FRONTEND_BASE_URL` 外置前端）
+
+更多说明见：[前后端分离](frontend.md)。
+
 ## 方式 0：安装包（Deb/Windows/macOS）
 
 从 GitHub Releases 下载对应版本的安装包/二进制产物（建议使用 tag，例如 `v1.2.3`）：

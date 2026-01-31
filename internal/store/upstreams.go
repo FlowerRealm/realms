@@ -236,6 +236,73 @@ VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	return id, nil
 }
 
+func (s *Store) UpdateUpstreamChannelBasics(ctx context.Context, channelID int64, name string, status int, priority int, promotion bool, allowServiceTier bool, disableStore bool, allowSafetyIdentifier bool) error {
+	if channelID == 0 {
+		return errors.New("channelID 不能为空")
+	}
+
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("name 不能为空")
+	}
+
+	promotionInt := 0
+	if promotion {
+		promotionInt = 1
+	}
+	allowServiceTierInt := 0
+	if allowServiceTier {
+		allowServiceTierInt = 1
+	}
+	disableStoreInt := 0
+	if disableStore {
+		disableStoreInt = 1
+	}
+	allowSafetyIdentifierInt := 0
+	if allowSafetyIdentifier {
+		allowSafetyIdentifierInt = 1
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("开始事务失败: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `
+UPDATE upstream_channels
+SET name=?,
+    status=?,
+    priority=?,
+    promotion=?,
+    allow_service_tier=?,
+    disable_store=?,
+    allow_safety_identifier=?,
+    updated_at=CURRENT_TIMESTAMP
+WHERE id=?
+`, name, status, priority, promotionInt, allowServiceTierInt, disableStoreInt, allowSafetyIdentifierInt, channelID)
+	if err != nil {
+		return fmt.Errorf("更新 upstream_channel 失败: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+
+	// 同步 channel_group_members（SSOT）：组内排序依赖 priority/promotion。
+	if _, err := tx.ExecContext(ctx, `
+UPDATE channel_group_members
+SET priority=?, promotion=?, updated_at=CURRENT_TIMESTAMP
+WHERE member_channel_id=?
+`, priority, promotionInt, channelID); err != nil {
+		return fmt.Errorf("更新 channel_group_members 失败: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("提交事务失败: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamChannel, error) {
 	var c UpstreamChannel
 	var promotion int

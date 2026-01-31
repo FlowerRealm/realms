@@ -63,3 +63,19 @@ jobs:
             REALMS_BUILD_DATE=${{ steps.build_date.outputs.value }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Build and push (backend only)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: backend
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ github.ref_name }}-backend
+            ${{ env.IMAGE_NAME }}:backend
+          build-args: |
+            REALMS_VERSION=${{ github.ref_name }}
+            REALMS_BUILD_DATE=${{ steps.build_date.outputs.value }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -9,6 +9,10 @@ dist/
 /vendor/
 /coverage.out
 
+# Frontend (Vite)
+web/node_modules/
+web/dist/
+
 # MkDocs build output
 /site/
 

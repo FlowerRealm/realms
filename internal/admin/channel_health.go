@@ -179,7 +179,7 @@ func runChannelTest(ctx context.Context, st channelTestStore, exec UpstreamDoer,
 	if ok {
 		return trimSummary(channelTestOKMessage(results, latencyMS, auto)), nil
 	}
-	return "", fmt.Errorf(trimSummary(channelTestFailMessage(results, latencyMS, auto)))
+	return "", fmt.Errorf("%s", trimSummary(channelTestFailMessage(results, latencyMS, auto)))
 }
 
 func defaultTestInput() string {

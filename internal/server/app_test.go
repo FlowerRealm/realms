@@ -1,10 +1,15 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-contrib/sessions/cookie"
+	"github.com/gin-gonic/gin"
 
 	"realms/internal/admin"
 	openaiapi "realms/internal/api/openai"
@@ -13,6 +18,7 @@ import (
 	"realms/internal/store"
 	"realms/internal/upstream"
 	"realms/internal/web"
+	"realms/router"
 )
 
 func newTestApp(t *testing.T, cfg config.Config) *App {
@@ -70,13 +76,54 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 		web:    webServer,
 		admin:  adminServer,
 		openai: openaiHandler,
-		mux:    http.NewServeMux(),
 	}
-	app.routes()
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+
+	sessionStore := cookie.NewStore([]byte("test-secret"))
+	sessionStore.Options(sessions.Options{
+		Path:     "/",
+		MaxAge:   2592000,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	engine.Use(sessions.Sessions(web.SessionCookieNameForSelfMode(cfg.SelfMode.Enable), sessionStore))
+
+	router.SetRouter(engine, router.Options{
+		Store:             st,
+		SelfMode:          cfg.SelfMode.Enable,
+		AllowOpenRegistration:         cfg.Security.AllowOpenRegistration,
+		EmailVerificationEnabledDefault: cfg.EmailVerif.Enable,
+		BillingDefault:     cfg.Billing,
+		PaymentDefault:     cfg.Payment,
+		SMTPDefault:        cfg.SMTP,
+		Web:               webServer,
+		Admin:             adminServer,
+		OpenAI:            openaiHandler,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+
+		Healthz: func(w http.ResponseWriter, r *http.Request) {
+			out := map[string]any{"ok": true}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_ = json.NewEncoder(w).Encode(out)
+		},
+		Version: func(w http.ResponseWriter, r *http.Request) {
+			out := map[string]any{"ok": true}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_ = json.NewEncoder(w).Encode(out)
+		},
+		RealmsIconSVG: app.handleRealmsIconSVG,
+		FaviconICO:    app.handleFaviconICO,
+
+		SubscriptionOrderPaidWebhook: app.handleSubscriptionOrderPaidWebhook,
+	})
+	app.engine = engine
 	return app
 }
 
-func TestRoutes_SelfMode_DisablesBillingAndTickets(t *testing.T) {
+func TestRoutes_SelfMode_DisablesBillingWebhooks(t *testing.T) {
 	cfg := config.Config{
 		SelfMode: config.SelfModeConfig{Enable: true},
 		Security: config.SecurityConfig{SubscriptionOrderWebhookSecret: "secret"},
@@ -87,20 +134,6 @@ func TestRoutes_SelfMode_DisablesBillingAndTickets(t *testing.T) {
 		method string
 		path   string
 	}{
-		{method: http.MethodGet, path: "/subscription"},
-		{method: http.MethodGet, path: "/topup"},
-		{method: http.MethodGet, path: "/pay/subscription/1"},
-		{method: http.MethodPost, path: "/pay/subscription/1/start"},
-		{method: http.MethodGet, path: "/tickets"},
-		{method: http.MethodGet, path: "/tickets/1"},
-
-		{method: http.MethodGet, path: "/admin/subscriptions"},
-		{method: http.MethodGet, path: "/admin/orders"},
-		{method: http.MethodGet, path: "/admin/payment-channels"},
-		{method: http.MethodGet, path: "/admin/settings/payment-channels"},
-		{method: http.MethodGet, path: "/admin/settings/payment-channels/1"},
-		{method: http.MethodGet, path: "/admin/tickets"},
-
 		{method: http.MethodPost, path: "/api/webhooks/subscription-orders/1/paid"},
 		{method: http.MethodPost, path: "/api/pay/stripe/webhook"},
 		{method: http.MethodGet, path: "/api/pay/epay/notify"},
@@ -135,40 +168,36 @@ func TestRoutes_DefaultMode_KeepsSubscriptionOrderWebhook(t *testing.T) {
 	}
 }
 
-func TestRoutes_DefaultMode_EnablesBillingAndTickets(t *testing.T) {
+func TestRoutes_SPAFallback(t *testing.T) {
 	cfg := config.Config{
 		SelfMode: config.SelfModeConfig{Enable: false},
 		Security: config.SecurityConfig{SubscriptionOrderWebhookSecret: "secret"},
 	}
 	app := newTestApp(t, cfg)
 
-	cases := []struct {
-		method string
-		path   string
-	}{
-		{method: http.MethodGet, path: "/subscription"},
-		{method: http.MethodGet, path: "/topup"},
-		{method: http.MethodGet, path: "/pay/subscription/1"},
-		{method: http.MethodPost, path: "/pay/subscription/1/start"},
-		{method: http.MethodGet, path: "/tickets"},
-		{method: http.MethodGet, path: "/tickets/1"},
-
-		{method: http.MethodGet, path: "/admin/subscriptions"},
-		{method: http.MethodGet, path: "/admin/orders"},
-		{method: http.MethodGet, path: "/admin/payment-channels"},
-		{method: http.MethodGet, path: "/admin/settings/payment-channels"},
-		{method: http.MethodGet, path: "/admin/settings/payment-channels/1"},
-		{method: http.MethodGet, path: "/admin/tickets"},
-	}
-
-	for _, tc := range cases {
-		req := httptest.NewRequest(tc.method, "http://example.com"+tc.path, nil)
+	t.Run("GET /login serves index", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://example.com/login", nil)
 		rr := httptest.NewRecorder()
 		app.Handler().ServeHTTP(rr, req)
-		if rr.Code == http.StatusNotFound {
-			t.Fatalf("%s %s expected status != %d, got %d", tc.method, tc.path, http.StatusNotFound, rr.Code)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
 		}
-	}
+		if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+			t.Fatalf("expected Content-Type text/html, got %q", ct)
+		}
+		if body := rr.Body.String(); !strings.Contains(body, "INDEX") {
+			t.Fatalf("expected index html body, got %q", body)
+		}
+	})
+
+	t.Run("GET /api/unknown returns 404", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://example.com/api/unknown", nil)
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("expected status %d, got %d", http.StatusNotFound, rr.Code)
+		}
+	})
 }
 
 func TestRoutes_NoChatFeature(t *testing.T) {
@@ -178,22 +207,23 @@ func TestRoutes_NoChatFeature(t *testing.T) {
 	}
 	app := newTestApp(t, cfg)
 
-	cases := []struct {
-		method string
-		path   string
-	}{
-		{method: http.MethodGet, path: "/chat"},
-		{method: http.MethodPost, path: "/api/chat/token"},
-	}
+	t.Run("GET /chat serves index (SPA handles 404)", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://example.com/chat", nil)
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+		}
+	})
 
-	for _, tc := range cases {
-		req := httptest.NewRequest(tc.method, "http://example.com"+tc.path, nil)
+	t.Run("POST /api/chat/token stays 404", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "http://example.com/api/chat/token", nil)
 		rr := httptest.NewRecorder()
 		app.Handler().ServeHTTP(rr, req)
 		if rr.Code != http.StatusNotFound {
-			t.Fatalf("%s %s expected status %d, got %d", tc.method, tc.path, http.StatusNotFound, rr.Code)
+			t.Fatalf("expected status %d, got %d", http.StatusNotFound, rr.Code)
 		}
-	}
+	})
 }
 
 func TestRoutes_Assets_IconAndFavicon(t *testing.T) {

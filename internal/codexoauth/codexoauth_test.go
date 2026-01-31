@@ -156,7 +156,7 @@ func TestFlowPendingCleanupAndOneTimeState(t *testing.T) {
 		RedirectURI:  "http://localhost:1455/auth/callback",
 		Scope:        "openid email profile offline_access",
 	})
-	f := NewFlow(nil, c, "sid", "http://localhost:8080")
+	f := NewFlow(nil, c, "sid", "test-secret", "http://localhost:8080")
 	f.ttl = 1 * time.Minute
 	f.pending["old"] = Pending{CreatedAt: time.Now().Add(-2 * f.ttl)}
 

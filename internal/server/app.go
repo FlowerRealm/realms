@@ -3,23 +3,30 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-contrib/sessions/cookie"
+	"github.com/gin-gonic/gin"
 
 	"realms/internal/admin"
 	openaiapi "realms/internal/api/openai"
 	"realms/internal/assets"
 	"realms/internal/codexoauth"
 	"realms/internal/config"
-	"realms/internal/middleware"
 	"realms/internal/proxylog"
 	"realms/internal/quota"
 	"realms/internal/scheduler"
@@ -28,6 +35,8 @@ import (
 	"realms/internal/upstream"
 	"realms/internal/version"
 	"realms/internal/web"
+	root "realms"
+	"realms/router"
 )
 
 type AppOptions struct {
@@ -49,7 +58,7 @@ type App struct {
 	sched         *scheduler.Scheduler
 	version       version.BuildInfo
 	ticketStorage *tickets.Storage
-	mux           *http.ServeMux
+	engine        *gin.Engine
 }
 
 func NewApp(opts AppOptions) (*App, error) {
@@ -65,12 +74,16 @@ func NewApp(opts AppOptions) (*App, error) {
 		publicBaseURL = strings.TrimRight(strings.TrimSpace(opts.Config.AppSettingsDefaults.SiteBaseURL), "/")
 	}
 	sessionCookieName := web.SessionCookieNameForSelfMode(opts.Config.SelfMode.Enable)
+	sessionSecret := strings.TrimSpace(os.Getenv("SESSION_SECRET"))
+	if sessionSecret == "" {
+		sessionSecret = randomSecret(32)
+	}
 
 	var oauthFlow *codexoauth.Flow
 	var codexClient *codexoauth.Client
 	if opts.Config.CodexOAuth.Enable {
 		codexClient = codexoauth.NewClient(opts.Config.CodexOAuth)
-		oauthFlow = codexoauth.NewFlow(st, codexClient, sessionCookieName, localBaseURL(opts.Config))
+		oauthFlow = codexoauth.NewFlow(st, codexClient, sessionCookieName, sessionSecret, localBaseURL(opts.Config))
 	}
 
 	ticketStorage := tickets.NewStorage(opts.Config.Tickets.AttachmentsDir)
@@ -137,13 +150,113 @@ func NewApp(opts AppOptions) (*App, error) {
 		sched:         sched,
 		version:       opts.Version,
 		ticketStorage: ticketStorage,
-		mux:           http.NewServeMux(),
 	}
 	if err := app.bootstrap(); err != nil {
 		return nil, err
 	}
-	app.routes()
+
+	if opts.Config.Env != "dev" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+	sessionStore := cookie.NewStore([]byte(sessionSecret))
+	sessionStore.Options(sessions.Options{
+		Path:     "/",
+		MaxAge:   2592000, // 30 days
+		HttpOnly: true,
+		Secure:   opts.Config.Env != "dev" && !opts.Config.Security.DisableSecureCookies,
+		SameSite: http.SameSiteStrictMode,
+	})
+	engine.Use(sessions.Sessions(sessionCookieName, sessionStore))
+
+	frontendBaseURL := strings.TrimSpace(os.Getenv("FRONTEND_BASE_URL"))
+	frontendDistDir := strings.TrimSpace(os.Getenv("FRONTEND_DIST_DIR"))
+	if frontendDistDir == "" {
+		frontendDistDir = "./web/dist"
+	}
+	var frontendFS fs.FS
+	frontendIndexPage := loadEmbeddedIndexHTML()
+	if len(frontendIndexPage) > 0 {
+		frontendFS = root.WebDistFS
+	} else {
+		frontendIndexPage = loadIndexHTML(frontendDistDir)
+	}
+
+	router.SetRouter(engine, router.Options{
+		Store:             st,
+		SelfMode:          opts.Config.SelfMode.Enable,
+		AllowOpenRegistration:         opts.Config.Security.AllowOpenRegistration,
+		EmailVerificationEnabledDefault: opts.Config.EmailVerif.Enable,
+		PublicBaseURLDefault:            publicBaseURL,
+		AdminTimeZoneDefault:            opts.Config.AppSettingsDefaults.AdminTimeZone,
+		BillingDefault:     opts.Config.Billing,
+		PaymentDefault:     opts.Config.Payment,
+		SMTPDefault:        opts.Config.SMTP,
+		TicketStorage:      ticketStorage,
+		FrontendBaseURL:   frontendBaseURL,
+		FrontendDistDir:   frontendDistDir,
+		FrontendIndexPage: frontendIndexPage,
+		FrontendFS:        frontendFS,
+		Web:               webServer,
+		Admin:             adminServer,
+		OpenAI:            openaiHandler,
+
+		CodexOAuthHandler: func() http.Handler {
+			if oauthFlow == nil {
+				return nil
+			}
+			return oauthFlow.Handler()
+		}(),
+
+		Healthz:       app.handleHealthz,
+		Version:       app.handleVersion,
+		RealmsIconSVG: app.handleRealmsIconSVG,
+		FaviconICO:    app.handleFaviconICO,
+
+		SubscriptionOrderPaidWebhook:  app.handleSubscriptionOrderPaidWebhook,
+		StripeWebhook:                 app.handleStripeWebhook,
+		StripeWebhookByPaymentChannel: app.handleStripeWebhookByPaymentChannel,
+		EPayNotify:                    app.handleEPayNotify,
+		EPayNotifyByPaymentChannel:    app.handleEPayNotifyByPaymentChannel,
+
+		RefreshCodexQuotasByEndpoint: app.RefreshCodexQuotasByEndpoint,
+		RefreshCodexQuota:            app.RefreshCodexQuota,
+	})
+	app.engine = engine
 	return app, nil
+}
+
+func randomSecret(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 10)
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+func loadEmbeddedIndexHTML() []byte {
+	b, err := fs.ReadFile(root.WebDistFS, "web/dist/index.html")
+	if err != nil || len(b) == 0 {
+		return nil
+	}
+	return b
+}
+
+func loadIndexHTML(distDir string) []byte {
+	dir := strings.TrimSpace(distDir)
+	if dir == "" {
+		return nil
+	}
+	p := filepath.Join(dir, "index.html")
+	b, err := os.ReadFile(p)
+	if err != nil || len(b) == 0 {
+		return nil
+	}
+	return b
 }
 
 func quotaProvider(st *store.Store) quota.Provider {
@@ -152,7 +265,7 @@ func quotaProvider(st *store.Store) quota.Provider {
 }
 
 func (a *App) Handler() http.Handler {
-	return a.mux
+	return a.engine
 }
 
 func (a *App) CodexOAuthCallbackHandler() http.Handler {
@@ -186,355 +299,6 @@ func localBaseURL(cfg config.Config) string {
 	return scheme + "://" + host + ":" + port
 }
 
-func (a *App) routes() {
-	selfMode := a.cfg.SelfMode.Enable
-	sessionCookieName := web.SessionCookieNameForSelfMode(selfMode)
-
-	a.mux.HandleFunc("GET /healthz", a.handleHealthz)
-	a.mux.HandleFunc("GET /api/version", a.handleVersion)
-	a.mux.HandleFunc("GET /assets/realms_icon.svg", a.handleRealmsIconSVG)
-	a.mux.HandleFunc("HEAD /assets/realms_icon.svg", a.handleRealmsIconSVG)
-	a.mux.HandleFunc("GET /favicon.ico", a.handleFaviconICO)
-	a.mux.HandleFunc("HEAD /favicon.ico", a.handleFaviconICO)
-
-	a.mux.Handle("GET /{$}", http.HandlerFunc(a.web.Index))
-	webPublicChain := func(h http.Handler) http.Handler {
-		return middleware.Chain(h,
-			middleware.RequestID,
-			middleware.AccessLog,
-			middleware.StripWebQuery,
-			middleware.FlashFromCookies,
-		)
-	}
-	a.mux.Handle("GET /login", webPublicChain(http.HandlerFunc(a.web.LoginPage)))
-	a.mux.Handle("POST /login", webPublicChain(http.HandlerFunc(a.web.Login)))
-	a.mux.Handle("GET /register", webPublicChain(http.HandlerFunc(a.web.RegisterPage)))
-	a.mux.Handle("POST /register", webPublicChain(http.HandlerFunc(a.web.Register)))
-
-	publicChain := func(h http.Handler) http.Handler {
-		return middleware.Chain(h,
-			middleware.RequestID,
-			middleware.AccessLog,
-			middleware.BodyCache(0),
-		)
-	}
-	a.mux.Handle("POST /oauth/token", publicChain(http.HandlerFunc(a.web.OAuthToken)))
-	publicFeatureChain := func(featureKey string, h http.Handler) http.Handler {
-		return middleware.Chain(h,
-			middleware.RequestID,
-			middleware.AccessLog,
-			middleware.FeatureGateEffective(a.store, selfMode, featureKey),
-			middleware.BodyCache(0),
-		)
-	}
-
-	if a.codexOAuth != nil {
-		a.mux.Handle("GET /auth/callback", publicChain(a.codexOAuth.Handler()))
-	}
-
-	a.mux.Handle("POST /api/email/verification/send", publicChain(http.HandlerFunc(a.web.APIEmailVerificationSend)))
-	if !selfMode {
-		a.mux.Handle("POST /api/webhooks/subscription-orders/{order_id}/paid", publicFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.handleSubscriptionOrderPaidWebhook)))
-		a.mux.Handle("POST /api/pay/stripe/webhook", publicFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.handleStripeWebhook)))
-		a.mux.Handle("POST /api/pay/stripe/webhook/{payment_channel_id}", publicFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.handleStripeWebhookByPaymentChannel)))
-		a.mux.Handle("GET /api/pay/epay/notify", publicFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.handleEPayNotify)))
-		a.mux.Handle("GET /api/pay/epay/notify/{payment_channel_id}", publicFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.handleEPayNotifyByPaymentChannel)))
-	}
-
-	apiChain := func(h http.Handler) http.Handler {
-		return middleware.Chain(h,
-			middleware.RequestID,
-			middleware.AccessLog,
-			middleware.TokenAuth(a.store),
-			middleware.BodyCache(0),
-		)
-	}
-	apiFeatureChain := func(featureKey string, h http.Handler) http.Handler {
-		return middleware.Chain(h,
-			middleware.RequestID,
-			middleware.AccessLog,
-			middleware.FeatureGateEffective(a.store, selfMode, featureKey),
-			middleware.TokenAuth(a.store),
-			middleware.BodyCache(0),
-		)
-	}
-	a.mux.Handle("POST /v1/responses", apiChain(http.HandlerFunc(a.openai.Responses)))
-	a.mux.Handle("POST /v1/chat/completions", apiChain(http.HandlerFunc(a.openai.ChatCompletions)))
-	a.mux.Handle("POST /v1/messages", apiChain(http.HandlerFunc(a.openai.Messages)))
-	a.mux.Handle("GET /v1/models", apiFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.openai.Models)))
-	a.mux.Handle("GET /v1beta/models", apiFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.openai.GeminiModels)))
-	a.mux.Handle("GET /v1beta/openai/models", apiFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.openai.Models)))
-	a.mux.Handle("POST /v1beta/models/{path...}", apiChain(http.HandlerFunc(a.openai.GeminiProxy)))
-	a.mux.Handle("GET /api/usage/windows", apiFeatureChain(store.SettingFeatureDisableWebUsage, http.HandlerFunc(a.web.APIUsageWindows)))
-	a.mux.Handle("GET /api/usage/events", apiFeatureChain(store.SettingFeatureDisableWebUsage, http.HandlerFunc(a.web.APIUsageEvents)))
-
-	webChain := func(h http.Handler) http.Handler {
-		return middleware.Chain(h,
-			middleware.RequestID,
-			middleware.AccessLog,
-			middleware.SessionAuth(a.store, sessionCookieName),
-			middleware.StripWebQuery,
-			middleware.FlashFromCookies,
-		)
-	}
-	webFeatureChain := func(featureKey string, h http.Handler) http.Handler {
-		return middleware.Chain(h,
-			middleware.RequestID,
-			middleware.AccessLog,
-			middleware.FeatureGateEffective(a.store, selfMode, featureKey),
-			middleware.SessionAuth(a.store, sessionCookieName),
-			middleware.StripWebQuery,
-			middleware.FlashFromCookies,
-		)
-	}
-	webCSRFChain := func(h http.Handler) http.Handler {
-		return middleware.Chain(h,
-			middleware.RequestID,
-			middleware.AccessLog,
-			middleware.SessionAuth(a.store, sessionCookieName),
-			middleware.StripWebQuery,
-			middleware.FlashFromCookies,
-			middleware.CSRF(),
-		)
-	}
-	webCSRFFeatureChain := func(featureKey string, h http.Handler) http.Handler {
-		return middleware.Chain(h,
-			middleware.RequestID,
-			middleware.AccessLog,
-			middleware.FeatureGateEffective(a.store, selfMode, featureKey),
-			middleware.SessionAuth(a.store, sessionCookieName),
-			middleware.StripWebQuery,
-			middleware.FlashFromCookies,
-			middleware.CSRF(),
-		)
-	}
-	webUploadFeatureChain := func(featureKey string, h http.Handler) http.Handler {
-		return middleware.Chain(h,
-			middleware.RequestID,
-			middleware.AccessLog,
-			middleware.FeatureGateEffective(a.store, selfMode, featureKey),
-			middleware.SessionAuth(a.store, sessionCookieName),
-			middleware.StripWebQuery,
-			middleware.FlashFromCookies,
-			middleware.CSRF(),
-		)
-	}
-	adminChain := func(h http.Handler) http.Handler {
-		return middleware.Chain(h,
-			middleware.RequestID,
-			middleware.AccessLog,
-			middleware.SessionAuth(a.store, sessionCookieName),
-			middleware.RequireRoles(store.UserRoleRoot),
-			middleware.CSRF(),
-		)
-	}
-	adminFeatureChain := func(featureKey string, h http.Handler) http.Handler {
-		return middleware.Chain(h,
-			middleware.RequestID,
-			middleware.AccessLog,
-			middleware.FeatureGateEffective(a.store, selfMode, featureKey),
-			middleware.SessionAuth(a.store, sessionCookieName),
-			middleware.RequireRoles(store.UserRoleRoot),
-			middleware.CSRF(),
-		)
-	}
-	adminFeatureChain2 := func(featureKey1, featureKey2 string, h http.Handler) http.Handler {
-		return middleware.Chain(h,
-			middleware.RequestID,
-			middleware.AccessLog,
-			middleware.FeatureGateEffective(a.store, selfMode, featureKey1),
-			middleware.FeatureGateEffective(a.store, selfMode, featureKey2),
-			middleware.SessionAuth(a.store, sessionCookieName),
-			middleware.RequireRoles(store.UserRoleRoot),
-			middleware.CSRF(),
-		)
-	}
-	adminUploadFeatureChain := func(featureKey string, h http.Handler) http.Handler {
-		return middleware.Chain(h,
-			middleware.RequestID,
-			middleware.AccessLog,
-			middleware.FeatureGateEffective(a.store, selfMode, featureKey),
-			middleware.SessionAuth(a.store, web.SessionCookieName),
-			middleware.RequireRoles(store.UserRoleRoot),
-			middleware.CSRF(),
-		)
-	}
-
-	a.mux.Handle("GET /admin", adminChain(http.HandlerFunc(a.admin.Home)))
-	a.mux.Handle("GET /admin/channels", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.Channels)))
-	a.mux.Handle("GET /admin/channels/{channel_id}/detail", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.ChannelDetail)))
-	a.mux.Handle("POST /admin/channels", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.CreateChannel)))
-	a.mux.Handle("POST /admin/channels/{channel_id}", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.UpdateChannel)))
-	a.mux.Handle("POST /admin/channels/{channel_id}/request_policy", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.UpdateChannelRequestPolicy)))
-	a.mux.Handle("POST /admin/channels/{channel_id}/param_override", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.UpdateChannelParamOverride)))
-	a.mux.Handle("POST /admin/channels/{channel_id}/header_override", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.UpdateChannelHeaderOverride)))
-	a.mux.Handle("POST /admin/channels/{channel_id}/status_code_mapping", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.UpdateChannelStatusCodeMapping)))
-	a.mux.Handle("POST /admin/channels/{channel_id}/model_suffix_preserve", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.UpdateChannelModelSuffixPreserve)))
-	a.mux.Handle("POST /admin/channels/{channel_id}/request_body_blacklist", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.UpdateChannelRequestBodyBlacklist)))
-	a.mux.Handle("POST /admin/channels/{channel_id}/request_body_whitelist", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.UpdateChannelRequestBodyWhitelist)))
-	a.mux.Handle("POST /admin/channels/{channel_id}/meta", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.UpdateChannelNewAPIMeta)))
-	a.mux.Handle("POST /admin/channels/{channel_id}/setting", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.UpdateChannelNewAPISetting)))
-	a.mux.Handle("GET /admin/channel-groups", adminFeatureChain(store.SettingFeatureDisableAdminChannelGroups, http.HandlerFunc(a.admin.ChannelGroups)))
-	a.mux.Handle("POST /admin/channel-groups", adminFeatureChain(store.SettingFeatureDisableAdminChannelGroups, http.HandlerFunc(a.admin.CreateChannelGroup)))
-	a.mux.Handle("POST /admin/channel-groups/{group_id}", adminFeatureChain(store.SettingFeatureDisableAdminChannelGroups, http.HandlerFunc(a.admin.UpdateChannelGroup)))
-	a.mux.Handle("GET /admin/channel-groups/{group_id}", adminFeatureChain(store.SettingFeatureDisableAdminChannelGroups, http.HandlerFunc(a.admin.ChannelGroupDetail)))
-	a.mux.Handle("POST /admin/channel-groups/{group_id}/children/groups", adminFeatureChain(store.SettingFeatureDisableAdminChannelGroups, http.HandlerFunc(a.admin.CreateChildChannelGroup)))
-	a.mux.Handle("POST /admin/channel-groups/{group_id}/children/channels", adminFeatureChain(store.SettingFeatureDisableAdminChannelGroups, http.HandlerFunc(a.admin.AddChannelGroupChannelMember)))
-	a.mux.Handle("POST /admin/channel-groups/{group_id}/children/groups/{child_group_id}/delete", adminFeatureChain(store.SettingFeatureDisableAdminChannelGroups, http.HandlerFunc(a.admin.DeleteChannelGroupGroupMember)))
-	a.mux.Handle("POST /admin/channel-groups/{group_id}/children/channels/{channel_id}/delete", adminFeatureChain(store.SettingFeatureDisableAdminChannelGroups, http.HandlerFunc(a.admin.DeleteChannelGroupChannelMember)))
-	a.mux.Handle("POST /admin/channel-groups/{group_id}/children/reorder", adminFeatureChain(store.SettingFeatureDisableAdminChannelGroups, http.HandlerFunc(a.admin.ReorderChannelGroupMembers)))
-	a.mux.Handle("POST /admin/channel-groups/{group_id}/delete", adminFeatureChain(store.SettingFeatureDisableAdminChannelGroups, http.HandlerFunc(a.admin.DeleteChannelGroup)))
-	a.mux.Handle("POST /admin/channels/reorder", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.ReorderChannels)))
-	// 兼容：部分前端/代理可能无法正确透传 path 参数，允许从表单 channel_id 读取。
-	a.mux.Handle("POST /admin/channels/test", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.TestChannel)))
-	a.mux.Handle("POST /admin/channels/{channel_id}/test", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.TestChannel)))
-	a.mux.Handle("POST /admin/channels/{channel_id}/promote", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.PinChannel)))
-	a.mux.Handle("POST /admin/channels/{channel_id}/delete", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.DeleteChannel)))
-	a.mux.Handle("GET /admin/channels/{channel_id}/models", adminFeatureChain2(store.SettingFeatureDisableAdminChannels, store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.ChannelModels)))
-	a.mux.Handle("POST /admin/channels/{channel_id}/models", adminFeatureChain2(store.SettingFeatureDisableAdminChannels, store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.CreateChannelModel)))
-	a.mux.Handle("GET /admin/channels/{channel_id}/models/{binding_id}", adminFeatureChain2(store.SettingFeatureDisableAdminChannels, store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.ChannelModel)))
-	a.mux.Handle("POST /admin/channels/{channel_id}/models/{binding_id}", adminFeatureChain2(store.SettingFeatureDisableAdminChannels, store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.UpdateChannelModel)))
-	a.mux.Handle("POST /admin/channels/{channel_id}/models/{binding_id}/delete", adminFeatureChain2(store.SettingFeatureDisableAdminChannels, store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.DeleteChannelModel)))
-	a.mux.Handle("GET /admin/channels/{channel_id}/endpoints", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.Endpoints)))
-	a.mux.Handle("POST /admin/channels/{channel_id}/endpoints", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.CreateEndpoint)))
-	a.mux.Handle("POST /admin/endpoints/{endpoint_id}/delete", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.DeleteEndpoint)))
-	a.mux.Handle("POST /admin/endpoints/{endpoint_id}/openai-credentials", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.CreateOpenAICredential)))
-	a.mux.Handle("POST /admin/endpoints/{endpoint_id}/anthropic-credentials", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.CreateAnthropicCredential)))
-	a.mux.Handle("POST /admin/openai-credentials/{credential_id}/delete", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.DeleteOpenAICredential)))
-	a.mux.Handle("POST /admin/anthropic-credentials/{credential_id}/delete", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.DeleteAnthropicCredential)))
-	a.mux.Handle("GET /admin/endpoints/{endpoint_id}/codex-accounts", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.CodexAccounts)))
-	a.mux.Handle("POST /admin/endpoints/{endpoint_id}/codex-accounts", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.CreateCodexAccount)))
-	a.mux.Handle("POST /admin/endpoints/{endpoint_id}/codex-accounts/refresh", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.RefreshCodexQuotasByEndpoint)))
-	a.mux.Handle("POST /admin/endpoints/{endpoint_id}/codex-oauth/start", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.StartCodexOAuth)))
-	a.mux.Handle("POST /admin/endpoints/{endpoint_id}/codex-oauth/complete", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.CompleteCodexOAuth)))
-	a.mux.Handle("POST /admin/codex-accounts/{account_id}/delete", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.DeleteCodexAccount)))
-	a.mux.Handle("POST /admin/codex-accounts/{account_id}/refresh", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.RefreshCodexQuota)))
-
-	// 批量注册API
-	a.mux.Handle("POST /admin/batch-register", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.StartBatchRegister)))
-	a.mux.Handle("GET /admin/batch-register-progress/{task_id}", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.StreamBatchRegisterProgress)))
-	a.mux.Handle("POST /admin/batch-register/{task_id}/cancel", adminFeatureChain(store.SettingFeatureDisableAdminChannels, http.HandlerFunc(a.admin.CancelBatchRegister)))
-
-	a.mux.Handle("GET /admin/users", adminFeatureChain(store.SettingFeatureDisableAdminUsers, http.HandlerFunc(a.admin.Users)))
-	a.mux.Handle("POST /admin/users", adminFeatureChain(store.SettingFeatureDisableAdminUsers, http.HandlerFunc(a.admin.CreateUser)))
-	a.mux.Handle("POST /admin/users/{user_id}", adminFeatureChain(store.SettingFeatureDisableAdminUsers, http.HandlerFunc(a.admin.UpdateUser)))
-	a.mux.Handle("POST /admin/users/{user_id}/balance", adminFeatureChain(store.SettingFeatureDisableAdminUsers, http.HandlerFunc(a.admin.AddUserBalance)))
-	a.mux.Handle("POST /admin/users/{user_id}/profile", adminFeatureChain(store.SettingFeatureDisableAdminUsers, http.HandlerFunc(a.admin.UpdateUserProfile)))
-	a.mux.Handle("POST /admin/users/{user_id}/password", adminFeatureChain(store.SettingFeatureDisableAdminUsers, http.HandlerFunc(a.admin.UpdateUserPassword)))
-	a.mux.Handle("POST /admin/users/{user_id}/delete", adminFeatureChain(store.SettingFeatureDisableAdminUsers, http.HandlerFunc(a.admin.DeleteUser)))
-	if !selfMode {
-		a.mux.Handle("GET /admin/subscriptions", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.Subscriptions)))
-		a.mux.Handle("POST /admin/subscriptions", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.CreateSubscriptionPlan)))
-		a.mux.Handle("GET /admin/subscriptions/{plan_id}", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.SubscriptionPlan)))
-		a.mux.Handle("POST /admin/subscriptions/{plan_id}", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.UpdateSubscriptionPlan)))
-		a.mux.Handle("POST /admin/subscriptions/{plan_id}/delete", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.DeleteSubscriptionPlan)))
-		a.mux.Handle("GET /admin/orders", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.Orders)))
-		a.mux.Handle("POST /admin/orders/{order_id}/approve", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.ApproveSubscriptionOrder)))
-		a.mux.Handle("POST /admin/orders/{order_id}/reject", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.RejectSubscriptionOrder)))
-		a.mux.Handle("GET /admin/settings/payment-channels", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.PaymentChannels)))
-		a.mux.Handle("POST /admin/settings/payment-channels", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.CreatePaymentChannel)))
-		a.mux.Handle("GET /admin/settings/payment-channels/{payment_channel_id}", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.PaymentChannel)))
-		a.mux.Handle("POST /admin/settings/payment-channels/{payment_channel_id}", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.UpdatePaymentChannel)))
-		a.mux.Handle("POST /admin/settings/payment-channels/{payment_channel_id}/delete", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.DeletePaymentChannel)))
-
-		a.mux.Handle("GET /admin/payment-channels", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			target := "/admin/settings/payment-channels"
-			if r.URL.RawQuery != "" {
-				target += "?" + r.URL.RawQuery
-			}
-			http.Redirect(w, r, target, http.StatusFound)
-		})))
-		a.mux.Handle("POST /admin/payment-channels", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.CreatePaymentChannel)))
-		a.mux.Handle("GET /admin/payment-channels/{payment_channel_id}", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			target := "/admin/settings/payment-channels?edit=" + strings.TrimSpace(r.PathValue("payment_channel_id"))
-			if r.URL.RawQuery != "" {
-				target += "&" + r.URL.RawQuery
-			}
-			http.Redirect(w, r, target, http.StatusFound)
-		})))
-		a.mux.Handle("POST /admin/payment-channels/{payment_channel_id}", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.UpdatePaymentChannel)))
-		a.mux.Handle("POST /admin/payment-channels/{payment_channel_id}/delete", adminFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.admin.DeletePaymentChannel)))
-	}
-	a.mux.Handle("GET /admin/usage", adminFeatureChain(store.SettingFeatureDisableAdminUsage, http.HandlerFunc(a.admin.Usage)))
-	a.mux.Handle("GET /admin/usage/events/{event_id}/detail", adminFeatureChain(store.SettingFeatureDisableAdminUsage, http.HandlerFunc(a.admin.UsageEventDetailAPI)))
-	a.mux.Handle("GET /admin/settings", adminChain(http.HandlerFunc(a.admin.Settings)))
-	a.mux.Handle("POST /admin/settings", adminChain(http.HandlerFunc(a.admin.UpdateSettings)))
-	a.mux.Handle("GET /admin/backup", adminChain(http.HandlerFunc(a.admin.Backup)))
-	a.mux.Handle("GET /admin/export", adminChain(http.HandlerFunc(a.admin.Export)))
-	a.mux.Handle("POST /admin/import", adminChain(http.HandlerFunc(a.admin.Import)))
-	a.mux.Handle("GET /admin/oauth-apps", adminChain(http.HandlerFunc(a.admin.OAuthApps)))
-	a.mux.Handle("POST /admin/oauth-apps", adminChain(http.HandlerFunc(a.admin.CreateOAuthApp)))
-	a.mux.Handle("GET /admin/oauth-apps/{app_id}", adminChain(http.HandlerFunc(a.admin.OAuthApp)))
-	a.mux.Handle("POST /admin/oauth-apps/{app_id}", adminChain(http.HandlerFunc(a.admin.UpdateOAuthApp)))
-	a.mux.Handle("POST /admin/oauth-apps/{app_id}/rotate-secret", adminChain(http.HandlerFunc(a.admin.RotateOAuthAppSecret)))
-	a.mux.Handle("GET /admin/models", adminFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.Models)))
-	a.mux.Handle("POST /admin/models", adminFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.CreateModel)))
-	a.mux.Handle("POST /admin/models/library-lookup", adminFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.ModelLibraryLookup)))
-	a.mux.Handle("POST /admin/models/import-pricing", adminUploadFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.ImportModelPricing)))
-	a.mux.Handle("GET /admin/models/{model_id}", adminFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.Model)))
-	a.mux.Handle("POST /admin/models/{model_id}", adminFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.UpdateModel)))
-	a.mux.Handle("POST /admin/models/{model_id}/delete", adminFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.admin.DeleteModel)))
-	if !selfMode {
-		a.mux.Handle("GET /admin/tickets", adminFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.admin.Tickets)))
-		a.mux.Handle("GET /admin/tickets/{ticket_id}", adminFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.admin.Ticket)))
-		a.mux.Handle("POST /admin/tickets/{ticket_id}/reply", adminUploadFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.admin.ReplyTicket)))
-		a.mux.Handle("POST /admin/tickets/{ticket_id}/close", adminFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.admin.CloseTicket)))
-		a.mux.Handle("POST /admin/tickets/{ticket_id}/reopen", adminFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.admin.ReopenTicket)))
-		a.mux.Handle("GET /admin/tickets/{ticket_id}/attachments/{attachment_id}", adminFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.admin.TicketAttachmentDownload)))
-	}
-	a.mux.Handle("GET /admin/announcements", adminFeatureChain(store.SettingFeatureDisableAdminAnnouncements, http.HandlerFunc(a.admin.Announcements)))
-	a.mux.Handle("POST /admin/announcements", adminFeatureChain(store.SettingFeatureDisableAdminAnnouncements, http.HandlerFunc(a.admin.CreateAnnouncement)))
-	a.mux.Handle("POST /admin/announcements/{announcement_id}", adminFeatureChain(store.SettingFeatureDisableAdminAnnouncements, http.HandlerFunc(a.admin.UpdateAnnouncementStatus)))
-	a.mux.Handle("POST /admin/announcements/{announcement_id}/delete", adminFeatureChain(store.SettingFeatureDisableAdminAnnouncements, http.HandlerFunc(a.admin.DeleteAnnouncement)))
-
-	a.mux.Handle("GET /oauth/authorize", webChain(http.HandlerFunc(a.web.OAuthAuthorizePage)))
-	a.mux.Handle("POST /oauth/authorize", webCSRFChain(http.HandlerFunc(a.web.OAuthAuthorize)))
-
-	a.mux.Handle("GET /dashboard", webChain(http.HandlerFunc(a.web.Dashboard)))
-	a.mux.Handle("GET /announcements", webFeatureChain(store.SettingFeatureDisableWebAnnouncements, http.HandlerFunc(a.web.AnnouncementsPage)))
-	a.mux.Handle("GET /announcements/{announcement_id}", webFeatureChain(store.SettingFeatureDisableWebAnnouncements, http.HandlerFunc(a.web.AnnouncementDetailPage)))
-	a.mux.Handle("GET /account", webChain(http.HandlerFunc(a.web.AccountPage)))
-	a.mux.Handle("GET /tokens", webFeatureChain(store.SettingFeatureDisableWebTokens, http.HandlerFunc(a.web.TokensPage)))
-	a.mux.Handle("GET /models", webFeatureChain(store.SettingFeatureDisableModels, http.HandlerFunc(a.web.ModelsPage)))
-	if !selfMode {
-		a.mux.Handle("GET /subscription", webFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.web.SubscriptionPage)))
-		a.mux.Handle("GET /topup", webFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.web.TopupPage)))
-	}
-	a.mux.Handle("GET /usage", webFeatureChain(store.SettingFeatureDisableWebUsage, http.HandlerFunc(a.web.UsagePage)))
-	a.mux.Handle("GET /usage/before/{cursor_id}", webFeatureChain(store.SettingFeatureDisableWebUsage, http.HandlerFunc(a.web.UsageBeforePage)))
-	a.mux.Handle("GET /usage/after/{cursor_id}", webFeatureChain(store.SettingFeatureDisableWebUsage, http.HandlerFunc(a.web.UsageAfterPage)))
-	a.mux.Handle("GET /usage/events/{event_id}/detail", webFeatureChain(store.SettingFeatureDisableWebUsage, http.HandlerFunc(a.web.UsageEventDetailAPI)))
-	a.mux.Handle("POST /usage/filter", webCSRFFeatureChain(store.SettingFeatureDisableWebUsage, http.HandlerFunc(a.web.UsageFilter)))
-	if !selfMode {
-		a.mux.Handle("GET /tickets", webFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.web.TicketsPage)))
-		a.mux.Handle("GET /tickets/open", webFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.web.TicketsOpenPage)))
-		a.mux.Handle("GET /tickets/closed", webFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.web.TicketsClosedPage)))
-		a.mux.Handle("GET /tickets/new", webFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.web.TicketNewPage)))
-		a.mux.Handle("POST /tickets/new", webUploadFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.web.CreateTicket)))
-		a.mux.Handle("GET /tickets/{ticket_id}", webFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.web.TicketDetailPage)))
-		a.mux.Handle("POST /tickets/{ticket_id}/reply", webUploadFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.web.ReplyTicket)))
-		a.mux.Handle("GET /tickets/{ticket_id}/attachments/{attachment_id}", webFeatureChain(store.SettingFeatureDisableTickets, http.HandlerFunc(a.web.TicketAttachmentDownload)))
-	}
-	a.mux.Handle("POST /account/username", webCSRFChain(http.HandlerFunc(a.web.AccountUpdateUsername)))
-	a.mux.Handle("POST /account/email", webCSRFChain(http.HandlerFunc(a.web.AccountUpdateEmail)))
-	a.mux.Handle("POST /account/password", webCSRFChain(http.HandlerFunc(a.web.AccountUpdatePassword)))
-	if !selfMode {
-		a.mux.Handle("POST /subscription/purchase", webCSRFFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.web.PurchaseSubscription)))
-		a.mux.Handle("POST /topup/create", webCSRFFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.web.CreateTopupOrder)))
-		a.mux.Handle("GET /pay/{kind}/{order_id}", webFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.web.PayPage)))
-		a.mux.Handle("GET /pay/{kind}/{order_id}/success", webFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.web.PayReturnSuccess)))
-		a.mux.Handle("GET /pay/{kind}/{order_id}/cancel", webFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.web.PayReturnCancel)))
-		a.mux.Handle("POST /pay/{kind}/{order_id}/start", webCSRFFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.web.StartPayment)))
-		a.mux.Handle("POST /pay/{kind}/{order_id}/cancel", webCSRFFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(a.web.CancelPayOrder)))
-	}
-	a.mux.Handle("POST /tokens/new", webCSRFFeatureChain(store.SettingFeatureDisableWebTokens, http.HandlerFunc(a.web.CreateToken)))
-	a.mux.Handle("POST /tokens/rotate", webCSRFFeatureChain(store.SettingFeatureDisableWebTokens, http.HandlerFunc(a.web.RotateToken)))
-	a.mux.Handle("POST /tokens/revoke", webCSRFFeatureChain(store.SettingFeatureDisableWebTokens, http.HandlerFunc(a.web.RevokeToken)))
-	a.mux.Handle("POST /tokens/delete", webCSRFFeatureChain(store.SettingFeatureDisableWebTokens, http.HandlerFunc(a.web.DeleteToken)))
-	a.mux.Handle("POST /announcements/{announcement_id}/read", webCSRFFeatureChain(store.SettingFeatureDisableWebAnnouncements, http.HandlerFunc(a.web.AnnouncementMarkRead)))
-	a.mux.Handle("POST /logout", webCSRFChain(http.HandlerFunc(a.web.Logout)))
-}
-
 func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	type resp struct {
 		OK      bool   `json:"ok"`
@@ -545,11 +309,19 @@ func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {
 		DBOK bool `json:"db_ok"`
 
 		AllowOpenRegistration bool `json:"allow_open_registration"`
+		EmailVerificationEnabled bool `json:"email_verification_enabled"`
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
 	dbOK := a.db.PingContext(ctx) == nil
+
+	emailVerifEnabled := a.cfg.EmailVerif.Enable
+	if a.store != nil {
+		if v, ok, err := a.store.GetBoolAppSetting(ctx, store.SettingEmailVerificationEnable); err == nil && ok {
+			emailVerifEnabled = v
+		}
+	}
 
 	out := resp{
 		OK:                    true,
@@ -558,6 +330,7 @@ func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {
 		Date:                  a.version.Date,
 		DBOK:                  dbOK,
 		AllowOpenRegistration: a.cfg.Security.AllowOpenRegistration,
+		EmailVerificationEnabled: emailVerifEnabled,
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

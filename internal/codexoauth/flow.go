@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	gorillasessions "github.com/gorilla/sessions"
 
 	"realms/internal/auth"
 	"realms/internal/config"
@@ -21,9 +24,10 @@ type Pending struct {
 }
 
 type Flow struct {
-	st         *store.Store
-	client     *Client
-	cookieName string
+	st          *store.Store
+	client      *Client
+	cookieName  string
+	cookieStore *gorillasessions.CookieStore
 
 	returnBaseURL string
 
@@ -32,11 +36,18 @@ type Flow struct {
 	ttl     time.Duration
 }
 
-func NewFlow(st *store.Store, client *Client, cookieName string, returnBaseURL string) *Flow {
+func NewFlow(st *store.Store, client *Client, cookieName string, sessionSecret string, returnBaseURL string) *Flow {
+	secret := strings.TrimSpace(sessionSecret)
+	var cookieStore *gorillasessions.CookieStore
+	if secret != "" {
+		cookieStore = gorillasessions.NewCookieStore([]byte(secret))
+	}
+
 	return &Flow{
 		st:            st,
 		client:        client,
 		cookieName:    cookieName,
+		cookieStore:   cookieStore,
 		returnBaseURL: strings.TrimRight(returnBaseURL, "/"),
 		pending:       make(map[string]Pending),
 		ttl:           30 * time.Minute,
@@ -129,24 +140,25 @@ func (f *Flow) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rawSession := ""
-	if c, err := r.Cookie(f.cookieName); err == nil {
-		rawSession = c.Value
+	if f.cookieStore == nil {
+		writeCallbackHTML(w, http.StatusUnauthorized, "Codex OAuth 失败", UserMessage(Wrap(ErrCallbackMissingSessionCookie, fmt.Errorf("missing cookie store"))), f.callbackReturnURL(r.Context(), pending.EndpointID, "error"))
+		return
 	}
-	if rawSession == "" {
+	cookieSession, err := f.cookieStore.Get(r, f.cookieName)
+	if err != nil || cookieSession == nil {
 		writeCallbackHTML(w, http.StatusUnauthorized, "Codex OAuth 失败", UserMessage(Wrap(ErrCallbackMissingSessionCookie, fmt.Errorf("missing session cookie"))), f.callbackReturnURL(r.Context(), pending.EndpointID, "error"))
 		return
 	}
-	sess, err := f.st.GetSessionByRaw(r.Context(), rawSession)
-	if err != nil {
-		writeCallbackHTML(w, http.StatusUnauthorized, "Codex OAuth 失败", UserMessage(Wrap(ErrCallbackInvalidSession, err)), f.callbackReturnURL(r.Context(), pending.EndpointID, "error"))
+	userID, ok := int64FromSessionValue(cookieSession.Values["id"])
+	if !ok || userID <= 0 {
+		writeCallbackHTML(w, http.StatusUnauthorized, "Codex OAuth 失败", UserMessage(Wrap(ErrCallbackInvalidSession, fmt.Errorf("missing id"))), f.callbackReturnURL(r.Context(), pending.EndpointID, "error"))
 		return
 	}
-	if sess.UserID != pending.ActorUserID {
+	if pending.ActorUserID > 0 && userID != pending.ActorUserID {
 		writeCallbackHTML(w, http.StatusForbidden, "Codex OAuth 失败", UserMessage(Wrap(ErrCallbackActorMismatch, fmt.Errorf("actor mismatch"))), f.callbackReturnURL(r.Context(), pending.EndpointID, "error"))
 		return
 	}
-	user, err := f.st.GetUserByID(r.Context(), sess.UserID)
+	user, err := f.st.GetUserByID(r.Context(), userID)
 	if err != nil {
 		writeCallbackHTML(w, http.StatusUnauthorized, "Codex OAuth 失败", UserMessage(Wrap(ErrCallbackUserNotFound, err)), f.callbackReturnURL(r.Context(), pending.EndpointID, "error"))
 		return
@@ -189,6 +201,25 @@ func (f *Flow) handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeCallbackHTML(w, http.StatusOK, "Codex OAuth 授权成功", "已成功保存账号凭据，正在跳转到管理后台。", f.callbackReturnURL(r.Context(), pending.EndpointID, "ok"))
+}
+
+func int64FromSessionValue(v any) (int64, bool) {
+	switch x := v.(type) {
+	case int64:
+		return x, true
+	case int:
+		return int64(x), true
+	case float64:
+		return int64(x), true
+	case string:
+		n, err := strconv.ParseInt(strings.TrimSpace(x), 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return n, true
+	default:
+		return 0, false
+	}
 }
 
 func claimString(m map[string]any, keys ...string) string {
