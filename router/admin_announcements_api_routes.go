@@ -201,4 +201,3 @@ func adminDeleteAnnouncementHandler(opts Options) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已删除"})
 	}
 }
-

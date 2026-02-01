@@ -40,50 +40,6 @@ func billingConfigEffective(ctx context.Context, opts Options) config.BillingCon
 	return cfg
 }
 
-func paymentConfigEffective(ctx context.Context, opts Options) config.PaymentConfig {
-	cfg := opts.PaymentDefault
-	if opts.Store == nil {
-		return cfg
-	}
-
-	if v, ok, err := opts.Store.GetBoolAppSetting(ctx, store.SettingPaymentStripeEnable); err == nil && ok {
-		cfg.Stripe.Enable = v
-	}
-	if v, ok, err := opts.Store.GetStringAppSetting(ctx, store.SettingPaymentStripeSecretKey); err == nil && ok {
-		cfg.Stripe.SecretKey = v
-	}
-	if v, ok, err := opts.Store.GetStringAppSetting(ctx, store.SettingPaymentStripeWebhookSecret); err == nil && ok {
-		cfg.Stripe.WebhookSecret = v
-	}
-	if v, ok, err := opts.Store.GetStringAppSetting(ctx, store.SettingPaymentStripeCurrency); err == nil && ok {
-		cfg.Stripe.Currency = v
-	}
-
-	if v, ok, err := opts.Store.GetBoolAppSetting(ctx, store.SettingPaymentEPayEnable); err == nil && ok {
-		cfg.EPay.Enable = v
-	}
-	if v, ok, err := opts.Store.GetStringAppSetting(ctx, store.SettingPaymentEPayGateway); err == nil && ok {
-		cfg.EPay.Gateway = v
-	}
-	if v, ok, err := opts.Store.GetStringAppSetting(ctx, store.SettingPaymentEPayPartnerID); err == nil && ok {
-		cfg.EPay.PartnerID = v
-	}
-	if v, ok, err := opts.Store.GetStringAppSetting(ctx, store.SettingPaymentEPayKey); err == nil && ok {
-		cfg.EPay.Key = v
-	}
-
-	cfg.Stripe.Currency = strings.ToLower(strings.TrimSpace(cfg.Stripe.Currency))
-	if cfg.Stripe.Currency == "" {
-		cfg.Stripe.Currency = "cny"
-	}
-	cfg.EPay.Gateway = strings.TrimSpace(cfg.EPay.Gateway)
-	cfg.EPay.PartnerID = strings.TrimSpace(cfg.EPay.PartnerID)
-	cfg.EPay.Key = strings.TrimSpace(cfg.EPay.Key)
-	cfg.Stripe.SecretKey = strings.TrimSpace(cfg.Stripe.SecretKey)
-	cfg.Stripe.WebhookSecret = strings.TrimSpace(cfg.Stripe.WebhookSecret)
-	return cfg
-}
-
 func uiBaseURLFromRequest(ctx context.Context, opts Options, r *http.Request) string {
 	if strings.TrimSpace(opts.FrontendBaseURL) != "" {
 		return strings.TrimRight(strings.TrimSpace(opts.FrontendBaseURL), "/")

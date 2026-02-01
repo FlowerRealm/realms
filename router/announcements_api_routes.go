@@ -17,7 +17,7 @@ type announcementListItemAPI struct {
 }
 
 type announcementsListAPIResponse struct {
-	UnreadCount int64                    `json:"unread_count"`
+	UnreadCount int64                     `json:"unread_count"`
 	Items       []announcementListItemAPI `json:"items"`
 }
 

@@ -24,7 +24,7 @@ type featureBanItemView struct {
 }
 
 type featureBanGroupView struct {
-	Title string              `json:"title"`
+	Title string               `json:"title"`
 	Items []featureBanItemView `json:"items"`
 }
 
@@ -112,14 +112,6 @@ var startupConfigKeys = []string{
 	"REALMS_BILLING_ENABLE_PAY_AS_YOU_GO",
 	"REALMS_BILLING_MIN_TOPUP_CNY",
 	"REALMS_BILLING_CREDIT_USD_PER_CNY",
-	"REALMS_PAYMENT_EPAY_ENABLE",
-	"REALMS_PAYMENT_EPAY_GATEWAY",
-	"REALMS_PAYMENT_EPAY_PARTNER_ID",
-	"REALMS_PAYMENT_EPAY_KEY",
-	"REALMS_PAYMENT_STRIPE_ENABLE",
-	"REALMS_PAYMENT_STRIPE_SECRET_KEY",
-	"REALMS_PAYMENT_STRIPE_WEBHOOK_SECRET",
-	"REALMS_PAYMENT_STRIPE_CURRENCY",
 	"REALMS_SMTP_SERVER",
 	"REALMS_SMTP_PORT",
 	"REALMS_SMTP_SSL_ENABLED",
@@ -132,8 +124,6 @@ var startupConfigKeys = []string{
 	"REALMS_CODEX_OAUTH_CLIENT_ID",
 	"REALMS_CODEX_OAUTH_AUTHORIZE_URL",
 	"REALMS_CODEX_OAUTH_TOKEN_URL",
-	"REALMS_CODEX_OAUTH_REQUEST_PASSTHROUGH",
-	"REALMS_CODEX_OAUTH_CALLBACK_LISTEN_ADDR",
 	"REALMS_CODEX_OAUTH_REDIRECT_URI",
 	"REALMS_CODEX_OAUTH_SCOPE",
 	"REALMS_CODEX_OAUTH_PROMPT",
@@ -155,10 +145,10 @@ var startupConfigKeys = []string{
 }
 
 type adminSettingsResponse struct {
-	SelfMode  bool              `json:"self_mode"`
-	Features  store.FeatureState `json:"features"`
-	FeatureBanGroups []featureBanGroupView `json:"feature_ban_groups"`
-	StartupConfigKeys []string `json:"startup_config_keys"`
+	SelfMode          bool                  `json:"self_mode"`
+	Features          store.FeatureState    `json:"features"`
+	FeatureBanGroups  []featureBanGroupView `json:"feature_ban_groups"`
+	StartupConfigKeys []string              `json:"startup_config_keys"`
 
 	SiteBaseURL          string `json:"site_base_url"`
 	SiteBaseURLOverride  bool   `json:"site_base_url_override"`
@@ -192,29 +182,11 @@ type adminSettingsResponse struct {
 	BillingMinTopupCNYOverride      bool   `json:"billing_min_topup_cny_override"`
 	BillingCreditUSDPerCNY          string `json:"billing_credit_usd_per_cny"`
 	BillingCreditUSDPerCNYOverride  bool   `json:"billing_credit_usd_per_cny_override"`
-
-	PaymentEPayEnable            bool   `json:"payment_epay_enable"`
-	PaymentEPayEnableOverride    bool   `json:"payment_epay_enable_override"`
-	PaymentEPayGateway           string `json:"payment_epay_gateway"`
-	PaymentEPayGatewayOverride   bool   `json:"payment_epay_gateway_override"`
-	PaymentEPayPartnerID         string `json:"payment_epay_partner_id"`
-	PaymentEPayPartnerIDOverride bool   `json:"payment_epay_partner_id_override"`
-	PaymentEPayKeySet            bool   `json:"payment_epay_key_set"`
-	PaymentEPayKeyOverride       bool   `json:"payment_epay_key_override"`
-
-	PaymentStripeEnable                bool   `json:"payment_stripe_enable"`
-	PaymentStripeEnableOverride        bool   `json:"payment_stripe_enable_override"`
-	PaymentStripeCurrency              string `json:"payment_stripe_currency"`
-	PaymentStripeCurrencyOverride      bool   `json:"payment_stripe_currency_override"`
-	PaymentStripeSecretKeySet          bool   `json:"payment_stripe_secret_key_set"`
-	PaymentStripeSecretKeyOverride     bool   `json:"payment_stripe_secret_key_override"`
-	PaymentStripeWebhookSecretSet      bool   `json:"payment_stripe_webhook_secret_set"`
-	PaymentStripeWebhookSecretOverride bool   `json:"payment_stripe_webhook_secret_override"`
 }
 
 type adminSettingsUpdateRequest struct {
-	SiteBaseURL     string `json:"site_base_url"`
-	AdminTimeZone   string `json:"admin_time_zone"`
+	SiteBaseURL   string `json:"site_base_url"`
+	AdminTimeZone string `json:"admin_time_zone"`
 
 	EmailVerificationEnabled bool `json:"email_verification_enable"`
 
@@ -228,16 +200,6 @@ type adminSettingsUpdateRequest struct {
 	BillingEnablePayAsYouGo bool   `json:"billing_enable_pay_as_you_go"`
 	BillingMinTopupCNY      string `json:"billing_min_topup_cny"`
 	BillingCreditUSDPerCNY  string `json:"billing_credit_usd_per_cny"`
-
-	PaymentEPayEnable    bool   `json:"payment_epay_enable"`
-	PaymentEPayGateway   string `json:"payment_epay_gateway"`
-	PaymentEPayPartnerID string `json:"payment_epay_partner_id"`
-	PaymentEPayKey       string `json:"payment_epay_key"`
-
-	PaymentStripeEnable        bool   `json:"payment_stripe_enable"`
-	PaymentStripeCurrency      string `json:"payment_stripe_currency"`
-	PaymentStripeSecretKey     string `json:"payment_stripe_secret_key"`
-	PaymentStripeWebhookSecret string `json:"payment_stripe_webhook_secret"`
 
 	FeatureEnabled map[string]bool `json:"feature_enabled"`
 }
@@ -409,81 +371,10 @@ func adminSettingsGetHandler(opts Options) gin.HandlerFunc {
 		billingEffective.MinTopupCNY = billingEffective.MinTopupCNY.Truncate(store.CNYScale)
 		billingEffective.CreditUSDPerCNY = billingEffective.CreditUSDPerCNY.Truncate(store.USDScale)
 
-		epayEffective := opts.PaymentDefault.EPay
-		epayEnable, epayEnableOK, err := opts.Store.GetBoolAppSetting(ctx, store.SettingPaymentEPayEnable)
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询配置失败"})
-			return
-		}
-		if epayEnableOK {
-			epayEffective.Enable = epayEnable
-		}
-		epayGateway, epayGatewayOK, err := opts.Store.GetStringAppSetting(ctx, store.SettingPaymentEPayGateway)
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询配置失败"})
-			return
-		}
-		if epayGatewayOK {
-			epayEffective.Gateway = epayGateway
-		}
-		epayPartnerID, epayPartnerIDOK, err := opts.Store.GetStringAppSetting(ctx, store.SettingPaymentEPayPartnerID)
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询配置失败"})
-			return
-		}
-		if epayPartnerIDOK {
-			epayEffective.PartnerID = epayPartnerID
-		}
-		epayKey, epayKeyOK, err := opts.Store.GetStringAppSetting(ctx, store.SettingPaymentEPayKey)
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询配置失败"})
-			return
-		}
-		if epayKeyOK {
-			epayEffective.Key = epayKey
-		}
-
-		stripeEffective := opts.PaymentDefault.Stripe
-		if strings.TrimSpace(stripeEffective.Currency) == "" {
-			stripeEffective.Currency = "cny"
-		}
-		stripeEnable, stripeEnableOK, err := opts.Store.GetBoolAppSetting(ctx, store.SettingPaymentStripeEnable)
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询配置失败"})
-			return
-		}
-		if stripeEnableOK {
-			stripeEffective.Enable = stripeEnable
-		}
-		stripeCurrency, stripeCurrencyOK, err := opts.Store.GetStringAppSetting(ctx, store.SettingPaymentStripeCurrency)
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询配置失败"})
-			return
-		}
-		if stripeCurrencyOK {
-			stripeEffective.Currency = stripeCurrency
-		}
-		stripeSecret, stripeSecretOK, err := opts.Store.GetStringAppSetting(ctx, store.SettingPaymentStripeSecretKey)
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询配置失败"})
-			return
-		}
-		if stripeSecretOK {
-			stripeEffective.SecretKey = stripeSecret
-		}
-		stripeWebhookSecret, stripeWebhookSecretOK, err := opts.Store.GetStringAppSetting(ctx, store.SettingPaymentStripeWebhookSecret)
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询配置失败"})
-			return
-		}
-		if stripeWebhookSecretOK {
-			stripeEffective.WebhookSecret = stripeWebhookSecret
-		}
-
 		resp := adminSettingsResponse{
-			SelfMode:  opts.SelfMode,
-			Features:  fs,
-			FeatureBanGroups: featureBanGroups(opts.SelfMode, fs),
+			SelfMode:          opts.SelfMode,
+			Features:          fs,
+			FeatureBanGroups:  featureBanGroups(opts.SelfMode, fs),
 			StartupConfigKeys: startupConfigKeys,
 
 			SiteBaseURL:          siteBaseURL,
@@ -518,24 +409,6 @@ func adminSettingsGetHandler(opts Options) gin.HandlerFunc {
 			BillingMinTopupCNYOverride:      minTopupOK,
 			BillingCreditUSDPerCNY:          formatUSDPlain(billingEffective.CreditUSDPerCNY),
 			BillingCreditUSDPerCNYOverride:  creditRatioOK,
-
-			PaymentEPayEnable:            epayEffective.Enable,
-			PaymentEPayEnableOverride:    epayEnableOK,
-			PaymentEPayGateway:           strings.TrimSpace(epayEffective.Gateway),
-			PaymentEPayGatewayOverride:   epayGatewayOK,
-			PaymentEPayPartnerID:         strings.TrimSpace(epayEffective.PartnerID),
-			PaymentEPayPartnerIDOverride: epayPartnerIDOK,
-			PaymentEPayKeySet:            strings.TrimSpace(epayEffective.Key) != "",
-			PaymentEPayKeyOverride:       epayKeyOK,
-
-			PaymentStripeEnable:                stripeEffective.Enable,
-			PaymentStripeEnableOverride:        stripeEnableOK,
-			PaymentStripeCurrency:              strings.TrimSpace(strings.ToLower(stripeEffective.Currency)),
-			PaymentStripeCurrencyOverride:      stripeCurrencyOK,
-			PaymentStripeSecretKeySet:          strings.TrimSpace(stripeEffective.SecretKey) != "",
-			PaymentStripeSecretKeyOverride:     stripeSecretOK,
-			PaymentStripeWebhookSecretSet:      strings.TrimSpace(stripeEffective.WebhookSecret) != "",
-			PaymentStripeWebhookSecretOverride: stripeWebhookSecretOK,
 		}
 
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": resp})
@@ -563,14 +436,6 @@ func adminSettingsResetHandler(opts Options) gin.HandlerFunc {
 			store.SettingBillingEnablePayAsYouGo,
 			store.SettingBillingMinTopupCNY,
 			store.SettingBillingCreditUSDPerCNY,
-			store.SettingPaymentEPayEnable,
-			store.SettingPaymentEPayGateway,
-			store.SettingPaymentEPayPartnerID,
-			store.SettingPaymentEPayKey,
-			store.SettingPaymentStripeEnable,
-			store.SettingPaymentStripeCurrency,
-			store.SettingPaymentStripeSecretKey,
-			store.SettingPaymentStripeWebhookSecret,
 			store.SettingFeatureDisableWebAnnouncements,
 			store.SettingFeatureDisableWebTokens,
 			store.SettingFeatureDisableWebUsage,
@@ -772,102 +637,6 @@ func adminSettingsUpdateHandler(opts Options) gin.HandlerFunc {
 					return
 				}
 			} else if err := opts.Store.UpsertDecimalAppSetting(ctx, store.SettingBillingCreditUSDPerCNY, d); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
-				return
-			}
-		}
-
-		// legacy payment config (keys only updated when non-empty)
-		if req.PaymentEPayEnable == opts.PaymentDefault.EPay.Enable {
-			if err := opts.Store.DeleteAppSetting(ctx, store.SettingPaymentEPayEnable); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
-				return
-			}
-		} else if err := opts.Store.UpsertBoolAppSetting(ctx, store.SettingPaymentEPayEnable, req.PaymentEPayEnable); err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
-			return
-		}
-
-		epayGateway := strings.TrimSpace(req.PaymentEPayGateway)
-		if epayGateway == "" || epayGateway == strings.TrimSpace(opts.PaymentDefault.EPay.Gateway) {
-			if err := opts.Store.DeleteAppSetting(ctx, store.SettingPaymentEPayGateway); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
-				return
-			}
-		} else if err := opts.Store.UpsertStringAppSetting(ctx, store.SettingPaymentEPayGateway, epayGateway); err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
-			return
-		}
-
-		epayPartnerID := strings.TrimSpace(req.PaymentEPayPartnerID)
-		if epayPartnerID == "" || epayPartnerID == strings.TrimSpace(opts.PaymentDefault.EPay.PartnerID) {
-			if err := opts.Store.DeleteAppSetting(ctx, store.SettingPaymentEPayPartnerID); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
-				return
-			}
-		} else if err := opts.Store.UpsertStringAppSetting(ctx, store.SettingPaymentEPayPartnerID, epayPartnerID); err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
-			return
-		}
-
-		epayKey := strings.TrimSpace(req.PaymentEPayKey)
-		if epayKey != "" {
-			if epayKey == strings.TrimSpace(opts.PaymentDefault.EPay.Key) {
-				if err := opts.Store.DeleteAppSetting(ctx, store.SettingPaymentEPayKey); err != nil {
-					c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
-					return
-				}
-			} else if err := opts.Store.UpsertStringAppSetting(ctx, store.SettingPaymentEPayKey, epayKey); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
-				return
-			}
-		}
-
-		if req.PaymentStripeEnable == opts.PaymentDefault.Stripe.Enable {
-			if err := opts.Store.DeleteAppSetting(ctx, store.SettingPaymentStripeEnable); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
-				return
-			}
-		} else if err := opts.Store.UpsertBoolAppSetting(ctx, store.SettingPaymentStripeEnable, req.PaymentStripeEnable); err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
-			return
-		}
-
-		stripeCurrency := strings.TrimSpace(strings.ToLower(req.PaymentStripeCurrency))
-		if stripeCurrency == "" {
-			stripeCurrency = "cny"
-		}
-		if stripeCurrency == strings.TrimSpace(strings.ToLower(opts.PaymentDefault.Stripe.Currency)) {
-			if err := opts.Store.DeleteAppSetting(ctx, store.SettingPaymentStripeCurrency); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
-				return
-			}
-		} else if err := opts.Store.UpsertStringAppSetting(ctx, store.SettingPaymentStripeCurrency, stripeCurrency); err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
-			return
-		}
-
-		stripeSecret := strings.TrimSpace(req.PaymentStripeSecretKey)
-		if stripeSecret != "" {
-			if stripeSecret == strings.TrimSpace(opts.PaymentDefault.Stripe.SecretKey) {
-				if err := opts.Store.DeleteAppSetting(ctx, store.SettingPaymentStripeSecretKey); err != nil {
-					c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
-					return
-				}
-			} else if err := opts.Store.UpsertStringAppSetting(ctx, store.SettingPaymentStripeSecretKey, stripeSecret); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
-				return
-			}
-		}
-
-		stripeWebhookSecret := strings.TrimSpace(req.PaymentStripeWebhookSecret)
-		if stripeWebhookSecret != "" {
-			if stripeWebhookSecret == strings.TrimSpace(opts.PaymentDefault.Stripe.WebhookSecret) {
-				if err := opts.Store.DeleteAppSetting(ctx, store.SettingPaymentStripeWebhookSecret); err != nil {
-					c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
-					return
-				}
-			} else if err := opts.Store.UpsertStringAppSetting(ctx, store.SettingPaymentStripeWebhookSecret, stripeWebhookSecret); err != nil {
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
 				return
 			}

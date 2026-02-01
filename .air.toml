@@ -7,7 +7,7 @@ tmp_dir = ".tmp/air"
   entrypoint = ["./.tmp/air/realms"]
 
   include_ext = ["go", "html", "sql", "env"]
-  exclude_dir = [".git", ".tmp", "vendor", "helloagents"]
+  exclude_dir = [".git", ".tmp", "vendor", "helloagents", "dist", "site", "web/dist", "web/node_modules"]
   exclude_regex = ["_test\\.go"]
 
   delay = 200

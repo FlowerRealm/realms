@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"sort"
@@ -60,38 +59,6 @@ func normalizeUserGroups(in []string) ([]string, error) {
 		return nil, fmt.Errorf("分组数量过多（最多 20 个）")
 	}
 	return out, nil
-}
-
-func splitGroupsCSV(groupsCSV string) []string {
-	groupsCSV = strings.TrimSpace(groupsCSV)
-	if groupsCSV == "" {
-		return []string{DefaultGroupName}
-	}
-	parts := strings.Split(groupsCSV, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		out = append(out, p)
-	}
-	if len(out) == 0 {
-		return []string{DefaultGroupName}
-	}
-	norm, err := normalizeUserGroups(out)
-	if err != nil {
-		return []string{DefaultGroupName}
-	}
-	return norm
-}
-
-func groupsToCSV(groups []string) string {
-	groups, err := normalizeUserGroups(groups)
-	if err != nil {
-		return DefaultGroupName
-	}
-	return strings.Join(groups, ",")
 }
 
 func (s *Store) ListUserGroups(ctx context.Context, userID int64) ([]string, error) {
@@ -181,11 +148,4 @@ WHERE user_id=? AND group_name=?
 		return false, fmt.Errorf("查询 user_groups 失败: %w", err)
 	}
 	return n > 0, nil
-}
-
-func (s *Store) scanUserGroupsCSV(groupsCSV sql.NullString) []string {
-	if !groupsCSV.Valid {
-		return []string{DefaultGroupName}
-	}
-	return splitGroupsCSV(groupsCSV.String)
 }

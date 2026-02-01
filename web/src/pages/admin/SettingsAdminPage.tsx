@@ -34,16 +34,6 @@ function initForm(s: AdminSettings): UpdateAdminSettingsRequest {
     billing_min_topup_cny: s.billing_min_topup_cny || '',
     billing_credit_usd_per_cny: s.billing_credit_usd_per_cny || '',
 
-    payment_epay_enable: !!s.payment_epay_enable,
-    payment_epay_gateway: s.payment_epay_gateway || '',
-    payment_epay_partner_id: s.payment_epay_partner_id || '',
-    payment_epay_key: '',
-
-    payment_stripe_enable: !!s.payment_stripe_enable,
-    payment_stripe_currency: s.payment_stripe_currency || 'cny',
-    payment_stripe_secret_key: '',
-    payment_stripe_webhook_secret: '',
-
     feature_enabled: featureEnabled,
   };
 }
@@ -435,7 +425,7 @@ export function SettingsAdminPage() {
 
             {tab === 'billing' ? (
               <div className="row g-4">
-                <div className="col-12 col-lg-6">
+                <div className="col-12">
                   <div className="card border-0 bg-light">
                     <div className="card-body">
                       <h5 className="fw-semibold mb-3">计费</h5>
@@ -480,89 +470,6 @@ export function SettingsAdminPage() {
                             placeholder="0.15"
                           />
                         </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="col-12 col-lg-6">
-                  <div className="card border-0 bg-light">
-                    <div className="card-body">
-                      <h5 className="fw-semibold mb-3">支付（旧版开关）</h5>
-                      <div className="alert alert-warning small">
-                        推荐使用「支付渠道」管理（支持多渠道）。此处为兼容旧配置（Stripe/EPay 单开关）。
-                      </div>
-
-                      <div className="mb-3">
-                        <div className="d-flex align-items-center justify-content-between">
-                          <div>
-                            <div className="fw-medium">EPay</div>
-                            <div className="text-muted small">
-                              {settings.payment_epay_enable_override ? <span className="badge bg-light text-dark border me-2">界面覆盖</span> : null}
-                              key：{settings.payment_epay_key_set ? '已设置' : '未设置'}
-                            </div>
-                          </div>
-                          <div className="form-check form-switch">
-                            <input className="form-check-input" type="checkbox" role="switch" checked={form.payment_epay_enable} onChange={(e) => setForm({ ...form, payment_epay_enable: e.target.checked })} />
-                          </div>
-                        </div>
-                        <div className="row g-2 mt-2">
-                          <div className="col-12">
-                            <input className="form-control" value={form.payment_epay_gateway} onChange={(e) => setForm({ ...form, payment_epay_gateway: e.target.value })} placeholder="gateway (https://epay.example.com)" />
-                          </div>
-                          <div className="col-md-6">
-                            <input className="form-control" value={form.payment_epay_partner_id} onChange={(e) => setForm({ ...form, payment_epay_partner_id: e.target.value })} placeholder="partner_id" />
-                          </div>
-                          <div className="col-md-6">
-                            <input className="form-control" value={form.payment_epay_key} onChange={(e) => setForm({ ...form, payment_epay_key: e.target.value })} placeholder="key（留空表示保持不变）" type="password" autoComplete="new-password" />
-                          </div>
-                        </div>
-                      </div>
-
-                      <hr className="my-3" />
-
-                      <div className="mb-3">
-                        <div className="d-flex align-items-center justify-content-between">
-                          <div>
-                            <div className="fw-medium">Stripe</div>
-                            <div className="text-muted small">
-                              {settings.payment_stripe_enable_override ? <span className="badge bg-light text-dark border me-2">界面覆盖</span> : null}
-                              secret_key：{settings.payment_stripe_secret_key_set ? '已设置' : '未设置'} · webhook：{settings.payment_stripe_webhook_secret_set ? '已设置' : '未设置'}
-                            </div>
-                          </div>
-                          <div className="form-check form-switch">
-                            <input className="form-check-input" type="checkbox" role="switch" checked={form.payment_stripe_enable} onChange={(e) => setForm({ ...form, payment_stripe_enable: e.target.checked })} />
-                          </div>
-                        </div>
-                        <div className="row g-2 mt-2">
-                          <div className="col-md-4">
-                            <input className="form-control" value={form.payment_stripe_currency} onChange={(e) => setForm({ ...form, payment_stripe_currency: e.target.value })} placeholder="currency (cny)" />
-                          </div>
-                          <div className="col-md-8">
-                            <input
-                              className="form-control"
-                              value={form.payment_stripe_secret_key}
-                              onChange={(e) => setForm({ ...form, payment_stripe_secret_key: e.target.value })}
-                              placeholder="secret_key（留空表示保持不变）"
-                              type="password"
-                              autoComplete="new-password"
-                            />
-                          </div>
-                          <div className="col-12">
-                            <input
-                              className="form-control"
-                              value={form.payment_stripe_webhook_secret}
-                              onChange={(e) => setForm({ ...form, payment_stripe_webhook_secret: e.target.value })}
-                              placeholder="webhook_secret（留空表示保持不变）"
-                              type="password"
-                              autoComplete="new-password"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="text-muted small">
-                        self_mode：<span className={boolBadge(settings.self_mode)}>{settings.self_mode ? '启用' : '禁用'}</span>
                       </div>
                     </div>
                   </div>

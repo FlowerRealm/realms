@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { createTopupOrder, getTopupPage, type BillingTopupPageResponse } from '../api/billing';
@@ -44,7 +44,7 @@ export function TopupPage() {
   }, []);
 
   const orders = data?.topup_orders || [];
-  const hasPayment = useMemo(() => !!(data?.payment_epay_enabled || data?.payment_stripe_enabled), [data?.payment_epay_enabled, data?.payment_stripe_enabled]);
+  const hasPayment = (data?.payment_channels || []).length > 0;
 
   async function submitCreate() {
     setErr('');
@@ -109,7 +109,7 @@ export function TopupPage() {
               {!hasPayment ? (
                 <div className="alert alert-warning d-flex align-items-center" role="alert">
                   <span className="me-2 material-symbols-rounded">error</span>
-                  <div>当前未配置任何支付方式，请联系管理员在「管理后台 → 支付渠道」配置渠道，或在「管理后台 → 设置」启用旧版 Stripe/EPay。</div>
+                  <div>当前未配置任何支付渠道，请联系管理员在「管理后台 → 支付渠道」配置。</div>
                 </div>
               ) : null}
 
@@ -204,4 +204,3 @@ export function TopupPage() {
     </div>
   );
 }
-

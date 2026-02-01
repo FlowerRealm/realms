@@ -61,8 +61,7 @@ export type BillingTopupPageResponse = {
   pay_as_you_go_enabled: boolean;
   topup_min_cny: string;
   topup_orders: BillingTopupOrderView[];
-  payment_stripe_enabled: boolean;
-  payment_epay_enabled: boolean;
+  payment_channels: BillingPaymentChannelView[];
 };
 
 export type BillingPayOrderView = {
@@ -86,8 +85,6 @@ export type BillingPayPageResponse = {
   base_url: string;
   pay_order: BillingPayOrderView;
   payment_channels: BillingPaymentChannelView[];
-  payment_stripe_enabled: boolean;
-  payment_epay_enabled: boolean;
 };
 
 export async function getSubscriptionPage() {
@@ -121,8 +118,7 @@ export async function cancelPayOrder(kind: string, orderId: number) {
 }
 
 export type StartPaymentRequest = {
-  payment_channel_id?: number;
-  method?: string;
+  payment_channel_id: number;
   epay_type?: string;
 };
 
@@ -130,4 +126,3 @@ export async function startPayment(kind: string, orderId: number, req: StartPaym
   const res = await api.post<APIResponse<{ redirect_url: string }>>(`/api/billing/pay/${encodeURIComponent(kind)}/${orderId}/start`, req);
   return res.data;
 }
-

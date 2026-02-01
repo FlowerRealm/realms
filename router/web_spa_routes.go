@@ -4,7 +4,6 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
-	"path"
 	"strings"
 
 	"github.com/gin-contrib/gzip"
@@ -81,49 +80,6 @@ func (h *hideRootFileSystem) Open(name string) (http.File, error) {
 		return nil, os.ErrNotExist
 	}
 	return h.ServeFileSystem.Open(name)
-}
-
-func spaStaticMiddleware(distDir string) gin.HandlerFunc {
-	fs := http.Dir(distDir)
-	fileServer := http.FileServer(fs)
-
-	return func(c *gin.Context) {
-		if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
-			c.Next()
-			return
-		}
-
-		p := c.Request.URL.Path
-		if strings.TrimSpace(p) == "" || p == "/" {
-			c.Next()
-			return
-		}
-
-		clean := path.Clean("/" + p)
-		rel := strings.TrimPrefix(clean, "/")
-		if rel == "" || rel == "." {
-			c.Next()
-			return
-		}
-
-		f, err := fs.Open(rel)
-		if err != nil {
-			c.Next()
-			return
-		}
-		_ = f.Close()
-
-		// 为静态资源提供强缓存；index.html 与路由回落由 NoRoute 处理并强制 no-cache。
-		if strings.HasPrefix(clean, "/assets/") {
-			c.Header("Cache-Control", "public, max-age=31536000, immutable")
-		} else {
-			c.Header("Cache-Control", "no-cache")
-		}
-
-		c.Request.URL.Path = "/" + rel
-		fileServer.ServeHTTP(c.Writer, c.Request)
-		c.Abort()
-	}
 }
 
 func isAPIPrefix(p string) bool {

@@ -37,10 +37,9 @@ type Executor struct {
 
 	upstreamTimeout time.Duration
 
-	codexOAuth              *codexoauth.Client
-	codexRequestPassthrough bool
-	refreshMu               sync.Mutex
-	lastRefresh             map[int64]time.Time
+	codexOAuth  *codexoauth.Client
+	refreshMu   sync.Mutex
+	lastRefresh map[int64]time.Time
 }
 
 type upstreamStore interface {
@@ -69,13 +68,12 @@ func NewExecutor(st *store.Store, cfg config.Config) *Executor {
 		codexClient = codexoauth.NewClient(cfg.CodexOAuth)
 	}
 	return &Executor{
-		st:                      st,
-		client:                  client,
-		clients:                 make(map[string]*http.Client),
-		upstreamTimeout:         0,
-		codexOAuth:              codexClient,
-		codexRequestPassthrough: cfg.CodexOAuth.RequestPassthrough,
-		lastRefresh:             make(map[int64]time.Time),
+		st:              st,
+		client:          client,
+		clients:         make(map[string]*http.Client),
+		upstreamTimeout: 0,
+		codexOAuth:      codexClient,
+		lastRefresh:     make(map[int64]time.Time),
 	}
 }
 
@@ -173,27 +171,6 @@ func (e *Executor) Do(ctx context.Context, sel scheduler.Selection, downstream *
 				break
 			}
 			if resp2.Body != nil {
-				_ = resp2.Body.Close()
-			}
-		}
-	}
-	// Codex OAuth：部分上游的 path 仍停留在旧版 /responses；也可能反过来只接受 /v1/responses。
-	// 为减少“配置正确但路径不兼容”导致的误报，这里在 404（以及部分返回 HTML 的 403）时做一次互斥形态的兜底重试。
-	if sel.CredentialType == scheduler.CredentialTypeCodex && resp != nil && shouldAttemptCodexPathFallback(resp) {
-		altPassthrough := !e.codexRequestPassthrough
-		req2, err2 := e.buildRequestWithCodexPassthrough(ctx, sel, downstream, body, altPassthrough)
-		if err2 == nil {
-			resp2, err2 := e.client.Do(req2)
-			if err2 == nil && resp2 != nil {
-				if resp2.StatusCode != http.StatusNotFound {
-					if resp.Body != nil {
-						_ = resp.Body.Close()
-					}
-					resp = resp2
-				} else if resp2.Body != nil {
-					_ = resp2.Body.Close()
-				}
-			} else if resp2 != nil && resp2.Body != nil {
 				_ = resp2.Body.Close()
 			}
 		}
@@ -346,39 +323,7 @@ func peekResponseBody(resp *http.Response, maxBytes int64) ([]byte, error) {
 	return b, err
 }
 
-func shouldAttemptCodexPathFallback(resp *http.Response) bool {
-	if resp == nil {
-		return false
-	}
-	switch resp.StatusCode {
-	case http.StatusNotFound:
-		return true
-	case http.StatusForbidden:
-		// 403 + HTML 通常是 upstream 侧的登录墙/防护页；尝试另一种 path 形态以提高兼容性。
-		return strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html")
-	case http.StatusBadRequest:
-		// 部分 Codex 上游会以 400 返回“Unsupported parameter: max_output_tokens”等兼容性错误；
-		// 这种情况下尝试切换到 legacy /responses + 兼容改写可以恢复。
-		b, _ := peekResponseBody(resp, 32<<10)
-		return looksLikeCodexUnsupportedParameter(b)
-	case http.StatusUnprocessableEntity:
-		// 部分 Codex 上游会以 422 返回参数校验错误（例如 “Unsupported parameter: ...”），同样需要切换兼容形态。
-		b, _ := peekResponseBody(resp, 32<<10)
-		return looksLikeCodexUnsupportedParameter(b)
-	default:
-		return false
-	}
-}
-
 var unsupportedParamRegexp = regexp.MustCompile(`(?i)unsupported parameter[^a-z0-9_]+([a-z0-9_]+)`)
-
-func looksLikeUnsupportedParameter(body []byte, param string) bool {
-	param = strings.ToLower(strings.TrimSpace(param))
-	if param == "" {
-		return false
-	}
-	return unsupportedParameterName(body) == param
-}
 
 func unsupportedParameterName(body []byte) string {
 	if len(body) == 0 {
@@ -407,11 +352,6 @@ func unsupportedParameterName(body []byte) string {
 		return ""
 	}
 	return strings.ToLower(m[1])
-}
-
-func looksLikeCodexUnsupportedParameter(body []byte) bool {
-	// 目前已观测到的兼容性字段（Codex OAuth 上游不接受）。
-	return looksLikeUnsupportedParameter(body, "max_output_tokens") || looksLikeUnsupportedParameter(body, "max_completion_tokens")
 }
 
 func extractUpstreamErrorMessage(payload any) string {
@@ -626,10 +566,6 @@ func (c *cancelReadCloser) Close() error {
 }
 
 func (e *Executor) buildRequest(ctx context.Context, sel scheduler.Selection, downstream *http.Request, body []byte) (*http.Request, error) {
-	return e.buildRequestWithCodexPassthrough(ctx, sel, downstream, body, e.codexRequestPassthrough)
-}
-
-func (e *Executor) buildRequestWithCodexPassthrough(ctx context.Context, sel scheduler.Selection, downstream *http.Request, body []byte, codexRequestPassthrough bool) (*http.Request, error) {
 	base, err := security.ValidateBaseURL(sel.BaseURL)
 	if err != nil {
 		return nil, err
@@ -646,13 +582,6 @@ func (e *Executor) buildRequestWithCodexPassthrough(ctx context.Context, sel sch
 	case scheduler.CredentialTypeCodex:
 		if targetPath != "/v1/responses" {
 			return nil, errors.New("codex_oauth 上游仅支持 /v1/responses")
-		}
-		// 旧版兼容逻辑：将 /v1/responses 映射到 Codex 后端的 /responses，并对请求体做兼容改写。
-		// 当 request_passthrough=true 时，保持 URL path 与请求体不变，直接透传给上游。
-		if !codexRequestPassthrough {
-			// codex oauth 上游的路径约定为 /backend-api/codex/responses。
-			targetPath = "/responses"
-			body = normalizeCodexRequestBody(body)
 		}
 	default:
 		return nil, errors.New("未知 credential 类型")
@@ -796,163 +725,6 @@ func normalizeUpstreamPath(base *url.URL, targetPath string) string {
 		return out
 	}
 	return targetPath
-}
-
-func normalizeCodexRequestBody(body []byte) []byte {
-	if len(body) == 0 {
-		return body
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return body
-	}
-
-	// 对齐 CLIProxyAPI：Codex 上游始终启用 stream，并补齐必要字段。
-	payload["stream"] = true
-	payload["store"] = false
-	payload["parallel_tool_calls"] = true
-	payload["include"] = []string{"reasoning.encrypted_content"}
-
-	delete(payload, "max_output_tokens")
-	delete(payload, "max_completion_tokens")
-	delete(payload, "temperature")
-	delete(payload, "top_p")
-	delete(payload, "service_tier")
-
-	model := strings.TrimSpace(stringFromAny(payload["model"]))
-	officialInstructions := codexInstructionsForModel(model)
-	rawInstructions, _ := payload["instructions"].(string)
-	userInstructions := strings.TrimSpace(rawInstructions)
-	switch {
-	case userInstructions == "":
-		payload["instructions"] = officialInstructions
-	case isOfficialCodexInstructions(rawInstructions):
-		// 已是官方/有效 instructions，保持不变。
-	default:
-		// Codex 上游会校验 instructions（必须为官方 prompt）。把用户自定义 instructions 转移到 input 内，并注入官方 instructions。
-		payload["instructions"] = officialInstructions
-		input := normalizeCodexInput(payload["input"])
-		payload["input"] = prependUserInstructionsToCodexInput(input, userInstructions)
-	}
-
-	if input, ok := payload["input"]; ok {
-		payload["input"] = normalizeCodexInput(input)
-	}
-
-	delete(payload, "previous_response_id")
-	delete(payload, "prompt_cache_retention")
-
-	out, err := json.Marshal(payload)
-	if err != nil {
-		return body
-	}
-	return out
-}
-
-func prependUserInstructionsToCodexInput(input any, instructions string) any {
-	instructions = strings.TrimSpace(instructions)
-	if instructions == "" {
-		return input
-	}
-
-	var arr []any
-	if v, ok := input.([]any); ok {
-		arr = v
-	} else if input != nil {
-		arr = []any{input}
-	} else {
-		arr = []any{}
-	}
-
-	msg := map[string]any{
-		"type": "message",
-		"role": "user",
-		"content": []any{
-			map[string]any{
-				"type": "input_text",
-				"text": "EXECUTE ACCORDING TO THE FOLLOWING INSTRUCTIONS!!!",
-			},
-			map[string]any{
-				"type": "input_text",
-				"text": instructions,
-			},
-		},
-	}
-	return append([]any{msg}, arr...)
-}
-
-func normalizeCodexInput(input any) any {
-	switch v := input.(type) {
-	case string:
-		return []any{
-			map[string]any{
-				"type": "message",
-				"role": "user",
-				"content": []any{
-					map[string]any{
-						"type": "input_text",
-						"text": v,
-					},
-				},
-			},
-		}
-	case map[string]any:
-		return []any{normalizeCodexInputItem(v)}
-	case []any:
-		out := make([]any, 0, len(v))
-		for _, item := range v {
-			if m, ok := item.(map[string]any); ok {
-				out = append(out, normalizeCodexInputItem(m))
-				continue
-			}
-			out = append(out, item)
-		}
-		return out
-	default:
-		return input
-	}
-}
-
-func normalizeCodexInputItem(m map[string]any) map[string]any {
-	if m == nil {
-		return nil
-	}
-	if _, ok := m["type"]; !ok {
-		// OpenAI Responses 里常见的是 {"role":"user","content":...}，Codex 上游通常要求显式 type=message。
-		m["type"] = "message"
-	}
-	switch c := m["content"].(type) {
-	case string:
-		m["content"] = []any{
-			map[string]any{
-				"type": "input_text",
-				"text": c,
-			},
-		}
-	case []any:
-		// 兼容常见的 {"type":"text","text":"..."}，在 Codex 侧映射为 input_text。
-		for i := range c {
-			part, ok := c[i].(map[string]any)
-			if !ok {
-				continue
-			}
-			if t, ok := part["type"].(string); ok && t == "text" {
-				part["type"] = "input_text"
-			}
-			c[i] = part
-		}
-		m["content"] = c
-	}
-	return m
-}
-
-func stringFromAny(v any) string {
-	switch vv := v.(type) {
-	case string:
-		return vv
-	default:
-		return ""
-	}
 }
 
 func applyCodexHeaders(h http.Header, accountID string) {

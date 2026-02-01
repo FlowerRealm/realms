@@ -12,4 +12,3 @@ func setSystemRoutes(r *gin.Engine, opts Options) {
 	r.GET("/favicon.ico", wrapHTTPFunc(opts.FaviconICO))
 	r.HEAD("/favicon.ico", wrapHTTPFunc(opts.FaviconICO))
 }
-

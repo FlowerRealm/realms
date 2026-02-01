@@ -21,7 +21,6 @@ type Config struct {
 	Security   SecurityConfig   `yaml:"security"`
 	Debug      DebugConfig      `yaml:"debug"`
 	Billing    BillingConfig    `yaml:"billing"`
-	Payment    PaymentConfig    `yaml:"payment"`
 	SMTP       SMTPConfig       `yaml:"smtp"`
 	EmailVerif EmailVerifConfig `yaml:"email_verification"`
 	CodexOAuth CodexOAuthConfig `yaml:"codex_oauth"`
@@ -101,25 +100,6 @@ type BillingConfig struct {
 	CreditUSDPerCNY  decimal.Decimal `yaml:"credit_usd_per_cny"`
 }
 
-type PaymentConfig struct {
-	EPay   PaymentEPayConfig   `yaml:"epay"`
-	Stripe PaymentStripeConfig `yaml:"stripe"`
-}
-
-type PaymentEPayConfig struct {
-	Enable    bool   `yaml:"enable"`
-	Gateway   string `yaml:"gateway"`
-	PartnerID string `yaml:"partner_id"`
-	Key       string `yaml:"key"`
-}
-
-type PaymentStripeConfig struct {
-	Enable        bool   `yaml:"enable"`
-	SecretKey     string `yaml:"secret_key"`
-	WebhookSecret string `yaml:"webhook_secret"`
-	Currency      string `yaml:"currency"`
-}
-
 type SMTPConfig struct {
 	SMTPServer     string `yaml:"SMTPServer"`
 	SMTPPort       int    `yaml:"SMTPPort"`
@@ -140,12 +120,7 @@ type CodexOAuthConfig struct {
 	AuthorizeURL string `yaml:"authorize_url"`
 	TokenURL     string `yaml:"token_url"`
 
-	// RequestPassthrough 表示 Codex OAuth 请求是否“直通上游”（不改写 URL path 与 request body）。
-	// 默认 true：保持与 Codex CLI 的请求形态一致，把兼容性与校验交给上游处理。
-	RequestPassthrough bool `yaml:"request_passthrough"`
-
-	CallbackListenAddr string `yaml:"callback_listen_addr"`
-	RedirectURI        string `yaml:"redirect_uri"`
+	RedirectURI string `yaml:"redirect_uri"`
 
 	Scope  string `yaml:"scope"`
 	Prompt string `yaml:"prompt"`
@@ -297,15 +272,6 @@ func defaultConfig() Config {
 			MinTopupCNY:      decimal.NewFromInt(10),
 			CreditUSDPerCNY:  decimal.NewFromInt(14).Div(decimal.NewFromInt(100)),
 		},
-		Payment: PaymentConfig{
-			EPay: PaymentEPayConfig{
-				Enable: false,
-			},
-			Stripe: PaymentStripeConfig{
-				Enable:   false,
-				Currency: "cny",
-			},
-		},
 		Security: SecurityConfig{
 			AllowOpenRegistration: true,
 			TrustProxyHeaders:     false,
@@ -320,15 +286,13 @@ func defaultConfig() Config {
 			Enable: false,
 		},
 		CodexOAuth: CodexOAuthConfig{
-			Enable:             true,
-			ClientID:           "app_EMoamEEZ73f0CkXaXp7hrann",
-			AuthorizeURL:       "https://auth.openai.com/oauth/authorize",
-			TokenURL:           "https://auth.openai.com/oauth/token",
-			RequestPassthrough: true,
-			CallbackListenAddr: "",
-			RedirectURI:        "http://localhost:1455/auth/callback",
-			Scope:              "openid email profile offline_access",
-			Prompt:             "login",
+			Enable:       true,
+			ClientID:     "app_EMoamEEZ73f0CkXaXp7hrann",
+			AuthorizeURL: "https://auth.openai.com/oauth/authorize",
+			TokenURL:     "https://auth.openai.com/oauth/token",
+			RedirectURI:  "http://localhost:8080/auth/callback",
+			Scope:        "openid email profile offline_access",
+			Prompt:       "login",
 		},
 		Tickets: TicketsConfig{
 			AttachmentsDir: "./data/tickets",
@@ -408,36 +372,6 @@ func applyEnvOverrides(cfg *Config) {
 		if d, err := parseDecimalNonNeg(v, 6); err == nil {
 			cfg.Billing.CreditUSDPerCNY = d
 		}
-	}
-
-	if v := os.Getenv("REALMS_PAYMENT_EPAY_ENABLE"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.Payment.EPay.Enable = b
-		}
-	}
-	if v := os.Getenv("REALMS_PAYMENT_EPAY_GATEWAY"); v != "" {
-		cfg.Payment.EPay.Gateway = v
-	}
-	if v := os.Getenv("REALMS_PAYMENT_EPAY_PARTNER_ID"); v != "" {
-		cfg.Payment.EPay.PartnerID = v
-	}
-	if v := os.Getenv("REALMS_PAYMENT_EPAY_KEY"); v != "" {
-		cfg.Payment.EPay.Key = v
-	}
-
-	if v := os.Getenv("REALMS_PAYMENT_STRIPE_ENABLE"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.Payment.Stripe.Enable = b
-		}
-	}
-	if v := os.Getenv("REALMS_PAYMENT_STRIPE_SECRET_KEY"); v != "" {
-		cfg.Payment.Stripe.SecretKey = v
-	}
-	if v := os.Getenv("REALMS_PAYMENT_STRIPE_WEBHOOK_SECRET"); v != "" {
-		cfg.Payment.Stripe.WebhookSecret = v
-	}
-	if v := os.Getenv("REALMS_PAYMENT_STRIPE_CURRENCY"); v != "" {
-		cfg.Payment.Stripe.Currency = v
 	}
 
 	if v := os.Getenv("REALMS_SMTP_SERVER"); v != "" {
@@ -547,14 +481,6 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("REALMS_CODEX_OAUTH_TOKEN_URL"); v != "" {
 		cfg.CodexOAuth.TokenURL = v
-	}
-	if v := os.Getenv("REALMS_CODEX_OAUTH_REQUEST_PASSTHROUGH"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.CodexOAuth.RequestPassthrough = b
-		}
-	}
-	if v := os.Getenv("REALMS_CODEX_OAUTH_CALLBACK_LISTEN_ADDR"); v != "" {
-		cfg.CodexOAuth.CallbackListenAddr = v
 	}
 	if v := os.Getenv("REALMS_CODEX_OAUTH_REDIRECT_URI"); v != "" {
 		cfg.CodexOAuth.RedirectURI = v

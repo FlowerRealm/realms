@@ -68,7 +68,7 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pathTail := strings.TrimSpace(r.PathValue("path"))
+	pathTail := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/v1beta/models/"))
 	if pathTail == "" {
 		http.Error(w, "模型路径为空", http.StatusBadRequest)
 		return

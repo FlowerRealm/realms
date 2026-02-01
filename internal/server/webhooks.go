@@ -24,6 +24,20 @@ type subscriptionOrderPaidWebhookResponse struct {
 	SubscriptionID *int64 `json:"subscription_id,omitempty"`
 }
 
+func parseSubscriptionOrderPaidWebhookOrderID(path string) (int64, bool) {
+	const prefix = "/api/webhooks/subscription-orders/"
+	const suffix = "/paid"
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		return 0, false
+	}
+	idRaw := strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
+	id, err := strconv.ParseInt(strings.TrimSpace(idRaw), 10, 64)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
+}
+
 func (a *App) handleSubscriptionOrderPaidWebhook(w http.ResponseWriter, r *http.Request) {
 	secret := strings.TrimSpace(a.cfg.Security.SubscriptionOrderWebhookSecret)
 	if secret == "" {
@@ -45,9 +59,8 @@ func (a *App) handleSubscriptionOrderPaidWebhook(w http.ResponseWriter, r *http.
 		return
 	}
 
-	orderIDRaw := strings.TrimSpace(r.PathValue("order_id"))
-	orderID, err := strconv.ParseInt(orderIDRaw, 10, 64)
-	if err != nil || orderID <= 0 {
+	orderID, ok := parseSubscriptionOrderPaidWebhookOrderID(r.URL.Path)
+	if !ok {
 		http.Error(w, "order_id 不合法", http.StatusBadRequest)
 		return
 	}

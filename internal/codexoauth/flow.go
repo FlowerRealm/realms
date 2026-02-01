@@ -222,19 +222,6 @@ func int64FromSessionValue(v any) (int64, bool) {
 	}
 }
 
-func claimString(m map[string]any, keys ...string) string {
-	for _, k := range keys {
-		if v, ok := m[k]; ok {
-			if s, ok := v.(string); ok {
-				if strings.TrimSpace(s) != "" {
-					return s
-				}
-			}
-		}
-	}
-	return ""
-}
-
 func (f *Flow) Complete(ctx context.Context, endpointID int64, actorUserID int64, state string, code string) error {
 	code = strings.TrimSpace(code)
 	state = strings.TrimSpace(state)

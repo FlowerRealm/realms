@@ -75,8 +75,8 @@ type adminUsagePageResponse struct {
 	End           string `json:"end"`
 	Limit         int    `json:"limit"`
 
-	Window   adminUsageWindowView `json:"window"`
-	TopUsers []adminUsageUserView `json:"top_users"`
+	Window   adminUsageWindowView  `json:"window"`
+	TopUsers []adminUsageUserView  `json:"top_users"`
 	Events   []adminUsageEventView `json:"events"`
 
 	NextBeforeID *int64 `json:"next_before_id,omitempty"`

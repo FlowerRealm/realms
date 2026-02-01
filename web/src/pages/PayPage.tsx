@@ -23,7 +23,6 @@ export function PayPage() {
   const [notice, setNotice] = useState('');
 
   const [epayTypeByChannel, setEpayTypeByChannel] = useState<Record<number, string>>({});
-  const [epayTypeFallback, setEpayTypeFallback] = useState('alipay');
 
   const pathState = useMemo(() => {
     const p = location.pathname;
@@ -85,13 +84,11 @@ export function PayPage() {
     }
   }
 
-  async function doPayByChannel(ch: BillingPaymentChannelView | null, method: string | null, epayType: string | null) {
+  async function doPayByChannel(ch: BillingPaymentChannelView, epayType: string | null) {
     setErr('');
     setNotice('');
     try {
-      const req: { payment_channel_id?: number; method?: string; epay_type?: string } = {};
-      if (ch) req.payment_channel_id = ch.id;
-      if (method) req.method = method;
+      const req: { payment_channel_id: number; epay_type?: string } = { payment_channel_id: ch.id };
       if (epayType) req.epay_type = epayType;
       const res = await startPayment(kind, orderId, req);
       if (!res.success) throw new Error(res.message || '发起支付失败');
@@ -218,7 +215,7 @@ export function PayPage() {
                                         <button
                                           type="button"
                                           className="btn btn-outline-primary w-100 mt-2"
-                                          onClick={() => void doPayByChannel(ch, null, epayTypeByChannel[ch.id] || 'alipay')}
+                                          onClick={() => void doPayByChannel(ch, epayTypeByChannel[ch.id] || 'alipay')}
                                         >
                                           使用该渠道支付
                                         </button>
@@ -226,13 +223,13 @@ export function PayPage() {
                                       </>
                                     ) : ch.type === 'stripe' ? (
                                       <>
-                                        <button type="button" className="btn btn-primary w-100" onClick={() => void doPayByChannel(ch, null, null)}>
+                                        <button type="button" className="btn btn-primary w-100" onClick={() => void doPayByChannel(ch, null)}>
                                           使用该渠道支付
                                         </button>
                                         <div className="form-text small text-muted mt-2">点击后跳转至 Stripe Checkout 完成支付。</div>
                                       </>
                                     ) : (
-                                      <button type="button" className="btn btn-outline-primary w-100" onClick={() => void doPayByChannel(ch, null, null)}>
+                                      <button type="button" className="btn btn-outline-primary w-100" onClick={() => void doPayByChannel(ch, null)}>
                                         使用该渠道支付
                                       </button>
                                     )}
@@ -243,67 +240,10 @@ export function PayPage() {
                           </div>
                         </>
                       ) : (
-                        <>
-                          <h5 className="fw-semibold mb-3">选择支付方式</h5>
-                          <div className="row g-3">
-                            <div className="col-md-6">
-                              <div className="card bg-light h-100">
-                                <div className="card-body p-3">
-                                  <div className="fw-semibold mb-2">
-                                    <span className="me-2 material-symbols-rounded">credit_card</span>Stripe
-                                  </div>
-                                  <button
-                                    type="button"
-                                    className="btn btn-primary w-100"
-                                    disabled={!data?.payment_stripe_enabled}
-                                    onClick={() => void doPayByChannel(null, 'stripe', null)}
-                                  >
-                                    使用 Stripe 支付
-                                  </button>
-                                  {data?.payment_stripe_enabled ? (
-                                    <div className="form-text small text-muted mt-2">点击后跳转至 Stripe Checkout 完成支付。</div>
-                                  ) : (
-                                    <div className="form-text small text-muted mt-2">Stripe 未配置或未启用。</div>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="col-md-6">
-                              <div className="card bg-light h-100">
-                                <div className="card-body p-3">
-                                  <div className="fw-semibold mb-2">
-                                    <span className="me-2 material-symbols-rounded">credit_card</span>EPay
-                                  </div>
-                                  <label className="form-label small text-muted mb-1">支付类型</label>
-                                  <select
-                                    className="form-select"
-                                    disabled={!data?.payment_epay_enabled}
-                                    value={epayTypeFallback}
-                                    onChange={(e) => setEpayTypeFallback(e.target.value)}
-                                  >
-                                    <option value="alipay">支付宝</option>
-                                    <option value="wxpay">微信</option>
-                                    <option value="qqpay">QQ</option>
-                                  </select>
-                                  <button
-                                    type="button"
-                                    className="btn btn-outline-primary w-100 mt-2"
-                                    disabled={!data?.payment_epay_enabled}
-                                    onClick={() => void doPayByChannel(null, 'epay', epayTypeFallback)}
-                                  >
-                                    使用 EPay 支付
-                                  </button>
-                                  {data?.payment_epay_enabled ? (
-                                    <div className="form-text small text-muted mt-2">点击后跳转至 EPay 网关完成支付。</div>
-                                  ) : (
-                                    <div className="form-text small text-muted mt-2">EPay 未配置或未启用。</div>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </>
+                        <div className="alert alert-warning d-flex align-items-center small" role="alert">
+                          <span className="me-2 material-symbols-rounded">warning</span>
+                          <div>当前未配置任何支付渠道，请联系管理员在「管理后台 → 支付渠道」配置。</div>
+                        </div>
                       )}
 
                       <div className="text-muted small mt-3">支付完成后会自动入账/生效。若页面未立即更新，请稍等并刷新查看状态。</div>

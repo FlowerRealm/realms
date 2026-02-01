@@ -106,4 +106,3 @@ func newEmailVerificationCode() (string, error) {
 	}
 	return fmt.Sprintf("%06d", n.Int64()), nil
 }
-

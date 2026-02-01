@@ -4,8 +4,8 @@ import (
 	"io/fs"
 	"net/http"
 
-	"realms/internal/config"
 	openaiapi "realms/internal/api/openai"
+	"realms/internal/config"
 	"realms/internal/scheduler"
 	"realms/internal/store"
 	"realms/internal/tickets"
@@ -16,13 +16,12 @@ type Options struct {
 	Sched    *scheduler.Scheduler
 	SelfMode bool
 
-	AllowOpenRegistration         bool
+	AllowOpenRegistration           bool
 	EmailVerificationEnabledDefault bool
 	PublicBaseURLDefault            string
 	AdminTimeZoneDefault            string
 
 	BillingDefault config.BillingConfig
-	PaymentDefault config.PaymentConfig
 	SMTPDefault    config.SMTPConfig
 	TicketStorage  *tickets.Storage
 
@@ -45,9 +44,7 @@ type Options struct {
 
 	// payments/webhooks (only mounted when !SelfMode in current routing)
 	SubscriptionOrderPaidWebhook  http.HandlerFunc
-	StripeWebhook                 http.HandlerFunc
 	StripeWebhookByPaymentChannel http.HandlerFunc
-	EPayNotify                    http.HandlerFunc
 	EPayNotifyByPaymentChannel    http.HandlerFunc
 
 	// codex/admin

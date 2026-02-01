@@ -55,11 +55,11 @@ type ticketAttachmentView struct {
 }
 
 type ticketMessageView struct {
-	ID          int64               `json:"id"`
-	Actor       string              `json:"actor"`
-	ActorMeta   string              `json:"actor_meta"`
-	Body        string              `json:"body"`
-	CreatedAt   string              `json:"created_at"`
+	ID          int64                  `json:"id"`
+	Actor       string                 `json:"actor"`
+	ActorMeta   string                 `json:"actor_meta"`
+	Body        string                 `json:"body"`
+	CreatedAt   string                 `json:"created_at"`
 	Attachments []ticketAttachmentView `json:"attachments,omitempty"`
 }
 
@@ -608,4 +608,3 @@ func truncateASCII(s string, max int) string {
 	}
 	return s[:max]
 }
-

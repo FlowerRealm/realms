@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"net/http"
@@ -14,45 +13,9 @@ import (
 	"github.com/stripe/stripe-go/v81"
 	stripeWebhook "github.com/stripe/stripe-go/v81/webhook"
 
-	"realms/internal/config"
 	"realms/internal/middleware"
 	"realms/internal/store"
 )
-
-func (a *App) paymentConfigEffective(ctx context.Context) config.PaymentConfig {
-	cfg := a.cfg.Payment
-
-	if v, ok, err := a.store.GetBoolAppSetting(ctx, store.SettingPaymentEPayEnable); err == nil && ok {
-		cfg.EPay.Enable = v
-	}
-	if v, ok, err := a.store.GetStringAppSetting(ctx, store.SettingPaymentEPayGateway); err == nil && ok {
-		cfg.EPay.Gateway = v
-	}
-	if v, ok, err := a.store.GetStringAppSetting(ctx, store.SettingPaymentEPayPartnerID); err == nil && ok {
-		cfg.EPay.PartnerID = v
-	}
-	if v, ok, err := a.store.GetStringAppSetting(ctx, store.SettingPaymentEPayKey); err == nil && ok {
-		cfg.EPay.Key = v
-	}
-
-	if v, ok, err := a.store.GetBoolAppSetting(ctx, store.SettingPaymentStripeEnable); err == nil && ok {
-		cfg.Stripe.Enable = v
-	}
-	if v, ok, err := a.store.GetStringAppSetting(ctx, store.SettingPaymentStripeCurrency); err == nil && ok {
-		cfg.Stripe.Currency = v
-	}
-	if v, ok, err := a.store.GetStringAppSetting(ctx, store.SettingPaymentStripeSecretKey); err == nil && ok {
-		cfg.Stripe.SecretKey = v
-	}
-	if v, ok, err := a.store.GetStringAppSetting(ctx, store.SettingPaymentStripeWebhookSecret); err == nil && ok {
-		cfg.Stripe.WebhookSecret = v
-	}
-	cfg.Stripe.Currency = strings.ToLower(strings.TrimSpace(cfg.Stripe.Currency))
-	if cfg.Stripe.Currency == "" {
-		cfg.Stripe.Currency = "cny"
-	}
-	return cfg
-}
 
 func parsePayOrderRef(ref string) (kind string, orderID int64, ok bool) {
 	ref = strings.TrimSpace(ref)
@@ -106,107 +69,21 @@ func cnyToMinorUnits(cny decimal.Decimal) (int64, bool) {
 	return n, true
 }
 
-func (a *App) handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
-	cfg := a.paymentConfigEffective(r.Context()).Stripe
-	if !cfg.Enable || strings.TrimSpace(cfg.WebhookSecret) == "" {
-		http.NotFound(w, r)
-		return
+func parsePaymentChannelID(path string, prefix string) (int64, bool) {
+	if !strings.HasPrefix(path, prefix) {
+		return 0, false
 	}
-
-	payload := middleware.CachedBody(r.Context())
-	if len(payload) == 0 {
-		http.Error(w, "请求体为空", http.StatusBadRequest)
-		return
+	idRaw := strings.TrimSpace(strings.Trim(strings.TrimPrefix(path, prefix), "/"))
+	id, err := strconv.ParseInt(idRaw, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, false
 	}
-
-	signature := r.Header.Get("Stripe-Signature")
-	event, err := stripeWebhook.ConstructEventWithOptions(payload, signature, cfg.WebhookSecret, stripeWebhook.ConstructEventOptions{
-		IgnoreAPIVersionMismatch: true,
-	})
-	if err != nil {
-		http.Error(w, "验签失败", http.StatusBadRequest)
-		return
-	}
-
-	switch event.Type {
-	case stripe.EventTypeCheckoutSessionCompleted:
-		ref := strings.TrimSpace(event.GetObjectValue("client_reference_id"))
-		status := strings.TrimSpace(event.GetObjectValue("status"))
-		if status != "complete" {
-			break
-		}
-		kind, orderID, ok := parsePayOrderRef(ref)
-		if !ok {
-			break
-		}
-		amountTotalRaw := strings.TrimSpace(event.GetObjectValue("amount_total"))
-		amountTotal, err := strconv.ParseInt(amountTotalRaw, 10, 64)
-		if err != nil || amountTotal <= 0 || amountTotal > int64(^uint(0)>>1) {
-			break
-		}
-		currency := strings.ToLower(strings.TrimSpace(event.GetObjectValue("currency")))
-		if currency != "" && currency != cfg.Currency {
-			break
-		}
-
-		paidMethod := "stripe"
-		paidRef := strings.TrimSpace(event.GetObjectValue("id")) // Checkout Session ID
-		var paidRefPtr *string
-		if paidRef != "" {
-			paidRefPtr = &paidRef
-		}
-
-		switch kind {
-		case "subscription":
-			o, err := a.store.GetSubscriptionOrderByID(r.Context(), orderID)
-			if err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
-					break
-				}
-				http.Error(w, "处理失败", http.StatusInternalServerError)
-				return
-			}
-			expected, ok := cnyToMinorUnits(o.AmountCNY)
-			if !ok || expected != amountTotal {
-				break
-			}
-			if _, _, err := a.store.MarkSubscriptionOrderPaidAndActivate(r.Context(), orderID, time.Now(), &paidMethod, paidRefPtr, nil); err != nil {
-				if errors.Is(err, store.ErrOrderCanceled) {
-					break
-				}
-				http.Error(w, "处理失败", http.StatusInternalServerError)
-				return
-			}
-		case "topup":
-			o, err := a.store.GetTopupOrderByID(r.Context(), orderID)
-			if err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
-					break
-				}
-				http.Error(w, "处理失败", http.StatusInternalServerError)
-				return
-			}
-			expected, ok := cnyToMinorUnits(o.AmountCNY)
-			if !ok || expected != amountTotal {
-				break
-			}
-			if err := a.store.MarkTopupOrderPaid(r.Context(), orderID, &paidMethod, paidRefPtr, nil, time.Now()); err != nil {
-				if errors.Is(err, store.ErrOrderCanceled) {
-					break
-				}
-				http.Error(w, "处理失败", http.StatusInternalServerError)
-				return
-			}
-		}
-	}
-
-	w.WriteHeader(http.StatusOK)
+	return id, true
 }
 
 func (a *App) handleStripeWebhookByPaymentChannel(w http.ResponseWriter, r *http.Request) {
-	channelIDRaw := strings.TrimSpace(r.PathValue("payment_channel_id"))
-	channelID, err := strconv.ParseInt(channelIDRaw, 10, 64)
-	if err != nil || channelID <= 0 {
+	channelID, ok := parsePaymentChannelID(r.URL.Path, "/api/pay/stripe/webhook/")
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
@@ -320,83 +197,9 @@ func (a *App) handleStripeWebhookByPaymentChannel(w http.ResponseWriter, r *http
 	w.WriteHeader(http.StatusOK)
 }
 
-func (a *App) handleEPayNotify(w http.ResponseWriter, r *http.Request) {
-	cfg := a.paymentConfigEffective(r.Context()).EPay
-	if !cfg.Enable || strings.TrimSpace(cfg.Gateway) == "" || strings.TrimSpace(cfg.PartnerID) == "" || strings.TrimSpace(cfg.Key) == "" {
-		http.NotFound(w, r)
-		return
-	}
-
-	client, err := epay.NewClient(&epay.Config{
-		PartnerID: cfg.PartnerID,
-		Key:       cfg.Key,
-	}, cfg.Gateway)
-	if err != nil {
-		http.Error(w, "配置错误", http.StatusInternalServerError)
-		return
-	}
-
-	params := make(map[string]string)
-	q := r.URL.Query()
-	for k := range q {
-		params[k] = q.Get(k)
-	}
-
-	verifyInfo, err := client.Verify(params)
-	if err != nil || !verifyInfo.VerifyStatus {
-		_, _ = w.Write([]byte("fail"))
-		return
-	}
-	_, _ = w.Write([]byte("success"))
-
-	if verifyInfo.TradeStatus != epay.StatusTradeSuccess {
-		return
-	}
-
-	kind, orderID, ok := parsePayOrderRef(verifyInfo.ServiceTradeNo)
-	if !ok {
-		return
-	}
-
-	paidMethod := "epay"
-	paidRef := strings.TrimSpace(verifyInfo.TradeNo)
-	var paidRefPtr *string
-	if paidRef != "" {
-		paidRefPtr = &paidRef
-	}
-
-	paidAt := time.Now()
-	paidCNY, ok := parseCNY(verifyInfo.Money)
-	if !ok || paidCNY.LessThanOrEqual(decimal.Zero) {
-		return
-	}
-
-	switch kind {
-	case "subscription":
-		o, err := a.store.GetSubscriptionOrderByID(r.Context(), orderID)
-		if err != nil {
-			return
-		}
-		if !paidCNY.Equal(o.AmountCNY.Truncate(store.CNYScale)) {
-			return
-		}
-		_, _, _ = a.store.MarkSubscriptionOrderPaidAndActivate(r.Context(), orderID, paidAt, &paidMethod, paidRefPtr, nil)
-	case "topup":
-		o, err := a.store.GetTopupOrderByID(r.Context(), orderID)
-		if err != nil {
-			return
-		}
-		if !paidCNY.Equal(o.AmountCNY.Truncate(store.CNYScale)) {
-			return
-		}
-		_ = a.store.MarkTopupOrderPaid(r.Context(), orderID, &paidMethod, paidRefPtr, nil, paidAt)
-	}
-}
-
 func (a *App) handleEPayNotifyByPaymentChannel(w http.ResponseWriter, r *http.Request) {
-	channelIDRaw := strings.TrimSpace(r.PathValue("payment_channel_id"))
-	channelID, err := strconv.ParseInt(channelIDRaw, 10, 64)
-	if err != nil || channelID <= 0 {
+	channelID, ok := parsePaymentChannelID(r.URL.Path, "/api/pay/epay/notify/")
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}

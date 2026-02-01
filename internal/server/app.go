@@ -22,6 +22,7 @@ import (
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 
+	root "realms"
 	openaiapi "realms/internal/api/openai"
 	"realms/internal/assets"
 	"realms/internal/codexoauth"
@@ -33,7 +34,6 @@ import (
 	"realms/internal/tickets"
 	"realms/internal/upstream"
 	"realms/internal/version"
-	root "realms"
 	"realms/router"
 )
 
@@ -137,22 +137,21 @@ func NewApp(opts AppOptions) (*App, error) {
 	}
 
 	router.SetRouter(engine, router.Options{
-		Store:             st,
-		SelfMode:          opts.Config.SelfMode.Enable,
-		AllowOpenRegistration:         opts.Config.Security.AllowOpenRegistration,
+		Store:                           st,
+		SelfMode:                        opts.Config.SelfMode.Enable,
+		AllowOpenRegistration:           opts.Config.Security.AllowOpenRegistration,
 		EmailVerificationEnabledDefault: opts.Config.EmailVerif.Enable,
 		PublicBaseURLDefault:            publicBaseURL,
 		AdminTimeZoneDefault:            opts.Config.AppSettingsDefaults.AdminTimeZone,
-		BillingDefault:     opts.Config.Billing,
-		PaymentDefault:     opts.Config.Payment,
-		SMTPDefault:        opts.Config.SMTP,
-		TicketStorage:      ticketStorage,
-		FrontendBaseURL:   frontendBaseURL,
-		FrontendDistDir:   frontendDistDir,
-		FrontendIndexPage: frontendIndexPage,
-		FrontendFS:        frontendFS,
-		OpenAI:            openaiHandler,
-		Sched:             sched,
+		BillingDefault:                  opts.Config.Billing,
+		SMTPDefault:                     opts.Config.SMTP,
+		TicketStorage:                   ticketStorage,
+		FrontendBaseURL:                 frontendBaseURL,
+		FrontendDistDir:                 frontendDistDir,
+		FrontendIndexPage:               frontendIndexPage,
+		FrontendFS:                      frontendFS,
+		OpenAI:                          openaiHandler,
+		Sched:                           sched,
 
 		CodexOAuthHandler: func() http.Handler {
 			if oauthFlow == nil {
@@ -167,9 +166,7 @@ func NewApp(opts AppOptions) (*App, error) {
 		FaviconICO:    app.handleFaviconICO,
 
 		SubscriptionOrderPaidWebhook:  app.handleSubscriptionOrderPaidWebhook,
-		StripeWebhook:                 app.handleStripeWebhook,
 		StripeWebhookByPaymentChannel: app.handleStripeWebhookByPaymentChannel,
-		EPayNotify:                    app.handleEPayNotify,
 		EPayNotifyByPaymentChannel:    app.handleEPayNotifyByPaymentChannel,
 
 		RefreshCodexQuotasByEndpoint: app.RefreshCodexQuotasByEndpoint,
@@ -220,13 +217,6 @@ func (a *App) Handler() http.Handler {
 	return a.engine
 }
 
-func (a *App) CodexOAuthCallbackHandler() http.Handler {
-	if a.codexOAuth == nil {
-		return nil
-	}
-	return a.codexOAuth.Handler()
-}
-
 func localBaseURL(cfg config.Config) string {
 	if strings.TrimSpace(cfg.AppSettingsDefaults.SiteBaseURL) != "" {
 		return strings.TrimRight(strings.TrimSpace(cfg.AppSettingsDefaults.SiteBaseURL), "/")
@@ -260,7 +250,7 @@ func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {
 
 		DBOK bool `json:"db_ok"`
 
-		AllowOpenRegistration bool `json:"allow_open_registration"`
+		AllowOpenRegistration    bool `json:"allow_open_registration"`
 		EmailVerificationEnabled bool `json:"email_verification_enabled"`
 	}
 
@@ -276,12 +266,12 @@ func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := resp{
-		OK:                    true,
-		Env:                   a.cfg.Env,
-		Version:               a.version.Version,
-		Date:                  a.version.Date,
-		DBOK:                  dbOK,
-		AllowOpenRegistration: a.cfg.Security.AllowOpenRegistration,
+		OK:                       true,
+		Env:                      a.cfg.Env,
+		Version:                  a.version.Version,
+		Date:                     a.version.Date,
+		DBOK:                     dbOK,
+		AllowOpenRegistration:    a.cfg.Security.AllowOpenRegistration,
 		EmailVerificationEnabled: emailVerifEnabled,
 	}
 
@@ -545,14 +535,25 @@ func (a *App) refreshCodexBalance(ctx context.Context, accountID int64) {
 	}, now, nil)
 }
 
+func parseLastIntPathSegment(path string) (int64, bool) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	for i := len(parts) - 1; i >= 0; i-- {
+		id, err := strconv.ParseInt(strings.TrimSpace(parts[i]), 10, 64)
+		if err == nil && id > 0 {
+			return id, true
+		}
+	}
+	return 0, false
+}
+
 func (a *App) RefreshCodexQuotasByEndpoint(w http.ResponseWriter, r *http.Request) {
 	if a.codexClient == nil {
 		http.Error(w, "Codex OAuth 未启用", http.StatusBadRequest)
 		return
 	}
 
-	endpointID, err := strconv.ParseInt(strings.TrimSpace(r.PathValue("endpoint_id")), 10, 64)
-	if err != nil || endpointID <= 0 {
+	endpointID, ok := parseLastIntPathSegment(r.URL.Path)
+	if !ok {
 		http.Error(w, "参数错误", http.StatusBadRequest)
 		return
 	}
@@ -590,8 +591,8 @@ func (a *App) RefreshCodexQuota(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accountID, err := strconv.ParseInt(strings.TrimSpace(r.PathValue("account_id")), 10, 64)
-	if err != nil || accountID <= 0 {
+	accountID, ok := parseLastIntPathSegment(r.URL.Path)
+	if !ok {
 		http.Error(w, "参数错误", http.StatusBadRequest)
 		return
 	}

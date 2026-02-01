@@ -41,7 +41,7 @@ func TestClientBuildAuthorizeURL(t *testing.T) {
 	c := NewClient(config.CodexOAuthConfig{
 		AuthorizeURL: "https://auth.openai.com/oauth/authorize",
 		ClientID:     "app_test",
-		RedirectURI:  "http://localhost:1455/auth/callback",
+		RedirectURI:  "http://localhost:8080/auth/callback",
 		Scope:        "openid email profile offline_access",
 		Prompt:       "login",
 	})
@@ -61,7 +61,7 @@ func TestClientBuildAuthorizeURL(t *testing.T) {
 	}
 	check("response_type", "code")
 	check("client_id", "app_test")
-	check("redirect_uri", "http://localhost:1455/auth/callback")
+	check("redirect_uri", "http://localhost:8080/auth/callback")
 	check("scope", "openid email profile offline_access")
 	check("state", "state123")
 	check("code_challenge", "challenge123")
@@ -119,7 +119,7 @@ func TestParseIDTokenClaims(t *testing.T) {
 
 func TestParseOAuthCallback(t *testing.T) {
 	t.Run("full_url", func(t *testing.T) {
-		cb, err := ParseOAuthCallback("http://localhost:1455/auth/callback?code=c&state=s")
+		cb, err := ParseOAuthCallback("http://localhost:8080/auth/callback?code=c&state=s")
 		if err != nil {
 			t.Fatalf("ParseOAuthCallback: %v", err)
 		}
@@ -139,7 +139,7 @@ func TestParseOAuthCallback(t *testing.T) {
 	})
 
 	t.Run("error", func(t *testing.T) {
-		cb, err := ParseOAuthCallback("http://localhost:1455/auth/callback?error=access_denied&error_description=cancelled")
+		cb, err := ParseOAuthCallback("http://localhost:8080/auth/callback?error=access_denied&error_description=cancelled")
 		if err != nil {
 			t.Fatalf("ParseOAuthCallback: %v", err)
 		}
@@ -153,7 +153,7 @@ func TestFlowPendingCleanupAndOneTimeState(t *testing.T) {
 	c := NewClient(config.CodexOAuthConfig{
 		AuthorizeURL: "https://auth.openai.com/oauth/authorize",
 		ClientID:     "app_test",
-		RedirectURI:  "http://localhost:1455/auth/callback",
+		RedirectURI:  "http://localhost:8080/auth/callback",
 		Scope:        "openid email profile offline_access",
 	})
 	f := NewFlow(nil, c, "sid", "test-secret", "http://localhost:8080")
@@ -199,7 +199,7 @@ func TestClientRefreshRetryAndInvalidGrant(t *testing.T) {
 			ClientID:    "app_test",
 			Scope:       "openid",
 			Prompt:      "login",
-			RedirectURI: "http://localhost:1455/auth/callback",
+			RedirectURI: "http://localhost:8080/auth/callback",
 		})
 		c.refreshBackoffs = []time.Duration{0}
 

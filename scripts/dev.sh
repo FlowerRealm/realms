@@ -28,6 +28,7 @@ fi
 set +a
 
 # 本地开发：固定 8080 + 正常模式（非 self_mode）
+export REALMS_ENV="dev"
 export REALMS_ADDR=":8080"
 export REALMS_SELF_MODE_ENABLE="false"
 

@@ -191,9 +191,7 @@ func processNegativeIndex(jsonStr string, path string) string {
 		index, _ := strconv.Atoi(negIndex)
 
 		arrayPath := strings.Split(path, negIndex)[0]
-		if strings.HasSuffix(arrayPath, ".") {
-			arrayPath = arrayPath[:len(arrayPath)-1]
-		}
+		arrayPath = strings.TrimSuffix(arrayPath, ".")
 
 		array := gjson.Get(jsonStr, arrayPath)
 		if array.IsArray() {
@@ -287,7 +285,7 @@ func applyOperationsLegacy(jsonData []byte, paramOverride map[string]any) ([]byt
 
 func applyOperations(jsonStr string, operations []ParamOperation, conditionContext map[string]any) (string, error) {
 	var contextJSON string
-	if conditionContext != nil && len(conditionContext) > 0 {
+	if len(conditionContext) > 0 {
 		ctxBytes, err := json.Marshal(conditionContext)
 		if err != nil {
 			return "", fmt.Errorf("marshal condition context failed: %v", err)

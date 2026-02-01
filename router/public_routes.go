@@ -41,14 +41,8 @@ func setAuthAndPublicRoutes(r *gin.Engine, opts Options) {
 		if opts.SubscriptionOrderPaidWebhook != nil {
 			r.POST("/api/webhooks/subscription-orders/:order_id/paid", publicFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(opts.SubscriptionOrderPaidWebhook)))
 		}
-		if opts.StripeWebhook != nil {
-			r.POST("/api/pay/stripe/webhook", publicFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(opts.StripeWebhook)))
-		}
 		if opts.StripeWebhookByPaymentChannel != nil {
 			r.POST("/api/pay/stripe/webhook/:payment_channel_id", publicFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(opts.StripeWebhookByPaymentChannel)))
-		}
-		if opts.EPayNotify != nil {
-			r.GET("/api/pay/epay/notify", publicFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(opts.EPayNotify)))
 		}
 		if opts.EPayNotifyByPaymentChannel != nil {
 			r.GET("/api/pay/epay/notify/:payment_channel_id", publicFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(opts.EPayNotifyByPaymentChannel)))

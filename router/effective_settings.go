@@ -84,4 +84,3 @@ func smtpConfigEffective(ctx context.Context, opts Options) (config.SMTPConfig, 
 
 	return out, nil
 }
-

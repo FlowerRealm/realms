@@ -50,9 +50,7 @@ func CodexUsageURL(baseURL string) (string, error) {
 	u.RawQuery = ""
 	u.Fragment = ""
 	u.Path = strings.TrimRight(u.Path, "/")
-	if strings.HasSuffix(u.Path, "/v1") {
-		u.Path = strings.TrimSuffix(u.Path, "/v1")
-	}
+	u.Path = strings.TrimSuffix(u.Path, "/v1")
 
 	switch {
 	case strings.Contains(u.Path, "/backend-api"):
@@ -263,14 +261,14 @@ func isRetryableQuotaFetchError(err error) bool {
 	}
 	var ne net.Error
 	if errors.As(err, &ne) {
-		return ne.Timeout() || ne.Temporary()
+		return ne.Timeout()
 	}
 	// 兼容极少数场景：HTTP/2/代理在握手阶段提前断开，net/http 可能包成字符串错误。
 	if strings.Contains(err.Error(), "TLS handshake timeout") {
 		return true
 	}
 	var oe *net.OpError
-	if errors.As(err, &oe) && oe != nil && oe.Op == "dial" {
+	if errors.As(err, &oe) && oe != nil && (oe.Op == "dial" || oe.Op == "read") {
 		return true
 	}
 	return false

@@ -162,18 +162,6 @@ func clearSession(c *gin.Context) {
 	_ = sess.Save()
 }
 
-func setSessionUserUpdatedAt(c *gin.Context, unix int64) error {
-	if c == nil {
-		return nil
-	}
-	if unix <= 0 {
-		return nil
-	}
-	sess := sessions.Default(c)
-	sess.Set(sessionUserUpdatedAtKey, unix)
-	return sess.Save()
-}
-
 func userIDFromContext(c *gin.Context) (int64, bool) {
 	if c == nil {
 		return 0, false
@@ -191,23 +179,3 @@ func userIDFromContext(c *gin.Context) (int64, bool) {
 		return 0, false
 	}
 }
-
-func userRoleFromContext(c *gin.Context) (string, bool) {
-	if c == nil {
-		return "", false
-	}
-	v, ok := c.Get("rlm_user_role")
-	if !ok {
-		return "", false
-	}
-	s, ok := v.(string)
-	if !ok {
-		return "", false
-	}
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return "", false
-	}
-	return s, true
-}
-

@@ -152,4 +152,3 @@ func buildUpstreamURL(baseURL string, targetPath string) (string, error) {
 	}
 	return base.ResolveReference(&url.URL{Path: targetPath}).String(), nil
 }
-

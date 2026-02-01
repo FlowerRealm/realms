@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -72,41 +71,6 @@ func main() {
 		Handler: app.Handler(),
 	}
 
-	var oauthServer *http.Server
-	if cfg.CodexOAuth.Enable {
-		h := app.CodexOAuthCallbackHandler()
-		if h == nil {
-			slog.Error("Codex OAuth 已启用但回调 handler 为空")
-			os.Exit(1)
-		}
-
-		callbackAddr := strings.TrimSpace(cfg.CodexOAuth.CallbackListenAddr)
-		if callbackAddr != "" && !sameTCPPort(cfg.Server.Addr, callbackAddr) {
-			oauthServer = &http.Server{
-				Addr:    callbackAddr,
-				Handler: h,
-			}
-			ln, err := net.Listen("tcp", oauthServer.Addr)
-			if err != nil {
-				slog.Error("Codex OAuth 回调监听启动失败", "addr", oauthServer.Addr, "err", err)
-				os.Exit(1)
-			}
-			go func() {
-				slog.Info("Codex OAuth 回调监听启动", "addr", ln.Addr().String())
-				if err := oauthServer.Serve(ln); err != nil && err != http.ErrServerClosed {
-					slog.Error("Codex OAuth 回调监听异常退出", "err", err)
-				}
-			}()
-			httpServer.RegisterOnShutdown(func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				_ = oauthServer.Shutdown(ctx)
-			})
-		} else {
-			slog.Info("Codex OAuth 未启动独立回调监听", "callback_listen_addr", callbackAddr)
-		}
-	}
-
 	serverErr := make(chan error, 1)
 
 	ln, err := net.Listen("tcp", cfg.Server.Addr)
@@ -137,26 +101,4 @@ func main() {
 		_ = httpServer.Close()
 	}
 	slog.Info("服务已退出")
-}
-
-func sameTCPPort(a string, b string) bool {
-	pa := tcpPort(a)
-	pb := tcpPort(b)
-	return pa != "" && pa == pb
-}
-
-func tcpPort(addr string) string {
-	addr = strings.TrimSpace(addr)
-	if addr == "" {
-		return ""
-	}
-	if _, port, err := net.SplitHostPort(addr); err == nil {
-		return port
-	}
-	if !strings.Contains(addr, ":") {
-		if _, port, err := net.SplitHostPort(":" + addr); err == nil {
-			return port
-		}
-	}
-	return ""
 }

@@ -78,4 +78,3 @@ func cnyToMinorUnits(cny decimal.Decimal) (int64, error) {
 	}
 	return n, nil
 }
-

@@ -14,14 +14,14 @@ import (
 )
 
 type adminChannelGroupView struct {
-	ID            int64   `json:"id"`
-	Name          string  `json:"name"`
-	Description   *string `json:"description,omitempty"`
-	PriceMultiplier string `json:"price_multiplier"`
-	MaxAttempts   int     `json:"max_attempts"`
-	Status        int     `json:"status"`
-	CreatedAt     string  `json:"created_at"`
-	UpdatedAt     string  `json:"updated_at"`
+	ID              int64   `json:"id"`
+	Name            string  `json:"name"`
+	Description     *string `json:"description,omitempty"`
+	PriceMultiplier string  `json:"price_multiplier"`
+	MaxAttempts     int     `json:"max_attempts"`
+	Status          int     `json:"status"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
 }
 
 func setAdminChannelGroupAPIRoutes(r gin.IRoutes, opts Options) {
@@ -106,11 +106,11 @@ func adminGetChannelGroupHandler(opts Options) gin.HandlerFunc {
 
 func adminCreateChannelGroupHandler(opts Options) gin.HandlerFunc {
 	type reqBody struct {
-		Name           string  `json:"name"`
-		Description    *string `json:"description,omitempty"`
-		PriceMultiplier string `json:"price_multiplier"`
-		MaxAttempts    int     `json:"max_attempts"`
-		Status         int     `json:"status"`
+		Name            string  `json:"name"`
+		Description     *string `json:"description,omitempty"`
+		PriceMultiplier string  `json:"price_multiplier"`
+		MaxAttempts     int     `json:"max_attempts"`
+		Status          int     `json:"status"`
 	}
 	return func(c *gin.Context) {
 		if opts.Store == nil {
@@ -177,10 +177,10 @@ func adminCreateChannelGroupHandler(opts Options) gin.HandlerFunc {
 
 func adminUpdateChannelGroupHandler(opts Options) gin.HandlerFunc {
 	type reqBody struct {
-		Description    *string `json:"description,omitempty"`
-		PriceMultiplier string `json:"price_multiplier"`
-		MaxAttempts    int     `json:"max_attempts"`
-		Status         int     `json:"status"`
+		Description     *string `json:"description,omitempty"`
+		PriceMultiplier string  `json:"price_multiplier"`
+		MaxAttempts     int     `json:"max_attempts"`
+		Status          int     `json:"status"`
 	}
 	return func(c *gin.Context) {
 		if opts.Store == nil {
@@ -352,10 +352,10 @@ type adminChannelRefView struct {
 }
 
 type adminChannelGroupDetailResponse struct {
-	Group      adminChannelGroupView        `json:"group"`
-	Breadcrumb []adminChannelGroupView      `json:"breadcrumb"`
+	Group      adminChannelGroupView         `json:"group"`
+	Breadcrumb []adminChannelGroupView       `json:"breadcrumb"`
 	Members    []adminChannelGroupMemberView `json:"members"`
-	Channels   []adminChannelRefView        `json:"channels"`
+	Channels   []adminChannelRefView         `json:"channels"`
 }
 
 func adminGetChannelGroupDetailHandler(opts Options) gin.HandlerFunc {

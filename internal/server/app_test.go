@@ -46,15 +46,14 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 	engine.Use(sessions.Sessions(SessionCookieNameForSelfMode(cfg.SelfMode.Enable), sessionStore))
 
 	router.SetRouter(engine, router.Options{
-		Store:             st,
-		SelfMode:          cfg.SelfMode.Enable,
-		AllowOpenRegistration:         cfg.Security.AllowOpenRegistration,
+		Store:                           st,
+		SelfMode:                        cfg.SelfMode.Enable,
+		AllowOpenRegistration:           cfg.Security.AllowOpenRegistration,
 		EmailVerificationEnabledDefault: cfg.EmailVerif.Enable,
-		BillingDefault:     cfg.Billing,
-		PaymentDefault:     cfg.Payment,
-		SMTPDefault:        cfg.SMTP,
-		OpenAI:            openaiHandler,
-		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+		BillingDefault:                  cfg.Billing,
+		SMTPDefault:                     cfg.SMTP,
+		OpenAI:                          openaiHandler,
+		FrontendIndexPage:               []byte("<!doctype html><html><body>INDEX</body></html>"),
 
 		Healthz: func(w http.ResponseWriter, r *http.Request) {
 			out := map[string]any{"ok": true}
@@ -69,7 +68,9 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 		RealmsIconSVG: app.handleRealmsIconSVG,
 		FaviconICO:    app.handleFaviconICO,
 
-		SubscriptionOrderPaidWebhook: app.handleSubscriptionOrderPaidWebhook,
+		SubscriptionOrderPaidWebhook:  app.handleSubscriptionOrderPaidWebhook,
+		StripeWebhookByPaymentChannel: app.handleStripeWebhookByPaymentChannel,
+		EPayNotifyByPaymentChannel:    app.handleEPayNotifyByPaymentChannel,
 	})
 	app.engine = engine
 	return app
@@ -87,8 +88,8 @@ func TestRoutes_SelfMode_DisablesBillingWebhooks(t *testing.T) {
 		path   string
 	}{
 		{method: http.MethodPost, path: "/api/webhooks/subscription-orders/1/paid"},
-		{method: http.MethodPost, path: "/api/pay/stripe/webhook"},
-		{method: http.MethodGet, path: "/api/pay/epay/notify"},
+		{method: http.MethodPost, path: "/api/pay/stripe/webhook/1"},
+		{method: http.MethodGet, path: "/api/pay/epay/notify/1"},
 	}
 
 	for _, tc := range cases {

@@ -15,14 +15,14 @@ import (
 )
 
 type oauthAuthorizePrepareResponse struct {
-	AppName               string `json:"app_name"`
-	ClientID              string `json:"client_id"`
-	RedirectURI           string `json:"redirect_uri"`
-	Scope                 string `json:"scope"`
-	State                 string `json:"state"`
-	CodeChallenge         string `json:"code_challenge,omitempty"`
-	CodeChallengeMethod   string `json:"code_challenge_method,omitempty"`
-	RedirectTo            string `json:"redirect_to,omitempty"`
+	AppName             string `json:"app_name"`
+	ClientID            string `json:"client_id"`
+	RedirectURI         string `json:"redirect_uri"`
+	Scope               string `json:"scope"`
+	State               string `json:"state"`
+	CodeChallenge       string `json:"code_challenge,omitempty"`
+	CodeChallengeMethod string `json:"code_challenge_method,omitempty"`
+	RedirectTo          string `json:"redirect_to,omitempty"`
 }
 
 func setOAuthAPIRoutes(r gin.IRoutes, opts Options) {

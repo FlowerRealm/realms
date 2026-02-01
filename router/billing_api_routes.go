@@ -30,12 +30,12 @@ type billingSubscriptionOrderView struct {
 }
 
 type billingSubscriptionView struct {
-	Active      bool                      `json:"active"`
-	PlanName    string                    `json:"plan_name"`
-	PriceCNY    string                    `json:"price_cny"`
-	GroupName   string                    `json:"group_name"`
-	StartAt     string                    `json:"start_at"`
-	EndAt       string                    `json:"end_at"`
+	Active       bool                          `json:"active"`
+	PlanName     string                        `json:"plan_name"`
+	PriceCNY     string                        `json:"price_cny"`
+	GroupName    string                        `json:"group_name"`
+	StartAt      string                        `json:"start_at"`
+	EndAt        string                        `json:"end_at"`
 	UsageWindows []dashboardSubscriptionWindow `json:"usage_windows,omitempty"`
 }
 
@@ -52,9 +52,9 @@ type billingPlanView struct {
 }
 
 type billingSubscriptionPageResponse struct {
-	Subscription       *billingSubscriptionView      `json:"subscription,omitempty"`
-	Subscriptions      []billingSubscriptionView     `json:"subscriptions"`
-	Plans              []billingPlanView             `json:"plans"`
+	Subscription       *billingSubscriptionView       `json:"subscription,omitempty"`
+	Subscriptions      []billingSubscriptionView      `json:"subscriptions"`
+	Plans              []billingPlanView              `json:"plans"`
 	SubscriptionOrders []billingSubscriptionOrderView `json:"subscription_orders"`
 }
 
@@ -68,12 +68,11 @@ type billingTopupOrderView struct {
 }
 
 type billingTopupPageResponse struct {
-	BalanceUSD           string               `json:"balance_usd"`
-	PayAsYouGoEnabled    bool                 `json:"pay_as_you_go_enabled"`
-	TopupMinCNY          string               `json:"topup_min_cny"`
-	TopupOrders          []billingTopupOrderView `json:"topup_orders"`
-	PaymentStripeEnabled bool                 `json:"payment_stripe_enabled"`
-	PaymentEPayEnabled   bool                 `json:"payment_epay_enabled"`
+	BalanceUSD        string                      `json:"balance_usd"`
+	PayAsYouGoEnabled bool                        `json:"pay_as_you_go_enabled"`
+	TopupMinCNY       string                      `json:"topup_min_cny"`
+	TopupOrders       []billingTopupOrderView     `json:"topup_orders"`
+	PaymentChannels   []billingPaymentChannelView `json:"payment_channels"`
 }
 
 type billingPayOrderView struct {
@@ -94,11 +93,39 @@ type billingPaymentChannelView struct {
 }
 
 type billingPayPageResponse struct {
-	BaseURL              string                    `json:"base_url"`
-	PayOrder             billingPayOrderView       `json:"pay_order"`
-	PaymentChannels      []billingPaymentChannelView `json:"payment_channels"`
-	PaymentStripeEnabled bool                      `json:"payment_stripe_enabled"`
-	PaymentEPayEnabled   bool                      `json:"payment_epay_enabled"`
+	BaseURL         string                      `json:"base_url"`
+	PayOrder        billingPayOrderView         `json:"pay_order"`
+	PaymentChannels []billingPaymentChannelView `json:"payment_channels"`
+}
+
+func listUsableBillingPaymentChannels(c *gin.Context, opts Options) []billingPaymentChannelView {
+	out := make([]billingPaymentChannelView, 0)
+	if c == nil || opts.Store == nil {
+		return out
+	}
+
+	rows, err := opts.Store.ListPaymentChannels(c.Request.Context())
+	if err != nil {
+		return out
+	}
+	for _, ch := range rows {
+		if ch.Status != 1 {
+			continue
+		}
+		switch ch.Type {
+		case store.PaymentChannelTypeStripe:
+			if ch.StripeSecretKey == nil || strings.TrimSpace(*ch.StripeSecretKey) == "" || ch.StripeWebhookSecret == nil || strings.TrimSpace(*ch.StripeWebhookSecret) == "" {
+				continue
+			}
+			out = append(out, billingPaymentChannelView{ID: ch.ID, Type: ch.Type, TypeLabel: "Stripe", Name: ch.Name})
+		case store.PaymentChannelTypeEPay:
+			if ch.EPayGateway == nil || strings.TrimSpace(*ch.EPayGateway) == "" || ch.EPayPartnerID == nil || strings.TrimSpace(*ch.EPayPartnerID) == "" || ch.EPayKey == nil || strings.TrimSpace(*ch.EPayKey) == "" {
+				continue
+			}
+			out = append(out, billingPaymentChannelView{ID: ch.ID, Type: ch.Type, TypeLabel: "EPay", Name: ch.Name})
+		}
+	}
+	return out
 }
 
 func setBillingAPIRoutes(r gin.IRoutes, opts Options) {
@@ -375,7 +402,6 @@ func billingTopupPageHandler(opts Options) gin.HandlerFunc {
 		}
 
 		billingCfg := billingConfigEffective(c.Request.Context(), opts)
-		payCfg := paymentConfigEffective(c.Request.Context(), opts)
 
 		balanceUSD, err := opts.Store.GetUserBalanceUSD(c.Request.Context(), userID)
 		if err != nil {
@@ -412,44 +438,17 @@ func billingTopupPageHandler(opts Options) gin.HandlerFunc {
 			views = append(views, v)
 		}
 
-		hasStripeChannel := false
-		hasEPayChannel := false
-		if rows, err := opts.Store.ListPaymentChannels(c.Request.Context()); err == nil {
-			for _, ch := range rows {
-				if ch.Status != 1 {
-					continue
-				}
-				switch ch.Type {
-				case store.PaymentChannelTypeStripe:
-					if ch.StripeSecretKey == nil || strings.TrimSpace(*ch.StripeSecretKey) == "" || ch.StripeWebhookSecret == nil || strings.TrimSpace(*ch.StripeWebhookSecret) == "" {
-						continue
-					}
-					hasStripeChannel = true
-				case store.PaymentChannelTypeEPay:
-					if ch.EPayGateway == nil || strings.TrimSpace(*ch.EPayGateway) == "" || ch.EPayPartnerID == nil || strings.TrimSpace(*ch.EPayPartnerID) == "" || ch.EPayKey == nil || strings.TrimSpace(*ch.EPayKey) == "" {
-						continue
-					}
-					hasEPayChannel = true
-				}
-				if hasStripeChannel && hasEPayChannel {
-					break
-				}
-			}
-		}
-
-		stripeEnabled := hasStripeChannel || (payCfg.Stripe.Enable && strings.TrimSpace(payCfg.Stripe.SecretKey) != "" && strings.TrimSpace(payCfg.Stripe.WebhookSecret) != "")
-		epayEnabled := hasEPayChannel || (payCfg.EPay.Enable && strings.TrimSpace(payCfg.EPay.Gateway) != "" && strings.TrimSpace(payCfg.EPay.PartnerID) != "" && strings.TrimSpace(payCfg.EPay.Key) != "")
+		paymentChannels := listUsableBillingPaymentChannels(c, opts)
 
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "",
 			"data": billingTopupPageResponse{
-				BalanceUSD:           formatUSD(balanceUSD),
-				PayAsYouGoEnabled:    billingCfg.EnablePayAsYouGo,
-				TopupMinCNY:          formatCNY(billingCfg.MinTopupCNY),
-				TopupOrders:          views,
-				PaymentStripeEnabled: stripeEnabled,
-				PaymentEPayEnabled:   epayEnabled,
+				BalanceUSD:        formatUSD(balanceUSD),
+				PayAsYouGoEnabled: billingCfg.EnablePayAsYouGo,
+				TopupMinCNY:       formatCNY(billingCfg.MinTopupCNY),
+				TopupOrders:       views,
+				PaymentChannels:   paymentChannels,
 			},
 		})
 	}
@@ -510,7 +509,7 @@ func billingCreateTopupOrderHandler(opts Options) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "订单已创建，请选择支付方式",
-			"data": gin.H{"order_id": o.ID},
+			"data":    gin.H{"order_id": o.ID},
 		})
 	}
 }
@@ -537,35 +536,7 @@ func billingPayPageHandler(opts Options) gin.HandlerFunc {
 		}
 
 		baseURL := uiBaseURLFromRequest(c.Request.Context(), opts, c.Request)
-
-		paymentChannels := make([]billingPaymentChannelView, 0)
-		hasStripeChannel := false
-		hasEPayChannel := false
-		if rows, err := opts.Store.ListPaymentChannels(c.Request.Context()); err == nil {
-			for _, ch := range rows {
-				if ch.Status != 1 {
-					continue
-				}
-				switch ch.Type {
-				case store.PaymentChannelTypeStripe:
-					if ch.StripeSecretKey == nil || strings.TrimSpace(*ch.StripeSecretKey) == "" || ch.StripeWebhookSecret == nil || strings.TrimSpace(*ch.StripeWebhookSecret) == "" {
-						continue
-					}
-					paymentChannels = append(paymentChannels, billingPaymentChannelView{ID: ch.ID, Type: ch.Type, TypeLabel: "Stripe", Name: ch.Name})
-					hasStripeChannel = true
-				case store.PaymentChannelTypeEPay:
-					if ch.EPayGateway == nil || strings.TrimSpace(*ch.EPayGateway) == "" || ch.EPayPartnerID == nil || strings.TrimSpace(*ch.EPayPartnerID) == "" || ch.EPayKey == nil || strings.TrimSpace(*ch.EPayKey) == "" {
-						continue
-					}
-					paymentChannels = append(paymentChannels, billingPaymentChannelView{ID: ch.ID, Type: ch.Type, TypeLabel: "EPay", Name: ch.Name})
-					hasEPayChannel = true
-				}
-			}
-		}
-
-		payCfg := paymentConfigEffective(c.Request.Context(), opts)
-		stripeEnabled := hasStripeChannel || (payCfg.Stripe.Enable && strings.TrimSpace(payCfg.Stripe.SecretKey) != "" && strings.TrimSpace(payCfg.Stripe.WebhookSecret) != "")
-		epayEnabled := hasEPayChannel || (payCfg.EPay.Enable && strings.TrimSpace(payCfg.EPay.Gateway) != "" && strings.TrimSpace(payCfg.EPay.PartnerID) != "" && strings.TrimSpace(payCfg.EPay.Key) != "")
+		paymentChannels := listUsableBillingPaymentChannels(c, opts)
 
 		view := billingPayOrderView{Kind: kind, ID: orderID}
 		switch kind {
@@ -643,11 +614,9 @@ func billingPayPageHandler(opts Options) gin.HandlerFunc {
 			"success": true,
 			"message": "",
 			"data": billingPayPageResponse{
-				BaseURL:              baseURL,
-				PayOrder:             view,
-				PaymentChannels:      paymentChannels,
-				PaymentStripeEnabled: stripeEnabled,
-				PaymentEPayEnabled:   epayEnabled,
+				BaseURL:         baseURL,
+				PayOrder:        view,
+				PaymentChannels: paymentChannels,
 			},
 		})
 	}
@@ -705,8 +674,7 @@ func billingCancelPayOrderHandler(opts Options) gin.HandlerFunc {
 
 func billingStartPaymentHandler(opts Options) gin.HandlerFunc {
 	type reqBody struct {
-		PaymentChannelID *int64  `json:"payment_channel_id,omitempty"`
-		Method           *string `json:"method,omitempty"`
+		PaymentChannelID int64   `json:"payment_channel_id"`
 		EPayType         *string `json:"epay_type,omitempty"`
 	}
 	return func(c *gin.Context) {
@@ -741,21 +709,14 @@ func billingStartPaymentHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
 			return
 		}
-		paymentChannelID := int64(0)
-		if req.PaymentChannelID != nil && *req.PaymentChannelID > 0 {
-			paymentChannelID = *req.PaymentChannelID
-		}
-		method := ""
-		if req.Method != nil {
-			method = strings.ToLower(strings.TrimSpace(*req.Method))
-		}
+		paymentChannelID := req.PaymentChannelID
 		epayType := ""
 		if req.EPayType != nil {
 			epayType = strings.ToLower(strings.TrimSpace(*req.EPayType))
 		}
 
-		if paymentChannelID == 0 && method == "" {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "请选择支付方式"})
+		if paymentChannelID <= 0 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "请先选择支付渠道"})
 			return
 		}
 
@@ -765,7 +726,7 @@ func billingStartPaymentHandler(opts Options) gin.HandlerFunc {
 
 		ref := ""
 		orderTitle := ""
-		amountCNY := decimal.Zero
+		var amountCNY decimal.Decimal
 		switch kind {
 		case "subscription":
 			o, err := opts.Store.GetSubscriptionOrderByID(c.Request.Context(), orderID)
@@ -833,149 +794,35 @@ func billingStartPaymentHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
-		if paymentChannelID > 0 {
-			ch, err := opts.Store.GetPaymentChannelByID(c.Request.Context(), paymentChannelID)
-			if err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
-					c.JSON(http.StatusOK, gin.H{"success": false, "message": "支付渠道不存在"})
-					return
-				}
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "支付渠道查询失败"})
+		ch, err := opts.Store.GetPaymentChannelByID(c.Request.Context(), paymentChannelID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "支付渠道不存在"})
 				return
 			}
-			if ch.Status != 1 {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "支付渠道未启用"})
-				return
-			}
-
-			switch ch.Type {
-			case store.PaymentChannelTypeStripe:
-				if ch.StripeSecretKey == nil || strings.TrimSpace(*ch.StripeSecretKey) == "" || ch.StripeWebhookSecret == nil || strings.TrimSpace(*ch.StripeWebhookSecret) == "" {
-					c.JSON(http.StatusOK, gin.H{"success": false, "message": "Stripe 渠道未配置或不可用"})
-					return
-				}
-				currency := "cny"
-				if ch.StripeCurrency != nil {
-					currency = strings.ToLower(strings.TrimSpace(*ch.StripeCurrency))
-				}
-				if currency == "" {
-					currency = "cny"
-				}
-
-				stripe.Key = strings.TrimSpace(*ch.StripeSecretKey)
-
-				exp := time.Now().Add(2 * time.Hour).Unix()
-				params := &stripe.CheckoutSessionParams{
-					SuccessURL:        stripe.String(successURL),
-					CancelURL:         stripe.String(cancelURL),
-					Mode:              stripe.String(string(stripe.CheckoutSessionModePayment)),
-					ClientReferenceID: stripe.String(ref),
-					CustomerEmail:     stripe.String(u.Email),
-					ExpiresAt:         stripe.Int64(exp),
-					LineItems: []*stripe.CheckoutSessionLineItemParams{
-						{
-							PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
-								Currency:   stripe.String(currency),
-								UnitAmount: stripe.Int64(unitAmount),
-								ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
-									Name: stripe.String(orderTitle),
-								},
-							},
-							Quantity: stripe.Int64(1),
-						},
-					},
-				}
-				sess, err := stripeCheckout.New(params)
-				if err != nil || strings.TrimSpace(sess.URL) == "" {
-					c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建 Stripe 支付失败"})
-					return
-				}
-				c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"redirect_url": sess.URL}})
-				return
-			case store.PaymentChannelTypeEPay:
-				if ch.EPayGateway == nil || strings.TrimSpace(*ch.EPayGateway) == "" || ch.EPayPartnerID == nil || strings.TrimSpace(*ch.EPayPartnerID) == "" || ch.EPayKey == nil || strings.TrimSpace(*ch.EPayKey) == "" {
-					c.JSON(http.StatusOK, gin.H{"success": false, "message": "EPay 渠道未配置或不可用"})
-					return
-				}
-
-				if epayType == "" {
-					epayType = "alipay"
-				}
-				switch epayType {
-				case "alipay", "wxpay", "qqpay":
-				default:
-					c.JSON(http.StatusOK, gin.H{"success": false, "message": "EPay 支付类型不支持"})
-					return
-				}
-
-				client, err := epay.NewClient(&epay.Config{
-					PartnerID: strings.TrimSpace(*ch.EPayPartnerID),
-					Key:       strings.TrimSpace(*ch.EPayKey),
-				}, strings.TrimSpace(*ch.EPayGateway))
-				if err != nil {
-					c.JSON(http.StatusOK, gin.H{"success": false, "message": "EPay 配置错误"})
-					return
-				}
-
-				notifyURL, err := url.Parse(baseURL + "/api/pay/epay/notify/" + strconv.FormatInt(paymentChannelID, 10))
-				if err != nil {
-					c.JSON(http.StatusOK, gin.H{"success": false, "message": "回调 URL 配置错误"})
-					return
-				}
-				returnURL, err := url.Parse(baseURL + "/pay/" + kind + "/" + strconv.FormatInt(orderID, 10))
-				if err != nil {
-					c.JSON(http.StatusOK, gin.H{"success": false, "message": "回跳 URL 配置错误"})
-					return
-				}
-
-				money := formatCNYFixed(amountCNY)
-				purchaseURL, params, err := client.Purchase(&epay.PurchaseArgs{
-					Type:           epayType,
-					ServiceTradeNo: ref,
-					Name:           orderTitle,
-					Money:          money,
-					Device:         epay.PC,
-					NotifyUrl:      notifyURL,
-					ReturnUrl:      returnURL,
-				})
-				if err != nil {
-					c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建 EPay 支付失败"})
-					return
-				}
-
-				u2, err := url.Parse(purchaseURL)
-				if err != nil {
-					c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建 EPay 支付失败"})
-					return
-				}
-				q := u2.Query()
-				for k, v := range params {
-					q.Set(k, v)
-				}
-				u2.RawQuery = q.Encode()
-
-				c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"redirect_url": u2.String()}})
-				return
-			default:
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "支付渠道类型不支持"})
-				return
-			}
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "支付渠道查询失败"})
+			return
+		}
+		if ch.Status != 1 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "支付渠道未启用"})
+			return
 		}
 
-		payCfg := paymentConfigEffective(c.Request.Context(), opts)
-		switch method {
-		case "stripe":
-			cfg := payCfg.Stripe
-			if !cfg.Enable || strings.TrimSpace(cfg.SecretKey) == "" || strings.TrimSpace(cfg.WebhookSecret) == "" {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "Stripe 未配置或未启用"})
+		switch ch.Type {
+		case store.PaymentChannelTypeStripe:
+			if ch.StripeSecretKey == nil || strings.TrimSpace(*ch.StripeSecretKey) == "" || ch.StripeWebhookSecret == nil || strings.TrimSpace(*ch.StripeWebhookSecret) == "" {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "Stripe 渠道未配置或不可用"})
 				return
 			}
-			cfg.Currency = strings.ToLower(strings.TrimSpace(cfg.Currency))
-			if cfg.Currency == "" {
-				cfg.Currency = "cny"
+			currency := "cny"
+			if ch.StripeCurrency != nil {
+				currency = strings.ToLower(strings.TrimSpace(*ch.StripeCurrency))
+			}
+			if currency == "" {
+				currency = "cny"
 			}
 
-			stripe.Key = strings.TrimSpace(cfg.SecretKey)
+			stripe.Key = strings.TrimSpace(*ch.StripeSecretKey)
 
 			exp := time.Now().Add(2 * time.Hour).Unix()
 			params := &stripe.CheckoutSessionParams{
@@ -988,7 +835,7 @@ func billingStartPaymentHandler(opts Options) gin.HandlerFunc {
 				LineItems: []*stripe.CheckoutSessionLineItemParams{
 					{
 						PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
-							Currency:   stripe.String(cfg.Currency),
+							Currency:   stripe.String(currency),
 							UnitAmount: stripe.Int64(unitAmount),
 							ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
 								Name: stripe.String(orderTitle),
@@ -998,7 +845,6 @@ func billingStartPaymentHandler(opts Options) gin.HandlerFunc {
 					},
 				},
 			}
-
 			sess, err := stripeCheckout.New(params)
 			if err != nil || strings.TrimSpace(sess.URL) == "" {
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建 Stripe 支付失败"})
@@ -1006,12 +852,12 @@ func billingStartPaymentHandler(opts Options) gin.HandlerFunc {
 			}
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"redirect_url": sess.URL}})
 			return
-		case "epay":
-			cfg := payCfg.EPay
-			if !cfg.Enable || strings.TrimSpace(cfg.Gateway) == "" || strings.TrimSpace(cfg.PartnerID) == "" || strings.TrimSpace(cfg.Key) == "" {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "EPay 未配置或未启用"})
+		case store.PaymentChannelTypeEPay:
+			if ch.EPayGateway == nil || strings.TrimSpace(*ch.EPayGateway) == "" || ch.EPayPartnerID == nil || strings.TrimSpace(*ch.EPayPartnerID) == "" || ch.EPayKey == nil || strings.TrimSpace(*ch.EPayKey) == "" {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "EPay 渠道未配置或不可用"})
 				return
 			}
+
 			if epayType == "" {
 				epayType = "alipay"
 			}
@@ -1023,15 +869,15 @@ func billingStartPaymentHandler(opts Options) gin.HandlerFunc {
 			}
 
 			client, err := epay.NewClient(&epay.Config{
-				PartnerID: strings.TrimSpace(cfg.PartnerID),
-				Key:       strings.TrimSpace(cfg.Key),
-			}, strings.TrimSpace(cfg.Gateway))
+				PartnerID: strings.TrimSpace(*ch.EPayPartnerID),
+				Key:       strings.TrimSpace(*ch.EPayKey),
+			}, strings.TrimSpace(*ch.EPayGateway))
 			if err != nil {
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "EPay 配置错误"})
 				return
 			}
 
-			notifyURL, err := url.Parse(baseURL + "/api/pay/epay/notify")
+			notifyURL, err := url.Parse(baseURL + "/api/pay/epay/notify/" + strconv.FormatInt(paymentChannelID, 10))
 			if err != nil {
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "回调 URL 配置错误"})
 				return
@@ -1067,10 +913,11 @@ func billingStartPaymentHandler(opts Options) gin.HandlerFunc {
 				q.Set(k, v)
 			}
 			u2.RawQuery = q.Encode()
+
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"redirect_url": u2.String()}})
 			return
 		default:
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "支付方式不支持"})
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "支付渠道类型不支持"})
 			return
 		}
 	}

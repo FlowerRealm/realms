@@ -72,11 +72,3 @@ func formatTimeIn(t time.Time, layout string, loc *time.Location) string {
 	}
 	return t.In(loc).Format(layout)
 }
-
-func formatTimePtrIn(t *time.Time, layout string, loc *time.Location) string {
-	if t == nil {
-		return "-"
-	}
-	return formatTimeIn(*t, layout, loc)
-}
-

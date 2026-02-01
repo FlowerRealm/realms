@@ -14,4 +14,3 @@ func SessionCookieNameForSelfMode(selfMode bool) string {
 	}
 	return SessionCookieName
 }
-

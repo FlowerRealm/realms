@@ -282,4 +282,3 @@ func normalizeRedirectURIs(raw []string) ([]string, error) {
 	}
 	return out, nil
 }
-

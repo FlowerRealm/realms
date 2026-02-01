@@ -49,14 +49,14 @@ type dashboardCharts struct {
 }
 
 type dashboardResponse struct {
-	TodayUsageUSD string                 `json:"today_usage_usd"`
-	TodayRequests int64                  `json:"today_requests"`
-	TodayTokens   int64                  `json:"today_tokens"`
-	TodayRPM      string                 `json:"today_rpm"`
-	TodayTPM      string                 `json:"today_tpm"`
-	UnreadAnnouncementsCount int64       `json:"unread_announcements_count"`
-	Subscription  *dashboardSubscription `json:"subscription,omitempty"`
-	Charts        dashboardCharts        `json:"charts"`
+	TodayUsageUSD            string                 `json:"today_usage_usd"`
+	TodayRequests            int64                  `json:"today_requests"`
+	TodayTokens              int64                  `json:"today_tokens"`
+	TodayRPM                 string                 `json:"today_rpm"`
+	TodayTPM                 string                 `json:"today_tpm"`
+	UnreadAnnouncementsCount int64                  `json:"unread_announcements_count"`
+	Subscription             *dashboardSubscription `json:"subscription,omitempty"`
+	Charts                   dashboardCharts        `json:"charts"`
 }
 
 func setDashboardAPIRoutes(r gin.IRoutes, opts Options) {
@@ -207,14 +207,14 @@ func dashboardHandler(opts Options) gin.HandlerFunc {
 			"success": true,
 			"message": "",
 			"data": dashboardResponse{
-				TodayUsageUSD: todayUsageUSD,
-				TodayRequests: todayStats.Requests,
-				TodayTokens:   todayStats.Tokens,
-				TodayRPM:      rpm,
-				TodayTPM:      tpm,
+				TodayUsageUSD:            todayUsageUSD,
+				TodayRequests:            todayStats.Requests,
+				TodayTokens:              todayStats.Tokens,
+				TodayRPM:                 rpm,
+				TodayTPM:                 tpm,
 				UnreadAnnouncementsCount: unreadCount,
-				Subscription:  subView,
-				Charts:        chartView,
+				Subscription:             subView,
+				Charts:                   chartView,
 			},
 		})
 	}

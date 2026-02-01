@@ -393,47 +393,6 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream, reqBytes, cw.bytes)
 }
 
-func selectionMatchesConstraints(sel scheduler.Selection, cons scheduler.Constraints) bool {
-	if cons.RequireChannelType != "" && sel.ChannelType != cons.RequireChannelType {
-		return false
-	}
-	if cons.RequireChannelID != 0 && sel.ChannelID != cons.RequireChannelID {
-		return false
-	}
-	if cons.AllowGroups != nil && !channelInAnyGroup(sel.ChannelGroups, cons.AllowGroups) {
-		return false
-	}
-	if cons.AllowChannelIDs != nil {
-		if _, ok := cons.AllowChannelIDs[sel.ChannelID]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
-func channelInAnyGroup(groups string, allowed map[string]struct{}) bool {
-	if allowed == nil {
-		return true
-	}
-	if len(allowed) == 0 {
-		return false
-	}
-	groups = strings.TrimSpace(groups)
-	if groups == "" {
-		groups = "default"
-	}
-	for _, g := range strings.Split(groups, ",") {
-		g = strings.TrimSpace(g)
-		if g == "" {
-			continue
-		}
-		if _, ok := allowed[g]; ok {
-			return true
-		}
-	}
-	return false
-}
-
 func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p auth.Principal, sel scheduler.Selection, body []byte, wantStream bool, model *string, usageID int64, reqStart time.Time, reqBytes int64, retries int) bool {
 	for i := 0; i < retries; i++ {
 		ok := h.proxyOnce(w, r, sel, body, wantStream, model, p, usageID, reqStart, reqBytes)
@@ -644,18 +603,6 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 	h.sched.Report(sel, scheduler.Result{Success: true})
 	h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "", "", time.Since(reqStart), false, reqBytes, int64(respBytes))
 	return true
-}
-
-func (h *Handler) copyNonStreamResponse(w http.ResponseWriter, resp *http.Response) int64 {
-	return h.copyNonStreamResponseWithStatus(w, resp, resp.StatusCode)
-}
-
-func (h *Handler) copyNonStreamResponseWithStatus(w http.ResponseWriter, resp *http.Response, status int) int64 {
-	bodyBytes, _ := readLimited(resp.Body, 0)
-	copyResponseHeaders(w.Header(), resp.Header)
-	w.WriteHeader(status)
-	n, _ := w.Write(bodyBytes)
-	return int64(n)
 }
 
 type countingResponseWriter struct {

@@ -209,4 +209,3 @@ func writeOAuthError(w http.ResponseWriter, status int, code string, desc string
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(oauthErrorResponse{Error: code, ErrorDescription: strings.TrimSpace(desc)})
 }
-

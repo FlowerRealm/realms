@@ -54,20 +54,6 @@ const (
 	SettingBillingCreditUSDPerCNY  = "billing_credit_usd_per_cny"
 )
 
-const (
-	SettingPaymentEPayEnable    = "payment_epay_enable"
-	SettingPaymentEPayGateway   = "payment_epay_gateway"
-	SettingPaymentEPayPartnerID = "payment_epay_partner_id"
-	SettingPaymentEPayKey       = "payment_epay_key"
-)
-
-const (
-	SettingPaymentStripeEnable        = "payment_stripe_enable"
-	SettingPaymentStripeSecretKey     = "payment_stripe_secret_key"
-	SettingPaymentStripeWebhookSecret = "payment_stripe_webhook_secret"
-	SettingPaymentStripeCurrency      = "payment_stripe_currency"
-)
-
 func (s *Store) GetAppSetting(ctx context.Context, key string) (string, bool, error) {
 	if s.db == nil {
 		return "", false, nil

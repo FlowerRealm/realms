@@ -240,9 +240,22 @@ func isRetryableRefreshError(err error) bool {
 	if errors.As(err, &te) {
 		return te.Retryable()
 	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
 	var ne net.Error
 	if errors.As(err, &ne) {
-		return ne.Timeout() || ne.Temporary()
+		return ne.Timeout()
+	}
+	if strings.Contains(err.Error(), "TLS handshake timeout") {
+		return true
+	}
+	var oe *net.OpError
+	if errors.As(err, &oe) && oe != nil && oe.Op == "dial" {
+		return true
 	}
 	return false
 }

@@ -55,24 +55,6 @@ export type AdminSettings = {
   billing_min_topup_cny_override: boolean;
   billing_credit_usd_per_cny: string;
   billing_credit_usd_per_cny_override: boolean;
-
-  payment_epay_enable: boolean;
-  payment_epay_enable_override: boolean;
-  payment_epay_gateway: string;
-  payment_epay_gateway_override: boolean;
-  payment_epay_partner_id: string;
-  payment_epay_partner_id_override: boolean;
-  payment_epay_key_set: boolean;
-  payment_epay_key_override: boolean;
-
-  payment_stripe_enable: boolean;
-  payment_stripe_enable_override: boolean;
-  payment_stripe_currency: string;
-  payment_stripe_currency_override: boolean;
-  payment_stripe_secret_key_set: boolean;
-  payment_stripe_secret_key_override: boolean;
-  payment_stripe_webhook_secret_set: boolean;
-  payment_stripe_webhook_secret_override: boolean;
 };
 
 export type UpdateAdminSettingsRequest = {
@@ -92,16 +74,6 @@ export type UpdateAdminSettingsRequest = {
   billing_min_topup_cny: string;
   billing_credit_usd_per_cny: string;
 
-  payment_epay_enable: boolean;
-  payment_epay_gateway: string;
-  payment_epay_partner_id: string;
-  payment_epay_key: string;
-
-  payment_stripe_enable: boolean;
-  payment_stripe_currency: string;
-  payment_stripe_secret_key: string;
-  payment_stripe_webhook_secret: string;
-
   feature_enabled: Record<string, boolean>;
 };
 
@@ -119,4 +91,3 @@ export async function resetAdminSettings() {
   const res = await api.post<APIResponse<void>>('/api/admin/settings/reset');
   return res.data;
 }
-

@@ -165,7 +165,7 @@ func accountUpdateEmailHandler(opts Options) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "邮箱已更新，请重新登录",
-			"data": gin.H{"force_logout": true},
+			"data":    gin.H{"force_logout": true},
 		})
 	}
 }
@@ -223,8 +223,7 @@ func accountUpdatePasswordHandler(opts Options) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "密码已更新，请重新登录",
-			"data": gin.H{"force_logout": true},
+			"data":    gin.H{"force_logout": true},
 		})
 	}
 }
-
