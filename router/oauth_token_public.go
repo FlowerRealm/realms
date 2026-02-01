@@ -137,7 +137,7 @@ func oauthTokenHandler(opts Options) http.HandlerFunc {
 			}
 		}
 
-		rawToken, err := auth.NewRandomToken("rlm_", 32)
+		rawToken, err := auth.NewRandomToken("sk_", 32)
 		if err != nil {
 			writeOAuthError(w, http.StatusInternalServerError, "server_error", "生成 token 失败")
 			return

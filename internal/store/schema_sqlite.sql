@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS `user_tokens` (
   `user_id` INTEGER NOT NULL,
   `name` TEXT NULL,
   `token_hash` BLOB NOT NULL,
+  `token_plain` TEXT NULL,
   `token_hint` TEXT NULL,
   `status` INTEGER NOT NULL DEFAULT 1,
   `created_at` DATETIME NOT NULL,

@@ -2,6 +2,7 @@ package router
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"realms/internal/auth"
+	"realms/internal/store"
 )
 
 type userTokenView struct {
@@ -31,6 +33,7 @@ func setTokenAPIRoutes(r gin.IRoutes, opts Options) {
 	r.POST("/token", authn, createUserTokenHandler(opts))
 	r.POST("/token/", authn, createUserTokenHandler(opts))
 
+	r.GET("/token/:token_id/reveal", authn, revealUserTokenHandler(opts))
 	r.POST("/token/:token_id/rotate", authn, rotateUserTokenHandler(opts))
 	r.POST("/token/:token_id/revoke", authn, revokeUserTokenHandler(opts))
 	r.DELETE("/token/:token_id", authn, deleteUserTokenHandler(opts))
@@ -85,7 +88,7 @@ func createUserTokenHandler(opts Options) gin.HandlerFunc {
 			}
 		}
 
-		raw, err := auth.NewRandomToken("sk-", 32)
+		raw, err := auth.NewRandomToken("sk_", 32)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "生成令牌失败"})
 			return
@@ -120,7 +123,7 @@ func rotateUserTokenHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
-		raw, err := auth.NewRandomToken("sk-", 32)
+		raw, err := auth.NewRandomToken("sk_", 32)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "生成令牌失败"})
 			return
@@ -139,6 +142,49 @@ func rotateUserTokenHandler(opts Options) gin.HandlerFunc {
 			"data": gin.H{
 				"token_id": tokenID,
 				"token":    raw,
+			},
+		})
+	}
+}
+
+func revealUserTokenHandler(opts Options) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID, ok := userIDFromContext(c)
+		if !ok {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "未登录"})
+			return
+		}
+		tokenID, err := strconv.ParseInt(strings.TrimSpace(c.Param("token_id")), 10, 64)
+		if err != nil || tokenID <= 0 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "token_id 不合法"})
+			return
+		}
+
+		tok, err := opts.Store.RevealUserToken(c.Request.Context(), userID, tokenID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "令牌不存在"})
+				return
+			}
+			if errors.Is(err, store.ErrUserTokenRevoked) {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "令牌已撤销，无法查看"})
+				return
+			}
+			if errors.Is(err, store.ErrUserTokenNotRevealable) {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "旧令牌不支持查看，请重新生成"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查看失败"})
+			return
+		}
+
+		c.Header("Cache-Control", "no-store")
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data": gin.H{
+				"token_id": tokenID,
+				"token":    tok,
 			},
 		})
 	}

@@ -488,7 +488,7 @@ export function DashboardPage() {
                     <pre className="mb-0 text-light overflow-auto smaller font-monospace" style={{ whiteSpace: 'pre-wrap' }}>
                       <code>{`# Linux/macOS
 export OPENAI_BASE_URL="${apiBaseURL}"
-export OPENAI_API_KEY="rlm_..."
+export OPENAI_API_KEY="sk_..."
 
 # ~/.codex/config.toml
 model_provider = "realms"

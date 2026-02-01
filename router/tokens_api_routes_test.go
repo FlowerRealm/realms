@@ -151,6 +151,57 @@ func TestUserTokensCRUD_SessionCookie(t *testing.T) {
 		t.Fatalf("expected 1 token, got success=%v len=%d msg=%q", listResp.Success, len(listResp.Data), listResp.Message)
 	}
 
+	// reveal token (active)
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/token/"+strconv.FormatInt(created.Data.TokenID, 10)+"/reveal", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("reveal status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("reveal expected Cache-Control no-store, got %q", got)
+	}
+	var revealed struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			TokenID int64  `json:"token_id"`
+			Token   string `json:"token"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &revealed); err != nil {
+		t.Fatalf("json.Unmarshal reveal: %v", err)
+	}
+	if !revealed.Success || revealed.Data.TokenID != created.Data.TokenID || revealed.Data.Token != created.Data.Token {
+		t.Fatalf("reveal unexpected resp: %#v", revealed)
+	}
+
+	// simulate old token (missing token_plain)
+	if _, err := db.Exec(`UPDATE user_tokens SET token_plain=NULL WHERE id=?`, created.Data.TokenID); err != nil {
+		t.Fatalf("clear token_plain: %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/token/"+strconv.FormatInt(created.Data.TokenID, 10)+"/reveal", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("reveal(old) status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var revealOld struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &revealOld); err != nil {
+		t.Fatalf("json.Unmarshal reveal(old): %v", err)
+	}
+	if revealOld.Success || revealOld.Message == "" {
+		t.Fatalf("reveal(old) expected error, got %#v", revealOld)
+	}
+
 	// revoke token
 	req = httptest.NewRequest(http.MethodPost, "http://example.com/api/token/"+strconv.FormatInt(created.Data.TokenID, 10)+"/revoke", nil)
 	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
@@ -169,6 +220,26 @@ func TestUserTokensCRUD_SessionCookie(t *testing.T) {
 	}
 	if !okResp.Success {
 		t.Fatalf("revoke expected success, got message=%q", okResp.Message)
+	}
+
+	// reveal token (revoked: should fail)
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/token/"+strconv.FormatInt(created.Data.TokenID, 10)+"/reveal", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("reveal(revoked) status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var revealRevoked struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &revealRevoked); err != nil {
+		t.Fatalf("json.Unmarshal reveal(revoked): %v", err)
+	}
+	if revealRevoked.Success || revealRevoked.Message == "" {
+		t.Fatalf("reveal(revoked) expected error, got %#v", revealRevoked)
 	}
 
 	// rotate token
@@ -193,6 +264,33 @@ func TestUserTokensCRUD_SessionCookie(t *testing.T) {
 	}
 	if !rotated.Success || rotated.Data.Token == "" || rotated.Data.TokenID != created.Data.TokenID {
 		t.Fatalf("rotate unexpected resp: %#v", rotated)
+	}
+
+	// reveal token (after rotate)
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/token/"+strconv.FormatInt(created.Data.TokenID, 10)+"/reveal", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("reveal(after rotate) status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("reveal(after rotate) expected Cache-Control no-store, got %q", got)
+	}
+	var revealAfterRotate struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			TokenID int64  `json:"token_id"`
+			Token   string `json:"token"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &revealAfterRotate); err != nil {
+		t.Fatalf("json.Unmarshal reveal(after rotate): %v", err)
+	}
+	if !revealAfterRotate.Success || revealAfterRotate.Data.TokenID != created.Data.TokenID || revealAfterRotate.Data.Token != rotated.Data.Token {
+		t.Fatalf("reveal(after rotate) unexpected resp: %#v", revealAfterRotate)
 	}
 
 	// delete token

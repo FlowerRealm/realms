@@ -226,7 +226,7 @@ func runCodexE2E(t *testing.T, e2eCfg codexE2EConfig) {
 	if _, err := st.AddUserBalanceUSD(ctx, userID, decimal.NewFromInt(1)); err != nil {
 		t.Fatalf("AddUserBalanceUSD: %v", err)
 	}
-	rawToken, err := auth.NewRandomToken("rlm_", 32)
+	rawToken, err := auth.NewRandomToken("sk_", 32)
 	if err != nil {
 		t.Fatalf("NewRandomToken: %v", err)
 	}

@@ -9,7 +9,7 @@ Realms 是一个 Go 单体服务（Gin），对外提供 **OpenAI 兼容** 的 A
 ## 你可以用它做什么
 
 - 作为 OpenAI SDK / Codex CLI 的 `base_url` 中转层（支持 `POST /v1/responses` SSE 透传）
-- Web 控制台管理用户 Token（`rlm_...`）、查看用量与请求明细
+- Web 控制台管理用户 Token（`sk_...`）、查看用量与请求明细
 - 管理后台管理上游渠道（OpenAI 兼容 base_url / Codex OAuth）与路由策略
 
 ## 快速开始（本地）

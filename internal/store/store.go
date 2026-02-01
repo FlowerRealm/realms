@@ -18,6 +18,11 @@ const (
 	UserRoleUser = "user"
 )
 
+var (
+	ErrUserTokenRevoked       = errors.New("user token revoked")
+	ErrUserTokenNotRevealable = errors.New("user token not revealable")
+)
+
 type Store struct {
 	db      *sql.DB
 	dialect Dialect
@@ -186,9 +191,9 @@ func (s *Store) CreateUserToken(ctx context.Context, userID int64, name *string,
 	tokenHash := crypto.TokenHash(rawToken)
 	hint := tokenHint(rawToken)
 	res, err := s.db.ExecContext(ctx, `
-INSERT INTO user_tokens(user_id, name, token_hash, token_hint, status, created_at)
-VALUES(?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
-`, userID, name, tokenHash, hint)
+INSERT INTO user_tokens(user_id, name, token_hash, token_plain, token_hint, status, created_at)
+VALUES(?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+`, userID, name, tokenHash, rawToken, hint)
 	if err != nil {
 		return 0, nil, fmt.Errorf("创建 Token 失败: %w", err)
 	}
@@ -216,9 +221,9 @@ func (s *Store) RotateUserToken(ctx context.Context, userID, tokenID int64, rawT
 
 	res, err := s.db.ExecContext(ctx, `
 UPDATE user_tokens
-SET token_hash=?, token_hint=?, status=1, revoked_at=NULL, last_used_at=NULL
+SET token_hash=?, token_plain=?, token_hint=?, status=1, revoked_at=NULL, last_used_at=NULL
 WHERE id=? AND user_id=?
-`, tokenHash, hint, tokenID, userID)
+`, tokenHash, rawToken, hint, tokenID, userID)
 	if err != nil {
 		return fmt.Errorf("重新生成 Token 失败: %w", err)
 	}
@@ -253,10 +258,45 @@ ORDER BY id DESC
 	return out, nil
 }
 
+func (s *Store) RevealUserToken(ctx context.Context, userID, tokenID int64) (string, error) {
+	if userID == 0 {
+		return "", errors.New("userID 不能为空")
+	}
+	if tokenID == 0 {
+		return "", errors.New("tokenID 不能为空")
+	}
+
+	var (
+		tokenPlain sql.NullString
+		status     int
+	)
+	err := s.db.QueryRowContext(ctx, `
+SELECT token_plain, status
+FROM user_tokens
+WHERE id=? AND user_id=?
+`, tokenID, userID).Scan(&tokenPlain, &status)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", sql.ErrNoRows
+		}
+		return "", fmt.Errorf("查询 Token 明文失败: %w", err)
+	}
+
+	if status != 1 {
+		return "", ErrUserTokenRevoked
+	}
+
+	token := strings.TrimSpace(tokenPlain.String)
+	if !tokenPlain.Valid || token == "" {
+		return "", ErrUserTokenNotRevealable
+	}
+	return token, nil
+}
+
 func (s *Store) RevokeUserToken(ctx context.Context, userID, tokenID int64) error {
 	res, err := s.db.ExecContext(ctx, `
 UPDATE user_tokens
-SET status=0, revoked_at=CURRENT_TIMESTAMP
+SET status=0, revoked_at=CURRENT_TIMESTAMP, token_plain=NULL
 WHERE id=? AND user_id=? AND status=1
 `, tokenID, userID)
 	if err != nil {

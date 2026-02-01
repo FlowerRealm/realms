@@ -9,6 +9,7 @@ Realms 提供 OpenAI 兼容（Responses）与 Anthropic 兼容（Messages）的 
 ## 认证方式
 
 - **下游访问（调用本服务，多用户）:** `Authorization: Bearer <user_api_key>`（可选兼容 `x-api-key`）
+  - `user_api_key` 可在 Web 控制台 `/tokens` 创建与管理（示例：`sk_...`）
 - **上游访问（本服务调用上游）:** 由管理后台配置并注入（OpenAI 兼容 API Key / Anthropic API Key / Codex OAuth 凭据）
 
 ## 常用端点

@@ -43,14 +43,14 @@ export function TokenCreatedPage() {
               <div className="alert alert-warning border-0 bg-warning bg-opacity-10 d-flex align-items-start mb-4">
                 <span className="me-2 mt-1 material-symbols-rounded">warning</span>
                 <div className="small">
-                  <strong>安全提醒：</strong>令牌仅在此处显示一次。如果您离开此页面，将无法再次查看完整的令牌。如果遗失，您只能重新生成。
+                  <strong>安全提醒：</strong>令牌会保存在服务端。为安全起见，在令牌列表页默认隐藏；需要使用时再查看/复制。令牌撤销后无法查看。
                 </div>
               </div>
 
               {!canCopy ? (
                 <div className="alert alert-danger d-flex align-items-center" role="alert">
                   <span className="me-2 material-symbols-rounded">warning</span>
-                  <div>令牌不存在或已过期。请在令牌列表重新生成。</div>
+                  <div>令牌不存在。请回到令牌列表重新生成。</div>
                 </div>
               ) : (
                 <div className="mb-4">

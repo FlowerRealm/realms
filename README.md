@@ -10,7 +10,7 @@ Realms 是一个 Go 单体服务（Gin），对外提供 **OpenAI 兼容** 的 A
 
 **你可以用它做什么：**
 - 作为 OpenAI SDK / Codex CLI 的 `base_url` 中转层（支持 `POST /v1/responses` SSE 透传）
-- 在 Web 控制台里管理用户 Token（`rlm_...`）、查看用量与请求明细
+- 在 Web 控制台里管理用户 Token（`sk_...`）、查看用量与请求明细
 - 在管理后台里管理上游渠道（OpenAI 兼容 base_url / Codex OAuth）与路由策略
 
 ## 文档
@@ -124,13 +124,13 @@ Realms 本身不自带可用上游，启动后请先完成一次上游配置，�
 
 ### 5. 创建数据面 Token（给客户端用）
 
-登录后在控制台的 `API 令牌` 页面（`/tokens`）创建数据面令牌（`rlm_...`）。令牌明文只在创建/重新生成时展示一次，请妥善保存。
+登录后在控制台的 `API 令牌` 页面（`/tokens`）创建数据面令牌（`sk_...`）。令牌默认隐藏，可在列表页查看/复制；撤销后无法查看。升级前创建的旧令牌可能无法显示明文，需要重新生成后才能查看。
 
 ### 6. 用 curl 测试（OpenAI 兼容）
 
 ```bash
 curl "http://localhost:8080/v1/responses" \
-  -H "Authorization: Bearer rlm_..." \
+  -H "Authorization: Bearer sk_..." \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-4.1-mini","input":"hello"}'
 ```
@@ -164,13 +164,13 @@ curl "http://localhost:8080/v1/responses" \
 
 ### 客户端配置（OpenAI SDK / CLI）
 
-1) 在控制台创建数据面令牌（`rlm_...`）后，配置 OpenAI 环境变量：
+1) 在控制台创建数据面令牌（`sk_...`）后，配置 OpenAI 环境变量：
 
 Linux/macOS（bash/zsh）：
 
 ```bash
 export OPENAI_BASE_URL="http://localhost:8080/v1"
-export OPENAI_API_KEY="rlm_..."
+export OPENAI_API_KEY="sk_..."
 ```
 
 Windows（PowerShell）：
@@ -178,11 +178,11 @@ Windows（PowerShell）：
 ```powershell
 # 当前会话
 $env:OPENAI_BASE_URL = "http://localhost:8080/v1"
-$env:OPENAI_API_KEY = "rlm_..."
+$env:OPENAI_API_KEY = "sk_..."
 
 # 持久化到用户环境变量（新终端生效）
 [System.Environment]::SetEnvironmentVariable("OPENAI_BASE_URL", "http://localhost:8080/v1", "User")
-[System.Environment]::SetEnvironmentVariable("OPENAI_API_KEY", "rlm_...", "User")
+[System.Environment]::SetEnvironmentVariable("OPENAI_API_KEY", "sk_...", "User")
 ```
 
 2) （可选）使用 Codex 配置文件（Linux/macOS: `~/.codex/config.toml`；Windows: `%USERPROFILE%\\.codex\\config.toml`）：

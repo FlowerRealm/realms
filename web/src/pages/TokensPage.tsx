@@ -1,26 +1,46 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 
 import {
   createUserToken,
   deleteUserToken,
   listUserTokens,
+  revealUserToken,
   revokeUserToken,
   rotateUserToken,
   type UserToken,
 } from '../api/tokens';
+import { BootstrapModal } from '../components/BootstrapModal';
+import { closeModalById } from '../components/modal';
 
 export function TokensPage() {
   const [tokens, setTokens] = useState<UserToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
+  const [revealed, setRevealed] = useState<Record<number, string>>({});
+  const [revealLoading, setRevealLoading] = useState<Record<number, boolean>>({});
+  const [copiedID, setCopiedID] = useState<number | null>(null);
 
   const [name, setName] = useState('');
-  const modalRef = useRef<HTMLDivElement | null>(null);
 
-  const navigate = useNavigate();
   const baseURL = useMemo(() => window.location.origin, []);
   const apiBaseURL = useMemo(() => `${baseURL}/v1`, [baseURL]);
+
+  const openGeneratedTokenModalBtnRef = useRef<HTMLButtonElement | null>(null);
+  const pendingGeneratedTokenRef = useRef<string | null>(null);
+  const [generatedToken, setGeneratedToken] = useState('');
+  const [generatedCopied, setGeneratedCopied] = useState(false);
+
+  useEffect(() => {
+    if (copiedID == null) return;
+    const t = window.setTimeout(() => setCopiedID(null), 2000);
+    return () => window.clearTimeout(t);
+  }, [copiedID]);
+
+  useEffect(() => {
+    if (!generatedCopied) return;
+    const t = window.setTimeout(() => setGeneratedCopied(false), 2000);
+    return () => window.clearTimeout(t);
+  }, [generatedCopied]);
 
   async function refresh() {
     setErr('');
@@ -30,7 +50,26 @@ export function TokensPage() {
       if (!res.success) {
         throw new Error(res.message || '加载失败');
       }
-      setTokens(res.data || []);
+      const nextTokens = res.data || [];
+      setTokens(nextTokens);
+      setRevealed((prev) => {
+        const active = new Set(nextTokens.filter((t) => t.status === 1).map((t) => t.id));
+        const next: Record<number, string> = {};
+        for (const [k, v] of Object.entries(prev)) {
+          const id = Number(k);
+          if (active.has(id)) next[id] = v;
+        }
+        return next;
+      });
+      setRevealLoading((prev) => {
+        const active = new Set(nextTokens.filter((t) => t.status === 1).map((t) => t.id));
+        const next: Record<number, boolean> = {};
+        for (const [k, v] of Object.entries(prev)) {
+          const id = Number(k);
+          if (active.has(id)) next[id] = v;
+        }
+        return next;
+      });
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败');
     } finally {
@@ -38,20 +77,63 @@ export function TokensPage() {
     }
   }
 
-  useEffect(() => {
-    void refresh();
-  }, []);
+  function openGeneratedTokenModal(tok: string) {
+    setGeneratedCopied(false);
+    setGeneratedToken(tok);
+    window.setTimeout(() => openGeneratedTokenModalBtnRef.current?.click(), 0);
+  }
+
+  async function copyText(raw: string): Promise<boolean> {
+    try {
+      await navigator.clipboard.writeText(raw);
+      return true;
+    } catch {
+      // fallback
+    }
+    try {
+      const el = document.createElement('textarea');
+      el.value = raw;
+      el.setAttribute('readonly', 'true');
+      el.style.position = 'fixed';
+      el.style.top = '0';
+      el.style.left = '0';
+      el.style.opacity = '0';
+      document.body.appendChild(el);
+      el.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(el);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async function copyToken(raw: string, tokenID: number) {
+    const ok = await copyText(raw);
+    if (ok) setCopiedID(tokenID);
+  }
+
+  async function revealToken(tokenID: number): Promise<string> {
+    if (revealed[tokenID]) return revealed[tokenID];
+    setRevealLoading((prev) => ({ ...prev, [tokenID]: true }));
+    try {
+      const res = await revealUserToken(tokenID);
+      if (!res.success) {
+        throw new Error(res.message || '查看失败');
+      }
+      const tok = (res.data?.token || '').toString();
+      if (tok.trim() === '') {
+        throw new Error('查看失败');
+      }
+      setRevealed((prev) => ({ ...prev, [tokenID]: tok }));
+      return tok;
+    } finally {
+      setRevealLoading((prev) => ({ ...prev, [tokenID]: false }));
+    }
+  }
 
   useEffect(() => {
-    const el = modalRef.current;
-    if (!el) return;
-    const onHidden = () => {
-      setName('');
-    };
-    el.addEventListener('hidden.bs.modal', onHidden);
-    return () => {
-      el.removeEventListener('hidden.bs.modal', onHidden);
-    };
+    void refresh();
   }, []);
 
   return (
@@ -69,7 +151,7 @@ export function TokensPage() {
                 </div>
                 <div>
                   <h5 className="mb-1 fw-semibold">我的 API 令牌</h5>
-                  <p className="mb-0 text-muted small">令牌仅在创建/重新生成后展示一次；需要再次复制请重新生成。</p>
+                  <p className="mb-0 text-muted small">为安全起见，令牌默认隐藏；可在此页查看/复制。令牌撤销后无法查看。</p>
                 </div>
               </div>
               <button type="button" className="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createTokenModal">
@@ -136,8 +218,10 @@ export function TokensPage() {
                             )}
                           </td>
                           <td className="py-3">
-                            {t.token_hint ? (
-                              <code className="bg-light px-2 py-1 rounded text-muted border user-select-all">{`rlm_…${t.token_hint}`}</code>
+                            {revealed[t.id] ? (
+                              <code className="bg-light px-2 py-1 rounded text-dark border user-select-all">{revealed[t.id]}</code>
+                            ) : t.token_hint ? (
+                              <code className="bg-light px-2 py-1 rounded text-muted border user-select-all">{`sk_…${t.token_hint}`}</code>
                             ) : (
                               <span className="text-muted small">-</span>
                             )}
@@ -150,12 +234,66 @@ export function TokensPage() {
                             )}
                           </td>
                           <td className="text-end pe-4 py-3">
+                            {t.status === 1 ? (
+                              <>
+                                <button
+                                  className="btn btn-link text-secondary p-0 text-decoration-none small"
+                                  type="button"
+                                  disabled={loading || revealLoading[t.id]}
+                                  onClick={async () => {
+                                    setErr('');
+                                    if (revealed[t.id]) {
+                                      setRevealed((prev) => {
+                                        const next = { ...prev };
+                                        delete next[t.id];
+                                        return next;
+                                      });
+                                      return;
+                                    }
+                                    try {
+                                      await revealToken(t.id);
+                                    } catch (e) {
+                                      setErr(e instanceof Error ? e.message : '查看失败');
+                                    }
+                                  }}
+                                >
+                                  {revealed[t.id] ? '隐藏' : '查看'}
+                                </button>
+
+                                <span className="text-muted small mx-2">|</span>
+
+                                <button
+                                  className="btn btn-link text-secondary p-0 text-decoration-none small"
+                                  type="button"
+                                  disabled={loading || revealLoading[t.id]}
+                                  onClick={async () => {
+                                    setErr('');
+                                    try {
+                                      const tok = revealed[t.id] ? revealed[t.id] : await revealToken(t.id);
+                                      await copyToken(tok, t.id);
+                                    } catch (e) {
+                                      setErr(e instanceof Error ? e.message : '复制失败');
+                                    }
+                                  }}
+                                >
+                                  {copiedID === t.id ? '已复制' : '复制'}
+                                </button>
+
+                                <span className="text-muted small mx-2">|</span>
+                              </>
+                            ) : null}
+
                             <button
                               className="btn btn-link text-primary p-0 text-decoration-none small"
                               type="button"
                               disabled={loading}
                               onClick={async () => {
                                 setErr('');
+                                setRevealed((prev) => {
+                                  const next = { ...prev };
+                                  delete next[t.id];
+                                  return next;
+                                });
                                 try {
                                   const res = await rotateUserToken(t.id);
                                   if (!res.success) {
@@ -163,9 +301,7 @@ export function TokensPage() {
                                   }
                                   const tok = res.data?.token;
                                   await refresh();
-                                  if (tok) {
-                                    navigate('/tokens/created', { state: { token: tok } });
-                                  }
+                                  if (tok) openGeneratedTokenModal(tok);
                                 } catch (e) {
                                   setErr(e instanceof Error ? e.message : '重新生成失败');
                                 }
@@ -253,12 +389,12 @@ export function TokensPage() {
                     {'# Linux/macOS（bash/zsh）\n'}
                     {`export OPENAI_BASE_URL="${apiBaseURL}"\n`}
                     {'export OPENAI_API_KEY="'}
-                    <span className="text-warning">rlm_...</span>
+                    <span className="text-warning">sk_...</span>
                     {'"\n\n'}
                     {'# Windows（PowerShell）\n'}
                     {`$env:OPENAI_BASE_URL = "${apiBaseURL}"\n`}
                     {'$env:OPENAI_API_KEY = "'}
-                    <span className="text-warning">rlm_...</span>
+                    <span className="text-warning">sk_...</span>
                     {'"\n\n'}
                     {'# ~/.codex/config.toml（Windows: %USERPROFILE%\\\\.codex\\\\config.toml）\n'}
                     {'model_provider = "realms"\n\n'}
@@ -283,68 +419,130 @@ export function TokensPage() {
         </div>
       </div>
 
-      <div className="modal fade" id="createTokenModal" tabIndex={-1} aria-hidden="true" ref={modalRef}>
-        <div className="modal-dialog modal-dialog-centered">
-          <div className="modal-content border-0 shadow">
-            <div className="modal-header border-bottom-0 pb-0">
-              <h5 className="modal-title fw-bold">创建新 API 令牌</h5>
-              <button type="button" className="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
-            </div>
-            <div className="modal-body pt-4">
-              <form
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  setErr('');
-                  try {
-                    const res = await createUserToken(name.trim() || undefined);
-                    if (!res.success) {
-                      throw new Error(res.message || '创建失败');
-                    }
-                    const tok = res.data?.token;
-                    setName('');
-                    await refresh();
+      {/* programmatically open the generated-token modal */}
+      <button ref={openGeneratedTokenModalBtnRef} type="button" className="d-none" data-bs-toggle="modal" data-bs-target="#generatedTokenModal"></button>
 
-                    // Close modal, then navigate to the "token created" page (match legacy SSR flow).
-                    modalRef.current?.querySelector<HTMLButtonElement>('button[data-bs-dismiss="modal"]')?.click();
-
-                    if (tok) {
-                      navigate('/tokens/created', { state: { token: tok } });
-                    }
-                  } catch (e) {
-                    setErr(e instanceof Error ? e.message : '创建失败');
-                  }
-                }}
-              >
-                <div className="mb-3">
-                  <label className="form-label fw-medium text-dark">备注名称</label>
-                  <input
-                    name="name"
-                    type="text"
-                    className="form-control"
-                    placeholder="例如：我的项目、笔记本 CLI…"
-                    autoFocus
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                  />
-                  <div className="form-text text-muted">给令牌起个名字，方便日后管理。</div>
-                </div>
-                <div className="alert alert-light border mb-0 d-flex align-items-start small">
-                  <span className="text-primary me-2 mt-1 material-symbols-rounded">info</span>
-                  <div>令牌创建成功后只会显示一次；如需再次复制，请在列表中点击“重新生成”。</div>
-                </div>
-                <div className="modal-footer border-top-0 px-0">
-                  <button type="button" className="btn btn-light text-muted" data-bs-dismiss="modal">
-                    取消
-                  </button>
-                  <button type="submit" className="btn btn-primary px-4" disabled={loading}>
-                    创建
-                  </button>
-                </div>
-              </form>
-            </div>
+      <BootstrapModal
+        id="generatedTokenModal"
+        title="令牌已生成"
+        dialogClassName="modal-dialog-centered"
+        onHidden={() => {
+          setGeneratedCopied(false);
+          setGeneratedToken('');
+        }}
+      >
+        <div className="alert alert-warning border-0 bg-warning bg-opacity-10 d-flex align-items-start mb-3">
+          <span className="me-2 mt-1 material-symbols-rounded">warning</span>
+          <div className="small">
+            请复制并妥善保存。也可以在令牌列表页查看/复制（默认隐藏）。令牌撤销后无法查看。
           </div>
         </div>
-      </div>
+
+        <div className="mb-3">
+          <label className="form-label small fw-bold text-uppercase text-muted">API 令牌</label>
+          <div className="input-group input-group-lg">
+            <input
+              type="text"
+              className="form-control font-monospace bg-light border-end-0"
+              value={generatedToken}
+              readOnly
+              onClick={(e) => {
+                try {
+                  e.currentTarget.select();
+                } catch {
+                  // ignore
+                }
+              }}
+            />
+            <button
+              className={`btn ${generatedCopied ? 'btn-success text-white' : 'btn-light'} border border-start-0 px-4`}
+              type="button"
+              title="点击复制"
+              disabled={generatedToken.trim() === ''}
+              onClick={async () => {
+                setErr('');
+                const ok = await copyText(generatedToken);
+                if (!ok) {
+                  setErr('复制失败');
+                  return;
+                }
+                setGeneratedCopied(true);
+              }}
+            >
+              <span className="material-symbols-rounded">{generatedCopied ? 'check' : 'content_copy'}</span>
+            </button>
+          </div>
+          <div className={`text-success small mt-2 opacity-0 transition-opacity${generatedCopied ? ' opacity-100' : ''}`}>
+            <span className="me-1 material-symbols-rounded">check</span>已成功复制到剪贴板
+          </div>
+        </div>
+
+        <div className="modal-footer border-top-0 px-0 pb-0">
+          <button type="button" className="btn btn-light" data-bs-dismiss="modal">
+            关闭
+          </button>
+        </div>
+      </BootstrapModal>
+
+      <BootstrapModal
+        id="createTokenModal"
+        title="创建新 API 令牌"
+        dialogClassName="modal-dialog-centered"
+        headerClassName="border-bottom-0 pb-0"
+        bodyClassName="pt-4"
+        onHidden={() => {
+          setName('');
+          const tok = pendingGeneratedTokenRef.current;
+          pendingGeneratedTokenRef.current = null;
+          if (tok) openGeneratedTokenModal(tok);
+        }}
+      >
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setErr('');
+            try {
+              const res = await createUserToken(name.trim() || undefined);
+              if (!res.success) {
+                throw new Error(res.message || '创建失败');
+              }
+              const tok = res.data?.token || '';
+              pendingGeneratedTokenRef.current = tok.trim() === '' ? null : tok;
+              setName('');
+              closeModalById('createTokenModal');
+              await refresh();
+            } catch (e) {
+              setErr(e instanceof Error ? e.message : '创建失败');
+            }
+          }}
+        >
+          <div className="mb-3">
+            <label className="form-label fw-medium text-dark">备注名称</label>
+            <input
+              name="name"
+              type="text"
+              className="form-control"
+              placeholder="例如：我的项目、笔记本 CLI…"
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+            <div className="form-text text-muted">给令牌起个名字，方便日后管理。</div>
+          </div>
+          <div className="alert alert-light border mb-0 d-flex align-items-start small">
+            <span className="text-primary me-2 mt-1 material-symbols-rounded">info</span>
+            <div>创建成功后会弹窗展示一次；也可以在列表页查看/复制（默认隐藏）。令牌撤销后无法查看。</div>
+          </div>
+          <div className="modal-footer border-top-0 px-0">
+            <button type="button" className="btn btn-light text-muted" data-bs-dismiss="modal">
+              取消
+            </button>
+            <button type="submit" className="btn btn-primary px-4" disabled={loading}>
+              创建
+            </button>
+          </div>
+        </form>
+      </BootstrapModal>
     </div>
   );
 }
