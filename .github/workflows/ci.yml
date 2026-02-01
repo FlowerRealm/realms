@@ -47,3 +47,43 @@ jobs:
 
       - name: E2E (Codex CLI -> Realms -> Upstream)
         run: go test ./tests/e2e -run TestCodexCLI_E2E -count=1
+
+  e2e-web:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install web deps
+        run: npm --prefix web ci
+
+      - name: Install Playwright (chromium)
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Build web
+        run: npm --prefix web run build
+
+      - name: E2E (Playwright -> Realms SPA)
+        run: npm --prefix web run test:e2e:ci
+
+      - name: Upload Playwright report (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report
+            web/test-results
