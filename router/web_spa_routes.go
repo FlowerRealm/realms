@@ -135,6 +135,8 @@ func isAPIPrefix(p string) bool {
 		return true
 	case strings.HasPrefix(p, "/api"):
 		return true
+	case strings.HasPrefix(p, "/oauth/authorize"):
+		return false
 	case strings.HasPrefix(p, "/oauth"):
 		return true
 	case strings.HasPrefix(p, "/assets"):

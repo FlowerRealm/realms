@@ -22,6 +22,7 @@ import { TokenCreatedPage } from './pages/TokenCreatedPage';
 import { TokensPage } from './pages/TokensPage';
 import { TopupPage } from './pages/TopupPage';
 import { UsagePage } from './pages/UsagePage';
+import { OAuthAuthorizePage } from './pages/OAuthAuthorizePage';
 
 export function App() {
   return (
@@ -31,6 +32,15 @@ export function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
       </Route>
+
+      <Route
+        path="/oauth/authorize"
+        element={
+          <RequireAuth>
+            <OAuthAuthorizePage />
+          </RequireAuth>
+        }
+      />
 
       <Route
         element={

@@ -4,16 +4,16 @@ import (
 	"io/fs"
 	"net/http"
 
-	"realms/internal/admin"
 	"realms/internal/config"
 	openaiapi "realms/internal/api/openai"
+	"realms/internal/scheduler"
 	"realms/internal/store"
 	"realms/internal/tickets"
-	"realms/internal/web"
 )
 
 type Options struct {
 	Store    *store.Store
+	Sched    *scheduler.Scheduler
 	SelfMode bool
 
 	AllowOpenRegistration         bool
@@ -32,8 +32,6 @@ type Options struct {
 	FrontendIndexPage []byte // optional; returned for SPA routes when FrontendBaseURL is empty.
 	FrontendFS        fs.FS  // optional; when set, static assets are served from this FS (typically go:embed).
 
-	Web    *web.Server
-	Admin  *admin.Server
 	OpenAI *openaiapi.Handler
 
 	// Optional.

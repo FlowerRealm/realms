@@ -16,7 +16,6 @@ import (
 
 	"realms/internal/auth"
 	"realms/internal/store"
-	"realms/internal/web"
 )
 
 func TestUserTokensCRUD_SessionCookie(t *testing.T) {
@@ -52,7 +51,7 @@ func TestUserTokensCRUD_SessionCookie(t *testing.T) {
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 
-	cookieName := web.SessionCookieNameForSelfMode(false)
+	cookieName := "realms_session"
 	sessionStore := cookie.NewStore([]byte("test-secret"))
 	sessionStore.Options(sessions.Options{
 		Path:     "/",

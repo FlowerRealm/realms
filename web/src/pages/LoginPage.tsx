@@ -5,7 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import type { PublicLayoutContext } from '../layout/PublicLayout';
 
 type LocationState = {
-  from?: { pathname?: string };
+  from?: string;
   notice?: string;
   error?: string;
 };
@@ -27,8 +27,8 @@ export function LoginPage() {
 
   const from = useMemo(() => {
     const state = location.state as LocationState | null;
-    const next = state?.from?.pathname;
-    if (next && typeof next === 'string') {
+    const next = (state?.from || '').toString().trim();
+    if (next) {
       return next;
     }
     return '/dashboard';

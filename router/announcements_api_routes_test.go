@@ -16,7 +16,6 @@ import (
 
 	"realms/internal/auth"
 	"realms/internal/store"
-	"realms/internal/web"
 )
 
 func TestAnnouncements_UserFlow(t *testing.T) {
@@ -60,7 +59,7 @@ func TestAnnouncements_UserFlow(t *testing.T) {
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 
-	cookieName := web.SessionCookieNameForSelfMode(false)
+	cookieName := "realms_session"
 	sessionStore := cookie.NewStore([]byte("test-secret"))
 	sessionStore.Options(sessions.Options{
 		Path:     "/",

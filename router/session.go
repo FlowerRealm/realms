@@ -6,8 +6,6 @@ import (
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
-
-	"realms/internal/auth"
 )
 
 func sessionUserID(c *gin.Context) (int64, bool) {
@@ -28,38 +26,6 @@ func sessionUserRole(c *gin.Context) (string, bool) {
 		return "", false
 	}
 	return role, true
-}
-
-func sessionCSRFToken(c *gin.Context) (string, bool) {
-	if c == nil {
-		return "", false
-	}
-	v := sessions.Default(c).Get("csrf_token")
-	s, ok := v.(string)
-	if !ok {
-		return "", false
-	}
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return "", false
-	}
-	return s, true
-}
-
-func ensureSessionCSRFToken(c *gin.Context) (string, error) {
-	if tok, ok := sessionCSRFToken(c); ok {
-		return tok, nil
-	}
-	sess := sessions.Default(c)
-	tok, err := auth.NewRandomToken("csrf_", 32)
-	if err != nil {
-		return "", err
-	}
-	sess.Set("csrf_token", tok)
-	if err := sess.Save(); err != nil {
-		return "", err
-	}
-	return tok, nil
 }
 
 func sessionInt64(c *gin.Context, key string) (int64, bool) {

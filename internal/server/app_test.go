@@ -11,13 +11,11 @@ import (
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 
-	"realms/internal/admin"
 	openaiapi "realms/internal/api/openai"
 	"realms/internal/config"
 	"realms/internal/quota"
 	"realms/internal/store"
 	"realms/internal/upstream"
-	"realms/internal/web"
 	"realms/router"
 )
 
@@ -26,55 +24,11 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 
 	st := store.New(nil)
 
-	webServer, err := web.NewServer(
-		st,
-		nil,
-		nil,
-		cfg.SelfMode.Enable,
-		cfg.Security.AllowOpenRegistration,
-		cfg.Security.DisableSecureCookies,
-		cfg.Billing,
-		cfg.Payment,
-		cfg.SMTP,
-		cfg.EmailVerif.Enable,
-		cfg.Server.PublicBaseURL,
-		cfg.Security.TrustProxyHeaders,
-		cfg.Security.TrustedProxyCIDRs,
-		cfg.Tickets,
-		nil,
-	)
-	if err != nil {
-		t.Fatalf("web.NewServer failed: %v", err)
-	}
-
-	adminServer, err := admin.NewServer(
-		st,
-		nil,
-		nil,
-		cfg.SelfMode.Enable,
-		cfg.EmailVerif.Enable,
-		cfg.SMTP,
-		cfg.Billing,
-		cfg.Payment,
-		cfg.Server.PublicBaseURL,
-		cfg.AppSettingsDefaults.AdminTimeZone,
-		cfg.Security.TrustProxyHeaders,
-		cfg.Security.TrustedProxyCIDRs,
-		cfg.Tickets,
-		nil,
-		nil,
-	)
-	if err != nil {
-		t.Fatalf("admin.NewServer failed: %v", err)
-	}
-
 	openaiHandler := openaiapi.NewHandler(nil, nil, nil, nil, nil, nil, false, nil, nil, nil, upstream.SSEPumpOptions{})
 
 	app := &App{
 		cfg:    cfg,
 		store:  st,
-		web:    webServer,
-		admin:  adminServer,
 		openai: openaiHandler,
 	}
 
@@ -89,7 +43,7 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 	})
-	engine.Use(sessions.Sessions(web.SessionCookieNameForSelfMode(cfg.SelfMode.Enable), sessionStore))
+	engine.Use(sessions.Sessions(SessionCookieNameForSelfMode(cfg.SelfMode.Enable), sessionStore))
 
 	router.SetRouter(engine, router.Options{
 		Store:             st,
@@ -99,8 +53,6 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 		BillingDefault:     cfg.Billing,
 		PaymentDefault:     cfg.Payment,
 		SMTPDefault:        cfg.SMTP,
-		Web:               webServer,
-		Admin:             adminServer,
 		OpenAI:            openaiHandler,
 		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
 

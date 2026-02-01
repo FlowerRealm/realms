@@ -14,7 +14,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	adminsrv "realms/internal/admin"
 	"realms/internal/security"
 	"realms/internal/store"
 )
@@ -163,8 +162,8 @@ type channelUsageView struct {
 
 type channelAdminListItem struct {
 	channelView
-	Usage   channelUsageView            `json:"usage"`
-	Runtime adminsrv.ChannelRuntimeInfo `json:"runtime"`
+	Usage   channelUsageView   `json:"usage"`
+	Runtime channelRuntimeInfo `json:"runtime"`
 }
 
 type channelsPageResponse struct {
@@ -283,10 +282,7 @@ func channelsPageHandler(opts Options) gin.HandlerFunc {
 				CacheRatio:   fmt.Sprintf("%.1f%%", us.CacheRatio*100),
 			}
 
-			runtime := adminsrv.ChannelRuntimeInfo{Available: false}
-			if opts.Admin != nil {
-				runtime = opts.Admin.ChannelRuntimeForAPI(c.Request.Context(), ch.ID)
-			}
+			runtime := channelRuntimeForAPI(c.Request.Context(), opts, ch.ID, loc)
 
 			out = append(out, channelAdminListItem{
 				channelView: view,

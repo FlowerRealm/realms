@@ -12,6 +12,7 @@ func SetRouter(r *gin.Engine, opts Options) {
 
 	api := r.Group("/api")
 	api.Use(gzip.Gzip(gzip.DefaultCompression))
+	setOAuthAPIRoutes(api, opts)
 	setUserAPIRoutes(api, opts)
 	setTokenAPIRoutes(api, opts)
 	setChannelAPIRoutes(api, opts)

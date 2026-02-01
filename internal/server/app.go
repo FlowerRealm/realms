@@ -22,7 +22,6 @@ import (
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 
-	"realms/internal/admin"
 	openaiapi "realms/internal/api/openai"
 	"realms/internal/assets"
 	"realms/internal/codexoauth"
@@ -34,7 +33,6 @@ import (
 	"realms/internal/tickets"
 	"realms/internal/upstream"
 	"realms/internal/version"
-	"realms/internal/web"
 	root "realms"
 	"realms/router"
 )
@@ -49,8 +47,6 @@ type App struct {
 	cfg           config.Config
 	db            *sql.DB
 	store         *store.Store
-	web           *web.Server
-	admin         *admin.Server
 	codexOAuth    *codexoauth.Flow
 	codexClient   *codexoauth.Client
 	exec          *upstream.Executor
@@ -73,7 +69,7 @@ func NewApp(opts AppOptions) (*App, error) {
 	if strings.TrimSpace(opts.Config.AppSettingsDefaults.SiteBaseURL) != "" {
 		publicBaseURL = strings.TrimRight(strings.TrimSpace(opts.Config.AppSettingsDefaults.SiteBaseURL), "/")
 	}
-	sessionCookieName := web.SessionCookieNameForSelfMode(opts.Config.SelfMode.Enable)
+	sessionCookieName := SessionCookieNameForSelfMode(opts.Config.SelfMode.Enable)
 	sessionSecret := strings.TrimSpace(os.Getenv("SESSION_SECRET"))
 	if sessionSecret == "" {
 		sessionSecret = randomSecret(32)
@@ -87,47 +83,6 @@ func NewApp(opts AppOptions) (*App, error) {
 	}
 
 	ticketStorage := tickets.NewStorage(opts.Config.Tickets.AttachmentsDir)
-
-	webServer, err := web.NewServer(
-		st,
-		sched,
-		exec,
-		opts.Config.SelfMode.Enable,
-		opts.Config.Security.AllowOpenRegistration,
-		opts.Config.Security.DisableSecureCookies,
-		opts.Config.Billing,
-		opts.Config.Payment,
-		opts.Config.SMTP,
-		opts.Config.EmailVerif.Enable,
-		publicBaseURL,
-		opts.Config.Security.TrustProxyHeaders,
-		opts.Config.Security.TrustedProxyCIDRs,
-		opts.Config.Tickets,
-		ticketStorage,
-	)
-	if err != nil {
-		return nil, err
-	}
-	adminServer, err := admin.NewServer(
-		st,
-		oauthFlow,
-		exec,
-		opts.Config.SelfMode.Enable,
-		opts.Config.EmailVerif.Enable,
-		opts.Config.SMTP,
-		opts.Config.Billing,
-		opts.Config.Payment,
-		publicBaseURL,
-		opts.Config.AppSettingsDefaults.AdminTimeZone,
-		opts.Config.Security.TrustProxyHeaders,
-		opts.Config.Security.TrustedProxyCIDRs,
-		opts.Config.Tickets,
-		ticketStorage,
-		sched,
-	)
-	if err != nil {
-		return nil, err
-	}
 	proxyLog := proxylog.New(proxylog.Config{
 		Enable: opts.Config.Env == "dev" && opts.Config.Debug.ProxyLog.Enable,
 		Dir:    opts.Config.Debug.ProxyLog.Dir,
@@ -141,8 +96,6 @@ func NewApp(opts AppOptions) (*App, error) {
 		cfg:           opts.Config,
 		db:            opts.DB,
 		store:         st,
-		web:           webServer,
-		admin:         adminServer,
 		codexOAuth:    oauthFlow,
 		codexClient:   codexClient,
 		exec:          exec,
@@ -198,9 +151,8 @@ func NewApp(opts AppOptions) (*App, error) {
 		FrontendDistDir:   frontendDistDir,
 		FrontendIndexPage: frontendIndexPage,
 		FrontendFS:        frontendFS,
-		Web:               webServer,
-		Admin:             adminServer,
 		OpenAI:            openaiHandler,
+		Sched:             sched,
 
 		CodexOAuthHandler: func() http.Handler {
 			if oauthFlow == nil {
@@ -413,9 +365,9 @@ func (a *App) channelAutoProbeLoop() {
 				continue
 			}
 
-			_, err = admin.RunChannelTest(ctx, a.store, a.exec, ch, nil)
+			ok, _, _ := testChannelOnce(ctx, a.store, ch.ID)
 			cancel()
-			if err == nil {
+			if ok {
 				a.sched.ClearChannelBan(channelID)
 				a.sched.ResetChannelFailScore(channelID)
 				continue

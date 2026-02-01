@@ -29,10 +29,8 @@ func setAuthAndPublicRoutes(r *gin.Engine, opts Options) {
 		))
 	}
 
-	if opts.Web != nil {
-		r.POST("/oauth/token", publicChain(http.HandlerFunc(opts.Web.OAuthToken)))
-		r.POST("/api/email/verification/send", publicChain(http.HandlerFunc(opts.Web.APIEmailVerificationSend)))
-	}
+	r.POST("/oauth/token", publicChain(http.HandlerFunc(oauthTokenHandler(opts))))
+	r.POST("/api/email/verification/send", publicChain(http.HandlerFunc(emailVerificationSendHandler(opts))))
 
 	if opts.CodexOAuthHandler != nil {
 		r.GET("/auth/callback", publicChain(opts.CodexOAuthHandler))

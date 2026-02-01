@@ -18,7 +18,6 @@ import (
 
 	"realms/internal/auth"
 	"realms/internal/store"
-	"realms/internal/web"
 )
 
 func TestChannels_PageAndReorder_RootFlow(t *testing.T) {
@@ -98,7 +97,7 @@ func TestChannels_PageAndReorder_RootFlow(t *testing.T) {
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 
-	cookieName := web.SessionCookieNameForSelfMode(false)
+	cookieName := "realms_session"
 	sessionStore := cookie.NewStore([]byte("test-secret"))
 	sessionStore.Options(sessions.Options{
 		Path:     "/",
@@ -327,7 +326,7 @@ func TestChannels_SettingsAndCredentials_RootFlow(t *testing.T) {
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 
-	cookieName := web.SessionCookieNameForSelfMode(false)
+	cookieName := "realms_session"
 	sessionStore := cookie.NewStore([]byte("test-secret"))
 	sessionStore.Options(sessions.Options{
 		Path:     "/",
