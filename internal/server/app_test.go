@@ -1,15 +1,18 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 
 	openaiapi "realms/internal/api/openai"
 	"realms/internal/config"
@@ -208,10 +211,194 @@ func TestRoutes_Assets_IconAndFavicon(t *testing.T) {
 }
 
 func TestQuotaProviderForConfig(t *testing.T) {
-	st := store.New(nil)
+	t.Run("default uses normal provider (hybrid)", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
 
-	qp := quotaProvider(st)
-	if _, ok := qp.(*quota.FreeProvider); !ok {
-		t.Fatalf("expected *quota.FreeProvider, got %T", qp)
-	}
+		db, err := store.OpenSQLite(path)
+		if err != nil {
+			t.Fatalf("OpenSQLite: %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+
+		if err := store.EnsureSQLiteSchema(db); err != nil {
+			t.Fatalf("EnsureSQLiteSchema: %v", err)
+		}
+
+		st := store.New(db)
+		st.SetDialect(store.DialectSQLite)
+
+		ctx := context.Background()
+		userID, err := st.CreateUser(ctx, "alice@example.com", "alice", []byte("pw-hash"), store.UserRoleUser)
+		if err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+		tokenID, _, err := st.CreateUserToken(ctx, userID, nil, "tok_test_123")
+		if err != nil {
+			t.Fatalf("CreateUserToken: %v", err)
+		}
+		if _, err := st.AddUserBalanceUSD(ctx, userID, decimal.RequireFromString("10")); err != nil {
+			t.Fatalf("AddUserBalanceUSD: %v", err)
+		}
+
+		cfg := config.Config{
+			Billing: config.BillingConfig{EnablePayAsYouGo: true},
+		}
+		st.SetAppSettingsDefaults(cfg.AppSettingsDefaults)
+
+		qp := quotaProvider(st, cfg)
+		if _, ok := qp.(*quota.FeatureProvider); !ok {
+			t.Fatalf("expected *quota.FeatureProvider, got %T", qp)
+		}
+
+		res, err := qp.Reserve(ctx, quota.ReserveInput{
+			RequestID: "req_1",
+			UserID:    userID,
+			TokenID:   tokenID,
+		})
+		if err != nil {
+			t.Fatalf("Reserve: %v", err)
+		}
+
+		if got, err := st.GetUserBalanceUSD(ctx, userID); err != nil {
+			t.Fatalf("GetUserBalanceUSD: %v", err)
+		} else if got.String() != "9.999" {
+			t.Fatalf("balance after reserve: got %s want %s", got.String(), "9.999")
+		}
+
+		ev, err := st.GetUsageEvent(ctx, res.UsageEventID)
+		if err != nil {
+			t.Fatalf("GetUsageEvent: %v", err)
+		}
+		if ev.State != store.UsageStateReserved {
+			t.Fatalf("state mismatch: got %q want %q", ev.State, store.UsageStateReserved)
+		}
+		if ev.ReservedUSD.String() != "0.001" {
+			t.Fatalf("reserved_usd mismatch: got %s want %s", ev.ReservedUSD.String(), "0.001")
+		}
+	})
+
+	t.Run("self_mode uses free provider", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+
+		db, err := store.OpenSQLite(path)
+		if err != nil {
+			t.Fatalf("OpenSQLite: %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+
+		if err := store.EnsureSQLiteSchema(db); err != nil {
+			t.Fatalf("EnsureSQLiteSchema: %v", err)
+		}
+
+		st := store.New(db)
+		st.SetDialect(store.DialectSQLite)
+
+		ctx := context.Background()
+		userID, err := st.CreateUser(ctx, "alice@example.com", "alice", []byte("pw-hash"), store.UserRoleUser)
+		if err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+		tokenID, _, err := st.CreateUserToken(ctx, userID, nil, "tok_test_123")
+		if err != nil {
+			t.Fatalf("CreateUserToken: %v", err)
+		}
+		if _, err := st.AddUserBalanceUSD(ctx, userID, decimal.RequireFromString("10")); err != nil {
+			t.Fatalf("AddUserBalanceUSD: %v", err)
+		}
+
+		cfg := config.Config{
+			SelfMode: config.SelfModeConfig{Enable: true},
+			Billing:  config.BillingConfig{EnablePayAsYouGo: true},
+		}
+		st.SetAppSettingsDefaults(cfg.AppSettingsDefaults)
+
+		qp := quotaProvider(st, cfg)
+		res, err := qp.Reserve(ctx, quota.ReserveInput{
+			RequestID: "req_1",
+			UserID:    userID,
+			TokenID:   tokenID,
+		})
+		if err != nil {
+			t.Fatalf("Reserve: %v", err)
+		}
+
+		if got, err := st.GetUserBalanceUSD(ctx, userID); err != nil {
+			t.Fatalf("GetUserBalanceUSD: %v", err)
+		} else if got.String() != "10" {
+			t.Fatalf("balance after reserve: got %s want %s", got.String(), "10")
+		}
+
+		ev, err := st.GetUsageEvent(ctx, res.UsageEventID)
+		if err != nil {
+			t.Fatalf("GetUsageEvent: %v", err)
+		}
+		if ev.ReservedUSD.String() != "0" {
+			t.Fatalf("reserved_usd mismatch: got %s want %s", ev.ReservedUSD.String(), "0")
+		}
+	})
+
+	t.Run("feature_disable_billing uses free provider", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+
+		db, err := store.OpenSQLite(path)
+		if err != nil {
+			t.Fatalf("OpenSQLite: %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+
+		if err := store.EnsureSQLiteSchema(db); err != nil {
+			t.Fatalf("EnsureSQLiteSchema: %v", err)
+		}
+
+		st := store.New(db)
+		st.SetDialect(store.DialectSQLite)
+
+		ctx := context.Background()
+		userID, err := st.CreateUser(ctx, "alice@example.com", "alice", []byte("pw-hash"), store.UserRoleUser)
+		if err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+		tokenID, _, err := st.CreateUserToken(ctx, userID, nil, "tok_test_123")
+		if err != nil {
+			t.Fatalf("CreateUserToken: %v", err)
+		}
+		if _, err := st.AddUserBalanceUSD(ctx, userID, decimal.RequireFromString("10")); err != nil {
+			t.Fatalf("AddUserBalanceUSD: %v", err)
+		}
+
+		cfg := config.Config{
+			Billing: config.BillingConfig{EnablePayAsYouGo: true},
+			AppSettingsDefaults: config.AppSettingsDefaultsConfig{
+				FeatureDisableBilling: true,
+			},
+		}
+		st.SetAppSettingsDefaults(cfg.AppSettingsDefaults)
+
+		qp := quotaProvider(st, cfg)
+		res, err := qp.Reserve(ctx, quota.ReserveInput{
+			RequestID: "req_1",
+			UserID:    userID,
+			TokenID:   tokenID,
+		})
+		if err != nil {
+			t.Fatalf("Reserve: %v", err)
+		}
+
+		if got, err := st.GetUserBalanceUSD(ctx, userID); err != nil {
+			t.Fatalf("GetUserBalanceUSD: %v", err)
+		} else if got.String() != "10" {
+			t.Fatalf("balance after reserve: got %s want %s", got.String(), "10")
+		}
+
+		ev, err := st.GetUsageEvent(ctx, res.UsageEventID)
+		if err != nil {
+			t.Fatalf("GetUsageEvent: %v", err)
+		}
+		if ev.ReservedUSD.String() != "0" {
+			t.Fatalf("reserved_usd mismatch: got %s want %s", ev.ReservedUSD.String(), "0")
+		}
+	})
 }

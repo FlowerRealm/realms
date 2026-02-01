@@ -3,6 +3,21 @@ import { fileURLToPath } from 'node:url';
 
 import { defineConfig, devices } from '@playwright/test';
 
+// CI/Dev 环境可能配置了全局代理；Playwright 的 webServer URL 探测若走代理会误判端口“已被占用”。
+// 强制本地回环地址直连，避免 flake。
+const existingNoProxy = (process.env.NO_PROXY || process.env.no_proxy || '').trim();
+const localNoProxy = ['127.0.0.1', 'localhost', '::1'];
+const noProxyParts = existingNoProxy
+  .split(',')
+  .map((s) => s.trim())
+  .filter((s) => s);
+for (const host of localNoProxy) {
+  if (!noProxyParts.includes(host)) noProxyParts.push(host);
+}
+const mergedNoProxy = noProxyParts.join(',');
+process.env.NO_PROXY = mergedNoProxy;
+process.env.no_proxy = mergedNoProxy;
+
 const configDir = path.dirname(fileURLToPath(import.meta.url));
 const baseURL = process.env.REALMS_E2E_BASE_URL?.trim() || 'http://127.0.0.1:18181';
 const u = new URL(baseURL);

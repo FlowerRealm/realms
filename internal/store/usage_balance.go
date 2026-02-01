@@ -119,17 +119,49 @@ WHERE id=?
 	if committed.Equal(decimal.Zero) {
 		committed = reserved
 	}
-	if committed.GreaterThan(reserved) {
-		// 保守策略：不允许“后补扣费”把余额扣成负数。
-		committed = reserved
+	committedEffective := committed
+	refund := decimal.Zero
+	if committed.LessThan(reserved) {
+		refund = reserved.Sub(committed)
+	} else if committed.GreaterThan(reserved) {
+		// 预留不足：尝试补扣差额（余额不足时最多扣到 0）。
+		extra := committed.Sub(reserved)
+
+		stmtInitBalance := fmt.Sprintf(`
+%s INTO user_balances(user_id, usd, created_at, updated_at)
+VALUES(?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+`, insertIgnoreVerb(s.dialect))
+		if _, err := tx.ExecContext(ctx, stmtInitBalance, userID); err != nil {
+			return fmt.Errorf("初始化余额失败: %w", err)
+		}
+
+		var bal decimal.Decimal
+		qBalance := "SELECT usd FROM user_balances WHERE user_id=?" + forUpdateClause(s.dialect)
+		if err := tx.QueryRowContext(ctx, qBalance, userID).Scan(&bal); err != nil {
+			return fmt.Errorf("查询余额失败: %w", err)
+		}
+
+		debit := extra
+		if bal.LessThan(debit) {
+			debit = bal
+		}
+		debit = debit.Truncate(USDScale)
+		if debit.GreaterThan(decimal.Zero) {
+			if _, err := tx.ExecContext(ctx, userBalancesSubSQL(s.dialect), debit, userID); err != nil {
+				return fmt.Errorf("补扣余额失败: %w", err)
+			}
+		}
+
+		if debit.LessThan(extra) {
+			committedEffective = reserved.Add(debit).Truncate(USDScale)
+		}
 	}
-	refund := reserved.Sub(committed)
 
 	if _, err := tx.ExecContext(ctx, `
 UPDATE usage_events
 SET state=?, upstream_channel_id=?, input_tokens=?, cached_input_tokens=?, output_tokens=?, cached_output_tokens=?, committed_usd=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=? AND state=?
-`, UsageStateCommitted, in.UpstreamChannelID, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens, committed, in.UsageEventID, UsageStateReserved); err != nil {
+`, UsageStateCommitted, in.UpstreamChannelID, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens, committedEffective, in.UsageEventID, UsageStateReserved); err != nil {
 		return fmt.Errorf("结算 usage_event 失败: %w", err)
 	}
 

@@ -6,11 +6,13 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -46,6 +48,19 @@ const (
 
 	e2eTicketOpenSubject   = "Playwright E2E Ticket (Open)"
 	e2eTicketClosedSubject = "Playwright E2E Ticket (Closed)"
+
+	// Billing E2E seed（与 web/e2e/seed.ts 保持一致）
+	e2eModelPublicID = "gpt-4.1-mini"
+
+	e2eUserEmail           = "e2e-user@example.com"
+	e2eUserUsername        = "e2e-user"
+	e2eUserTokenPlain      = "sk_playwright_e2e_user_token"
+	e2eUserInitialBalance  = "1"
+	e2ePoorUserEmail       = "e2e-poor@example.com"
+	e2ePoorUserUsername    = "e2e-poor"
+	e2ePoorUserTokenPlain  = "sk_playwright_e2e_poor_token"
+	e2ePoorUserInitialBal  = "0.0005" // < 0.001 USD default reserve
+	e2eUpstreamAPIKeyPlain = "sk_upstream_playwright_e2e"
 )
 
 func envOr(key string, fallback string) string {
@@ -122,12 +137,55 @@ func main() {
 	st.SetDialect(dialect)
 	st.SetAppSettingsDefaults(cfg.AppSettingsDefaults)
 
-	seed, err := seedE2EData(context.Background(), st, cfg)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = r.Body.Close()
+
+		resp := map[string]any{
+			"id":     "resp_pw_e2e_1",
+			"object": "response",
+			"model":  e2eModelPublicID,
+			"output": []any{
+				map[string]any{
+					"type": "message",
+					"role": "assistant",
+					"content": []any{
+						map[string]any{"type": "output_text", "text": "OK"},
+					},
+				},
+			},
+			"usage": map[string]any{
+				"input_tokens":  1000,
+				"output_tokens": 1,
+			},
+			"status": "completed",
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer upstream.Close()
+
+	upstreamBaseURL := strings.TrimRight(strings.TrimSpace(upstream.URL), "/") + "/v1"
+
+	seed, err := seedE2EData(context.Background(), st, cfg, upstreamBaseURL)
 	if err != nil {
 		slog.Error("seed 失败", "err", err)
 		os.Exit(1)
 	}
-	slog.Info("e2e seed 完成", "user_id", seed.RootUserID, "announcement_id", seed.AnnouncementID, "ticket_open_id", seed.TicketOpenID, "ticket_closed_id", seed.TicketClosedID, "oauth_app_id", seed.OAuthAppID, "topup_order_id", seed.TopupOrderID)
+	slog.Info("e2e seed 完成",
+		"user_id", seed.RootUserID,
+		"e2e_user_id", seed.E2EUserID,
+		"poor_user_id", seed.PoorUserID,
+		"announcement_id", seed.AnnouncementID,
+		"ticket_open_id", seed.TicketOpenID,
+		"ticket_closed_id", seed.TicketClosedID,
+		"oauth_app_id", seed.OAuthAppID,
+		"topup_order_id", seed.TopupOrderID,
+		"upstream_base_url", upstreamBaseURL,
+	)
 
 	app, err := server.NewApp(server.AppOptions{
 		Config:  cfg,
@@ -177,6 +235,8 @@ func main() {
 
 type e2eSeedResult struct {
 	RootUserID     int64
+	E2EUserID      int64
+	PoorUserID     int64
 	AnnouncementID int64
 	TicketOpenID   int64
 	TicketClosedID int64
@@ -184,7 +244,7 @@ type e2eSeedResult struct {
 	TopupOrderID   int64
 }
 
-func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config) (e2eSeedResult, error) {
+func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, upstreamBaseURL string) (e2eSeedResult, error) {
 	if st == nil {
 		return e2eSeedResult{}, errors.New("store 为空")
 	}
@@ -204,6 +264,64 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config) (e2eSe
 			return e2eSeedResult{}, fmt.Errorf("创建 root 用户失败: %w", err)
 		}
 		userID = id
+	}
+
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "pw-e2e-upstream", store.DefaultGroupName, 0, false, false, false, false)
+	if err != nil {
+		return e2eSeedResult{}, fmt.Errorf("创建 upstream_channel 失败: %w", err)
+	}
+	epID, err := st.CreateUpstreamEndpoint(ctx, channelID, strings.TrimRight(strings.TrimSpace(upstreamBaseURL), "/"), 0)
+	if err != nil {
+		return e2eSeedResult{}, fmt.Errorf("创建 upstream_endpoint 失败: %w", err)
+	}
+	if _, _, err := st.CreateOpenAICompatibleCredential(ctx, epID, strPtr("pw-e2e"), e2eUpstreamAPIKeyPlain); err != nil {
+		return e2eSeedResult{}, fmt.Errorf("创建 upstream_credential 失败: %w", err)
+	}
+
+	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
+		PublicID:            e2eModelPublicID,
+		OwnedBy:             strPtr("upstream"),
+		InputUSDPer1M:       decimal.RequireFromString("10"),
+		OutputUSDPer1M:      decimal.Zero,
+		CacheInputUSDPer1M:  decimal.Zero,
+		CacheOutputUSDPer1M: decimal.Zero,
+		Status:              1,
+	}); err != nil {
+		return e2eSeedResult{}, fmt.Errorf("创建 managed_model 失败: %w", err)
+	}
+	if _, err := st.CreateChannelModel(ctx, store.ChannelModelCreate{
+		ChannelID:     channelID,
+		PublicID:      e2eModelPublicID,
+		UpstreamModel: e2eModelPublicID,
+		Status:        1,
+	}); err != nil {
+		return e2eSeedResult{}, fmt.Errorf("创建 channel_model 失败: %w", err)
+	}
+
+	userHash, err := auth.HashPassword("pw-e2e-user-123")
+	if err != nil {
+		return e2eSeedResult{}, fmt.Errorf("生成 e2e 用户密码失败: %w", err)
+	}
+	e2eUserID, err := st.CreateUser(ctx, e2eUserEmail, e2eUserUsername, userHash, store.UserRoleUser)
+	if err != nil {
+		return e2eSeedResult{}, fmt.Errorf("创建 e2e 用户失败: %w", err)
+	}
+	if _, err := st.AddUserBalanceUSD(ctx, e2eUserID, decimal.RequireFromString(e2eUserInitialBalance)); err != nil {
+		return e2eSeedResult{}, fmt.Errorf("写入 e2e 用户余额失败: %w", err)
+	}
+	if _, _, err := st.CreateUserToken(ctx, e2eUserID, strPtr("pw-e2e-user"), e2eUserTokenPlain); err != nil {
+		return e2eSeedResult{}, fmt.Errorf("创建 e2e 用户 token 失败: %w", err)
+	}
+
+	poorUserID, err := st.CreateUser(ctx, e2ePoorUserEmail, e2ePoorUserUsername, userHash, store.UserRoleUser)
+	if err != nil {
+		return e2eSeedResult{}, fmt.Errorf("创建 poor 用户失败: %w", err)
+	}
+	if _, err := st.AddUserBalanceUSD(ctx, poorUserID, decimal.RequireFromString(e2ePoorUserInitialBal)); err != nil {
+		return e2eSeedResult{}, fmt.Errorf("写入 poor 用户余额失败: %w", err)
+	}
+	if _, _, err := st.CreateUserToken(ctx, poorUserID, strPtr("pw-e2e-poor"), e2ePoorUserTokenPlain); err != nil {
+		return e2eSeedResult{}, fmt.Errorf("创建 poor 用户 token 失败: %w", err)
 	}
 
 	announcementID, err := st.CreateAnnouncement(ctx, e2eAnnouncementTitle, e2eAnnouncementBody, store.AnnouncementStatusPublished)
@@ -250,14 +368,29 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config) (e2eSe
 		"root_password_len", strconv.Itoa(len(e2eRootPassword)),
 		"oauth_client_id", e2eOAuthClientID,
 		"oauth_redirect_uri", e2eOAuthRedirectURI,
+		"model_public_id", e2eModelPublicID,
+		"e2e_user_username", e2eUserUsername,
+		"e2e_user_token_prefix", "sk_",
+		"poor_user_username", e2ePoorUserUsername,
+		"poor_user_token_prefix", "sk_",
 	)
 
 	return e2eSeedResult{
 		RootUserID:     userID,
+		E2EUserID:      e2eUserID,
+		PoorUserID:     poorUserID,
 		AnnouncementID: announcementID,
 		TicketOpenID:   ticketOpenID,
 		TicketClosedID: ticketClosedID,
 		OAuthAppID:     oauthAppID,
 		TopupOrderID:   order.ID,
 	}, nil
+}
+
+func strPtr(s string) *string {
+	v := strings.TrimSpace(s)
+	if v == "" {
+		return nil
+	}
+	return &v
 }

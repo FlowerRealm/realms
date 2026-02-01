@@ -87,7 +87,7 @@ func NewApp(opts AppOptions) (*App, error) {
 		Enable: opts.Config.Env == "dev" && opts.Config.Debug.ProxyLog.Enable,
 		Dir:    opts.Config.Debug.ProxyLog.Dir,
 	})
-	qp := quotaProvider(st)
+	qp := quotaProvider(st, opts.Config)
 	openaiHandler := openaiapi.NewHandler(st, st, sched, exec, proxyLog, st, opts.Config.SelfMode.Enable, qp, st, st, upstream.SSEPumpOptions{
 		InitialLineBytes: 64 << 10,
 	})
@@ -207,9 +207,11 @@ func loadIndexHTML(distDir string) []byte {
 	return b
 }
 
-func quotaProvider(st *store.Store) quota.Provider {
+func quotaProvider(st *store.Store, cfg config.Config) quota.Provider {
 	reserveTTL := 2*time.Minute + 30*time.Second
-	return quota.NewFreeProvider(st, reserveTTL)
+	normal := quota.NewHybridProvider(st, reserveTTL, cfg.Billing.EnablePayAsYouGo)
+	free := quota.NewFreeProvider(st, reserveTTL)
+	return quota.NewFeatureProvider(st, cfg.SelfMode.Enable, normal, free)
 }
 
 func (a *App) Handler() http.Handler {

@@ -1588,6 +1588,77 @@ func TestResponses_QuotaCommitIncludesUpstreamChannelID(t *testing.T) {
 	}
 }
 
+func TestResponses_QuotaCommitIgnoresUpstreamCostFields(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-4.1-mini": {
+				ID:       1,
+				PublicID: "gpt-4.1-mini",
+				Status:   1,
+			},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-4.1-mini": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-4.1-mini", UpstreamModel: "gpt-4.1-mini", Status: 1},
+			},
+		},
+	}
+
+	sched := scheduler.New(fs)
+	doer := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		// 仅包含 cost 字段，不包含 tokens：应被忽略（Commit 仍会被调用，但 tokens 应为 nil）。
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"total_cost":123.45,"cost_usd":123.45}}`))),
+		}, nil
+	})
+	q := &fakeQuota{}
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, q, fakeAudit{}, nil, upstream.SSEPumpOptions{})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-4.1-mini","input":"hi","stream":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+
+	tokenID := int64(123)
+	p := auth.Principal{
+		ActorType: auth.ActorTypeToken,
+		UserID:    10,
+		Role:      store.UserRoleUser,
+		TokenID:   &tokenID,
+	}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(q.commitCalls) != 1 {
+		t.Fatalf("expected exactly 1 commit call, got=%d", len(q.commitCalls))
+	}
+	call := q.commitCalls[0]
+	if call.UpstreamChannelID == nil || *call.UpstreamChannelID != 1 {
+		t.Fatalf("expected upstream_channel_id=1, got=%v", call.UpstreamChannelID)
+	}
+	if call.InputTokens != nil || call.OutputTokens != nil || call.CachedInputTokens != nil || call.CachedOutputTokens != nil {
+		t.Fatalf("expected all token fields to be nil, got input=%v cached_in=%v output=%v cached_out=%v", call.InputTokens, call.CachedInputTokens, call.OutputTokens, call.CachedOutputTokens)
+	}
+}
+
 func TestResponses_GroupConstraintFiltersChannels(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{

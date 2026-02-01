@@ -4,6 +4,21 @@ export const E2E_SEED = {
     password: process.env.REALMS_E2E_PASSWORD?.trim() || 'rootpass123',
   },
 
+  // cmd/realms-e2e/main.go 固定的按量计费种子（模型/用户/Token）
+  billing: {
+    model: 'gpt-4.1-mini',
+    user: {
+      email: 'e2e-user@example.com',
+      username: 'e2e-user',
+      token: 'sk_playwright_e2e_user_token',
+    },
+    poorUser: {
+      email: 'e2e-poor@example.com',
+      username: 'e2e-poor',
+      token: 'sk_playwright_e2e_poor_token',
+    },
+  },
+
   // cmd/realms-e2e/main.go 固定的 OAuth App 种子
   oauth: {
     clientId: 'oa_playwright_e2e',
