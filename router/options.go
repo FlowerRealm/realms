@@ -38,7 +38,6 @@ type Options struct {
 
 	// system
 	Healthz       http.HandlerFunc
-	Version       http.HandlerFunc
 	RealmsIconSVG http.HandlerFunc
 	FaviconICO    http.HandlerFunc
 

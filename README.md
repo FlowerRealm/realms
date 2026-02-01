@@ -263,8 +263,7 @@ go test ./tests/e2e -run TestCodexCLI_E2E -count=1
 ## 7) 版本号
 
 - 运行时构建信息（公开）：
-  - 查询版本：`GET /api/version`
   - 健康检查（含版本/DB 状态）：`GET /healthz`
 - release 构建建议通过 `-ldflags -X` 注入版本信息（Docker 发布链路已支持 `REALMS_VERSION/REALMS_BUILD_DATE`）。
 - 最新发布版本（latest）由 GitHub Pages 提供（`version.json` / `version.txt`），用于外部查询与升级提示（见 `.github/workflows/pages.yml`）。
-- Web 控制台与管理后台会在页脚展示版本信息（来源：`/api/version`）
+- Web 控制台与管理后台默认不在页脚展示版本信息（如需排障，请使用 `/healthz`）。

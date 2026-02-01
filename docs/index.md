@@ -45,4 +45,3 @@ npm run build
 - 部署：见「部署指南」
 - 数据面接口：见「API 手册」
 - 健康检查：`GET /healthz`
-- 构建信息：`GET /api/version`

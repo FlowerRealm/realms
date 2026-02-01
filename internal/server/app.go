@@ -161,7 +161,6 @@ func NewApp(opts AppOptions) (*App, error) {
 		}(),
 
 		Healthz:       app.handleHealthz,
-		Version:       app.handleVersion,
 		RealmsIconSVG: app.handleRealmsIconSVG,
 		FaviconICO:    app.handleFaviconICO,
 
@@ -292,23 +291,6 @@ func (a *App) handleRealmsIconSVG(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleFaviconICO(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/assets/realms_icon.svg", http.StatusPermanentRedirect)
-}
-
-func (a *App) handleVersion(w http.ResponseWriter, r *http.Request) {
-	type resp struct {
-		OK      bool   `json:"ok"`
-		Env     string `json:"env"`
-		Version string `json:"version"`
-		Date    string `json:"date"`
-	}
-	out := resp{
-		OK:      true,
-		Env:     a.cfg.Env,
-		Version: a.version.Version,
-		Date:    a.version.Date,
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_ = json.NewEncoder(w).Encode(out)
 }
 
 func (a *App) bootstrap() error {

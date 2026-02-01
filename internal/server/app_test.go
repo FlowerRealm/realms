@@ -60,11 +60,6 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			_ = json.NewEncoder(w).Encode(out)
 		},
-		Version: func(w http.ResponseWriter, r *http.Request) {
-			out := map[string]any{"ok": true}
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			_ = json.NewEncoder(w).Encode(out)
-		},
 		RealmsIconSVG: app.handleRealmsIconSVG,
 		FaviconICO:    app.handleFaviconICO,
 

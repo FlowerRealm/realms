@@ -17,10 +17,6 @@ Realms 提供 OpenAI 兼容（Responses）与 Anthropic 兼容（Messages）的 
 
 健康检查（公开），包含 DB 状态与构建信息（版本/构建时间）。
 
-### [GET] /api/version
-
-构建信息（公开），用于页脚版本展示与排障定位。
-
 ### [POST] /v1/responses
 
 OpenAI Responses create（支持 `stream=true` SSE 逐事件透传）。
