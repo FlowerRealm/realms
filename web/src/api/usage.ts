@@ -37,8 +37,6 @@ export type UsageEvent = {
   endpoint?: string | null;
   method?: string | null;
   token_id: number;
-  upstream_channel_id?: number | null;
-  upstream_channel_name?: string | null;
   upstream_endpoint_id?: number | null;
   upstream_credential_id?: number | null;
   state: string;

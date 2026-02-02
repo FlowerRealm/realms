@@ -709,10 +709,6 @@ function FragmentUsageRow({
                   <div className="text-muted smaller">Event ID</div>
                   <div className="font-monospace">{ev.id}</div>
                 </div>
-                <div className="col-6 col-lg-3">
-                  <div className="text-muted smaller">上游渠道</div>
-                  {ev.upstream_channel_name ? <div className="fw-bold">{ev.upstream_channel_name}</div> : <div className="text-muted">-</div>}
-                </div>
 
                 <div className="col-12 col-lg-6">
                   <div className="text-muted smaller">Endpoint</div>

@@ -10,11 +10,13 @@ export const E2E_SEED = {
     user: {
       email: 'e2e-user@example.com',
       username: 'e2e-user',
+      password: 'pw-e2e-user-123',
       token: 'sk_playwright_e2e_user_token',
     },
     poorUser: {
       email: 'e2e-poor@example.com',
       username: 'e2e-poor',
+      password: 'pw-e2e-user-123',
       token: 'sk_playwright_e2e_poor_token',
     },
   },

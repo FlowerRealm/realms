@@ -64,8 +64,6 @@ type usageEventAPI struct {
 	Endpoint            *string         `json:"endpoint,omitempty"`
 	Method              *string         `json:"method,omitempty"`
 	TokenID             int64           `json:"token_id"`
-	UpstreamChannelID   *int64          `json:"upstream_channel_id,omitempty"`
-	UpstreamChannelName *string         `json:"upstream_channel_name,omitempty"`
 	UpstreamEndpointID  *int64          `json:"upstream_endpoint_id,omitempty"`
 	UpstreamCredID      *int64          `json:"upstream_credential_id,omitempty"`
 	State               string          `json:"state"`
@@ -222,13 +220,6 @@ func usageEventsHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
 			return
 		}
-		channelNameByID := map[int64]string{}
-		if channels, err := opts.Store.ListUpstreamChannels(c.Request.Context()); err == nil {
-			channelNameByID = make(map[int64]string, len(channels))
-			for _, ch := range channels {
-				channelNameByID[ch.ID] = ch.Name
-			}
-		}
 
 		resp := usageEventsAPIResponse{
 			Events: make([]usageEventAPI, 0, len(events)),
@@ -240,12 +231,6 @@ func usageEventsHandler(opts Options) gin.HandlerFunc {
 				errClass = nil
 				errMsg = nil
 			}
-			var upstreamChannelName *string
-			if e.UpstreamChannelID != nil && *e.UpstreamChannelID > 0 {
-				if name := strings.TrimSpace(channelNameByID[*e.UpstreamChannelID]); name != "" {
-					upstreamChannelName = &name
-				}
-			}
 
 			resp.Events = append(resp.Events, usageEventAPI{
 				ID:                  e.ID,
@@ -254,8 +239,6 @@ func usageEventsHandler(opts Options) gin.HandlerFunc {
 				Endpoint:            e.Endpoint,
 				Method:              e.Method,
 				TokenID:             e.TokenID,
-				UpstreamChannelID:   e.UpstreamChannelID,
-				UpstreamChannelName: upstreamChannelName,
 				UpstreamEndpointID:  e.UpstreamEndpointID,
 				UpstreamCredID:      e.UpstreamCredID,
 				State:               e.State,
