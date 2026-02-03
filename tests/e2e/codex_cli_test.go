@@ -248,7 +248,6 @@ func runCodexE2E(t *testing.T, e2eCfg codexE2EConfig) {
 	appCfg.DB.DSN = ""
 	appCfg.DB.SQLitePath = dbPath
 	appCfg.Security.AllowOpenRegistration = false
-	appCfg.CodexOAuth.Enable = false
 
 	app, err := server.NewApp(server.AppOptions{
 		Config:  appCfg,

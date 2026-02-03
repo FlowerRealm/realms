@@ -23,7 +23,6 @@ type Config struct {
 	Billing    BillingConfig    `yaml:"billing"`
 	SMTP       SMTPConfig       `yaml:"smtp"`
 	EmailVerif EmailVerifConfig `yaml:"email_verification"`
-	CodexOAuth CodexOAuthConfig `yaml:"codex_oauth"`
 	Tickets    TicketsConfig    `yaml:"tickets"`
 
 	// AppSettingsDefaults 提供管理后台“系统设置”（app_settings）的配置文件默认值。
@@ -111,19 +110,6 @@ type SMTPConfig struct {
 
 type EmailVerifConfig struct {
 	Enable bool `yaml:"enable"`
-}
-
-type CodexOAuthConfig struct {
-	Enable bool `yaml:"enable"`
-
-	ClientID     string `yaml:"client_id"`
-	AuthorizeURL string `yaml:"authorize_url"`
-	TokenURL     string `yaml:"token_url"`
-
-	RedirectURI string `yaml:"redirect_uri"`
-
-	Scope  string `yaml:"scope"`
-	Prompt string `yaml:"prompt"`
 }
 
 type TicketsConfig struct {
@@ -284,15 +270,6 @@ func defaultConfig() Config {
 		},
 		EmailVerif: EmailVerifConfig{
 			Enable: false,
-		},
-		CodexOAuth: CodexOAuthConfig{
-			Enable:       true,
-			ClientID:     "app_EMoamEEZ73f0CkXaXp7hrann",
-			AuthorizeURL: "https://auth.openai.com/oauth/authorize",
-			TokenURL:     "https://auth.openai.com/oauth/token",
-			RedirectURI:  "http://localhost:8080/auth/callback",
-			Scope:        "openid email profile offline_access",
-			Prompt:       "login",
 		},
 		Tickets: TicketsConfig{
 			AttachmentsDir: "./data/tickets",
@@ -466,30 +443,6 @@ func applyEnvOverrides(cfg *Config) {
 
 	if v := os.Getenv("REALMS_TICKETS_ATTACHMENTS_DIR"); v != "" {
 		cfg.Tickets.AttachmentsDir = v
-	}
-
-	if v := os.Getenv("REALMS_CODEX_OAUTH_ENABLE"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.CodexOAuth.Enable = b
-		}
-	}
-	if v := os.Getenv("REALMS_CODEX_OAUTH_CLIENT_ID"); v != "" {
-		cfg.CodexOAuth.ClientID = v
-	}
-	if v := os.Getenv("REALMS_CODEX_OAUTH_AUTHORIZE_URL"); v != "" {
-		cfg.CodexOAuth.AuthorizeURL = v
-	}
-	if v := os.Getenv("REALMS_CODEX_OAUTH_TOKEN_URL"); v != "" {
-		cfg.CodexOAuth.TokenURL = v
-	}
-	if v := os.Getenv("REALMS_CODEX_OAUTH_REDIRECT_URI"); v != "" {
-		cfg.CodexOAuth.RedirectURI = v
-	}
-	if v := os.Getenv("REALMS_CODEX_OAUTH_SCOPE"); v != "" {
-		cfg.CodexOAuth.Scope = v
-	}
-	if v := os.Getenv("REALMS_CODEX_OAUTH_PROMPT"); v != "" {
-		cfg.CodexOAuth.Prompt = v
 	}
 }
 

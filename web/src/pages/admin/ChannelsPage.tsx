@@ -36,7 +36,7 @@ import { listManagedModelsAdmin } from '../../api/models';
 function channelTypeLabel(t: string): string {
   if (t === 'openai_compatible') return 'OpenAI 兼容';
   if (t === 'anthropic') return 'Anthropic';
-  if (t === 'codex_oauth') return 'Codex OAuth（内置）';
+  if (t === 'codex_oauth') return 'Codex OAuth';
   return t;
 }
 
@@ -47,7 +47,7 @@ function statusBadge(status: number): { cls: string; label: string } {
 
 function healthBadge(ch: Channel): { cls: string; label: string; hint?: string } {
   if (ch.type === 'codex_oauth') {
-    return { cls: 'badge bg-success bg-opacity-10 text-success border border-success-subtle', label: '内置' };
+    return { cls: 'badge bg-light text-secondary border', label: '不支持测试' };
   }
   if (!ch.last_test_at) {
     return { cls: 'badge bg-light text-secondary border', label: '未测试' };
@@ -76,7 +76,7 @@ export function ChannelsPage() {
   const [draggingID, setDraggingID] = useState<number | null>(null);
   const [dropOverID, setDropOverID] = useState<number | null>(null);
 
-  const [createType, setCreateType] = useState<'openai_compatible' | 'anthropic'>('openai_compatible');
+  const [createType, setCreateType] = useState<'openai_compatible' | 'anthropic' | 'codex_oauth'>('openai_compatible');
   const [createName, setCreateName] = useState('');
   const [createBaseURL, setCreateBaseURL] = useState('https://api.openai.com');
   const [createKey, setCreateKey] = useState('');
@@ -719,7 +719,7 @@ export function ChannelsPage() {
                                 className="btn btn-sm btn-primary"
                                 type="button"
                                 title="设置"
-                                disabled={loading || reordering || ch.type === 'codex_oauth'}
+                                disabled={loading || reordering}
                                 data-bs-toggle="modal"
                                 data-bs-target="#editChannelModal"
                                 onClick={() => {
@@ -736,9 +736,8 @@ export function ChannelsPage() {
                                 className="btn btn-sm btn-light border text-danger"
                                 type="button"
                                 title="删除"
-                                disabled={loading || reordering || ch.type === 'codex_oauth'}
+                                disabled={loading || reordering}
                                 onClick={async () => {
-                                  if (ch.type === 'codex_oauth') return;
                                   if (!window.confirm(`确认删除渠道 ${ch.name || ch.id} ? 此操作不可恢复。`)) return;
                                   setErr('');
                                   setNotice('');
@@ -793,7 +792,7 @@ export function ChannelsPage() {
                 type: createType,
                 name: createName.trim(),
                 base_url: createBaseURL.trim(),
-                key: createKey.trim() || undefined,
+                key: createType === 'codex_oauth' ? undefined : createKey.trim() || undefined,
                 groups: createGroups.trim() || undefined,
                 priority: Number.parseInt(createPriority, 10) || 0,
                 promotion: createPromotion,
@@ -812,9 +811,23 @@ export function ChannelsPage() {
         >
           <div className="col-md-4">
             <label className="form-label">类型</label>
-            <select className="form-select" value={createType} onChange={(e) => setCreateType(e.target.value as 'openai_compatible' | 'anthropic')}>
+            <select
+              className="form-select"
+              value={createType}
+              onChange={(e) => {
+                const t = e.target.value as 'openai_compatible' | 'anthropic' | 'codex_oauth';
+                setCreateType(t);
+                if (t === 'openai_compatible') setCreateBaseURL('https://api.openai.com');
+                if (t === 'anthropic') setCreateBaseURL('https://api.anthropic.com');
+                if (t === 'codex_oauth') {
+                  setCreateBaseURL('https://chatgpt.com/backend-api/codex');
+                  setCreateKey('');
+                }
+              }}
+            >
               <option value="openai_compatible">openai_compatible（OpenAI 兼容）</option>
               <option value="anthropic">anthropic（Anthropic）</option>
+              <option value="codex_oauth">codex_oauth（Codex OAuth）</option>
             </select>
           </div>
           <div className="col-md-8">
@@ -842,17 +855,25 @@ export function ChannelsPage() {
             </div>
           </div>
 
-          <div className="col-12">
-            <label className="form-label">初始 Key（可选）</label>
-            <input
-              className="form-control font-monospace"
-              value={createKey}
-              onChange={(e) => setCreateKey(e.target.value)}
-              placeholder={createType === 'anthropic' ? 'sk-ant-...' : 'sk-...'}
-              autoComplete="new-password"
-            />
-            <div className="form-text small text-muted">留空表示先创建渠道，再在“设置”中追加 Key。</div>
-          </div>
+          {createType === 'codex_oauth' ? (
+            <div className="col-12">
+              <div className="alert alert-light border mb-0">
+                <div className="fw-semibold">codex_oauth 不需要 API Key</div>
+              </div>
+            </div>
+          ) : (
+            <div className="col-12">
+              <label className="form-label">初始 Key（可选）</label>
+              <input
+                className="form-control font-monospace"
+                value={createKey}
+                onChange={(e) => setCreateKey(e.target.value)}
+                placeholder={createType === 'anthropic' ? 'sk-ant-...' : 'sk-...'}
+                autoComplete="new-password"
+              />
+              <div className="form-text small text-muted">留空表示先创建渠道，再在“设置”中追加 Key。</div>
+            </div>
+          )}
 
           <div className="col-12">
             <div className="form-check">
@@ -1151,156 +1172,173 @@ export function ChannelsPage() {
                 <div className="card border-0 shadow-sm">
                   <div className="card-header bg-white fw-bold py-3">密钥管理</div>
                   <div className="card-body">
-                    <div className="form-text small text-muted mb-3">密钥将以明文存储，仅展示提示；删除不可恢复。</div>
-
-                    {credentials.length === 0 ? (
-                      <div className="text-muted small">暂无密钥。</div>
+                    {settingsChannel.type === 'codex_oauth' ? (
+                      <div className="text-muted small">codex_oauth 渠道不使用 API Key，这里无需配置。</div>
                     ) : (
-                      <div className="table-responsive">
-                        <table className="table table-hover align-middle mb-0">
-                          <thead className="table-light">
-                            <tr>
-                              <th className="ps-3">名称</th>
-                              <th>密钥提示</th>
-                              <th>状态</th>
-                              <th className="text-end pe-3">操作</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {credentials.map((c) => (
-                              <tr key={c.id}>
-                                <td className="ps-3">{c.name ? <span className="fw-semibold text-dark">{c.name}</span> : <span className="text-muted small">-</span>}</td>
-                                <td>
-                                  <code className="text-secondary bg-light border p-2 rounded d-inline-block">{c.masked_key || '-'}</code>
-                                </td>
-                                <td>
-                                  {c.status === 1 ? (
-                                    <span className="badge rounded-pill bg-success bg-opacity-10 text-success px-2">
-                                      <i className="ri-checkbox-circle-line me-1"></i>启用
-                                    </span>
-                                  ) : (
-                                    <span className="badge rounded-pill bg-secondary bg-opacity-10 text-secondary px-2">
-                                      <i className="ri-close-circle-line me-1"></i>禁用
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="text-end pe-3">
-                                  <button
-                                    type="button"
-                                    className="btn btn-sm btn-light border text-danger"
-                                    onClick={async () => {
-                                      if (!settingsChannelID) return;
-                                      if (!window.confirm('确认彻底删除该凭证？且不可恢复。')) return;
-                                      setErr('');
-                                      setNotice('');
-                                      try {
-                                        const res = await deleteChannelCredential(settingsChannelID, c.id);
-                                        if (!res.success) throw new Error(res.message || '删除失败');
-                                        setNotice(res.message || '已删除');
-                                        await reloadCredentials(settingsChannelID);
-                                        await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
-                                      } catch (e) {
-                                        setErr(e instanceof Error ? e.message : '删除失败');
-                                      }
-                                    }}
-                                  >
-                                    <i className="ri-delete-bin-line me-1"></i>删除
-                                  </button>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
+                      <>
+                        <div className="form-text small text-muted mb-3">密钥将以明文存储，仅展示提示；删除不可恢复。</div>
+
+                        {credentials.length === 0 ? (
+                          <div className="text-muted small">暂无密钥。</div>
+                        ) : (
+                          <div className="table-responsive">
+                            <table className="table table-hover align-middle mb-0">
+                              <thead className="table-light">
+                                <tr>
+                                  <th className="ps-3">名称</th>
+                                  <th>密钥提示</th>
+                                  <th>状态</th>
+                                  <th className="text-end pe-3">操作</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {credentials.map((c) => (
+                                  <tr key={c.id}>
+                                    <td className="ps-3">
+                                      {c.name ? <span className="fw-semibold text-dark">{c.name}</span> : <span className="text-muted small">-</span>}
+                                    </td>
+                                    <td>
+                                      <code className="text-secondary bg-light border p-2 rounded d-inline-block">{c.masked_key || '-'}</code>
+                                    </td>
+                                    <td>
+                                      {c.status === 1 ? (
+                                        <span className="badge rounded-pill bg-success bg-opacity-10 text-success px-2">
+                                          <i className="ri-checkbox-circle-line me-1"></i>启用
+                                        </span>
+                                      ) : (
+                                        <span className="badge rounded-pill bg-secondary bg-opacity-10 text-secondary px-2">
+                                          <i className="ri-close-circle-line me-1"></i>禁用
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="text-end pe-3">
+                                      <button
+                                        type="button"
+                                        className="btn btn-sm btn-light border text-danger"
+                                        onClick={async () => {
+                                          if (!settingsChannelID) return;
+                                          if (!window.confirm('确认彻底删除该凭证？且不可恢复。')) return;
+                                          setErr('');
+                                          setNotice('');
+                                          try {
+                                            const res = await deleteChannelCredential(settingsChannelID, c.id);
+                                            if (!res.success) throw new Error(res.message || '删除失败');
+                                            setNotice(res.message || '已删除');
+                                            await reloadCredentials(settingsChannelID);
+                                            await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                                          } catch (e) {
+                                            setErr(e instanceof Error ? e.message : '删除失败');
+                                          }
+                                        }}
+                                      >
+                                        <i className="ri-delete-bin-line me-1"></i>删除
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+
+                        <hr className="my-4 text-muted opacity-25" />
+
+                        <form
+                          className="row g-3"
+                          onSubmit={async (e) => {
+                            e.preventDefault();
+                            if (!settingsChannelID) return;
+                            setErr('');
+                            setNotice('');
+                            try {
+                              const res = await createChannelCredential(settingsChannelID, newCredentialKey.trim(), newCredentialName.trim() || undefined);
+                              if (!res.success) throw new Error(res.message || '添加失败');
+                              setNotice(res.message || '已添加');
+                              setNewCredentialKey('');
+                              setNewCredentialName('');
+                              await reloadCredentials(settingsChannelID);
+                              await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                            } catch (e) {
+                              setErr(e instanceof Error ? e.message : '添加失败');
+                            }
+                          }}
+                        >
+                          <div className="col-md-4">
+                            <label className="form-label fw-medium">备注名称（可选）</label>
+                            <input className="form-control" value={newCredentialName} onChange={(e) => setNewCredentialName(e.target.value)} placeholder="例如：team-a-gpt4" />
+                          </div>
+                          <div className="col-md-8">
+                            <label className="form-label fw-medium">API 密钥</label>
+                            <input
+                              className="form-control font-monospace"
+                              value={newCredentialKey}
+                              onChange={(e) => setNewCredentialKey(e.target.value)}
+                              required
+                              placeholder="sk-..."
+                              autoComplete="new-password"
+                            />
+                            <div className="form-text small text-muted">密钥将以明文存储。</div>
+                          </div>
+                          <div className="col-12">
+                            <button type="submit" className="btn btn-primary btn-sm" disabled={!newCredentialKey.trim()}>
+                              <i className="ri-add-line me-1"></i>添加密钥
+                            </button>
+                          </div>
+                        </form>
+                      </>
                     )}
-
-                    <hr className="my-4 text-muted opacity-25" />
-
-                    <form
-                      className="row g-3"
-                      onSubmit={async (e) => {
-                        e.preventDefault();
-                        if (!settingsChannelID) return;
-                        setErr('');
-                        setNotice('');
-                        try {
-                          const res = await createChannelCredential(settingsChannelID, newCredentialKey.trim(), newCredentialName.trim() || undefined);
-                          if (!res.success) throw new Error(res.message || '添加失败');
-                          setNotice(res.message || '已添加');
-                          setNewCredentialKey('');
-                          setNewCredentialName('');
-                          await reloadCredentials(settingsChannelID);
-                          await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
-                        } catch (e) {
-                          setErr(e instanceof Error ? e.message : '添加失败');
-                        }
-                      }}
-                    >
-                      <div className="col-md-4">
-                        <label className="form-label fw-medium">备注名称（可选）</label>
-                        <input className="form-control" value={newCredentialName} onChange={(e) => setNewCredentialName(e.target.value)} placeholder="例如：team-a-gpt4" />
-                      </div>
-                      <div className="col-md-8">
-                        <label className="form-label fw-medium">API 密钥</label>
-                        <input className="form-control font-monospace" value={newCredentialKey} onChange={(e) => setNewCredentialKey(e.target.value)} required placeholder="sk-..." autoComplete="new-password" />
-                        <div className="form-text small text-muted">密钥将以明文存储。</div>
-                      </div>
-                      <div className="col-12">
-                        <button type="submit" className="btn btn-primary btn-sm" disabled={!newCredentialKey.trim()}>
-                          <i className="ri-add-line me-1"></i>添加密钥
-                        </button>
-                      </div>
-                    </form>
                   </div>
                 </div>
 
-                <div className="card border-0 shadow-sm">
-                  <div className="card-header bg-white fw-bold py-3">查看明文 Key（可选）</div>
-                  <div className="card-body">
-                    <div className="form-text small text-muted mb-3">仅 root 可见；读取第一个 credential 的明文 key，请妥善保管。</div>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-light border"
-                      onClick={async () => {
-                        if (!settingsChannelID) return;
-                        setErr('');
-                        setNotice('');
-                        setKeyValue('');
-                        try {
-                          const res = await getChannelKey(settingsChannelID);
-                          if (!res.success) throw new Error(res.message || '获取失败');
-                          setKeyValue(res.data?.key || '');
-                        } catch (e) {
-                          setErr(e instanceof Error ? e.message : '获取失败');
-                        }
-                      }}
-                    >
-                      <i className="ri-key-2-line me-1"></i>读取明文 Key
-                    </button>
+                {settingsChannel.type === 'codex_oauth' ? null : (
+                  <div className="card border-0 shadow-sm">
+                    <div className="card-header bg-white fw-bold py-3">查看明文 Key（可选）</div>
+                    <div className="card-body">
+                      <div className="form-text small text-muted mb-3">仅 root 可见；读取第一个 credential 的明文 key，请妥善保管。</div>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-light border"
+                        onClick={async () => {
+                          if (!settingsChannelID) return;
+                          setErr('');
+                          setNotice('');
+                          setKeyValue('');
+                          try {
+                            const res = await getChannelKey(settingsChannelID);
+                            if (!res.success) throw new Error(res.message || '获取失败');
+                            setKeyValue(res.data?.key || '');
+                          } catch (e) {
+                            setErr(e instanceof Error ? e.message : '获取失败');
+                          }
+                        }}
+                      >
+                        <i className="ri-key-2-line me-1"></i>读取明文 Key
+                      </button>
 
-                    {keyValue ? (
-                      <div className="mt-3">
-                        <textarea className="form-control font-monospace" rows={4} value={keyValue} readOnly />
-                        <div className="d-grid mt-2">
-                          <button
-                            type="button"
-                            className="btn btn-primary btn-sm"
-                            onClick={async () => {
-                              try {
-                                await navigator.clipboard.writeText(keyValue);
-                                setNotice('已复制到剪贴板');
-                              } catch {
-                                setErr('复制失败（浏览器不支持或无权限）');
-                              }
-                            }}
-                          >
-                            复制
-                          </button>
+                      {keyValue ? (
+                        <div className="mt-3">
+                          <textarea className="form-control font-monospace" rows={4} value={keyValue} readOnly />
+                          <div className="d-grid mt-2">
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              onClick={async () => {
+                                try {
+                                  await navigator.clipboard.writeText(keyValue);
+                                  setNotice('已复制到剪贴板');
+                                } catch {
+                                  setErr('复制失败（浏览器不支持或无权限）');
+                                }
+                              }}
+                            >
+                              复制
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ) : null}
+                      ) : null}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             ) : null}
 

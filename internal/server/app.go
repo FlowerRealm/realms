@@ -48,7 +48,6 @@ type App struct {
 	db            *sql.DB
 	store         *store.Store
 	codexOAuth    *codexoauth.Flow
-	codexClient   *codexoauth.Client
 	exec          *upstream.Executor
 	openai        *openaiapi.Handler
 	sched         *scheduler.Scheduler
@@ -75,12 +74,7 @@ func NewApp(opts AppOptions) (*App, error) {
 		sessionSecret = randomSecret(32)
 	}
 
-	var oauthFlow *codexoauth.Flow
-	var codexClient *codexoauth.Client
-	if opts.Config.CodexOAuth.Enable {
-		codexClient = codexoauth.NewClient(opts.Config.CodexOAuth)
-		oauthFlow = codexoauth.NewFlow(st, codexClient, sessionCookieName, sessionSecret, localBaseURL(opts.Config))
-	}
+	oauthFlow := codexoauth.NewFlow(st, sessionCookieName, sessionSecret, localBaseURL(opts.Config), codexOAuthRedirectURI(opts.Config.Server.Addr))
 
 	ticketStorage := tickets.NewStorage(opts.Config.Tickets.AttachmentsDir)
 	proxyLog := proxylog.New(proxylog.Config{
@@ -97,7 +91,6 @@ func NewApp(opts AppOptions) (*App, error) {
 		db:            opts.DB,
 		store:         st,
 		codexOAuth:    oauthFlow,
-		codexClient:   codexClient,
 		exec:          exec,
 		openai:        openaiHandler,
 		sched:         sched,
@@ -154,9 +147,6 @@ func NewApp(opts AppOptions) (*App, error) {
 		Sched:                           sched,
 
 		CodexOAuthHandler: func() http.Handler {
-			if oauthFlow == nil {
-				return nil
-			}
 			return oauthFlow.Handler()
 		}(),
 
@@ -240,6 +230,25 @@ func localBaseURL(cfg config.Config) string {
 		return scheme + "://" + host
 	}
 	return scheme + "://" + host + ":" + port
+}
+
+func localhostBaseURLFromAddr(addr string) string {
+	scheme := "http"
+	host := "localhost"
+	port := ""
+	if _, p, err := net.SplitHostPort(addr); err == nil {
+		port = p
+	} else {
+		port = strings.TrimPrefix(addr, ":")
+	}
+	if port == "" {
+		return scheme + "://" + host
+	}
+	return scheme + "://" + host + ":" + port
+}
+
+func codexOAuthRedirectURI(addr string) string {
+	return localhostBaseURLFromAddr(addr) + "/auth/callback"
 }
 
 func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {
@@ -364,7 +373,7 @@ func (a *App) usageCleanupLoop() {
 }
 
 func (a *App) codexBalanceRefreshLoop() {
-	if a.codexClient == nil {
+	if a.store == nil {
 		return
 	}
 
@@ -458,6 +467,7 @@ func (a *App) refreshCodexBalance(ctx context.Context, accountID int64) {
 		_ = a.store.UpdateCodexOAuthAccountQuota(ctx, accountID, store.CodexOAuthQuota{}, now, &msg)
 		return
 	}
+	client := codexoauth.NewClient(codexoauth.DefaultConfig(""))
 
 	accessToken := sec.AccessToken
 	refreshToken := sec.RefreshToken
@@ -465,10 +475,7 @@ func (a *App) refreshCodexBalance(ctx context.Context, accountID int64) {
 	expiresAt := sec.ExpiresAt
 
 	maybeRefresh := func() bool {
-		if a.codexClient == nil {
-			return false
-		}
-		refreshed, err := a.codexClient.Refresh(ctx, refreshToken)
+		refreshed, err := client.Refresh(ctx, refreshToken)
 		if err != nil {
 			return false
 		}
@@ -493,12 +500,12 @@ func (a *App) refreshCodexBalance(ctx context.Context, accountID int64) {
 		_ = maybeRefresh()
 	}
 
-	quota, err := a.codexClient.FetchQuota(ctx, ep.BaseURL, accessToken, sec.AccountID)
+	quota, err := client.FetchQuota(ctx, ep.BaseURL, accessToken, sec.AccountID)
 	if err != nil {
 		var se *codexoauth.HTTPStatusError
 		if errors.As(err, &se) && (se.StatusCode == http.StatusUnauthorized || se.StatusCode == http.StatusForbidden) {
 			if maybeRefresh() {
-				quota, err = a.codexClient.FetchQuota(ctx, ep.BaseURL, accessToken, sec.AccountID)
+				quota, err = client.FetchQuota(ctx, ep.BaseURL, accessToken, sec.AccountID)
 			}
 		}
 	}
@@ -531,11 +538,6 @@ func parseLastIntPathSegment(path string) (int64, bool) {
 }
 
 func (a *App) RefreshCodexQuotasByEndpoint(w http.ResponseWriter, r *http.Request) {
-	if a.codexClient == nil {
-		http.Error(w, "Codex OAuth 未启用", http.StatusBadRequest)
-		return
-	}
-
 	endpointID, ok := parseLastIntPathSegment(r.URL.Path)
 	if !ok {
 		http.Error(w, "参数错误", http.StatusBadRequest)
@@ -570,11 +572,6 @@ func (a *App) RefreshCodexQuotasByEndpoint(w http.ResponseWriter, r *http.Reques
 }
 
 func (a *App) RefreshCodexQuota(w http.ResponseWriter, r *http.Request) {
-	if a.codexClient == nil {
-		http.Error(w, "Codex OAuth 未启用", http.StatusBadRequest)
-		return
-	}
-
 	accountID, ok := parseLastIntPathSegment(r.URL.Path)
 	if !ok {
 		http.Error(w, "参数错误", http.StatusBadRequest)

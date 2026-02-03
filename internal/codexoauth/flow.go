@@ -36,16 +36,17 @@ type Flow struct {
 	ttl     time.Duration
 }
 
-func NewFlow(st *store.Store, client *Client, cookieName string, sessionSecret string, returnBaseURL string) *Flow {
+func NewFlow(st *store.Store, cookieName string, sessionSecret string, returnBaseURL string, redirectURI string) *Flow {
 	secret := strings.TrimSpace(sessionSecret)
 	var cookieStore *gorillasessions.CookieStore
 	if secret != "" {
 		cookieStore = gorillasessions.NewCookieStore([]byte(secret))
 	}
 
+	redirectURI = strings.TrimSpace(redirectURI)
 	return &Flow{
 		st:            st,
-		client:        client,
+		client:        NewClient(DefaultConfig(redirectURI)),
 		cookieName:    cookieName,
 		cookieStore:   cookieStore,
 		returnBaseURL: strings.TrimRight(returnBaseURL, "/"),

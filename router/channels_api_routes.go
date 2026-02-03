@@ -482,12 +482,13 @@ func createChannelHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 		switch req.Type {
-		case store.UpstreamTypeOpenAICompatible, store.UpstreamTypeAnthropic:
-		case store.UpstreamTypeCodexOAuth:
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "codex_oauth Channel 为内置，不允许创建"})
-			return
+		case store.UpstreamTypeOpenAICompatible, store.UpstreamTypeAnthropic, store.UpstreamTypeCodexOAuth:
 		default:
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "不支持的渠道类型"})
+			return
+		}
+		if req.Type == store.UpstreamTypeCodexOAuth && req.Key != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "codex_oauth Channel 不支持 key"})
 			return
 		}
 		if _, err := security.ValidateBaseURL(req.BaseURL); err != nil {
@@ -564,8 +565,8 @@ func updateChannelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询 channel 失败"})
 			return
 		}
-		if ch.Type == store.UpstreamTypeCodexOAuth {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "codex_oauth Channel 为内置，不允许编辑"})
+		if ch.Type == store.UpstreamTypeCodexOAuth && req.Key != nil && strings.TrimSpace(*req.Key) != "" {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "codex_oauth Channel 不支持 key"})
 			return
 		}
 
@@ -707,7 +708,7 @@ func listChannelCredentialsHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 		if ch.Type == store.UpstreamTypeCodexOAuth {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "codex_oauth Channel 不支持 key"})
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": []channelCredentialView{}})
 			return
 		}
 		ep, err := opts.Store.GetUpstreamEndpointByChannelID(c.Request.Context(), ch.ID)
@@ -928,10 +929,6 @@ func updateChannelMetaHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询 channel 失败"})
 			return
 		}
-		if ch.Type == store.UpstreamTypeCodexOAuth {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "codex_oauth Channel 为内置，不允许编辑"})
-			return
-		}
 
 		var req reqBody
 		if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
@@ -1000,10 +997,6 @@ func updateChannelSettingHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询 channel 失败"})
 			return
 		}
-		if ch.Type == store.UpstreamTypeCodexOAuth {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "codex_oauth Channel 为内置，不允许编辑"})
-			return
-		}
 
 		var req reqBody
 		if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
@@ -1062,10 +1055,6 @@ func updateChannelParamOverrideHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询 channel 失败"})
 			return
 		}
-		if ch.Type == store.UpstreamTypeCodexOAuth {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "codex_oauth Channel 为内置，不允许编辑"})
-			return
-		}
 		var req reqBody
 		if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
@@ -1104,10 +1093,6 @@ func updateChannelHeaderOverrideHandler(opts Options) gin.HandlerFunc {
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询 channel 失败"})
-			return
-		}
-		if ch.Type == store.UpstreamTypeCodexOAuth {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "codex_oauth Channel 为内置，不允许编辑"})
 			return
 		}
 		var req reqBody
@@ -1150,10 +1135,6 @@ func updateChannelModelSuffixPreserveHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询 channel 失败"})
 			return
 		}
-		if ch.Type == store.UpstreamTypeCodexOAuth {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "codex_oauth Channel 为内置，不允许编辑"})
-			return
-		}
 		var req reqBody
 		if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
@@ -1192,10 +1173,6 @@ func updateChannelRequestBodyWhitelistHandler(opts Options) gin.HandlerFunc {
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询 channel 失败"})
-			return
-		}
-		if ch.Type == store.UpstreamTypeCodexOAuth {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "codex_oauth Channel 为内置，不允许编辑"})
 			return
 		}
 		var req reqBody
@@ -1238,10 +1215,6 @@ func updateChannelRequestBodyBlacklistHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询 channel 失败"})
 			return
 		}
-		if ch.Type == store.UpstreamTypeCodexOAuth {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "codex_oauth Channel 为内置，不允许编辑"})
-			return
-		}
 		var req reqBody
 		if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
@@ -1282,10 +1255,6 @@ func updateChannelStatusCodeMappingHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询 channel 失败"})
 			return
 		}
-		if ch.Type == store.UpstreamTypeCodexOAuth {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "codex_oauth Channel 为内置，不允许编辑"})
-			return
-		}
 		var req reqBody
 		if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
@@ -1314,17 +1283,13 @@ func deleteChannelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
 			return
 		}
-		ch, err := opts.Store.GetUpstreamChannelByID(c.Request.Context(), channelID)
+		_, err = opts.Store.GetUpstreamChannelByID(c.Request.Context(), channelID)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel 不存在"})
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询 channel 失败"})
-			return
-		}
-		if ch.Type == store.UpstreamTypeCodexOAuth {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "codex_oauth Channel 为内置，不允许删除"})
 			return
 		}
 		if err := opts.Store.DeleteUpstreamChannel(c.Request.Context(), channelID); err != nil {

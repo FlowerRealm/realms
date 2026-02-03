@@ -47,6 +47,7 @@ type fakeUpstreamStore struct {
 	codexSecret     store.CodexOAuthSecret
 	openaiSecret    store.OpenAICredentialSecret
 	anthropicSecret store.AnthropicCredentialSecret
+	channel         store.UpstreamChannel
 
 	updateTokensCalls int
 	setStatusCalls    int
@@ -63,6 +64,12 @@ func (f *fakeUpstreamStore) GetAnthropicCredentialSecret(_ context.Context, cred
 	sec := f.anthropicSecret
 	sec.ID = credentialID
 	return sec, nil
+}
+
+func (f *fakeUpstreamStore) GetUpstreamChannelByID(_ context.Context, channelID int64) (store.UpstreamChannel, error) {
+	ch := f.channel
+	ch.ID = channelID
+	return ch, nil
 }
 
 func (f *fakeUpstreamStore) GetCodexOAuthSecret(_ context.Context, accountID int64) (store.CodexOAuthSecret, error) {

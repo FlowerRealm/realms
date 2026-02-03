@@ -37,7 +37,6 @@ type Executor struct {
 
 	upstreamTimeout time.Duration
 
-	codexOAuth  *codexoauth.Client
 	refreshMu   sync.Mutex
 	lastRefresh map[int64]time.Time
 }
@@ -63,16 +62,11 @@ func NewExecutor(st *store.Store, cfg config.Config) *Executor {
 			return http.ErrUseLastResponse
 		},
 	}
-	var codexClient *codexoauth.Client
-	if cfg.CodexOAuth.Enable {
-		codexClient = codexoauth.NewClient(cfg.CodexOAuth)
-	}
 	return &Executor{
 		st:              st,
 		client:          client,
 		clients:         make(map[string]*http.Client),
 		upstreamTimeout: 0,
-		codexOAuth:      codexClient,
 		lastRefresh:     make(map[int64]time.Time),
 	}
 }
@@ -659,10 +653,11 @@ func (e *Executor) buildRequest(ctx context.Context, sel scheduler.Selection, do
 		}
 
 		accessToken := sec.AccessToken
-		if e.codexOAuth != nil && sec.ExpiresAt != nil && time.Until(*sec.ExpiresAt) < 5*time.Minute {
+		if sec.ExpiresAt != nil && time.Until(*sec.ExpiresAt) < 5*time.Minute {
 			now := time.Now()
 			if e.shouldAttemptRefresh(sel.CredentialID, now) {
-				refreshed, err := e.codexOAuth.Refresh(ctx, sec.RefreshToken)
+				client := codexoauth.NewClient(codexoauth.DefaultConfig(""))
+				refreshed, err := client.Refresh(ctx, sec.RefreshToken)
 				if err == nil {
 					refreshToken := refreshed.RefreshToken
 					if refreshToken == "" {

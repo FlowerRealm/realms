@@ -11,12 +11,10 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"realms/internal/config"
 )
 
 type Client struct {
-	cfg  config.CodexOAuthConfig
+	cfg  Config
 	http *http.Client
 
 	refreshBackoffs []time.Duration
@@ -74,7 +72,7 @@ func cloneDefaultTransport() *http.Transport {
 	}
 }
 
-func NewClient(cfg config.CodexOAuthConfig) *Client {
+func NewClient(cfg Config) *Client {
 	t := cloneDefaultTransport()
 	// 移除超时限制：Dial/TLS/HTTP 均允许无限等待。
 	t.DialContext = (&net.Dialer{Timeout: 0, KeepAlive: 30 * time.Second}).DialContext

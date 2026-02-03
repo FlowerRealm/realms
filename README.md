@@ -108,10 +108,9 @@ Realms 本身不自带可用上游，启动后请先完成一次上游配置，�
 > 说明：当前前端已覆盖用户控制台与管理后台的完整功能入口（路由保持与 SSR/tag `0.3.3` 一致）：
 > - 用户：`/login`、`/register`、`/dashboard`、`/announcements`、`/tokens`、`/models`、`/usage`、`/account`、`/subscription`、`/topup`、`/pay/...`、`/tickets`
 > - 管理：`/admin/channels`、`/admin/channel-groups`、`/admin/models`、`/admin/users`、`/admin/subscriptions`、`/admin/orders`、`/admin/payment-channels`、`/admin/usage`、`/admin/tickets`、`/admin/announcements`、`/admin/oauth-apps`、`/admin/settings`
-
 在管理后台配置上游：
 - OpenAI 兼容上游：创建 Channel → 配置 Endpoint 的 `base_url` → 添加 API Key（示例写 `sk-***`）
-- Codex OAuth 上游：创建 Channel → 发起 OAuth 授权并导入账号（如遇 `redirect_uri` 回跳端口问题，按后台提示走“复制回调 URL 粘贴完成授权”的兜底流程）
+- Codex OAuth 上游：创建 Channel → 手动完成 OAuth 授权 → 复制浏览器回调 URL（含 `code/state`）并粘贴完成导入账号
 
 ### 4. 配置模型（默认必须）
 

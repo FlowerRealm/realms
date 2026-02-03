@@ -12,8 +12,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"realms/internal/config"
 )
 
 type roundTripperFunc func(r *http.Request) (*http.Response, error)
@@ -38,7 +36,7 @@ func TestNewPKCE(t *testing.T) {
 }
 
 func TestClientBuildAuthorizeURL(t *testing.T) {
-	c := NewClient(config.CodexOAuthConfig{
+	c := NewClient(Config{
 		AuthorizeURL: "https://auth.openai.com/oauth/authorize",
 		ClientID:     "app_test",
 		RedirectURI:  "http://localhost:8080/auth/callback",
@@ -150,13 +148,7 @@ func TestParseOAuthCallback(t *testing.T) {
 }
 
 func TestFlowPendingCleanupAndOneTimeState(t *testing.T) {
-	c := NewClient(config.CodexOAuthConfig{
-		AuthorizeURL: "https://auth.openai.com/oauth/authorize",
-		ClientID:     "app_test",
-		RedirectURI:  "http://localhost:8080/auth/callback",
-		Scope:        "openid email profile offline_access",
-	})
-	f := NewFlow(nil, c, "sid", "test-secret", "http://localhost:8080")
+	f := NewFlow(nil, "sid", "test-secret", "http://localhost:8080", "http://localhost:8080/auth/callback")
 	f.ttl = 1 * time.Minute
 	f.pending["old"] = Pending{CreatedAt: time.Now().Add(-2 * f.ttl)}
 
@@ -194,7 +186,7 @@ func TestClientRefreshRetryAndInvalidGrant(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		c := NewClient(config.CodexOAuthConfig{
+		c := NewClient(Config{
 			TokenURL:    srv.URL,
 			ClientID:    "app_test",
 			Scope:       "openid",
@@ -224,7 +216,7 @@ func TestClientRefreshRetryAndInvalidGrant(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		c := NewClient(config.CodexOAuthConfig{
+		c := NewClient(Config{
 			TokenURL: srv.URL,
 			ClientID: "app_test",
 		})
@@ -270,7 +262,7 @@ func TestClientFetchQuota(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		c := NewClient(config.CodexOAuthConfig{TokenURL: "http://example.com", ClientID: "app_test"})
+		c := NewClient(Config{TokenURL: "http://example.com", ClientID: "app_test"})
 		out, err := c.FetchQuota(context.Background(), srv.URL, "at", "user-123")
 		if err != nil {
 			t.Fatalf("FetchQuota: %v", err)
@@ -311,7 +303,7 @@ func TestClientFetchQuota(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		c := NewClient(config.CodexOAuthConfig{TokenURL: "http://example.com", ClientID: "app_test"})
+		c := NewClient(Config{TokenURL: "http://example.com", ClientID: "app_test"})
 		out, err := c.FetchQuota(context.Background(), srv.URL+"/backend-api/codex", "at", "")
 		if err != nil {
 			t.Fatalf("FetchQuota: %v", err)
@@ -328,7 +320,7 @@ func TestClientFetchQuota(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		c := NewClient(config.CodexOAuthConfig{TokenURL: "http://example.com", ClientID: "app_test"})
+		c := NewClient(Config{TokenURL: "http://example.com", ClientID: "app_test"})
 		_, err := c.FetchQuota(context.Background(), srv.URL, "at", "user-123")
 		if err == nil {
 			t.Fatalf("expected error")
@@ -344,7 +336,7 @@ func TestClientFetchQuota(t *testing.T) {
 
 	t.Run("retry_on_eof", func(t *testing.T) {
 		calls := 0
-		c := NewClient(config.CodexOAuthConfig{TokenURL: "http://example.com", ClientID: "app_test"})
+		c := NewClient(Config{TokenURL: "http://example.com", ClientID: "app_test"})
 		c.http.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 			calls++
 			if r.Method != http.MethodGet {
@@ -386,7 +378,7 @@ func TestClientFetchQuota(t *testing.T) {
 
 	t.Run("fallback_backend_api", func(t *testing.T) {
 		calls := 0
-		c := NewClient(config.CodexOAuthConfig{TokenURL: "http://example.com", ClientID: "app_test"})
+		c := NewClient(Config{TokenURL: "http://example.com", ClientID: "app_test"})
 		c.http.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 			calls++
 			switch calls {

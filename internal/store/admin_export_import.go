@@ -435,9 +435,6 @@ ON CONFLICT(name) DO UPDATE SET
 
 	channelKey := func(typ, name string) string {
 		typ = strings.TrimSpace(typ)
-		if typ == UpstreamTypeCodexOAuth {
-			return typ
-		}
 		return typ + ":" + strings.TrimSpace(name)
 	}
 
@@ -447,33 +444,6 @@ ON CONFLICT(name) DO UPDATE SET
 		switch typ {
 		case "":
 			return 0, errors.New("channel_type 不能为空")
-		case UpstreamTypeCodexOAuth:
-			var ids []int64
-			rows, err := tx.QueryContext(ctx, `SELECT id FROM upstream_channels WHERE type=?`, typ)
-			if err != nil {
-				return 0, fmt.Errorf("查询 codex_oauth channel 失败: %w", err)
-			}
-			defer rows.Close()
-			for rows.Next() {
-				var id int64
-				if err := rows.Scan(&id); err != nil {
-					return 0, fmt.Errorf("扫描 codex_oauth channel 失败: %w", err)
-				}
-				ids = append(ids, id)
-				if len(ids) > 1 {
-					break
-				}
-			}
-			if err := rows.Err(); err != nil {
-				return 0, fmt.Errorf("遍历 codex_oauth channel 失败: %w", err)
-			}
-			if len(ids) == 0 || ids[0] == 0 {
-				return 0, errors.New("内置 codex_oauth channel 不存在（请确认已运行迁移）")
-			}
-			if len(ids) > 1 {
-				return 0, errors.New("存在多个 codex_oauth channel，请先清理重复记录")
-			}
-			return ids[0], nil
 		default:
 			var ids []int64
 			rows, err := tx.QueryContext(ctx, `SELECT id FROM upstream_channels WHERE type=? AND name=?`, typ, name)
@@ -510,7 +480,7 @@ ON CONFLICT(name) DO UPDATE SET
 		if typ == "" {
 			return 0, errors.New("type 不能为空")
 		}
-		if typ != UpstreamTypeCodexOAuth && name == "" {
+		if name == "" {
 			return 0, errors.New("name 不能为空")
 		}
 
