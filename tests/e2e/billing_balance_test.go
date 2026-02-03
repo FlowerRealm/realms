@@ -106,7 +106,7 @@ func TestBilling_PaygBalanceDebitsByTokensPricing_E2E(t *testing.T) {
 		t.Fatalf("CreateChannelModel: %v", err)
 	}
 
-	userID, err := st.CreateUser(ctx, "ci-user@example.com", "ci-user", []byte("x"), store.UserRoleUser)
+	userID, err := st.CreateUser(ctx, "ci-user@example.com", "ciuser", []byte("x"), store.UserRoleUser)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}

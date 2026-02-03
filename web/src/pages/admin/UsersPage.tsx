@@ -53,7 +53,6 @@ export function UsersPage() {
 
   const [editing, setEditing] = useState<AdminUser | null>(null);
   const [editEmail, setEditEmail] = useState('');
-  const [editUsername, setEditUsername] = useState('');
   const [editRole, setEditRole] = useState<'user' | 'root'>('user');
   const [editStatus, setEditStatus] = useState(1);
   const [editGroups, setEditGroups] = useState<string[]>(['default']);
@@ -91,7 +90,6 @@ export function UsersPage() {
   useEffect(() => {
     if (!editing) return;
     setEditEmail(editing.email || '');
-    setEditUsername(editing.username || '');
     setEditRole((editing.role || 'user') as 'user' | 'root');
     setEditStatus(editing.status || 0);
     setEditGroups(parseGroups(editing.groups || 'default'));
@@ -316,7 +314,7 @@ export function UsersPage() {
           <div className="col-md-6">
             <label className="form-label">账号名</label>
             <input className="form-control" value={createUsername} onChange={(e) => setCreateUsername(e.target.value)} placeholder="alice" required />
-            <div className="form-text small text-muted">支持字母/数字及 . _ -，最多 32 位；用于登录。</div>
+            <div className="form-text small text-muted">仅允许字母/数字（区分大小写），最多 64 位；创建后不可修改。</div>
           </div>
           <div className="col-md-6">
             <label className="form-label">初始密码</label>
@@ -391,7 +389,6 @@ export function UsersPage() {
               try {
                 const res = await updateAdminUser(editing.id, {
                   email: editEmail.trim(),
-                  username: editUsername.trim(),
                   role: editRole,
                   status: editStatus,
                   groups: editGroups,
@@ -412,8 +409,8 @@ export function UsersPage() {
             </div>
             <div className="col-md-6">
               <label className="form-label">账号名</label>
-              <input className="form-control" value={editUsername} onChange={(e) => setEditUsername(e.target.value)} required />
-              <div className="form-text small text-muted">支持字母/数字及 . _ -，最多 32 位；用于登录。</div>
+              <input className="form-control" value={editing.username || ''} disabled />
+              <div className="form-text small text-muted">账号名不可修改；用于登录（区分大小写，仅字母/数字）。</div>
             </div>
             <div className="col-md-6">
               <label className="form-label">状态</label>

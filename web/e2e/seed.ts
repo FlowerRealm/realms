@@ -9,13 +9,13 @@ export const E2E_SEED = {
     model: 'gpt-4.1-mini',
     user: {
       email: 'e2e-user@example.com',
-      username: 'e2e-user',
+      username: 'e2euser',
       password: 'pw-e2e-user-123',
       token: 'sk_playwright_e2e_user_token',
     },
     poorUser: {
       email: 'e2e-poor@example.com',
-      username: 'e2e-poor',
+      username: 'e2epoor',
       password: 'pw-e2e-user-123',
       token: 'sk_playwright_e2e_poor_token',
     },

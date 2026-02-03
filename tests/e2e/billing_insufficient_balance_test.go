@@ -76,7 +76,7 @@ func TestBilling_InsufficientBalanceReturnsPaymentRequired_E2E(t *testing.T) {
 		t.Fatalf("CreateChannelModel: %v", err)
 	}
 
-	userID, err := st.CreateUser(ctx, "ci-poor@example.com", "ci-poor", []byte("x"), store.UserRoleUser)
+	userID, err := st.CreateUser(ctx, "ci-poor@example.com", "cipoor", []byte("x"), store.UserRoleUser)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}

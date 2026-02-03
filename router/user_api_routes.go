@@ -47,12 +47,12 @@ func userLoginHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
 			return
 		}
-		login := strings.TrimSpace(strings.ToLower(req.Login))
+		login := strings.TrimSpace(req.Login)
 		if login == "" {
-			login = strings.TrimSpace(strings.ToLower(req.Username))
+			login = strings.TrimSpace(req.Username)
 		}
 		if login == "" {
-			login = strings.TrimSpace(strings.ToLower(req.Email))
+			login = strings.TrimSpace(req.Email)
 		}
 		password := req.Password
 		if login == "" || password == "" {
@@ -60,7 +60,8 @@ func userLoginHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
-		u, err := opts.Store.GetUserByEmail(c.Request.Context(), login)
+		// email: 统一按小写匹配；username: 大小写敏感匹配。
+		u, err := opts.Store.GetUserByEmail(c.Request.Context(), strings.ToLower(login))
 		if err != nil && err == sql.ErrNoRows {
 			u, err = opts.Store.GetUserByUsername(c.Request.Context(), login)
 		}

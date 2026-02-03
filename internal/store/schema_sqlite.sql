@@ -6,7 +6,7 @@
 CREATE TABLE IF NOT EXISTS `users` (
   `id` INTEGER PRIMARY KEY AUTOINCREMENT,
   `email` TEXT NOT NULL,
-  `username` TEXT NOT NULL,
+  `username` TEXT NOT NULL CHECK (`username` <> '' AND `username` NOT GLOB '*[^A-Za-z0-9]*'),
   `password_hash` BLOB NOT NULL,
   `role` TEXT NOT NULL DEFAULT 'user',
   `status` INTEGER NOT NULL DEFAULT 1,
@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `updated_at` DATETIME NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS `uk_users_email` ON `users` (`email`);
-CREATE UNIQUE INDEX IF NOT EXISTS `uk_users_username` ON `users` (`username`);
+CREATE UNIQUE INDEX IF NOT EXISTS `uk_users_username` ON `users` (`username` COLLATE BINARY);
 
 CREATE TABLE IF NOT EXISTS `user_groups` (
   `user_id` INTEGER NOT NULL,

@@ -219,7 +219,7 @@ func runCodexE2E(t *testing.T, e2eCfg codexE2EConfig) {
 		t.Fatalf("CreateChannelModel: %v", err)
 	}
 
-	userID, err := st.CreateUser(ctx, "ci-user@example.com", "ci-user", []byte("x"), store.UserRoleUser)
+	userID, err := st.CreateUser(ctx, "ci-user@example.com", "ciuser", []byte("x"), store.UserRoleUser)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}

@@ -256,25 +256,8 @@ func adminUpdateUserHandler(opts Options) gin.HandlerFunc {
 		}
 
 		if req.Username != nil {
-			username, err := store.NormalizeUsername(*req.Username)
-			if err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
-				return
-			}
-			if other, err := opts.Store.GetUserByUsername(c.Request.Context(), username); err == nil && other.ID != target.ID {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "账号名已被占用"})
-				return
-			} else if err != nil && err != sql.ErrNoRows {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询账号名失败"})
-				return
-			}
-			if username != target.Username {
-				if err := opts.Store.UpdateUserUsername(c.Request.Context(), target.ID, username); err != nil {
-					c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
-					return
-				}
-				changed = true
-			}
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "账号名不可修改"})
+			return
 		}
 
 		if req.Status != nil {

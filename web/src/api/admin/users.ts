@@ -32,7 +32,6 @@ export async function createAdminUser(req: CreateAdminUserRequest) {
 
 export type UpdateAdminUserRequest = {
   email?: string;
-  username?: string;
   status?: number;
   role?: string;
   groups?: string[];
@@ -60,4 +59,3 @@ export async function deleteAdminUser(userID: number) {
   const res = await api.delete<APIResponse<void>>(`/api/admin/users/${userID}`);
   return res.data;
 }
-

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../auth/AuthContext';
-import { updateEmail, updatePassword, updateUsername } from '../api/account';
+import { updateEmail, updatePassword } from '../api/account';
 
 function normalizeEmail(v: string): string {
   return (v || '').trim().toLowerCase();
@@ -16,8 +16,6 @@ export function AccountPage() {
 
   const [err, setErr] = useState('');
   const [notice, setNotice] = useState('');
-
-  const [username, setUsername] = useState(() => (user?.username || '').toString());
 
   const [newEmail, setNewEmail] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
@@ -58,7 +56,7 @@ export function AccountPage() {
                 </div>
                 <div>
                   <h5 className="mb-1 fw-semibold">账号设置</h5>
-                  <p className="mb-0 text-muted small">修改账号名/邮箱/密码成功后将强制登出，需要重新登录。</p>
+                  <p className="mb-0 text-muted small">修改邮箱/密码成功后将强制登出，需要重新登录。</p>
                 </div>
               </div>
             </div>
@@ -87,42 +85,18 @@ export function AccountPage() {
               <h5 className="fw-semibold mb-3">
                 <span className="me-2 text-primary material-symbols-rounded">alternate_email</span>账号名
               </h5>
-              <form
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  setErr('');
-                  setNotice('');
-                  try {
-                    const res = await updateUsername(username);
-                    if (!res.success) throw new Error(res.message || '保存失败');
-                    if (res.data?.force_logout) {
-                      await forceLogout(res.message || '账号名已更新，请重新登录');
-                      return;
-                    }
-                    setNotice('已保存');
-                  } catch (e) {
-                    setErr(e instanceof Error ? e.message : '保存失败');
-                  }
-                }}
-              >
-                <div className="mb-3">
-                  <label className="form-label">账号名</label>
-                  <input
-                    name="username"
-                    type="text"
-                    className="form-control"
-                    autoComplete="username"
-                    required
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder="例如：alice"
-                  />
-                  <div className="form-text">支持字母/数字及 . _ -，最多 32 位；用于登录。</div>
-                </div>
-                <button type="submit" className="btn btn-primary">
-                  保存并重新登录
-                </button>
-              </form>
+              <div className="mb-3">
+                <label className="form-label">账号名</label>
+                <input
+                  name="username"
+                  type="text"
+                  className="form-control"
+                  autoComplete="username"
+                  disabled
+                  value={(user?.username || '').toString()}
+                />
+                <div className="form-text">账号名不可修改；用于登录（区分大小写，仅字母/数字）。</div>
+              </div>
             </div>
           </div>
         </div>
@@ -304,4 +278,3 @@ export function AccountPage() {
     </div>
   );
 }
-

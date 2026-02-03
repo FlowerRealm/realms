@@ -53,11 +53,11 @@ const (
 	e2eModelPublicID = "gpt-4.1-mini"
 
 	e2eUserEmail           = "e2e-user@example.com"
-	e2eUserUsername        = "e2e-user"
+	e2eUserUsername        = "e2euser"
 	e2eUserTokenPlain      = "sk_playwright_e2e_user_token"
 	e2eUserInitialBalance  = "1"
 	e2ePoorUserEmail       = "e2e-poor@example.com"
-	e2ePoorUserUsername    = "e2e-poor"
+	e2ePoorUserUsername    = "e2epoor"
 	e2ePoorUserTokenPlain  = "sk_playwright_e2e_poor_token"
 	e2ePoorUserInitialBal  = "0.0005" // < 0.001 USD default reserve
 	e2eUpstreamAPIKeyPlain = "sk_upstream_playwright_e2e"

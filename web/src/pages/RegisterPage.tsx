@@ -87,7 +87,7 @@ export function RegisterPage() {
               onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
               disabled={!allowOpenRegistration}
             />
-            <div className="form-text">支持字母/数字及 . _ -，最多 32 位；用于登录。</div>
+            <div className="form-text">仅允许字母/数字（区分大小写），最多 64 位；用于登录。</div>
           </div>
 
           {emailVerificationEnabled ? (

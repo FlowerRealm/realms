@@ -152,21 +152,6 @@ WHERE id=?
 	return nil
 }
 
-func (s *Store) UpdateUserUsername(ctx context.Context, userID int64, username string) error {
-	if strings.TrimSpace(username) == "" {
-		return fmt.Errorf("账号名不能为空")
-	}
-	_, err := s.db.ExecContext(ctx, `
-	UPDATE users
-	SET username=?, updated_at=CURRENT_TIMESTAMP
-	WHERE id=?
-	`, username, userID)
-	if err != nil {
-		return fmt.Errorf("更新用户账号名失败: %w", err)
-	}
-	return nil
-}
-
 func (s *Store) UpdateUserPasswordHash(ctx context.Context, userID int64, passwordHash []byte) error {
 	_, err := s.db.ExecContext(ctx, `
 UPDATE users

@@ -23,65 +23,8 @@ func setAccountAPIRoutes(r gin.IRoutes, opts Options) {
 }
 
 func accountUpdateUsernameHandler(opts Options) gin.HandlerFunc {
-	type reqBody struct {
-		Username string `json:"username"`
-	}
 	return func(c *gin.Context) {
-		userID, ok := userIDFromContext(c)
-		if !ok {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "未登录"})
-			return
-		}
-		if opts.Store == nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
-			return
-		}
-		u, err := opts.Store.GetUserByID(c.Request.Context(), userID)
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "用户查询失败"})
-			return
-		}
-
-		var req reqBody
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
-			return
-		}
-		username, err := store.NormalizeUsername(req.Username)
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
-			return
-		}
-		if u.Username == username {
-			c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
-			return
-		}
-
-		other, err := opts.Store.GetUserByUsername(c.Request.Context(), username)
-		if err == nil && other.ID != u.ID {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "账号名已被占用"})
-			return
-		}
-		if err != nil && err != sql.ErrNoRows {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询账号名失败"})
-			return
-		}
-
-		if err := opts.Store.UpdateUserUsername(c.Request.Context(), u.ID, username); err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
-			return
-		}
-
-		sess := sessions.Default(c)
-		sess.Clear()
-		_ = sess.Save()
-		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"message": "账号名已更新，请重新登录",
-			"data": gin.H{
-				"force_logout": true,
-			},
-		})
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "账号名不可修改"})
 	}
 }
 
