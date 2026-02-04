@@ -27,6 +27,25 @@ if [[ -f "./.env" ]]; then
 fi
 set +a
 
+# dev 默认需要前端构建产物（web/dist）；否则后端静态资源会缺失
+FRONTEND_DIST_DIR="${FRONTEND_DIST_DIR:-./web/dist}"
+if [[ "${FRONTEND_DIST_DIR}" == "./web/dist" || "${FRONTEND_DIST_DIR}" == "web/dist" ]]; then
+  if [[ ! -d "./web/dist" ]] || ! compgen -G "./web/dist/*" >/dev/null; then
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "未找到 npm，无法自动构建前端。请先安装 Node.js/npm，或手动执行: (cd web && npm ci && npm run build)" >&2
+      exit 1
+    fi
+    if [[ ! -d "./web/node_modules" ]]; then
+      echo ">> installing frontend deps (npm ci)"
+      npm --prefix "./web" ci
+    fi
+    echo ">> building frontend (npm run build)"
+    npm --prefix "./web" run build
+  fi
+else
+  echo "检测到 FRONTEND_DIST_DIR=${FRONTEND_DIST_DIR}（非 ./web/dist），跳过自动前端构建" >&2
+fi
+
 # 本地开发：固定 8080 + 正常模式（非 self_mode）
 export REALMS_ENV="dev"
 export REALMS_ADDR=":8080"
