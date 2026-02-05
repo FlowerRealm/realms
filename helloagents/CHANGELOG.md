@@ -12,6 +12,10 @@
 
 - **[Web/E2E]**: 新增用量页隐私回归：用户侧 `/usage` 明细不展示上游渠道信息（`web/e2e/usage.spec.ts`）
 
+- **[Web/Frontend]**: 用量统计页“请求明细”下拉详情展示对应 API 令牌（Key）名称，便于按 Key 定位请求来源（`web/src/pages/UsagePage.tsx`、`web/e2e/usage.spec.ts`）
+
+- **[Web/Frontend]**: 用量统计页“请求明细”下拉详情补充费用计算明细（输入/输出/缓存输入/缓存输出 × 各自单价），便于审计每次请求的计费组成（`web/src/pages/UsagePage.tsx`、`web/e2e/usage.spec.ts`）
+
 - **[Docker]**: 增加后端专用镜像（用于前后端分离部署）：在同一仓库名 `flowerrealm/realms` 下发布 `:backend` / `:<TAG>-backend` tag（不 embed 前端产物）；默认镜像仍为前后端同源一体（embed `web/dist`）（`Dockerfile`、`.github/workflows/docker.yml`、`docs/frontend.md`、`.env.example`、`docs/USAGE.md`）
 
 - **[Docs]**: 补充“前后端分离（默认同源部署）”用户文档：说明同源一体/外置前端两种部署方式与关键环境变量（`docs/frontend.md`、`docs/index.md`、`docs/USAGE.md`、`mkdocs.yml`、`README.md`）
@@ -53,6 +57,9 @@
   - 方案: [202601292030_packaging-deb-exe](plan/202601292030_packaging-deb-exe/)
 
 ### 修复
+
+- **[Usage/Privacy]**: 用户侧用量“请求明细”彻底移除上游标识与上游明细 body：`/api/usage/events` 不再返回 `upstream_endpoint_id/upstream_credential_id`，`/api/usage/events/:event_id/detail` 不下发 `upstream_request_body/upstream_response_body`；前端在对应区域提示“仅管理员可查看”，并增强 Playwright 回归覆盖失败请求（`router/usage_api_routes.go`、`web/src/pages/UsagePage.tsx`、`cmd/realms-e2e/main.go`、`web/e2e/usage.spec.ts`、`router/usage_api_routes_test.go`）
+  - 方案: [202602042228_usage-privacy-hide-upstream-detail](archive/2026-02/202602042228_usage-privacy-hide-upstream-detail/)
 
 - **[Config]**: 同步 `.env` 与 `.env.example`：为缺失的环境变量补齐占位（不改动现有配置），便于升级后补全配置（`.env`）
 

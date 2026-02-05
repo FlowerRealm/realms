@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { listUserModelsDetail, type UserManagedModel } from '../api/models';
+import { listUserTokens, type UserToken } from '../api/tokens';
 import { getUsageEventDetail, getUsageEvents, getUsageWindows, type UsageEvent, type UsageEventDetail, type UsageWindow } from '../api/usage';
 import { formatUSD } from '../format/money';
 
@@ -80,6 +82,84 @@ function cachedTokens(ev: UsageEvent): string {
   return String(n);
 }
 
+function tokenNameFromMap(tokenByID: Record<number, UserToken>, tokenID: number): string {
+  const tok = tokenByID[tokenID];
+  const name = (tok?.name || '').toString().trim();
+  if (name) return name;
+  const hint = (tok?.token_hint || '').toString().trim();
+  if (hint) return hint;
+  return '-';
+}
+
+function parseDecimalToMicroInt(raw: string | number | null | undefined): bigint {
+  let s = (raw == null ? '' : String(raw)).trim();
+  if (!s) return 0n;
+  if (s.startsWith('$')) s = s.slice(1).trim();
+
+  let sign = 1n;
+  if (s.startsWith('-')) {
+    sign = -1n;
+    s = s.slice(1).trim();
+  } else if (s.startsWith('+')) {
+    s = s.slice(1).trim();
+  }
+  if (!s) return 0n;
+
+  const dot = s.indexOf('.');
+  let intPart = s;
+  let frac = '';
+  if (dot >= 0) {
+    intPart = s.slice(0, dot);
+    frac = s.slice(dot + 1);
+  }
+  intPart = intPart.trim() || '0';
+  frac = (frac || '').replace(/[^\d]/g, '');
+  frac = (frac + '000000').slice(0, 6);
+
+  const i = BigInt(intPart.replace(/[^\d]/g, '') || '0');
+  const f = BigInt(frac || '0');
+  return sign * (i * 1_000_000n + f);
+}
+
+function microUSDToUSDString(micro: bigint): string {
+  if (micro === 0n) return '0';
+  let v = micro;
+  let sign = '';
+  if (v < 0n) {
+    sign = '-';
+    v = -v;
+  }
+  const i = v / 1_000_000n;
+  const f = v % 1_000_000n;
+  if (f === 0n) return `${sign}${i.toString()}`;
+  let frac = f.toString().padStart(6, '0');
+  frac = frac.replace(/0+$/, '');
+  return `${sign}${i.toString()}.${frac}`;
+}
+
+function microUSDToUSDWithDollar(micro: bigint): string {
+  const s = microUSDToUSDString(micro);
+  if (s.startsWith('-')) return `-$${s.slice(1)}`;
+  return `$${s}`;
+}
+
+function formatUSDPer1M(usdPer1M: string): string {
+  const micro = parseDecimalToMicroInt(usdPer1M);
+  return `${microUSDToUSDWithDollar(micro)}/1M`;
+}
+
+function costMicroUSD(tokens: number, usdPer1MMicro: bigint): bigint {
+  if (!Number.isFinite(tokens) || tokens <= 0) return 0n;
+  if (usdPer1MMicro <= 0n) return 0n;
+  return (BigInt(tokens) * usdPer1MMicro) / 1_000_000n;
+}
+
+function clampCached(total: number, cached: number): number {
+  if (!Number.isFinite(total) || total <= 0) return 0;
+  if (!Number.isFinite(cached) || cached <= 0) return 0;
+  return Math.min(total, cached);
+}
+
 function quickRangeKey(start: string, end: string): 'today' | 'yesterday' | '7d' | null {
   const fmt = (d: Date) => {
     const y = d.getFullYear();
@@ -110,6 +190,9 @@ export function UsagePage() {
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
+
+  const [tokenByID, setTokenByID] = useState<Record<number, UserToken>>({});
+  const [modelByPublicID, setModelByPublicID] = useState<Record<string, UserManagedModel>>({});
 
   const [window0, setWindow0] = useState<UsageWindow | null>(null);
   const [events, setEvents] = useState<UsageEvent[]>([]);
@@ -206,6 +289,52 @@ export function UsagePage() {
     initRef.current = true;
     void refresh(undefined);
   }, [refresh]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await listUserTokens();
+        if (!res.success) return;
+        const list = res.data || [];
+        const m: Record<number, UserToken> = {};
+        for (const tok of list) {
+          m[tok.id] = tok;
+        }
+        if (cancelled) return;
+        setTokenByID(m);
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await listUserModelsDetail();
+        if (!res.success) return;
+        const list = res.data || [];
+        const m: Record<string, UserManagedModel> = {};
+        for (const mm of list) {
+          const pid = (mm.public_id || '').toString().trim();
+          if (!pid) continue;
+          m[pid] = mm;
+        }
+        if (cancelled) return;
+        setModelByPublicID(m);
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -492,29 +621,33 @@ export function UsagePage() {
                           </td>
                         </tr>
                       ) : (
-                        events.map((ev) => {
-                          const isOpen = openEventID === ev.id;
-                          const cached = cachedTokens(ev);
-                          const state = stateLabel(ev.state);
-                          const detail = detailByID[ev.id] || { status: 'idle' };
-
-                          return (
-                            <FragmentUsageRow
-                              key={ev.id}
-                              ev={ev}
-                              isOpen={isOpen}
-                              onToggle={async () => {
-                                setOpenEventID((cur) => (cur === ev.id ? null : ev.id));
-                                await ensureDetailLoaded(ev.id);
-                              }}
-                              cached={cached}
-                              cost={costLabel(ev)}
-                              state={state}
-                              detailState={detail}
-                            />
-                          );
-                        })
-                      )}
+	                        events.map((ev) => {
+	                          const isOpen = openEventID === ev.id;
+	                          const cached = cachedTokens(ev);
+	                          const state = stateLabel(ev.state);
+	                          const detail = detailByID[ev.id] || { status: 'idle' };
+                            const tokenName = tokenNameFromMap(tokenByID, ev.token_id);
+                            const pricing = ev.model ? modelByPublicID[(ev.model || '').trim()] : undefined;
+	
+	                          return (
+	                            <FragmentUsageRow
+	                              key={ev.id}
+	                              ev={ev}
+	                              isOpen={isOpen}
+	                              onToggle={async () => {
+	                                setOpenEventID((cur) => (cur === ev.id ? null : ev.id));
+	                                await ensureDetailLoaded(ev.id);
+	                              }}
+	                              cached={cached}
+	                              cost={costLabel(ev)}
+	                              state={state}
+                                tokenName={tokenName}
+                                pricing={pricing}
+	                              detailState={detail}
+	                            />
+	                          );
+	                        })
+	                      )}
                     </tbody>
                   </table>
                 </div>
@@ -600,6 +733,8 @@ function FragmentUsageRow({
   cached,
   cost,
   state,
+  tokenName,
+  pricing,
   detailState,
 }: {
   ev: UsageEvent;
@@ -608,6 +743,8 @@ function FragmentUsageRow({
   cached: string;
   cost: string;
   state: { label: string; badgeClass: string };
+  tokenName: string;
+  pricing?: UserManagedModel;
   detailState: UsageEventDetailState;
 }) {
   const endpoint = (ev.endpoint || '').trim() || '-';
@@ -625,28 +762,61 @@ function FragmentUsageRow({
     detailTextUpReq = '加载中...';
     detailTextUpResp = '加载中...';
   }
-  if (detailState.status === 'loaded') {
-    if (!detailState.data.available) {
-      detailTextDown = '（无明细：仅对失败请求保存，或该条记录未启用存储）';
-      detailTextUpReq = '（无明细：仅对失败请求保存，或该条记录未启用存储）';
-      detailTextUpResp = '-';
-    } else {
-      detailTextDown = detailState.data.downstream_request_body || '-';
-      detailTextUpReq = detailState.data.upstream_request_body || '-';
-      detailTextUpResp = detailState.data.upstream_response_body || '-';
-    }
-  }
-  if (detailState.status === 'error') {
-    detailTextDown = `加载失败：${detailState.message}`;
-    detailTextUpReq = `加载失败：${detailState.message}`;
-    detailTextUpResp = '-';
-  }
+	  if (detailState.status === 'loaded') {
+	    if (!detailState.data.available) {
+	      detailTextDown = '（无明细：仅对失败请求保存，或该条记录未启用存储）';
+	      detailTextUpReq = '（无明细：仅对失败请求保存，或该条记录未启用存储）';
+	      detailTextUpResp = '-';
+	    } else {
+	      detailTextDown = detailState.data.downstream_request_body || '-';
+	      const upstreamHidden = detailState.data.upstream_request_body === undefined && detailState.data.upstream_response_body === undefined;
+	      if (upstreamHidden) {
+	        detailTextUpReq = '（仅管理员可查看）';
+	        detailTextUpResp = '（仅管理员可查看）';
+	      } else {
+	        detailTextUpReq = detailState.data.upstream_request_body || '-';
+	        detailTextUpResp = detailState.data.upstream_response_body || '-';
+	      }
+	    }
+	  }
+	  if (detailState.status === 'error') {
+	    detailTextDown = `加载失败：${detailState.message}`;
+	    detailTextUpReq = `加载失败：${detailState.message}`;
+	    detailTextUpResp = '-';
+	  }
 
-  return (
-    <>
-      <tr className="rlm-usage-row" role="button" aria-expanded={isOpen} onClick={() => void onToggle()}>
-        <td className="ps-4 text-nowrap font-monospace">
-          <span className="material-symbols-rounded text-muted rlm-usage-chevron me-1 align-middle">chevron_right</span>
+    const inTokTotal = ev.input_tokens ?? 0;
+    const outTokTotal = ev.output_tokens ?? 0;
+    const cachedInTok = clampCached(inTokTotal, ev.cached_input_tokens ?? 0);
+    const cachedOutTok = clampCached(outTokTotal, ev.cached_output_tokens ?? 0);
+    const nonCachedInTok = Math.max(0, inTokTotal - cachedInTok);
+    const nonCachedOutTok = Math.max(0, outTokTotal - cachedOutTok);
+
+    const pricingAvailable = pricing && (pricing.public_id || '').toString().trim() !== '';
+    const inUSDPer1MStr = pricingAvailable ? pricing!.input_usd_per_1m : '0';
+    const outUSDPer1MStr = pricingAvailable ? pricing!.output_usd_per_1m : '0';
+    const cacheInUSDPer1MStr = pricingAvailable ? pricing!.cache_input_usd_per_1m : '0';
+    const cacheOutUSDPer1MStr = pricingAvailable ? pricing!.cache_output_usd_per_1m : '0';
+
+    const inUSDPer1MMicro = parseDecimalToMicroInt(inUSDPer1MStr);
+    const outUSDPer1MMicro = parseDecimalToMicroInt(outUSDPer1MStr);
+    const cacheInUSDPer1MMicro = parseDecimalToMicroInt(cacheInUSDPer1MStr);
+    const cacheOutUSDPer1MMicro = parseDecimalToMicroInt(cacheOutUSDPer1MStr);
+
+    const inCostMicro = costMicroUSD(nonCachedInTok, inUSDPer1MMicro);
+    const outCostMicro = costMicroUSD(nonCachedOutTok, outUSDPer1MMicro);
+    const cacheInCostMicro = costMicroUSD(cachedInTok, cacheInUSDPer1MMicro);
+    const cacheOutCostMicro = costMicroUSD(cachedOutTok, cacheOutUSDPer1MMicro);
+    const sumCostMicro = inCostMicro + outCostMicro + cacheInCostMicro + cacheOutCostMicro;
+
+    const actualUSD = ev.state === 'committed' ? ev.committed_usd : ev.state === 'reserved' ? ev.reserved_usd : '0';
+    const actualMicro = parseDecimalToMicroInt(actualUSD);
+
+	  return (
+	    <>
+	      <tr className="rlm-usage-row" role="button" aria-expanded={isOpen} onClick={() => void onToggle()}>
+	        <td className="ps-4 text-nowrap font-monospace">
+	          <span className="material-symbols-rounded text-muted rlm-usage-chevron me-1 align-middle">chevron_right</span>
           <span className="align-middle">{formatUTCDateTime(ev.time)}</span>
         </td>
         <td className="text-nowrap">
@@ -700,20 +870,24 @@ function FragmentUsageRow({
         <tr className="rlm-usage-detail-row">
           <td colSpan={8} className="p-0 border-0">
             <div className="bg-light border-top px-4 py-3">
-              <div className="row g-3 small">
-                <div className="col-12 col-lg-6">
-                  <div className="text-muted smaller">Request ID</div>
-                  <div className="font-monospace user-select-all">{ev.request_id}</div>
-                </div>
-                <div className="col-6 col-lg-3">
-                  <div className="text-muted smaller">Event ID</div>
-                  <div className="font-monospace">{ev.id}</div>
-                </div>
-
-                <div className="col-12 col-lg-6">
-                  <div className="text-muted smaller">Endpoint</div>
-                  <div className="font-monospace">
-                    {method} {endpoint}
+	              <div className="row g-3 small">
+	                <div className="col-12 col-lg-6">
+	                  <div className="text-muted smaller">Request ID</div>
+	                  <div className="font-monospace user-select-all">{ev.request_id}</div>
+	                </div>
+	                <div className="col-6 col-lg-3">
+	                  <div className="text-muted smaller">Event ID</div>
+	                  <div className="font-monospace">{ev.id}</div>
+	                </div>
+                  <div className="col-6 col-lg-3">
+                    <div className="text-muted smaller">Key 名称</div>
+                    <div className="font-monospace">{tokenName || '-'}</div>
+                  </div>
+	
+	                <div className="col-12 col-lg-6">
+	                  <div className="text-muted smaller">Endpoint</div>
+	                  <div className="font-monospace">
+	                    {method} {endpoint}
                   </div>
                 </div>
                 <div className="col-12 col-lg-6">
@@ -735,15 +909,43 @@ function FragmentUsageRow({
                     {ev.request_bytes} / {ev.response_bytes} bytes
                   </div>
                 </div>
-                <div className="col-6 col-lg-3">
-                  <div className="text-muted smaller">费用</div>
-                  <div className="font-monospace">{cost}</div>
-                </div>
+	                <div className="col-6 col-lg-3">
+	                  <div className="text-muted smaller">费用</div>
+	                  <div className="font-monospace">{cost}</div>
+	                </div>
+	
+                  <div className="col-12">
+                    <div className="text-muted smaller">费用计算</div>
+                    {pricingAvailable ? (
+                      <div className="font-monospace">
+                        <div>
+                          输入(非缓存): {nonCachedInTok} × {formatUSDPer1M(inUSDPer1MStr)} = {microUSDToUSDWithDollar(inCostMicro)}
+                        </div>
+                        <div>
+                          输出(非缓存): {nonCachedOutTok} × {formatUSDPer1M(outUSDPer1MStr)} = {microUSDToUSDWithDollar(outCostMicro)}
+                        </div>
+                        <div>
+                          缓存输入: {cachedInTok} × {formatUSDPer1M(cacheInUSDPer1MStr)} = {microUSDToUSDWithDollar(cacheInCostMicro)}
+                        </div>
+                        <div>
+                          缓存输出: {cachedOutTok} × {formatUSDPer1M(cacheOutUSDPer1MStr)} = {microUSDToUSDWithDollar(cacheOutCostMicro)}
+                        </div>
+                        <div className="mt-1">
+                          合计: {microUSDToUSDWithDollar(sumCostMicro)}{' '}
+                          <span className="text-muted smaller">
+                            （事件费用: {microUSDToUSDWithDollar(actualMicro)}）
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-muted smaller">（未找到该模型定价，无法计算明细）</div>
+                    )}
+                  </div>
 
-                <div className="col-12 col-lg-6">
-                  <div className="text-muted smaller">Tokens</div>
-                  <div className="font-monospace">
-                    In: {tokenText(ev.input_tokens)} / Out: {tokenText(ev.output_tokens)} / Cache: {cached}
+	                <div className="col-12 col-lg-6">
+	                  <div className="text-muted smaller">Tokens</div>
+	                  <div className="font-monospace">
+	                    In: {tokenText(ev.input_tokens)} / Out: {tokenText(ev.output_tokens)} / Cache: {cached}
                   </div>
                 </div>
                 <div className="col-12 col-lg-6">

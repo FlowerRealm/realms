@@ -58,32 +58,30 @@ func setUsageAPIRoutes(r gin.IRoutes, opts Options) {
 }
 
 type usageEventAPI struct {
-	ID                  int64           `json:"id"`
-	Time                time.Time       `json:"time"`
-	RequestID           string          `json:"request_id"`
-	Endpoint            *string         `json:"endpoint,omitempty"`
-	Method              *string         `json:"method,omitempty"`
-	TokenID             int64           `json:"token_id"`
-	UpstreamEndpointID  *int64          `json:"upstream_endpoint_id,omitempty"`
-	UpstreamCredID      *int64          `json:"upstream_credential_id,omitempty"`
-	State               string          `json:"state"`
-	Model               *string         `json:"model,omitempty"`
-	InputTokens         *int64          `json:"input_tokens,omitempty"`
-	CachedInputTokens   *int64          `json:"cached_input_tokens,omitempty"`
-	OutputTokens        *int64          `json:"output_tokens,omitempty"`
-	CachedOutputTokens  *int64          `json:"cached_output_tokens,omitempty"`
-	ReservedUSD         decimal.Decimal `json:"reserved_usd"`
-	CommittedUSD        decimal.Decimal `json:"committed_usd"`
-	ReserveExpiresAt    time.Time       `json:"reserve_expires_at"`
-	StatusCode          int             `json:"status_code"`
-	LatencyMS           int             `json:"latency_ms"`
-	ErrorClass          *string         `json:"error_class,omitempty"`
-	ErrorMessage        *string         `json:"error_message,omitempty"`
-	IsStream            bool            `json:"is_stream"`
-	RequestBytes        int64           `json:"request_bytes"`
-	ResponseBytes       int64           `json:"response_bytes"`
-	CreatedAt           time.Time       `json:"created_at"`
-	UpdatedAt           time.Time       `json:"updated_at"`
+	ID                 int64           `json:"id"`
+	Time               time.Time       `json:"time"`
+	RequestID          string          `json:"request_id"`
+	Endpoint           *string         `json:"endpoint,omitempty"`
+	Method             *string         `json:"method,omitempty"`
+	TokenID            int64           `json:"token_id"`
+	State              string          `json:"state"`
+	Model              *string         `json:"model,omitempty"`
+	InputTokens        *int64          `json:"input_tokens,omitempty"`
+	CachedInputTokens  *int64          `json:"cached_input_tokens,omitempty"`
+	OutputTokens       *int64          `json:"output_tokens,omitempty"`
+	CachedOutputTokens *int64          `json:"cached_output_tokens,omitempty"`
+	ReservedUSD        decimal.Decimal `json:"reserved_usd"`
+	CommittedUSD       decimal.Decimal `json:"committed_usd"`
+	ReserveExpiresAt   time.Time       `json:"reserve_expires_at"`
+	StatusCode         int             `json:"status_code"`
+	LatencyMS          int             `json:"latency_ms"`
+	ErrorClass         *string         `json:"error_class,omitempty"`
+	ErrorMessage       *string         `json:"error_message,omitempty"`
+	IsStream           bool            `json:"is_stream"`
+	RequestBytes       int64           `json:"request_bytes"`
+	ResponseBytes      int64           `json:"response_bytes"`
+	CreatedAt          time.Time       `json:"created_at"`
+	UpdatedAt          time.Time       `json:"updated_at"`
 }
 
 func usageWindowsHandler(opts Options) gin.HandlerFunc {
@@ -233,32 +231,30 @@ func usageEventsHandler(opts Options) gin.HandlerFunc {
 			}
 
 			resp.Events = append(resp.Events, usageEventAPI{
-				ID:                  e.ID,
-				Time:                e.Time,
-				RequestID:           e.RequestID,
-				Endpoint:            e.Endpoint,
-				Method:              e.Method,
-				TokenID:             e.TokenID,
-				UpstreamEndpointID:  e.UpstreamEndpointID,
-				UpstreamCredID:      e.UpstreamCredID,
-				State:               e.State,
-				Model:               e.Model,
-				InputTokens:         e.InputTokens,
-				CachedInputTokens:   e.CachedInputTokens,
-				OutputTokens:        e.OutputTokens,
-				CachedOutputTokens:  e.CachedOutputTokens,
-				ReservedUSD:         e.ReservedUSD,
-				CommittedUSD:        e.CommittedUSD,
-				ReserveExpiresAt:    e.ReserveExpiresAt,
-				StatusCode:          e.StatusCode,
-				LatencyMS:           e.LatencyMS,
-				ErrorClass:          errClass,
-				ErrorMessage:        errMsg,
-				IsStream:            e.IsStream,
-				RequestBytes:        e.RequestBytes,
-				ResponseBytes:       e.ResponseBytes,
-				CreatedAt:           e.CreatedAt,
-				UpdatedAt:           e.UpdatedAt,
+				ID:                 e.ID,
+				Time:               e.Time,
+				RequestID:          e.RequestID,
+				Endpoint:           e.Endpoint,
+				Method:             e.Method,
+				TokenID:            e.TokenID,
+				State:              e.State,
+				Model:              e.Model,
+				InputTokens:        e.InputTokens,
+				CachedInputTokens:  e.CachedInputTokens,
+				OutputTokens:       e.OutputTokens,
+				CachedOutputTokens: e.CachedOutputTokens,
+				ReservedUSD:        e.ReservedUSD,
+				CommittedUSD:       e.CommittedUSD,
+				ReserveExpiresAt:   e.ReserveExpiresAt,
+				StatusCode:         e.StatusCode,
+				LatencyMS:          e.LatencyMS,
+				ErrorClass:         errClass,
+				ErrorMessage:       errMsg,
+				IsStream:           e.IsStream,
+				RequestBytes:       e.RequestBytes,
+				ResponseBytes:      e.ResponseBytes,
+				CreatedAt:          e.CreatedAt,
+				UpdatedAt:          e.UpdatedAt,
 			})
 		}
 		if len(events) > 0 {
@@ -276,6 +272,12 @@ type usageEventDetailAPIResponse struct {
 	DownstreamRequestBody string `json:"downstream_request_body,omitempty"`
 	UpstreamRequestBody   string `json:"upstream_request_body,omitempty"`
 	UpstreamResponseBody  string `json:"upstream_response_body,omitempty"`
+}
+
+type usageEventDetailUserAPIResponse struct {
+	EventID               int64  `json:"event_id"`
+	Available             bool   `json:"available"`
+	DownstreamRequestBody string `json:"downstream_request_body,omitempty"`
 }
 
 func usageEventDetailHandler(opts Options) gin.HandlerFunc {
@@ -314,22 +316,16 @@ func usageEventDetailHandler(opts Options) gin.HandlerFunc {
 		detail, err := opts.Store.GetUsageEventDetail(c.Request.Context(), id)
 		if err != nil {
 			if err == sql.ErrNoRows {
-				c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": usageEventDetailAPIResponse{EventID: id, Available: false}})
+				c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": usageEventDetailUserAPIResponse{EventID: id, Available: false}})
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
 			return
 		}
 
-		resp := usageEventDetailAPIResponse{EventID: id, Available: true}
+		resp := usageEventDetailUserAPIResponse{EventID: id, Available: true}
 		if detail.DownstreamRequestBody != nil {
 			resp.DownstreamRequestBody = *detail.DownstreamRequestBody
-		}
-		if detail.UpstreamRequestBody != nil {
-			resp.UpstreamRequestBody = *detail.UpstreamRequestBody
-		}
-		if detail.UpstreamResponseBody != nil {
-			resp.UpstreamResponseBody = *detail.UpstreamResponseBody
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": resp})
 	}

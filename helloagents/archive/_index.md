@@ -7,6 +7,7 @@
 
 | 时间戳 | 名称 | 类型 | 涉及模块 | 决策 | 结果 |
 |--------|------|------|---------|------|------|
+| 202602042228 | usage-privacy-hide-upstream-detail | - | - | - | ✅完成 |
 | 202602011956 | billing-cost-balance-fix | - | - | - | ✅完成 |
 | 202602011407 | remove-footer-version | - | - | - | ✅完成 |
 | 202601310120 | restore-console-admin-features | - | - | - | ✅完成 |

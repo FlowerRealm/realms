@@ -51,6 +51,14 @@ func TestUsageEvents_UserResponse_HidesUpstreamChannel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel: %v", err)
 	}
+	upstreamEndpointID, err := st.CreateUpstreamEndpoint(ctx, upstreamChannelID, "http://example.com/v1", 0)
+	if err != nil {
+		t.Fatalf("CreateUpstreamEndpoint: %v", err)
+	}
+	upstreamCredID, _, err := st.CreateOpenAICompatibleCredential(ctx, upstreamEndpointID, nil, "sk-upstream-123")
+	if err != nil {
+		t.Fatalf("CreateOpenAICompatibleCredential: %v", err)
+	}
 
 	tokenName := "t1"
 	tokenID, _, err := st.CreateUserToken(ctx, userID, &tokenName, "sk-test-123")
@@ -84,15 +92,17 @@ func TestUsageEvents_UserResponse_HidesUpstreamChannel(t *testing.T) {
 	}
 
 	if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
-		UsageEventID:      usageEventID,
-		Endpoint:          "/v1/chat/completions",
-		Method:            "POST",
-		StatusCode:        200,
-		LatencyMS:         123,
-		UpstreamChannelID: &upstreamChannelID,
-		IsStream:          false,
-		RequestBytes:      100,
-		ResponseBytes:     200,
+		UsageEventID:       usageEventID,
+		Endpoint:           "/v1/chat/completions",
+		Method:             "POST",
+		StatusCode:         200,
+		LatencyMS:          123,
+		UpstreamChannelID:  &upstreamChannelID,
+		UpstreamEndpointID: &upstreamEndpointID,
+		UpstreamCredID:     &upstreamCredID,
+		IsStream:           false,
+		RequestBytes:       100,
+		ResponseBytes:      200,
 	}); err != nil {
 		t.Fatalf("FinalizeUsageEvent: %v", err)
 	}
@@ -174,5 +184,10 @@ func TestUsageEvents_UserResponse_HidesUpstreamChannel(t *testing.T) {
 	if _, ok := ev["upstream_channel_name"]; ok {
 		t.Fatalf("expected upstream_channel_name to be hidden for user usage events")
 	}
+	if _, ok := ev["upstream_endpoint_id"]; ok {
+		t.Fatalf("expected upstream_endpoint_id to be hidden for user usage events")
+	}
+	if _, ok := ev["upstream_credential_id"]; ok {
+		t.Fatalf("expected upstream_credential_id to be hidden for user usage events")
+	}
 }
-

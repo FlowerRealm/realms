@@ -133,6 +133,12 @@ SPA 的视觉与布局参考 **tag `0.3.3`** 的 SSR 模板（当前仓库已移
 - Usage
   - 页面：`web/src/pages/UsagePage.tsx`（UI 参考 tag `0.3.3` Usage 结构；区间筛选样式对齐 `/admin/channels` 的 row g-2 date 输入）
   - 接口：`GET /api/usage/windows`、`GET /api/usage/events`、`GET /api/usage/events/:event_id/detail`
+  - 隐私约定（用户侧）：
+    - `GET /api/usage/events` 不返回任何上游标识字段（渠道/端点/凭据等 `upstream_*` 标识）
+    - `GET /api/usage/events/:event_id/detail` 仅返回 `downstream_request_body`；`upstream_request_body/upstream_response_body` 为管理后台专用
+  - UI 行为：当上游明细缺失时，在“转发请求体/上游响应体”区域显示“（仅管理员可查看）”
+  - UI 行为：请求明细下拉详情展示对应 API 令牌（Key）名称，便于按 Key 定位请求来源
+  - UI 行为：请求明细下拉详情展示费用计算明细：输入/输出/缓存输入/缓存输出 × 各自单价（来自 `/api/user/models/detail`）
 
 - Admin Usage（管理后台：全站用量统计）
   - 页面：`web/src/pages/admin/UsageAdminPage.tsx`（区间筛选样式对齐 `/admin/channels`）

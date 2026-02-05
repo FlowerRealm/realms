@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -142,7 +143,22 @@ func main() {
 			http.NotFound(w, r)
 			return
 		}
+		rawBody, _ := io.ReadAll(r.Body)
 		_ = r.Body.Close()
+
+		var payload map[string]any
+		_ = json.Unmarshal(rawBody, &payload)
+		if input, ok := payload["input"].(string); ok && strings.TrimSpace(input) == "__pw_fail__" {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{
+					"message": "bad request for e2e",
+				},
+				"upstream_channel": "pw-e2e-upstream",
+			})
+			return
+		}
 
 		resp := map[string]any{
 			"id":     "resp_pw_e2e_1",
