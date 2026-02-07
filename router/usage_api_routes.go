@@ -267,17 +267,19 @@ func usageEventsHandler(opts Options) gin.HandlerFunc {
 }
 
 type usageEventDetailAPIResponse struct {
-	EventID               int64  `json:"event_id"`
-	Available             bool   `json:"available"`
-	DownstreamRequestBody string `json:"downstream_request_body,omitempty"`
-	UpstreamRequestBody   string `json:"upstream_request_body,omitempty"`
-	UpstreamResponseBody  string `json:"upstream_response_body,omitempty"`
+	EventID               int64                          `json:"event_id"`
+	Available             bool                           `json:"available"`
+	DownstreamRequestBody string                         `json:"downstream_request_body,omitempty"`
+	UpstreamRequestBody   string                         `json:"upstream_request_body,omitempty"`
+	UpstreamResponseBody  string                         `json:"upstream_response_body,omitempty"`
+	PricingBreakdown      *usageEventPricingBreakdownAPI `json:"pricing_breakdown,omitempty"`
 }
 
 type usageEventDetailUserAPIResponse struct {
-	EventID               int64  `json:"event_id"`
-	Available             bool   `json:"available"`
-	DownstreamRequestBody string `json:"downstream_request_body,omitempty"`
+	EventID               int64                          `json:"event_id"`
+	Available             bool                           `json:"available"`
+	DownstreamRequestBody string                         `json:"downstream_request_body,omitempty"`
+	PricingBreakdown      *usageEventPricingBreakdownAPI `json:"pricing_breakdown,omitempty"`
 }
 
 func usageEventDetailHandler(opts Options) gin.HandlerFunc {
@@ -312,18 +314,31 @@ func usageEventDetailHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "not found"})
 			return
 		}
+		pricingBreakdown, err := buildUsageEventPricingBreakdown(c.Request.Context(), opts.Store, ev)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
+			return
+		}
 
 		detail, err := opts.Store.GetUsageEventDetail(c.Request.Context(), id)
 		if err != nil {
 			if err == sql.ErrNoRows {
-				c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": usageEventDetailUserAPIResponse{EventID: id, Available: false}})
+				c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": usageEventDetailUserAPIResponse{
+					EventID:          id,
+					Available:        false,
+					PricingBreakdown: &pricingBreakdown,
+				}})
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
 			return
 		}
 
-		resp := usageEventDetailUserAPIResponse{EventID: id, Available: true}
+		resp := usageEventDetailUserAPIResponse{
+			EventID:          id,
+			Available:        true,
+			PricingBreakdown: &pricingBreakdown,
+		}
 		if detail.DownstreamRequestBody != nil {
 			resp.DownstreamRequestBody = *detail.DownstreamRequestBody
 		}

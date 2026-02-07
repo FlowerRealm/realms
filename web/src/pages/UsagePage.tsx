@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listUserModelsDetail, type UserManagedModel } from '../api/models';
 import { listUserTokens, type UserToken } from '../api/tokens';
 import { getUsageEventDetail, getUsageEvents, getUsageWindows, type UsageEvent, type UsageEventDetail, type UsageWindow } from '../api/usage';
-import { formatUSD } from '../format/money';
+import { formatUSD, formatUSDPlain } from '../format/money';
 
 type UsageEventDetailState =
   | { status: 'idle' }
@@ -56,6 +56,17 @@ function stateLabel(state: string): { label: string; badgeClass: string } {
       return { label: '已过期', badgeClass: 'bg-secondary-subtle text-secondary border border-secondary-subtle' };
     default:
       return { label: state || '-', badgeClass: 'bg-secondary-subtle text-secondary border border-secondary-subtle' };
+  }
+}
+
+function costSourceLabel(source: string): string {
+  switch ((source || '').trim()) {
+    case 'committed':
+      return '已结算';
+    case 'reserved':
+      return '预留';
+    default:
+      return '事件';
   }
 }
 
@@ -811,6 +822,7 @@ function FragmentUsageRow({
 
     const actualUSD = ev.state === 'committed' ? ev.committed_usd : ev.state === 'reserved' ? ev.reserved_usd : '0';
     const actualMicro = parseDecimalToMicroInt(actualUSD);
+    const pricingBreakdown = detailState.status === 'loaded' ? detailState.data.pricing_breakdown : undefined;
 
 	  return (
 	    <>
@@ -916,7 +928,58 @@ function FragmentUsageRow({
 	
                   <div className="col-12">
                     <div className="text-muted smaller">费用计算</div>
-                    {pricingAvailable ? (
+                    {pricingBreakdown ? (
+                      <div className="font-monospace">
+                        <div>
+                          输入(总/缓存/计费): {pricingBreakdown.input_tokens_total} / {pricingBreakdown.input_tokens_cached} / {pricingBreakdown.input_tokens_billable}
+                        </div>
+                        <div>
+                          输出(总/缓存/计费): {pricingBreakdown.output_tokens_total} / {pricingBreakdown.output_tokens_cached} / {pricingBreakdown.output_tokens_billable}
+                        </div>
+                        <div>
+                          输入(非缓存): {pricingBreakdown.input_tokens_billable} × {formatUSDPer1M(pricingBreakdown.input_usd_per_1m)} = {formatUSD(pricingBreakdown.input_cost_usd)}
+                        </div>
+                        <div>
+                          输出(非缓存): {pricingBreakdown.output_tokens_billable} × {formatUSDPer1M(pricingBreakdown.output_usd_per_1m)} = {formatUSD(pricingBreakdown.output_cost_usd)}
+                        </div>
+                        <div>
+                          缓存输入: {pricingBreakdown.input_tokens_cached} × {formatUSDPer1M(pricingBreakdown.cache_input_usd_per_1m)} = {formatUSD(pricingBreakdown.cache_input_cost_usd)}
+                        </div>
+                        <div>
+                          缓存输出: {pricingBreakdown.output_tokens_cached} × {formatUSDPer1M(pricingBreakdown.cache_output_usd_per_1m)} = {formatUSD(pricingBreakdown.cache_output_cost_usd)}
+                        </div>
+                        <div className="mt-1">
+                          基础费用: {formatUSD(pricingBreakdown.base_cost_usd)}
+                        </div>
+                        <div>
+                          用户分组倍率: {pricingBreakdown.user_group_factors.length > 0
+                            ? pricingBreakdown.user_group_factors.map((item) => `${item.group_name}×${formatUSDPlain(item.multiplier)}`).join(' × ')
+                            : 'default×1'}
+                        </div>
+                        <div>
+                          用户倍率合计: ×{formatUSDPlain(pricingBreakdown.user_multiplier)}
+                        </div>
+                        {pricingBreakdown.subscription_group ? (
+                          <div>
+                            订阅分组: {pricingBreakdown.subscription_group}（仅用于套餐购买权限校验，不参与计费倍率）
+                          </div>
+                        ) : null}
+                        <div>
+                          生效倍率: ×{formatUSDPlain(pricingBreakdown.effective_multiplier)}
+                        </div>
+                        <div className="mt-1">
+                          最终费用: {formatUSD(pricingBreakdown.base_cost_usd)} × {formatUSDPlain(pricingBreakdown.effective_multiplier)} = {formatUSD(pricingBreakdown.final_cost_usd)}{' '}
+                          <span className="text-muted smaller">
+                            （{costSourceLabel(pricingBreakdown.cost_source)}费用: {formatUSD(pricingBreakdown.cost_source_usd)}）
+                          </span>
+                        </div>
+                        {parseDecimalToMicroInt(pricingBreakdown.diff_from_source_usd) !== 0n ? (
+                          <div className="text-muted smaller">
+                            差值(事件费用-公式): {formatUSD(pricingBreakdown.diff_from_source_usd)}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : pricingAvailable ? (
                       <div className="font-monospace">
                         <div>
                           输入(非缓存): {nonCachedInTok} × {formatUSDPer1M(inUSDPer1MStr)} = {microUSDToUSDWithDollar(inCostMicro)}
@@ -938,7 +1001,7 @@ function FragmentUsageRow({
                         </div>
                       </div>
                     ) : (
-                      <div className="text-muted smaller">（未找到该模型定价，无法计算明细）</div>
+                      <div className="text-muted smaller">（未找到可用定价，无法计算明细）</div>
                     )}
                   </div>
 

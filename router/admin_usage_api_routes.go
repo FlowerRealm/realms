@@ -442,18 +442,40 @@ func adminUsageEventDetailHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "event_id 不合法"})
 			return
 		}
+		ev, err := opts.Store.GetUsageEvent(c.Request.Context(), id)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "not found"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
+			return
+		}
+		pricingBreakdown, err := buildUsageEventPricingBreakdown(c.Request.Context(), opts.Store, ev)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
+			return
+		}
 
 		detail, err := opts.Store.GetUsageEventDetail(c.Request.Context(), id)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": usageEventDetailAPIResponse{EventID: id, Available: false}})
+				c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": usageEventDetailAPIResponse{
+					EventID:          id,
+					Available:        false,
+					PricingBreakdown: &pricingBreakdown,
+				}})
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
 			return
 		}
 
-		resp := usageEventDetailAPIResponse{EventID: id, Available: true}
+		resp := usageEventDetailAPIResponse{
+			EventID:          id,
+			Available:        true,
+			PricingBreakdown: &pricingBreakdown,
+		}
 		if detail.DownstreamRequestBody != nil {
 			resp.DownstreamRequestBody = *detail.DownstreamRequestBody
 		}

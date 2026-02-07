@@ -67,6 +67,14 @@
 
 ### 修复
 
+- **[Tests/E2E]**: 新增倍率回归端到端测试：覆盖按量计费（多用户分组倍率连乘）与订阅计费（仅按用户分组倍率计费，订阅分组仅用于购买权限）两条真实 `/v1/responses` 请求链路，验证 `usage_events.committed_usd` 与余额/订阅扣费结果符合预期（`tests/e2e/billing_multiplier_test.go`）
+
+- **[Usage/Billing]**: 请求详情新增“完整金额计算流程”输出：后端 `/api/usage/events/:event_id/detail` 与 `/api/admin/usage/events/:event_id/detail` 现在返回可还原计费过程的 `pricing_breakdown`（token 拆分、单价分项、基础费用、用户分组倍率、订阅分组信息、生效倍率、最终费用与差值）；前端用户侧与管理侧详情面板同步展示完整公式链路（`router/usage_pricing_breakdown.go`、`router/usage_api_routes.go`、`router/admin_usage_api_routes.go`、`web/src/api/usage.ts`、`web/src/api/admin/usage.ts`、`web/src/pages/UsagePage.tsx`、`web/src/pages/admin/UsageAdminPage.tsx`、`router/usage_api_routes_test.go`）
+
+- **[Billing/Quota]**: 修复“用户分组倍率”在实际计费时未正确叠加的问题；新增按用户分组聚合倍率逻辑，并接入订阅与按量计费 `Reserve/Commit` 流程；订阅分组仅用于购买权限校验，不参与计费倍率；补充配额层回归测试覆盖叠加行为（`internal/quota/group_multiplier.go`、`internal/quota/subscription.go`、`internal/quota/hybrid.go`、`internal/quota/quota.go`、`internal/quota/group_multiplier_test.go`）
+
+- **[Usage/API]**: 下线 `pricing_breakdown.subscription_group_multiplier` 与 `pricing_breakdown.subscription_group_applied` 字段，避免“订阅分组参与倍率”歧义；保留 `subscription_group` 仅作套餐权限信息展示（`router/usage_pricing_breakdown.go`、`web/src/api/usage.ts`、`web/src/api/admin/usage.ts`）
+
 - **[Dev/SPA]**: 修复 `make dev` 运行中前端重新构建后白屏问题：SPA fallback 不再只使用启动时缓存的 `index.html`，改为请求时优先读取最新 `web/dist/index.html`（或 embed FS 中的 `index.html`），避免旧 hash 资源 404 导致页面空白；新增回归测试覆盖“运行时更新 dist/index.html 后应立即生效”（`internal/server/app.go`、`router/web_spa_routes.go`、`router/web_spa_routes_test.go`、`router/options.go`）
 
 - **[Dev]**: `make dev` 升级为前后端双热更新：在后端 air 热重载之外，自动启动前端 `npm run build -- --watch` 持续写入 `web/dist`，避免 `web/src` 变更后同源页面不更新（`scripts/dev.sh`、`Makefile`、`.env.example`、`README.md`、`docs/frontend.md`）

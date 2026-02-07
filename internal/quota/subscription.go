@@ -2,9 +2,7 @@ package quota
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -68,20 +66,13 @@ func (p *SubscriptionProvider) Reserve(ctx context.Context, in ReserveInput) (Re
 	var chosen *store.SubscriptionWithPlan
 	var chosenReservedUSD decimal.Decimal
 
-	groupMult := make(map[string]decimal.Decimal)
+	multSnap := userGroupMultiplierSnapshot{}
 	if baseReservedUSD.GreaterThan(decimal.Zero) {
-		gs, err := p.st.ListChannelGroups(ctx)
+		snap, err := loadUserGroupMultiplierSnapshot(ctx, p.st, in.UserID)
 		if err != nil {
 			return ReserveResult{}, err
 		}
-		groupMult = make(map[string]decimal.Decimal, len(gs)+1)
-		for _, g := range gs {
-			name := strings.TrimSpace(g.Name)
-			if name == "" {
-				continue
-			}
-			groupMult[name] = g.PriceMultiplier
-		}
+		multSnap = snap
 	}
 
 	for i := range subs {
@@ -89,15 +80,7 @@ func (p *SubscriptionProvider) Reserve(ctx context.Context, in ReserveInput) (Re
 		ok := true
 		reservedUSD := baseReservedUSD
 		if baseReservedUSD.GreaterThan(decimal.Zero) {
-			group := strings.TrimSpace(row.Plan.GroupName)
-			if group == "" {
-				group = store.DefaultGroupName
-			}
-			mult := store.DefaultGroupPriceMultiplier
-			if v, ok := groupMult[group]; ok {
-				mult = v
-			}
-			usd, err := applyPriceMultiplierUSD(baseReservedUSD, mult)
+			usd, err := applyPriceMultiplierUSD(baseReservedUSD, multSnap.userMultiplier)
 			if err != nil {
 				return ReserveResult{}, err
 			}
@@ -164,24 +147,11 @@ func (p *SubscriptionProvider) Commit(ctx context.Context, in CommitInput) error
 		model = ev.Model
 	}
 
-	mult := store.DefaultGroupPriceMultiplier
-	if ev.SubscriptionID != nil && *ev.SubscriptionID > 0 {
-		sub, err := p.st.GetSubscriptionWithPlanByID(ctx, *ev.SubscriptionID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		group := strings.TrimSpace(sub.Plan.GroupName)
-		if group == "" {
-			group = store.DefaultGroupName
-		}
-		g, err := p.st.GetChannelGroupByName(ctx, group)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if err == nil {
-			mult = g.PriceMultiplier
-		}
+	multSnap, err := loadUserGroupMultiplierSnapshot(ctx, p.st, ev.UserID)
+	if err != nil {
+		return err
 	}
+	mult := multSnap.userMultiplier
 
 	usd, err := estimateCostUSD(ctx, p.st, model, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens, nil)
 	if err != nil {

@@ -191,3 +191,185 @@ func TestUsageEvents_UserResponse_HidesUpstreamChannel(t *testing.T) {
 		t.Fatalf("expected upstream_credential_id to be hidden for user usage events")
 	}
 }
+
+func TestUsageEventDetail_UserResponse_IncludesPricingBreakdown(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	userID, err := st.CreateUser(ctx, "detail@example.com", "detailuser", pwHash, store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, decimal.RequireFromString("1.5"), 5); err != nil {
+		t.Fatalf("CreateChannelGroup(vip): %v", err)
+	}
+	if _, err := st.CreateChannelGroup(ctx, "staff", nil, 1, decimal.RequireFromString("2"), 5); err != nil {
+		t.Fatalf("CreateChannelGroup(staff): %v", err)
+	}
+	if err := st.ReplaceUserGroups(ctx, userID, []string{"vip", "staff"}); err != nil {
+		t.Fatalf("ReplaceUserGroups: %v", err)
+	}
+
+	modelID := "m_detail_1"
+	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
+		PublicID:            modelID,
+		GroupName:           store.DefaultGroupName,
+		InputUSDPer1M:       decimal.RequireFromString("2"),
+		OutputUSDPer1M:      decimal.RequireFromString("4"),
+		CacheInputUSDPer1M:  decimal.RequireFromString("0.5"),
+		CacheOutputUSDPer1M: decimal.RequireFromString("1"),
+		Status:              1,
+	}); err != nil {
+		t.Fatalf("CreateManagedModel: %v", err)
+	}
+
+	tokenName := "t-detail"
+	tokenID, _, err := st.CreateUserToken(ctx, userID, &tokenName, "sk-detail-123")
+	if err != nil {
+		t.Fatalf("CreateUserToken: %v", err)
+	}
+
+	usageEventID, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
+		RequestID:        "req_detail_1",
+		UserID:           userID,
+		SubscriptionID:   nil,
+		TokenID:          tokenID,
+		Model:            &modelID,
+		ReservedUSD:      decimal.RequireFromString("9.3"),
+		ReserveExpiresAt: time.Now().UTC().Add(1 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("ReserveUsage: %v", err)
+	}
+
+	inTokens := int64(1_000_000)
+	outTokens := int64(500_000)
+	cachedInTokens := int64(400_000)
+	cachedOutTokens := int64(100_000)
+	if err := st.CommitUsage(ctx, store.CommitUsageInput{
+		UsageEventID:       usageEventID,
+		InputTokens:        &inTokens,
+		CachedInputTokens:  &cachedInTokens,
+		OutputTokens:       &outTokens,
+		CachedOutputTokens: &cachedOutTokens,
+		CommittedUSD:       decimal.RequireFromString("9.3"),
+	}); err != nil {
+		t.Fatalf("CommitUsage: %v", err)
+	}
+
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+
+	cookieName := "realms_session"
+	sessionStore := cookie.NewStore([]byte("test-secret"))
+	sessionStore.Options(sessions.Options{
+		Path:     "/",
+		MaxAge:   2592000,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	engine.Use(sessions.Sessions(cookieName, sessionStore))
+
+	SetRouter(engine, Options{
+		Store:             st,
+		SelfMode:          false,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
+
+	loginBody, _ := json.Marshal(map[string]any{
+		"login":    "detail@example.com",
+		"password": "password123",
+	})
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/user/login", bytes.NewReader(loginBody))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	sessionCookie := ""
+	for _, cookieItem := range rr.Result().Cookies() {
+		if cookieItem.Name == cookieName {
+			sessionCookie = cookieItem.String()
+			break
+		}
+	}
+	if sessionCookie == "" {
+		t.Fatalf("expected session cookie %q", cookieName)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/usage/events/"+strconv.FormatInt(usageEventID, 10)+"/detail", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("detail status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			EventID          int64 `json:"event_id"`
+			Available        bool  `json:"available"`
+			PricingBreakdown struct {
+				CostSource          string `json:"cost_source"`
+				CostSourceUSD       string `json:"cost_source_usd"`
+				ModelFound          bool   `json:"model_found"`
+				BaseCostUSD         string `json:"base_cost_usd"`
+				UserMultiplier      string `json:"user_multiplier"`
+				EffectiveMultiplier string `json:"effective_multiplier"`
+				FinalCostUSD        string `json:"final_cost_usd"`
+			} `json:"pricing_breakdown"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal detail: %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("expected success, got message=%q", got.Message)
+	}
+	if got.Data.EventID != usageEventID {
+		t.Fatalf("event_id mismatch: got=%d want=%d", got.Data.EventID, usageEventID)
+	}
+	if got.Data.PricingBreakdown.CostSource != "committed" {
+		t.Fatalf("cost_source mismatch: got=%q want=%q", got.Data.PricingBreakdown.CostSource, "committed")
+	}
+	if got.Data.PricingBreakdown.CostSourceUSD != "9.3" {
+		t.Fatalf("cost_source_usd mismatch: got=%q want=%q", got.Data.PricingBreakdown.CostSourceUSD, "9.3")
+	}
+	if !got.Data.PricingBreakdown.ModelFound {
+		t.Fatalf("expected model_found=true")
+	}
+	if got.Data.PricingBreakdown.BaseCostUSD != "3.1" {
+		t.Fatalf("base_cost_usd mismatch: got=%q want=%q", got.Data.PricingBreakdown.BaseCostUSD, "3.1")
+	}
+	if got.Data.PricingBreakdown.UserMultiplier != "3" {
+		t.Fatalf("user_multiplier mismatch: got=%q want=%q", got.Data.PricingBreakdown.UserMultiplier, "3")
+	}
+	if got.Data.PricingBreakdown.EffectiveMultiplier != "3" {
+		t.Fatalf("effective_multiplier mismatch: got=%q want=%q", got.Data.PricingBreakdown.EffectiveMultiplier, "3")
+	}
+	if got.Data.PricingBreakdown.FinalCostUSD != "9.3" {
+		t.Fatalf("final_cost_usd mismatch: got=%q want=%q", got.Data.PricingBreakdown.FinalCostUSD, "9.3")
+	}
+}

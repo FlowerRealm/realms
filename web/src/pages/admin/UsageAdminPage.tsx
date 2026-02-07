@@ -8,6 +8,36 @@ function badgeForState(cls: string): string {
   return 'badge rounded-pill bg-light text-secondary border';
 }
 
+function costSourceLabel(source: string): string {
+  switch ((source || '').trim()) {
+    case 'committed':
+      return '已结算';
+    case 'reserved':
+      return '预留';
+    default:
+      return '事件';
+  }
+}
+
+function formatDecimalPlain(raw: string): string {
+  let s = (raw || '').toString().trim();
+  if (!s) return '0';
+  if (s.startsWith('+')) s = s.slice(1).trim();
+  if (s.startsWith('$')) s = s.slice(1).trim();
+  if (!s) return '0';
+  if (s.includes('.')) {
+    s = s.replace(/0+$/, '').replace(/\.$/, '');
+  }
+  if (s === '-0' || s === '') return '0';
+  return s;
+}
+
+function formatUSD(raw: string): string {
+  const s = formatDecimalPlain(raw);
+  if (s.startsWith('-')) return `-$${s.slice(1)}`;
+  return `$${s}`;
+}
+
 export function UsageAdminPage() {
   const [data, setData] = useState<AdminUsagePage | null>(null);
   const [loading, setLoading] = useState(true);
@@ -413,7 +443,7 @@ export function UsageAdminPage() {
                               <td colSpan={10} className="p-0 border-0">
                                 <div className="bg-light border-top px-4 py-3">
                                   {detailLoadingID === e.id ? <div className="text-muted small">加载详情中…</div> : null}
-                                  {detailByEventID[e.id]?.available ? (
+                                  {detailByEventID[e.id] ? (
                                     <div className="row g-3 small">
                                       <div className="col-12 col-lg-4">
                                         <div className="text-muted smaller">Event ID</div>
@@ -428,24 +458,80 @@ export function UsageAdminPage() {
                                         <div className="font-monospace">{e.error_message || '-'}</div>
                                       </div>
 
-                                      <div className="col-12">
-                                        <div className="text-muted smaller">Downstream Request Body</div>
-                                        <pre className="bg-white border rounded p-2 small mb-0">
-                                          <code>{detailByEventID[e.id]?.downstream_request_body || '(empty)'}</code>
-                                        </pre>
-                                      </div>
-                                      <div className="col-12">
-                                        <div className="text-muted smaller">Upstream Request Body</div>
-                                        <pre className="bg-white border rounded p-2 small mb-0">
-                                          <code>{detailByEventID[e.id]?.upstream_request_body || '(empty)'}</code>
-                                        </pre>
-                                      </div>
-                                      <div className="col-12">
-                                        <div className="text-muted smaller">Upstream Response Body</div>
-                                        <pre className="bg-white border rounded p-2 small mb-0">
-                                          <code>{detailByEventID[e.id]?.upstream_response_body || '(empty)'}</code>
-                                        </pre>
-                                      </div>
+                                      {detailByEventID[e.id]?.pricing_breakdown ? (
+                                        <div className="col-12">
+                                          <div className="text-muted smaller">金额计算流程</div>
+                                          <div className="font-monospace">
+                                            <div>
+                                              输入(总/缓存/计费): {detailByEventID[e.id]?.pricing_breakdown?.input_tokens_total} / {detailByEventID[e.id]?.pricing_breakdown?.input_tokens_cached} / {detailByEventID[e.id]?.pricing_breakdown?.input_tokens_billable}
+                                            </div>
+                                            <div>
+                                              输出(总/缓存/计费): {detailByEventID[e.id]?.pricing_breakdown?.output_tokens_total} / {detailByEventID[e.id]?.pricing_breakdown?.output_tokens_cached} / {detailByEventID[e.id]?.pricing_breakdown?.output_tokens_billable}
+                                            </div>
+                                            <div>
+                                              输入(非缓存): {detailByEventID[e.id]?.pricing_breakdown?.input_tokens_billable} × {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.input_usd_per_1m || '0')}/1M = {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.input_cost_usd || '0')}
+                                            </div>
+                                            <div>
+                                              输出(非缓存): {detailByEventID[e.id]?.pricing_breakdown?.output_tokens_billable} × {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.output_usd_per_1m || '0')}/1M = {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.output_cost_usd || '0')}
+                                            </div>
+                                            <div>
+                                              缓存输入: {detailByEventID[e.id]?.pricing_breakdown?.input_tokens_cached} × {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.cache_input_usd_per_1m || '0')}/1M = {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.cache_input_cost_usd || '0')}
+                                            </div>
+                                            <div>
+                                              缓存输出: {detailByEventID[e.id]?.pricing_breakdown?.output_tokens_cached} × {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.cache_output_usd_per_1m || '0')}/1M = {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.cache_output_cost_usd || '0')}
+                                            </div>
+                                            <div className="mt-1">基础费用: {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.base_cost_usd || '0')}</div>
+                                            <div>
+                                              用户分组倍率: {(detailByEventID[e.id]?.pricing_breakdown?.user_group_factors || []).length > 0
+                                                ? (detailByEventID[e.id]?.pricing_breakdown?.user_group_factors || []).map((item) => `${item.group_name}×${formatDecimalPlain(item.multiplier)}`).join(' × ')
+                                                : 'default×1'}
+                                            </div>
+                                            <div>用户倍率合计: ×{formatDecimalPlain(detailByEventID[e.id]?.pricing_breakdown?.user_multiplier || '1')}</div>
+                                            {detailByEventID[e.id]?.pricing_breakdown?.subscription_group ? (
+                                              <div>
+                                                订阅分组: {detailByEventID[e.id]?.pricing_breakdown?.subscription_group}（仅用于套餐购买权限校验，不参与计费倍率）
+                                              </div>
+                                            ) : null}
+                                            <div>生效倍率: ×{formatDecimalPlain(detailByEventID[e.id]?.pricing_breakdown?.effective_multiplier || '1')}</div>
+                                            <div className="mt-1">
+                                              最终费用: {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.base_cost_usd || '0')} × {formatDecimalPlain(detailByEventID[e.id]?.pricing_breakdown?.effective_multiplier || '1')} = {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.final_cost_usd || '0')}{' '}
+                                              <span className="text-muted smaller">
+                                                （{costSourceLabel(detailByEventID[e.id]?.pricing_breakdown?.cost_source || '')}费用: {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.cost_source_usd || '0')}）
+                                              </span>
+                                            </div>
+                                            {formatDecimalPlain(detailByEventID[e.id]?.pricing_breakdown?.diff_from_source_usd || '0') !== '0' ? (
+                                              <div className="text-muted smaller">
+                                                差值(事件费用-公式): {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.diff_from_source_usd || '0')}
+                                              </div>
+                                            ) : null}
+                                          </div>
+                                        </div>
+                                      ) : null}
+
+                                      {detailByEventID[e.id]?.available ? (
+                                        <>
+                                          <div className="col-12">
+                                            <div className="text-muted smaller">Downstream Request Body</div>
+                                            <pre className="bg-white border rounded p-2 small mb-0">
+                                              <code>{detailByEventID[e.id]?.downstream_request_body || '(empty)'}</code>
+                                            </pre>
+                                          </div>
+                                          <div className="col-12">
+                                            <div className="text-muted smaller">Upstream Request Body</div>
+                                            <pre className="bg-white border rounded p-2 small mb-0">
+                                              <code>{detailByEventID[e.id]?.upstream_request_body || '(empty)'}</code>
+                                            </pre>
+                                          </div>
+                                          <div className="col-12">
+                                            <div className="text-muted smaller">Upstream Response Body</div>
+                                            <pre className="bg-white border rounded p-2 small mb-0">
+                                              <code>{detailByEventID[e.id]?.upstream_response_body || '(empty)'}</code>
+                                            </pre>
+                                          </div>
+                                        </>
+                                      ) : (
+                                        <div className="col-12 text-muted small">该事件不包含可用的 body 详情。</div>
+                                      )}
                                     </div>
                                   ) : (
                                     <div className="text-muted small">该事件不包含可用的 body 详情。</div>

@@ -76,6 +76,14 @@ func (p *UsageProvider) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 			reservedUSD = c
 		}
 	}
+	multSnap, err := loadUserGroupMultiplierSnapshot(ctx, p.st, in.UserID)
+	if err != nil {
+		return ReserveResult{}, err
+	}
+	reservedUSD, err = applyPriceMultiplierUSD(reservedUSD, multSnap.userMultiplier)
+	if err != nil {
+		return ReserveResult{}, err
+	}
 	id, err := p.st.ReserveUsage(ctx, store.ReserveUsageInput{
 		RequestID:        in.RequestID,
 		UserID:           in.UserID,
@@ -99,11 +107,19 @@ func (p *UsageProvider) Commit(ctx context.Context, in CommitInput) error {
 	if err != nil {
 		return err
 	}
+	ev, err := p.st.GetUsageEvent(ctx, in.UsageEventID)
+	if err != nil {
+		return err
+	}
+	multSnap, err := loadUserGroupMultiplierSnapshot(ctx, p.st, ev.UserID)
+	if err != nil {
+		return err
+	}
+	usd, err = applyPriceMultiplierUSD(usd, multSnap.userMultiplier)
+	if err != nil {
+		return err
+	}
 	if usd.Equal(decimal.Zero) {
-		ev, err := p.st.GetUsageEvent(ctx, in.UsageEventID)
-		if err != nil {
-			return err
-		}
 		usd = ev.ReservedUSD
 	}
 	return p.st.CommitUsage(ctx, store.CommitUsageInput{

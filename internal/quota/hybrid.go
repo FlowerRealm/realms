@@ -79,6 +79,14 @@ func (p *HybridProvider) Reserve(ctx context.Context, in ReserveInput) (ReserveR
 	if reservedUSD.LessThanOrEqual(decimal.Zero) {
 		reservedUSD = p.defaultReserveUSD
 	}
+	multSnap, err := loadUserGroupMultiplierSnapshot(ctx, p.st, in.UserID)
+	if err != nil {
+		return ReserveResult{}, err
+	}
+	reservedUSD, err = applyPriceMultiplierUSD(reservedUSD, multSnap.userMultiplier)
+	if err != nil {
+		return ReserveResult{}, err
+	}
 
 	now := time.Now()
 	id, err := p.st.ReserveUsageAndDebitBalance(ctx, store.ReserveUsageInput{
@@ -120,6 +128,14 @@ func (p *HybridProvider) Commit(ctx context.Context, in CommitInput) error {
 		model = ev.Model
 	}
 	usd, err := estimateCostUSD(ctx, p.st, model, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens, nil)
+	if err != nil {
+		return err
+	}
+	multSnap, err := loadUserGroupMultiplierSnapshot(ctx, p.st, ev.UserID)
+	if err != nil {
+		return err
+	}
+	usd, err = applyPriceMultiplierUSD(usd, multSnap.userMultiplier)
 	if err != nil {
 		return err
 	}

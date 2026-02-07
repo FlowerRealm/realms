@@ -92,6 +92,47 @@ export type UsageEventDetail = {
   downstream_request_body?: string;
   upstream_request_body?: string;
   upstream_response_body?: string;
+  pricing_breakdown?: UsageEventPricingBreakdown;
+};
+
+export type UsageEventGroupMultiplier = {
+  group_name: string;
+  multiplier: string;
+};
+
+export type UsageEventPricingBreakdown = {
+  cost_source: 'committed' | 'reserved' | 'none' | string;
+  cost_source_usd: string;
+
+  model_public_id?: string;
+  model_found: boolean;
+
+  input_tokens_total: number;
+  input_tokens_cached: number;
+  input_tokens_billable: number;
+  output_tokens_total: number;
+  output_tokens_cached: number;
+  output_tokens_billable: number;
+
+  input_usd_per_1m: string;
+  output_usd_per_1m: string;
+  cache_input_usd_per_1m: string;
+  cache_output_usd_per_1m: string;
+
+  input_cost_usd: string;
+  output_cost_usd: string;
+  cache_input_cost_usd: string;
+  cache_output_cost_usd: string;
+  base_cost_usd: string;
+
+  user_groups: string[];
+  user_group_factors: UsageEventGroupMultiplier[];
+  user_multiplier: string;
+  subscription_group?: string;
+  effective_multiplier: string;
+
+  final_cost_usd: string;
+  diff_from_source_usd: string;
 };
 
 export async function getUsageEventDetail(eventID: number) {
