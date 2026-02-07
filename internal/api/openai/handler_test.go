@@ -1654,7 +1654,84 @@ func TestResponses_AuditUpstreamErrorDoesNotRecordResponseBody(t *testing.T) {
 	}
 }
 
-func TestResponses_CodexOAuth_FiltersUpstreamErrorMessage(t *testing.T) {
+func TestResponses_CodexOAuth_UsageLimitFailoverToNextAccount(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeCodexOAuth, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example/backend-api/codex", Status: 1},
+			},
+		},
+		accounts: map[int64][]store.CodexOAuthAccount{
+			11: {
+				{ID: 1002, EndpointID: 11, Status: 1},
+				{ID: 1001, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeCodexOAuth, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	sched := scheduler.New(fs)
+	var calls []scheduler.Selection
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		calls = append(calls, sel)
+		if sel.CredentialID == 1002 {
+			return &http.Response{
+				StatusCode: http.StatusBadRequest,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"The usage limit has been reached","type":"usage_limit_reached","code":"usage_limit_reached"}}`)),
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"ok-from-openai","usage":{"input_tokens":1,"output_tokens":2}}`)),
+		}, nil
+	})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "The usage limit has been reached") {
+		t.Fatalf("expected failover response not to include exhausted response body, got=%s", rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "ok-from-openai") {
+		t.Fatalf("expected fallback response from openai channel, got=%s", rr.Body.String())
+	}
+	if len(calls) < 2 {
+		t.Fatalf("expected failover attempts across codex accounts, got=%d", len(calls))
+	}
+	if calls[0].CredentialType != scheduler.CredentialTypeCodex {
+		t.Fatalf("expected first attempt on codex channel, got=%s", calls[0].CredentialType)
+	}
+	if calls[0].CredentialID != 1002 {
+		t.Fatalf("expected first attempt on exhausted account 1002, got=%d", calls[0].CredentialID)
+	}
+	if calls[1].CredentialType != scheduler.CredentialTypeCodex || calls[1].CredentialID != 1001 {
+		t.Fatalf("expected second attempt on fallback account 1001, got type=%s id=%d", calls[1].CredentialType, calls[1].CredentialID)
+	}
+}
+
+func TestResponses_CodexOAuth_UsageLimitNoFallbackReturnsUpstreamUnavailable(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
 			{ID: 1, Type: store.UpstreamTypeCodexOAuth, Status: 1},
@@ -1680,13 +1757,14 @@ func TestResponses_CodexOAuth_FiltersUpstreamErrorMessage(t *testing.T) {
 	}
 
 	sched := scheduler.New(fs)
-	doer := statusDoer{
-		status: http.StatusBadRequest,
-		body:   `{"error":{"message":"你的用量没有了","type":"usage_limit_reached","code":"usage_limit_reached"}}`,
-	}
-	q := &fakeQuota{}
-	usage := &recordingUsage{}
-	h := NewHandler(fs, fs, sched, doer, nil, nil, false, q, fakeAudit{}, usage, upstream.SSEPumpOptions{})
+	doer := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"The usage limit has been reached","type":"usage_limit_reached","code":"usage_limit_reached"}}`)),
+		}, nil
+	})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -1697,42 +1775,14 @@ func TestResponses_CodexOAuth_FiltersUpstreamErrorMessage(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
-	if rr.Code != http.StatusBadRequest {
+	if rr.Code != http.StatusBadGateway {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
-	if strings.Contains(rr.Body.String(), "你的用量没有了") {
-		t.Fatalf("expected downstream body to be sanitized, got=%s", rr.Body.String())
+	if strings.Contains(rr.Body.String(), "The usage limit has been reached") {
+		t.Fatalf("expected generic unavailable message instead of raw upstream body, got=%s", rr.Body.String())
 	}
-
-	var resp struct {
-		Error struct {
-			Message string `json:"message"`
-			Type    string `json:"type"`
-			Code    string `json:"code"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode downstream body: %v body=%s", err, rr.Body.String())
-	}
-	if resp.Error.Message != codexSanitizedErrorMessage {
-		t.Fatalf("unexpected sanitized message: %q", resp.Error.Message)
-	}
-	if resp.Error.Type != "usage_limit_reached" {
-		t.Fatalf("expected type to be preserved, got=%q", resp.Error.Type)
-	}
-	if resp.Error.Code != "usage_limit_reached" {
-		t.Fatalf("expected code to be preserved, got=%q", resp.Error.Code)
-	}
-
-	if len(usage.calls) != 1 {
-		t.Fatalf("expected 1 usage finalize call, got=%d", len(usage.calls))
-	}
-	call := usage.calls[0]
-	if call.ErrorMessage == nil || *call.ErrorMessage != "你的用量没有了" {
-		t.Fatalf("expected internal error message to keep raw upstream text, got=%v", call.ErrorMessage)
-	}
-	if call.UpstreamResponseBody == nil || !strings.Contains(*call.UpstreamResponseBody, "你的用量没有了") {
-		t.Fatalf("expected internal upstream body to keep raw upstream content, got=%v", call.UpstreamResponseBody)
+	if !strings.Contains(rr.Body.String(), "上游不可用") {
+		t.Fatalf("expected generic unavailable message, got=%s", rr.Body.String())
 	}
 }
 

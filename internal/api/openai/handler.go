@@ -423,10 +423,16 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 
 	// 失败分支：根据状态码决定是否 failover。
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		retriable := isRetriableStatus(resp.StatusCode)
+		bodyBytes, _ := readLimited(resp.Body, 0)
+		retriableByCodexExhausted := isCodexUsageLimitReached(sel, resp.StatusCode, bodyBytes)
+		retriable := isRetriableStatus(resp.StatusCode) || retriableByCodexExhausted
+		errorClass := "upstream_status"
+		if retriableByCodexExhausted {
+			errorClass = "upstream_exhausted"
+		}
 		if retriable {
-			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: true, StatusCode: resp.StatusCode, ErrorClass: "upstream_status"})
-			h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, "upstream_status", time.Since(attemptStart))
+			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: true, StatusCode: resp.StatusCode, ErrorClass: errorClass})
+			h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, errorClass, time.Since(attemptStart))
 			return false
 		}
 		if h.sched != nil {
@@ -435,22 +441,11 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, "upstream_status", time.Since(attemptStart))
 		cw := &countingResponseWriter{ResponseWriter: w}
 		downstreamStatus := resetStatusCode(resp.StatusCode, sel.StatusCodeMapping)
-		bodyBytes, _ := readLimited(resp.Body, 0)
-		downstreamBody := bodyBytes
-		filtered := false
-		if sel.CredentialType == scheduler.CredentialTypeCodex {
-			downstreamBody = sanitizeCodexErrorBody(bodyBytes)
-			filtered = true
-		}
 		copyResponseHeaders(cw.Header(), resp.Header)
-		if filtered {
-			cw.Header().Set("Content-Type", "application/json; charset=utf-8")
-		}
 		cw.WriteHeader(downstreamStatus)
-		n, _ := cw.Write(downstreamBody)
+		n, _ := cw.Write(bodyBytes)
 		respBytes := int64(n)
 
-		// A 模式：仅过滤下游返回文案，内部记录仍保留上游原始错误信息用于排障。
 		failMsg := summarizeUpstreamErrorBody(bodyBytes)
 		logMsg := resp.Status
 		if strings.TrimSpace(failMsg) != "" {
@@ -857,50 +852,49 @@ func summarizeUpstreamErrorBody(b []byte) string {
 	return trimSummary(string(b))
 }
 
-const codexSanitizedErrorMessage = "Codex upstream request failed. Please retry later."
-
-func sanitizeCodexErrorBody(b []byte) []byte {
-	sanitized := map[string]any{
-		"error": map[string]any{
-			"message": codexSanitizedErrorMessage,
-			"type":    "upstream_error",
-			"code":    "upstream_error",
-		},
+func isCodexUsageLimitReached(sel scheduler.Selection, statusCode int, body []byte) bool {
+	if sel.CredentialType != scheduler.CredentialTypeCodex || len(body) == 0 {
+		return false
 	}
-
-	var parsed map[string]any
-	if err := json.Unmarshal(b, &parsed); err == nil && len(parsed) > 0 {
-		if errObj, ok := parsed["error"].(map[string]any); ok {
-			copyOptionalErrorField(errObj, sanitized["error"].(map[string]any), "type")
-			copyOptionalErrorField(errObj, sanitized["error"].(map[string]any), "code")
-			copyOptionalErrorField(errObj, sanitized["error"].(map[string]any), "param")
-			copyOptionalErrorField(errObj, sanitized["error"].(map[string]any), "request_id")
-		}
-		copyOptionalErrorField(parsed, sanitized["error"].(map[string]any), "type")
-		copyOptionalErrorField(parsed, sanitized["error"].(map[string]any), "code")
-		copyOptionalErrorField(parsed, sanitized["error"].(map[string]any), "param")
-		copyOptionalErrorField(parsed, sanitized["error"].(map[string]any), "request_id")
+	// 对齐参考项目（openaiRoutes.js）：
+	// - 非流式以 429 作为限流/耗尽信号
+	// - 流式/结构化错误以 error.type=usage_limit_reached 识别
+	if statusCode == http.StatusTooManyRequests {
+		return true
 	}
-
-	out, err := json.Marshal(sanitized)
-	if err != nil {
-		return []byte(`{"error":{"message":"Codex upstream request failed. Please retry later.","type":"upstream_error","code":"upstream_error"}}`)
+	code, typ := extractUpstreamErrorCodeAndType(body)
+	if strings.EqualFold(strings.TrimSpace(typ), "usage_limit_reached") {
+		return true
 	}
-	return out
+	return strings.EqualFold(strings.TrimSpace(code), "usage_limit_reached")
 }
 
-func copyOptionalErrorField(src map[string]any, dst map[string]any, key string) {
-	if src == nil || dst == nil {
-		return
+func extractUpstreamErrorCodeAndType(body []byte) (string, string) {
+	if len(body) == 0 {
+		return "", ""
 	}
-	v, ok := src[key]
-	if !ok || v == nil {
-		return
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", ""
 	}
-	if s, ok := v.(string); ok && strings.TrimSpace(s) == "" {
-		return
+
+	var code, typ string
+	if s, ok := parsed["code"].(string); ok {
+		code = s
 	}
-	dst[key] = v
+	if s, ok := parsed["type"].(string); ok {
+		typ = s
+	}
+
+	if errObj, ok := parsed["error"].(map[string]any); ok {
+		if s, ok := errObj["code"].(string); ok && strings.TrimSpace(code) == "" {
+			code = s
+		}
+		if s, ok := errObj["type"].(string); ok && strings.TrimSpace(typ) == "" {
+			typ = s
+		}
+	}
+	return strings.TrimSpace(code), strings.TrimSpace(typ)
 }
 
 func trimSummary(s string) string {
