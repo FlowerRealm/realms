@@ -436,11 +436,21 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		cw := &countingResponseWriter{ResponseWriter: w}
 		downstreamStatus := resetStatusCode(resp.StatusCode, sel.StatusCodeMapping)
 		bodyBytes, _ := readLimited(resp.Body, 0)
+		downstreamBody := bodyBytes
+		filtered := false
+		if sel.CredentialType == scheduler.CredentialTypeCodex {
+			downstreamBody = sanitizeCodexErrorBody(bodyBytes)
+			filtered = true
+		}
 		copyResponseHeaders(cw.Header(), resp.Header)
+		if filtered {
+			cw.Header().Set("Content-Type", "application/json; charset=utf-8")
+		}
 		cw.WriteHeader(downstreamStatus)
-		n, _ := cw.Write(bodyBytes)
+		n, _ := cw.Write(downstreamBody)
 		respBytes := int64(n)
 
+		// A 模式：仅过滤下游返回文案，内部记录仍保留上游原始错误信息用于排障。
 		failMsg := summarizeUpstreamErrorBody(bodyBytes)
 		logMsg := resp.Status
 		if strings.TrimSpace(failMsg) != "" {
@@ -845,6 +855,52 @@ func summarizeUpstreamErrorBody(b []byte) string {
 		}
 	}
 	return trimSummary(string(b))
+}
+
+const codexSanitizedErrorMessage = "Codex upstream request failed. Please retry later."
+
+func sanitizeCodexErrorBody(b []byte) []byte {
+	sanitized := map[string]any{
+		"error": map[string]any{
+			"message": codexSanitizedErrorMessage,
+			"type":    "upstream_error",
+			"code":    "upstream_error",
+		},
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(b, &parsed); err == nil && len(parsed) > 0 {
+		if errObj, ok := parsed["error"].(map[string]any); ok {
+			copyOptionalErrorField(errObj, sanitized["error"].(map[string]any), "type")
+			copyOptionalErrorField(errObj, sanitized["error"].(map[string]any), "code")
+			copyOptionalErrorField(errObj, sanitized["error"].(map[string]any), "param")
+			copyOptionalErrorField(errObj, sanitized["error"].(map[string]any), "request_id")
+		}
+		copyOptionalErrorField(parsed, sanitized["error"].(map[string]any), "type")
+		copyOptionalErrorField(parsed, sanitized["error"].(map[string]any), "code")
+		copyOptionalErrorField(parsed, sanitized["error"].(map[string]any), "param")
+		copyOptionalErrorField(parsed, sanitized["error"].(map[string]any), "request_id")
+	}
+
+	out, err := json.Marshal(sanitized)
+	if err != nil {
+		return []byte(`{"error":{"message":"Codex upstream request failed. Please retry later.","type":"upstream_error","code":"upstream_error"}}`)
+	}
+	return out
+}
+
+func copyOptionalErrorField(src map[string]any, dst map[string]any, key string) {
+	if src == nil || dst == nil {
+		return
+	}
+	v, ok := src[key]
+	if !ok || v == nil {
+		return
+	}
+	if s, ok := v.(string); ok && strings.TrimSpace(s) == "" {
+		return
+	}
+	dst[key] = v
 }
 
 func trimSummary(s string) string {
