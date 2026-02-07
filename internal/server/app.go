@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -125,8 +124,6 @@ func NewApp(opts AppOptions) (*App, error) {
 	frontendIndexPage := loadEmbeddedIndexHTML()
 	if len(frontendIndexPage) > 0 {
 		frontendFS = root.WebDistFS
-	} else {
-		frontendIndexPage = loadIndexHTML(frontendDistDir)
 	}
 
 	router.SetRouter(engine, router.Options{
@@ -178,19 +175,6 @@ func randomSecret(n int) string {
 
 func loadEmbeddedIndexHTML() []byte {
 	b, err := fs.ReadFile(root.WebDistFS, "web/dist/index.html")
-	if err != nil || len(b) == 0 {
-		return nil
-	}
-	return b
-}
-
-func loadIndexHTML(distDir string) []byte {
-	dir := strings.TrimSpace(distDir)
-	if dir == "" {
-		return nil
-	}
-	p := filepath.Join(dir, "index.html")
-	b, err := os.ReadFile(p)
 	if err != nil || len(b) == 0 {
 		return nil
 	}

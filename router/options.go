@@ -28,7 +28,7 @@ type Options struct {
 	// frontend-backend-separation (new-api-aligned)
 	FrontendBaseURL   string // optional; if set, non-API requests redirect to this base.
 	FrontendDistDir   string // optional; e.g. "./web/dist" for serving static assets.
-	FrontendIndexPage []byte // optional; returned for SPA routes when FrontendBaseURL is empty.
+	FrontendIndexPage []byte // optional; when empty, SPA routes read dist/index.html at request time.
 	FrontendFS        fs.FS  // optional; when set, static assets are served from this FS (typically go:embed).
 
 	OpenAI *openaiapi.Handler

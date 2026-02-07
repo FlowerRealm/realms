@@ -51,6 +51,7 @@ Realms 是一个 Go 单体服务（Gin），对外提供 **OpenAI 兼容** 的 A
 
 `make dev` 仅启动本地（正常模式）：`http://127.0.0.1:8080/`（air 热重载）。  
 `make dev` 不会自动启动 Docker / MySQL；如你选择使用 MySQL，请先自行启动 MySQL（本机或 docker compose）。
+默认会同时启动前端 `web/dist` 的 watch 构建（`npm run build -- --watch`），保证 `/login`、`/admin/*` 等同源页面在开发中实时更新。
 
 如需用 docker compose 启动 MySQL（可选）：
 
@@ -82,7 +83,17 @@ go run ./cmd/realms
 
 ### 2.1 启动前端（可选）
 
-开发模式（Vite dev server + proxy 到 8080）：
+开发模式（两种）：
+
+1) 同源联调（推荐，后端路由/鉴权更贴近生产）：
+
+```bash
+make dev
+```
+
+访问：`http://127.0.0.1:8080/login`
+
+2) 前端独立 dev server（Vite + proxy 到 8080）：
 
 ```bash
 cd web
@@ -90,7 +101,7 @@ npm install
 npm run dev
 ```
 
-然后访问：`http://localhost:5173/login`
+访问：`http://localhost:5173/login`
 
 如需同源部署（由后端提供静态资源），先构建：
 
@@ -226,7 +237,7 @@ requires_openai_auth = true
 
 ## 6) 开发与测试
 
-开发热重载（自动重启）：
+开发热重载（见上文 2.1，同源联调推荐）：
 
 ```bash
 make dev

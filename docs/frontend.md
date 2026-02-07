@@ -96,6 +96,20 @@ npm run dev
 
 ---
 
+## 开发模式：同源一条命令（后端 air + 前端 dist watch）
+
+```bash
+make dev
+```
+
+该模式会同时运行：
+- 后端 air 热重载（`:8080`）
+- 前端 `npm run build -- --watch`（持续更新 `web/dist`）
+
+访问：`http://127.0.0.1:8080/login`
+
+---
+
 ## 安全提示：Session API 需要 `Realms-User` 请求头
 
 Realms 的部分 cookie session JSON API（例如 `/api/token`、`/api/channel`）要求请求携带：

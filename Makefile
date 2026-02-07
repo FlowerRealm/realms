@@ -10,7 +10,7 @@ AIR := $(TOOLS_BIN)/air
 help:
 	@echo "Targets:"
 	@echo "  make tools   安装开发工具（air，安装到 .tmp/bin）"
-	@echo "  make dev     开发热重载（本地:8080 正常模式；不自动启动 Docker）"
+	@echo "  make dev     开发热重载（后端 air + 前端 dist watch；本地:8080；不自动启动 Docker）"
 	@echo "  make test    运行测试"
 	@echo "  make fmt     gofmt（按包目录）"
 	@echo "  make tidy    go mod tidy"

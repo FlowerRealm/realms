@@ -67,6 +67,12 @@
 
 ### 修复
 
+- **[Dev/SPA]**: 修复 `make dev` 运行中前端重新构建后白屏问题：SPA fallback 不再只使用启动时缓存的 `index.html`，改为请求时优先读取最新 `web/dist/index.html`（或 embed FS 中的 `index.html`），避免旧 hash 资源 404 导致页面空白；新增回归测试覆盖“运行时更新 dist/index.html 后应立即生效”（`internal/server/app.go`、`router/web_spa_routes.go`、`router/web_spa_routes_test.go`、`router/options.go`）
+
+- **[Dev]**: `make dev` 升级为前后端双热更新：在后端 air 热重载之外，自动启动前端 `npm run build -- --watch` 持续写入 `web/dist`，避免 `web/src` 变更后同源页面不更新（`scripts/dev.sh`、`Makefile`、`.env.example`、`README.md`、`docs/frontend.md`）
+
+- **[Docs]**: 精简 `README` 开发说明，合并“同源联调 / 前端独立 dev server”两种模式，减少 `make dev` 重复描述并统一入口（`README.md`）
+
 - **[Router/Dev]**: 修复 `make dev`（Gin Debug + gzip NoRoute）下 API 未命中路由时的日志噪声：`/api/*` 的 SPA 兜底由 `c.Status(404)` 改为 `c.AbortWithStatus(404)`，避免 `serveError` 在 gzip writer 关闭后再次写入触发 `flate: closed writer`（`router/web_spa_routes.go`、`router/web_spa_routes_test.go`）
 
 - **[Usage/Privacy]**: 用户侧用量“请求明细”彻底移除上游标识与上游明细 body：`/api/usage/events` 不再返回 `upstream_endpoint_id/upstream_credential_id`，`/api/usage/events/:event_id/detail` 不下发 `upstream_request_body/upstream_response_body`；前端在对应区域提示“仅管理员可查看”，并增强 Playwright 回归覆盖失败请求（`router/usage_api_routes.go`、`web/src/pages/UsagePage.tsx`、`cmd/realms-e2e/main.go`、`web/e2e/usage.spec.ts`、`router/usage_api_routes_test.go`）

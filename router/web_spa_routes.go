@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gin-contrib/gzip"
@@ -31,10 +32,7 @@ func setWebSPARoutes(r *gin.Engine, opts Options) {
 		r.Use(static.Serve("/", &hideRootFileSystem{ServeFileSystem: static.LocalFile(distDir, false)}))
 	}
 
-	indexPage := opts.FrontendIndexPage
-	if len(indexPage) == 0 {
-		indexPage = defaultIndexPage()
-	}
+	fallbackIndexPage := defaultIndexPage()
 
 	r.NoRoute(func(c *gin.Context) {
 		if isAPIPrefix(c.Request.URL.Path) {
@@ -42,8 +40,27 @@ func setWebSPARoutes(r *gin.Engine, opts Options) {
 			return
 		}
 		c.Header("Cache-Control", "no-cache")
-		c.Data(http.StatusOK, "text/html; charset=utf-8", indexPage)
+		c.Data(http.StatusOK, "text/html; charset=utf-8", resolveSPAIndexPage(opts, fallbackIndexPage))
 	})
+}
+
+func resolveSPAIndexPage(opts Options, fallback []byte) []byte {
+	if len(opts.FrontendIndexPage) > 0 {
+		return opts.FrontendIndexPage
+	}
+	if opts.FrontendFS != nil {
+		if b, err := fs.ReadFile(opts.FrontendFS, "web/dist/index.html"); err == nil && len(b) > 0 {
+			return b
+		}
+	}
+	distDir := strings.TrimSpace(opts.FrontendDistDir)
+	if distDir != "" {
+		p := filepath.Join(distDir, "index.html")
+		if b, err := os.ReadFile(p); err == nil && len(b) > 0 {
+			return b
+		}
+	}
+	return fallback
 }
 
 // embedFileSystem is a minimal static.ServeFileSystem wrapper for embed.FS sub folders.
