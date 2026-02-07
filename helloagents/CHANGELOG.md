@@ -147,6 +147,8 @@
 
 ### 变更
 
+- **[CI/Pages]**: GitHub Pages 工作流改为仅在 `push tags` 时触发，移除 `master` 分支 push 与 `workflow_dispatch` 触发，避免每次提交都自动发布文档（`.github/workflows/pages.yml`）
+
 - **[Auth/DB]**: `users.username` 收敛为不可更改 + 唯一 + 区分大小写 + 仅字母/数字：MySQL 增加迁移 `0050_users_username_immutable.sql`（case-sensitive collation + CHECK + trigger），SQLite schema/启动期 ensure 补齐约束；同时禁用用户侧/管理员侧修改账号名接口，并将登录流程改为账号名大小写敏感（`internal/store/migrations/0050_users_username_immutable.sql`、`internal/store/schema_sqlite.sql`、`internal/store/sqlite_schema.go`、`internal/store/username.go`、`router/user_api_routes.go`、`router/account_api_routes.go`、`router/admin_users_api_routes.go`、`web/src/pages/AccountPage.tsx`、`web/src/pages/admin/UsersPage.tsx`）
   - 方案: [202602032206_username_immutable](plan/202602032206_username_immutable/)
 

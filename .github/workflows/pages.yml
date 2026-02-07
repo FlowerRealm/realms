@@ -2,11 +2,8 @@ name: pages
 
 on:
   push:
-    branches:
-      - master
     tags:
       - "*"
-  workflow_dispatch:
 
 permissions:
   contents: read
