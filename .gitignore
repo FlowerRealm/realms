@@ -38,3 +38,6 @@ data/
 
 # Backups
 backups/
+
+# Local agent workspace (keep local, do not commit)
+/helloagents/
