@@ -93,8 +93,16 @@ func (f *Flow) Handler() http.Handler {
 
 func (f *Flow) callbackReturnURL(ctx context.Context, endpointID int64, result string) string {
 	base := strings.TrimRight(strings.TrimSpace(f.returnBaseURLEffective(ctx)), "/")
-	if endpointID > 0 {
-		return fmt.Sprintf("%s/admin/endpoints/%d/codex-accounts?oauth=%s", base, endpointID, result)
+	if endpointID > 0 && f.st != nil {
+		if ep, err := f.st.GetUpstreamEndpointByID(ctx, endpointID); err == nil && ep.ChannelID > 0 {
+			if result != "" {
+				return fmt.Sprintf("%s/admin/channels?open_channel_settings=%d&oauth=%s", base, ep.ChannelID, result)
+			}
+			return fmt.Sprintf("%s/admin/channels?open_channel_settings=%d", base, ep.ChannelID)
+		}
+	}
+	if result != "" {
+		return fmt.Sprintf("%s/admin/channels?oauth=%s", base, result)
 	}
 	return fmt.Sprintf("%s/admin/channels", base)
 }

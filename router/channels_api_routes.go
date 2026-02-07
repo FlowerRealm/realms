@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 
+	"realms/internal/codexoauth"
 	"realms/internal/security"
 	"realms/internal/store"
 )
@@ -84,6 +86,13 @@ func setChannelAPIRoutes(r gin.IRoutes, opts Options) {
 	r.GET("/channel/:channel_id/credentials", admin, listChannelCredentialsHandler(opts))
 	r.POST("/channel/:channel_id/credentials", admin, createChannelCredentialHandler(opts))
 	r.DELETE("/channel/:channel_id/credentials/:credential_id", admin, deleteChannelCredentialHandler(opts))
+	r.GET("/channel/:channel_id/codex-accounts", admin, listChannelCodexAccountsHandler(opts))
+	r.POST("/channel/:channel_id/codex-oauth/start", admin, startChannelCodexOAuthHandler(opts))
+	r.POST("/channel/:channel_id/codex-oauth/complete", admin, completeChannelCodexOAuthHandler(opts))
+	r.POST("/channel/:channel_id/codex-accounts", admin, createChannelCodexAccountHandler(opts))
+	r.POST("/channel/:channel_id/codex-accounts/refresh", admin, refreshChannelCodexAccountsHandler(opts))
+	r.POST("/channel/:channel_id/codex-accounts/:account_id/refresh", admin, refreshChannelCodexAccountHandler(opts))
+	r.DELETE("/channel/:channel_id/codex-accounts/:account_id", admin, deleteChannelCodexAccountHandler(opts))
 
 	r.PUT("/channel/:channel_id/meta", admin, updateChannelMetaHandler(opts))
 	r.PUT("/channel/:channel_id/setting", admin, updateChannelSettingHandler(opts))
@@ -685,6 +694,418 @@ func trimOptionalString(v *string) *string {
 		return nil
 	}
 	return &s
+}
+
+type channelCodexAccountView struct {
+	ID        int64   `json:"id"`
+	AccountID string  `json:"account_id"`
+	Email     *string `json:"email,omitempty"`
+	Status    int     `json:"status"`
+
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+	LastRefreshAt *time.Time `json:"last_refresh_at,omitempty"`
+	CooldownUntil *time.Time `json:"cooldown_until,omitempty"`
+	LastUsedAt    *time.Time `json:"last_used_at,omitempty"`
+
+	BalanceTotalGrantedUSD   *string    `json:"balance_total_granted_usd,omitempty"`
+	BalanceTotalUsedUSD      *string    `json:"balance_total_used_usd,omitempty"`
+	BalanceTotalAvailableUSD *string    `json:"balance_total_available_usd,omitempty"`
+	BalanceUpdatedAt         *time.Time `json:"balance_updated_at,omitempty"`
+	BalanceError             *string    `json:"balance_error,omitempty"`
+
+	QuotaCreditsHasCredits    *bool      `json:"quota_credits_has_credits,omitempty"`
+	QuotaCreditsUnlimited     *bool      `json:"quota_credits_unlimited,omitempty"`
+	QuotaCreditsBalance       *string    `json:"quota_credits_balance,omitempty"`
+	QuotaPrimaryUsedPercent   *int       `json:"quota_primary_used_percent,omitempty"`
+	QuotaPrimaryResetAt       *time.Time `json:"quota_primary_reset_at,omitempty"`
+	QuotaSecondaryUsedPercent *int       `json:"quota_secondary_used_percent,omitempty"`
+	QuotaSecondaryResetAt     *time.Time `json:"quota_secondary_reset_at,omitempty"`
+	QuotaUpdatedAt            *time.Time `json:"quota_updated_at,omitempty"`
+	QuotaError                *string    `json:"quota_error,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func decimalStringPtr(v *decimal.Decimal) *string {
+	if v == nil {
+		return nil
+	}
+	s := strings.TrimSpace(v.String())
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func codexAccountView(a store.CodexOAuthAccount) channelCodexAccountView {
+	return channelCodexAccountView{
+		ID:        a.ID,
+		AccountID: a.AccountID,
+		Email:     a.Email,
+		Status:    a.Status,
+
+		ExpiresAt:     a.ExpiresAt,
+		LastRefreshAt: a.LastRefreshAt,
+		CooldownUntil: a.CooldownUntil,
+		LastUsedAt:    a.LastUsedAt,
+
+		BalanceTotalGrantedUSD:   decimalStringPtr(a.BalanceTotalGrantedUSD),
+		BalanceTotalUsedUSD:      decimalStringPtr(a.BalanceTotalUsedUSD),
+		BalanceTotalAvailableUSD: decimalStringPtr(a.BalanceTotalAvailableUSD),
+		BalanceUpdatedAt:         a.BalanceUpdatedAt,
+		BalanceError:             a.BalanceError,
+
+		QuotaCreditsHasCredits:    a.QuotaCreditsHasCredits,
+		QuotaCreditsUnlimited:     a.QuotaCreditsUnlimited,
+		QuotaCreditsBalance:       a.QuotaCreditsBalance,
+		QuotaPrimaryUsedPercent:   a.QuotaPrimaryUsedPercent,
+		QuotaPrimaryResetAt:       a.QuotaPrimaryResetAt,
+		QuotaSecondaryUsedPercent: a.QuotaSecondaryUsedPercent,
+		QuotaSecondaryResetAt:     a.QuotaSecondaryResetAt,
+		QuotaUpdatedAt:            a.QuotaUpdatedAt,
+		QuotaError:                a.QuotaError,
+
+		CreatedAt: a.CreatedAt,
+		UpdatedAt: a.UpdatedAt,
+	}
+}
+
+func loadCodexChannelEndpoint(c *gin.Context, opts Options, channelID int64) (store.UpstreamChannel, store.UpstreamEndpoint, bool) {
+	ch, err := opts.Store.GetUpstreamChannelByID(c.Request.Context(), channelID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel 不存在"})
+			return store.UpstreamChannel{}, store.UpstreamEndpoint{}, false
+		}
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询 channel 失败"})
+		return store.UpstreamChannel{}, store.UpstreamEndpoint{}, false
+	}
+	if ch.Type != store.UpstreamTypeCodexOAuth {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "仅 codex_oauth 渠道支持账号管理"})
+		return store.UpstreamChannel{}, store.UpstreamEndpoint{}, false
+	}
+	ep, err := opts.Store.GetUpstreamEndpointByChannelID(c.Request.Context(), ch.ID)
+	if err != nil || ep.ID <= 0 {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "endpoint 不存在"})
+		return store.UpstreamChannel{}, store.UpstreamEndpoint{}, false
+	}
+	return ch, ep, true
+}
+
+func listChannelCodexAccountsHandler(opts Options) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if opts.Store == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			return
+		}
+		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
+		if err != nil || channelID <= 0 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
+			return
+		}
+		_, ep, ok := loadCodexChannelEndpoint(c, opts, channelID)
+		if !ok {
+			return
+		}
+		accounts, err := opts.Store.ListCodexOAuthAccountsByEndpoint(c.Request.Context(), ep.ID)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询账号失败"})
+			return
+		}
+		out := make([]channelCodexAccountView, 0, len(accounts))
+		for _, acc := range accounts {
+			out = append(out, codexAccountView(acc))
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": out})
+	}
+}
+
+func startChannelCodexOAuthHandler(opts Options) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if opts.Store == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			return
+		}
+		if opts.StartCodexOAuth == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "Codex OAuth 未启用"})
+			return
+		}
+		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
+		if err != nil || channelID <= 0 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
+			return
+		}
+		_, ep, ok := loadCodexChannelEndpoint(c, opts, channelID)
+		if !ok {
+			return
+		}
+		actorUserID, ok := userIDFromContext(c)
+		if !ok || actorUserID <= 0 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "未登录"})
+			return
+		}
+		authURL, err := opts.StartCodexOAuth(c.Request.Context(), ep.ID, actorUserID)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": codexoauth.UserMessage(err)})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data":    gin.H{"auth_url": authURL},
+		})
+	}
+}
+
+func completeChannelCodexOAuthHandler(opts Options) gin.HandlerFunc {
+	type reqBody struct {
+		CallbackURL string `json:"callback_url"`
+	}
+	return func(c *gin.Context) {
+		if opts.Store == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			return
+		}
+		if opts.CompleteCodexOAuth == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "Codex OAuth 未启用"})
+			return
+		}
+		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
+		if err != nil || channelID <= 0 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
+			return
+		}
+		_, ep, ok := loadCodexChannelEndpoint(c, opts, channelID)
+		if !ok {
+			return
+		}
+		actorUserID, ok := userIDFromContext(c)
+		if !ok || actorUserID <= 0 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "未登录"})
+			return
+		}
+		var req reqBody
+		if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
+			return
+		}
+		parsed, err := codexoauth.ParseOAuthCallback(req.CallbackURL)
+		if err != nil || parsed == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "回调 URL 解析失败，请粘贴包含 code/state 的完整 URL"})
+			return
+		}
+		if strings.TrimSpace(parsed.Error) != "" {
+			msg := "OAuth 回调失败：" + strings.TrimSpace(parsed.Error)
+			if desc := strings.TrimSpace(parsed.ErrorDescription); desc != "" {
+				msg += " - " + desc
+			}
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
+			return
+		}
+		if strings.TrimSpace(parsed.Code) == "" || strings.TrimSpace(parsed.State) == "" {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "回调 URL 缺少 code/state"})
+			return
+		}
+		if err := opts.CompleteCodexOAuth(c.Request.Context(), ep.ID, actorUserID, parsed.State, parsed.Code); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": codexoauth.UserMessage(err)})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已完成授权"})
+	}
+}
+
+func createChannelCodexAccountHandler(opts Options) gin.HandlerFunc {
+	type reqBody struct {
+		AccountID    *string `json:"account_id,omitempty"`
+		Email        *string `json:"email,omitempty"`
+		AccessToken  string  `json:"access_token"`
+		RefreshToken string  `json:"refresh_token"`
+		IDToken      *string `json:"id_token,omitempty"`
+		ExpiresAt    *string `json:"expires_at,omitempty"`
+	}
+	return func(c *gin.Context) {
+		if opts.Store == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			return
+		}
+		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
+		if err != nil || channelID <= 0 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
+			return
+		}
+		_, ep, ok := loadCodexChannelEndpoint(c, opts, channelID)
+		if !ok {
+			return
+		}
+		var req reqBody
+		if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
+			return
+		}
+		accountID := ""
+		if req.AccountID != nil {
+			accountID = strings.TrimSpace(*req.AccountID)
+		}
+		email := trimOptionalString(req.Email)
+		accessToken := strings.TrimSpace(req.AccessToken)
+		refreshToken := strings.TrimSpace(req.RefreshToken)
+		idToken := trimOptionalString(req.IDToken)
+
+		if accessToken == "" || refreshToken == "" {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "access_token 和 refresh_token 不能为空"})
+			return
+		}
+
+		if idToken != nil {
+			if claims, err := codexoauth.ParseIDTokenClaims(*idToken); err == nil && claims != nil {
+				if accountID == "" {
+					accountID = strings.TrimSpace(claims.AccountID)
+				}
+				if email == nil {
+					e := strings.TrimSpace(claims.Email)
+					if e != "" {
+						email = &e
+					}
+				}
+			}
+		}
+
+		if accountID == "" {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "account_id 不能为空（可传 account_id，或提供包含 account_id 的 id_token）"})
+			return
+		}
+
+		var expiresAt *time.Time
+		if req.ExpiresAt != nil {
+			s := strings.TrimSpace(*req.ExpiresAt)
+			if s != "" {
+				t, err := time.Parse(time.RFC3339, s)
+				if err != nil {
+					c.JSON(http.StatusOK, gin.H{"success": false, "message": "expires_at 不合法（需 RFC3339）"})
+					return
+				}
+				utc := t.UTC()
+				expiresAt = &utc
+			}
+		}
+
+		id, err := opts.Store.CreateCodexOAuthAccount(c.Request.Context(), ep.ID, accountID, email, accessToken, refreshToken, idToken, expiresAt)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建账号失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已添加账号", "data": gin.H{"id": id}})
+	}
+}
+
+func refreshChannelCodexAccountsHandler(opts Options) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if opts.Store == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			return
+		}
+		if opts.RefreshCodexQuotasByEndpointID == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "Codex 刷新能力未启用"})
+			return
+		}
+		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
+		if err != nil || channelID <= 0 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
+			return
+		}
+		_, ep, ok := loadCodexChannelEndpoint(c, opts, channelID)
+		if !ok {
+			return
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 90*time.Second)
+		defer cancel()
+		if err := opts.RefreshCodexQuotasByEndpointID(ctx, ep.ID); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "刷新失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已刷新"})
+	}
+}
+
+func refreshChannelCodexAccountHandler(opts Options) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if opts.Store == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			return
+		}
+		if opts.RefreshCodexQuotaByAccountID == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "Codex 刷新能力未启用"})
+			return
+		}
+		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
+		if err != nil || channelID <= 0 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
+			return
+		}
+		accountID, err := strconv.ParseInt(strings.TrimSpace(c.Param("account_id")), 10, 64)
+		if err != nil || accountID <= 0 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "account_id 不合法"})
+			return
+		}
+		_, ep, ok := loadCodexChannelEndpoint(c, opts, channelID)
+		if !ok {
+			return
+		}
+		acc, err := opts.Store.GetCodexOAuthAccountByID(c.Request.Context(), accountID)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "account 不存在"})
+			return
+		}
+		if acc.EndpointID != ep.ID {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "account 不属于该渠道"})
+			return
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		defer cancel()
+		if err := opts.RefreshCodexQuotaByAccountID(ctx, acc.ID); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "刷新失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已刷新"})
+	}
+}
+
+func deleteChannelCodexAccountHandler(opts Options) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if opts.Store == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			return
+		}
+		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
+		if err != nil || channelID <= 0 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
+			return
+		}
+		accountID, err := strconv.ParseInt(strings.TrimSpace(c.Param("account_id")), 10, 64)
+		if err != nil || accountID <= 0 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "account_id 不合法"})
+			return
+		}
+		_, ep, ok := loadCodexChannelEndpoint(c, opts, channelID)
+		if !ok {
+			return
+		}
+		acc, err := opts.Store.GetCodexOAuthAccountByID(c.Request.Context(), accountID)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "account 不存在"})
+			return
+		}
+		if acc.EndpointID != ep.ID {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "account 不属于该渠道"})
+			return
+		}
+		if err := opts.Store.DeleteCodexOAuthAccount(c.Request.Context(), acc.ID); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "删除失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已删除"})
+	}
 }
 
 func listChannelCredentialsHandler(opts Options) gin.HandlerFunc {

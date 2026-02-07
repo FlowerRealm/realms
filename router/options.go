@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"io/fs"
 	"net/http"
 
@@ -49,4 +50,10 @@ type Options struct {
 	// codex/admin
 	RefreshCodexQuotasByEndpoint http.HandlerFunc
 	RefreshCodexQuota            http.HandlerFunc
+
+	// codex/oauth (SPA APIs)
+	StartCodexOAuth                func(ctx context.Context, endpointID int64, actorUserID int64) (string, error)
+	CompleteCodexOAuth             func(ctx context.Context, endpointID int64, actorUserID int64, state string, code string) error
+	RefreshCodexQuotasByEndpointID func(ctx context.Context, endpointID int64) error
+	RefreshCodexQuotaByAccountID   func(ctx context.Context, accountID int64) error
 }

@@ -157,6 +157,34 @@ func NewApp(opts AppOptions) (*App, error) {
 
 		RefreshCodexQuotasByEndpoint: app.RefreshCodexQuotasByEndpoint,
 		RefreshCodexQuota:            app.RefreshCodexQuota,
+		StartCodexOAuth: func(ctx context.Context, endpointID int64, actorUserID int64) (string, error) {
+			if app.codexOAuth == nil {
+				return "", errors.New("Codex OAuth 未启用")
+			}
+			return app.codexOAuth.Start(ctx, endpointID, actorUserID)
+		},
+		CompleteCodexOAuth: func(ctx context.Context, endpointID int64, actorUserID int64, state string, code string) error {
+			if app.codexOAuth == nil {
+				return errors.New("Codex OAuth 未启用")
+			}
+			return app.codexOAuth.Complete(ctx, endpointID, actorUserID, state, code)
+		},
+		RefreshCodexQuotasByEndpointID: func(ctx context.Context, endpointID int64) error {
+			accs, err := app.store.ListCodexOAuthAccountsByEndpoint(ctx, endpointID)
+			if err != nil {
+				return err
+			}
+			for _, acc := range accs {
+				perCtx, perCancel := context.WithTimeout(ctx, 15*time.Second)
+				app.refreshCodexBalance(perCtx, acc.ID)
+				perCancel()
+			}
+			return nil
+		},
+		RefreshCodexQuotaByAccountID: func(ctx context.Context, accountID int64) error {
+			app.refreshCodexBalance(ctx, accountID)
+			return nil
+		},
 	})
 	app.engine = engine
 	return app, nil

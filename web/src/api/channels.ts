@@ -141,6 +141,33 @@ export type ChannelCredential = {
   status: number;
 };
 
+export type CodexOAuthAccount = {
+  id: number;
+  account_id: string;
+  email?: string | null;
+  status: number;
+  expires_at?: string | null;
+  last_refresh_at?: string | null;
+  cooldown_until?: string | null;
+  last_used_at?: string | null;
+  balance_total_granted_usd?: string | null;
+  balance_total_used_usd?: string | null;
+  balance_total_available_usd?: string | null;
+  balance_updated_at?: string | null;
+  balance_error?: string | null;
+  quota_credits_has_credits?: boolean | null;
+  quota_credits_unlimited?: boolean | null;
+  quota_credits_balance?: string | null;
+  quota_primary_used_percent?: number | null;
+  quota_primary_reset_at?: string | null;
+  quota_secondary_used_percent?: number | null;
+  quota_secondary_reset_at?: string | null;
+  quota_updated_at?: string | null;
+  quota_error?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export async function listChannelCredentials(channelID: number) {
   const res = await api.get<APIResponse<ChannelCredential[]>>(`/api/channel/${channelID}/credentials`);
   return res.data;
@@ -156,6 +183,53 @@ export async function createChannelCredential(channelID: number, apiKey: string,
 
 export async function deleteChannelCredential(channelID: number, credentialID: number) {
   const res = await api.delete<APIResponse<void>>(`/api/channel/${channelID}/credentials/${credentialID}`);
+  return res.data;
+}
+
+export async function listChannelCodexAccounts(channelID: number) {
+  const res = await api.get<APIResponse<CodexOAuthAccount[]>>(`/api/channel/${channelID}/codex-accounts`);
+  return res.data;
+}
+
+export async function startChannelCodexOAuth(channelID: number) {
+  const res = await api.post<APIResponse<{ auth_url: string }>>(`/api/channel/${channelID}/codex-oauth/start`);
+  return res.data;
+}
+
+export async function completeChannelCodexOAuth(channelID: number, callbackURL: string) {
+  const res = await api.post<APIResponse<void>>(`/api/channel/${channelID}/codex-oauth/complete`, {
+    callback_url: callbackURL,
+  });
+  return res.data;
+}
+
+export async function createChannelCodexAccount(
+  channelID: number,
+  req: {
+    account_id?: string;
+    email?: string;
+    access_token: string;
+    refresh_token: string;
+    id_token?: string;
+    expires_at?: string;
+  },
+) {
+  const res = await api.post<APIResponse<{ id: number }>>(`/api/channel/${channelID}/codex-accounts`, req);
+  return res.data;
+}
+
+export async function refreshChannelCodexAccounts(channelID: number) {
+  const res = await api.post<APIResponse<void>>(`/api/channel/${channelID}/codex-accounts/refresh`);
+  return res.data;
+}
+
+export async function refreshChannelCodexAccount(channelID: number, accountID: number) {
+  const res = await api.post<APIResponse<void>>(`/api/channel/${channelID}/codex-accounts/${accountID}/refresh`);
+  return res.data;
+}
+
+export async function deleteChannelCodexAccount(channelID: number, accountID: number) {
+  const res = await api.delete<APIResponse<void>>(`/api/channel/${channelID}/codex-accounts/${accountID}`);
   return res.data;
 }
 

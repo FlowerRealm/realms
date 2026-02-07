@@ -1,19 +1,26 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { BootstrapModal } from '../../components/BootstrapModal';
 import { closeModalById } from '../../components/modal';
 import {
   createChannel,
   createChannelCredential,
+  createChannelCodexAccount,
+  deleteChannelCodexAccount,
   deleteChannel,
   deleteChannelCredential,
+  completeChannelCodexOAuth,
   getChannel,
   getChannelKey,
   getChannelsPage,
   getPinnedChannelInfo,
+  listChannelCodexAccounts,
   listChannelCredentials,
   pinChannel,
+  refreshChannelCodexAccount,
+  refreshChannelCodexAccounts,
   reorderChannels,
+  startChannelCodexOAuth,
   testChannel,
   updateChannel,
   updateChannelHeaderOverride,
@@ -27,6 +34,7 @@ import {
   type Channel,
   type ChannelAdminItem,
   type ChannelCredential,
+  type CodexOAuthAccount,
   type PinnedChannelInfo,
 } from '../../api/channels';
 import { listAdminChannelGroups, type AdminChannelGroup } from '../../api/admin/channelGroups';
@@ -107,6 +115,14 @@ export function ChannelsPage() {
   const [newCredentialName, setNewCredentialName] = useState('');
   const [newCredentialKey, setNewCredentialKey] = useState('');
   const [keyValue, setKeyValue] = useState('');
+  const [codexAccounts, setCodexAccounts] = useState<CodexOAuthAccount[]>([]);
+  const [codexCallbackURL, setCodexCallbackURL] = useState('');
+  const [codexManualAccountID, setCodexManualAccountID] = useState('');
+  const [codexManualEmail, setCodexManualEmail] = useState('');
+  const [codexManualAccessToken, setCodexManualAccessToken] = useState('');
+  const [codexManualRefreshToken, setCodexManualRefreshToken] = useState('');
+  const [codexManualIDToken, setCodexManualIDToken] = useState('');
+  const [codexManualExpiresAt, setCodexManualExpiresAt] = useState('');
 
   const [bindings, setBindings] = useState<ChannelModelBinding[]>([]);
   const [selectedModelIDs, setSelectedModelIDs] = useState<string[]>([]);
@@ -133,6 +149,7 @@ export function ChannelsPage() {
   const [requestBodyWhitelist, setRequestBodyWhitelist] = useState('');
   const [requestBodyBlacklist, setRequestBodyBlacklist] = useState('');
   const [statusCodeMapping, setStatusCodeMapping] = useState('');
+  const oauthQueryHandled = useRef(false);
 
   const enabledCount = useMemo(() => channels.filter((c) => c.status === 1).length, [channels]);
   const selectableModelIDs = useMemo(() => {
@@ -184,6 +201,13 @@ export function ChannelsPage() {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return '';
     return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+  }
+
+  function fmtDateTime(iso?: string | null): string {
+    if (!iso) return '-';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '-';
+    return d.toLocaleString('zh-CN', { hour12: false });
   }
 
   async function refresh(params?: { start?: string; end?: string }) {
@@ -267,6 +291,85 @@ export function ChannelsPage() {
     setCredentials(res.data || []);
   }
 
+  async function reloadCodexAccounts(channelID: number) {
+    const res = await listChannelCodexAccounts(channelID);
+    if (!res.success) throw new Error(res.message || '加载账号失败');
+    setCodexAccounts(res.data || []);
+  }
+
+  const openChannelSettingsModal = useCallback((ch: { id: number; name?: string }, tab: 'common' | 'keys' | 'models' | 'advanced' = 'common') => {
+    setSettingsTab(tab);
+    setSettingsChannelID(ch.id);
+    setSettingsChannelName(ch.name || `#${ch.id}`);
+    setSettingsChannel(null);
+
+    if (typeof window === 'undefined') return;
+    const modalRoot = document.getElementById('editChannelModal');
+    const modalCtor = (window as Window & { bootstrap?: { Modal?: { getOrCreateInstance: (el: Element) => { show: () => void } } } }).bootstrap?.Modal;
+    if (!modalRoot || !modalCtor?.getOrCreateInstance) return;
+    modalCtor.getOrCreateInstance(modalRoot).show();
+  }, []);
+
+  useEffect(() => {
+    if (oauthQueryHandled.current || loading) return;
+    if (typeof window === 'undefined') return;
+    oauthQueryHandled.current = true;
+
+    const params = new URLSearchParams(window.location.search);
+    const openChannelSettings = Number.parseInt(params.get('open_channel_settings') || '', 10);
+    const oauthState = (params.get('oauth') || '').trim();
+    const oauthErr = (params.get('err') || '').trim();
+
+    if (oauthState === 'ok') setNotice('Codex OAuth 授权成功');
+    if (oauthState === 'error') setErr(oauthErr || 'Codex OAuth 授权失败');
+
+    if (openChannelSettings > 0) {
+      const target = channels.find((ch) => ch.id === openChannelSettings);
+      if (target) openChannelSettingsModal(target, 'keys');
+    }
+
+    if (openChannelSettings > 0 || oauthState !== '' || oauthErr !== '') {
+      params.delete('open_channel_settings');
+      params.delete('oauth');
+      params.delete('err');
+      const nextQuery = params.toString();
+      const nextURL = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ''}${window.location.hash || ''}`;
+      window.history.replaceState({}, '', nextURL);
+    }
+  }, [channels, loading, openChannelSettingsModal]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onMessage = (event: MessageEvent) => {
+      const payload = event.data as { type?: string; redirectURL?: string } | null;
+      if (!payload || payload.type !== 'realms_codex_oauth_callback') return;
+      let openChannelSettings = 0;
+      let oauthState = '';
+      if (payload.redirectURL) {
+        try {
+          const parsed = new URL(payload.redirectURL, window.location.origin);
+          openChannelSettings = Number.parseInt(parsed.searchParams.get('open_channel_settings') || '', 10);
+          oauthState = (parsed.searchParams.get('oauth') || '').trim();
+        } catch {
+          // ignore
+        }
+      }
+      if (oauthState === 'ok') setNotice('Codex OAuth 授权成功');
+      if (oauthState === 'error') setErr('Codex OAuth 授权失败');
+
+      if (openChannelSettings > 0) {
+        const target = channels.find((ch) => ch.id === openChannelSettings);
+        if (target) openChannelSettingsModal(target, 'keys');
+      } else if (settingsChannelID && settingsChannel?.type === 'codex_oauth') {
+        void reloadCodexAccounts(settingsChannelID).catch(() => {});
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => {
+      window.removeEventListener('message', onMessage);
+    };
+  }, [channels, openChannelSettingsModal, settingsChannel, settingsChannelID]);
+
   const applyChannelModelBindings = useCallback((items: ChannelModelBinding[]) => {
     setBindings(items);
 
@@ -320,6 +423,18 @@ export function ChannelsPage() {
       setNewCredentialName('');
       setNewCredentialKey('');
       setKeyValue('');
+      setCodexCallbackURL('');
+      setCodexManualAccountID('');
+      setCodexManualEmail('');
+      setCodexManualAccessToken('');
+      setCodexManualRefreshToken('');
+      setCodexManualIDToken('');
+      setCodexManualExpiresAt('');
+      if (ch.type === 'codex_oauth') {
+        await reloadCodexAccounts(channelID);
+      } else {
+        setCodexAccounts([]);
+      }
 
       if (!bindingsRes.success) throw new Error(bindingsRes.message || '加载绑定失败');
       applyChannelModelBindings(bindingsRes.data || []);
@@ -350,6 +465,7 @@ export function ChannelsPage() {
       setErr(e instanceof Error ? e.message : '加载失败');
       setSettingsChannel(null);
       setCredentials([]);
+      setCodexAccounts([]);
       setBindings([]);
       setSelectedModelIDs([]);
       setModelRedirects({});
@@ -720,14 +836,7 @@ export function ChannelsPage() {
                                 type="button"
                                 title="设置"
                                 disabled={loading || reordering}
-                                data-bs-toggle="modal"
-                                data-bs-target="#editChannelModal"
-                                onClick={() => {
-                                  setSettingsTab('common');
-                                  setSettingsChannelID(ch.id);
-                                  setSettingsChannelName(ch.name || `#${ch.id}`);
-                                  setSettingsChannel(null);
-                                }}
+                                onClick={() => openChannelSettingsModal({ id: ch.id, name: ch.name }, 'common')}
                               >
                                 <i className="ri-settings-3-line me-1"></i>设置
                               </button>
@@ -928,6 +1037,14 @@ export function ChannelsPage() {
           setNewCredentialName('');
           setNewCredentialKey('');
           setKeyValue('');
+          setCodexAccounts([]);
+          setCodexCallbackURL('');
+          setCodexManualAccountID('');
+          setCodexManualEmail('');
+          setCodexManualAccessToken('');
+          setCodexManualRefreshToken('');
+          setCodexManualIDToken('');
+          setCodexManualExpiresAt('');
 
           setBindings([]);
           setSelectedModelIDs([]);
@@ -1173,7 +1290,274 @@ export function ChannelsPage() {
                   <div className="card-header bg-white fw-bold py-3">密钥管理</div>
                   <div className="card-body">
                     {settingsChannel.type === 'codex_oauth' ? (
-                      <div className="text-muted small">codex_oauth 渠道不使用 API Key，这里无需配置。</div>
+                      <div className="d-flex flex-column gap-3">
+                        <div className="d-flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-primary"
+                            onClick={async () => {
+                              if (!settingsChannelID) return;
+                              setErr('');
+                              setNotice('');
+                              try {
+                                const res = await startChannelCodexOAuth(settingsChannelID);
+                                if (!res.success) throw new Error(res.message || '发起授权失败');
+                                const authURL = (res.data?.auth_url || '').trim();
+                                if (!authURL) throw new Error('未返回授权链接');
+                                const popup = window.open(authURL, '_blank', 'noopener,noreferrer');
+                                if (!popup) window.location.href = authURL;
+                                setNotice('已发起 OAuth 授权，请在新窗口完成后返回此页面。');
+                              } catch (e) {
+                                setErr(e instanceof Error ? e.message : '发起授权失败');
+                              }
+                            }}
+                          >
+                            <i className="ri-external-link-line me-1"></i>发起授权（新窗口）
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-light border"
+                            onClick={async () => {
+                              if (!settingsChannelID) return;
+                              setErr('');
+                              setNotice('');
+                              try {
+                                const res = await refreshChannelCodexAccounts(settingsChannelID);
+                                if (!res.success) throw new Error(res.message || '刷新失败');
+                                await reloadCodexAccounts(settingsChannelID);
+                                await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                                setNotice(res.message || '已刷新');
+                              } catch (e) {
+                                setErr(e instanceof Error ? e.message : '刷新失败');
+                              }
+                            }}
+                          >
+                            <i className="ri-refresh-line me-1"></i>全部刷新
+                          </button>
+                        </div>
+
+                        <div className="row g-3">
+                          <div className="col-12 col-lg-6">
+                            <div className="p-3 border rounded bg-light bg-opacity-10 h-100">
+                              <div className="fw-semibold mb-2">完成授权（粘贴回调 URL）</div>
+                              <form
+                                className="d-flex flex-column gap-2"
+                                onSubmit={async (e) => {
+                                  e.preventDefault();
+                                  if (!settingsChannelID) return;
+                                  const callbackURL = codexCallbackURL.trim();
+                                  if (!callbackURL) return;
+                                  setErr('');
+                                  setNotice('');
+                                  try {
+                                    const res = await completeChannelCodexOAuth(settingsChannelID, callbackURL);
+                                    if (!res.success) throw new Error(res.message || '完成授权失败');
+                                    setCodexCallbackURL('');
+                                    await reloadCodexAccounts(settingsChannelID);
+                                    await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                                    setNotice(res.message || '已完成授权');
+                                  } catch (e) {
+                                    setErr(e instanceof Error ? e.message : '完成授权失败');
+                                  }
+                                }}
+                              >
+                                <input
+                                  className="form-control form-control-sm font-monospace"
+                                  placeholder="http://localhost:1455/auth/callback?code=...&state=..."
+                                  value={codexCallbackURL}
+                                  onChange={(e) => setCodexCallbackURL(e.target.value)}
+                                />
+                                <div className="form-text small text-muted">如回跳失败，可粘贴浏览器地址栏完整 URL（含 code/state）。</div>
+                                <button type="submit" className="btn btn-sm btn-light border" disabled={!codexCallbackURL.trim()}>
+                                  完成授权
+                                </button>
+                              </form>
+                            </div>
+                          </div>
+
+                          <div className="col-12 col-lg-6">
+                            <div className="p-3 border rounded bg-light bg-opacity-10 h-100">
+                              <div className="fw-semibold mb-2">手工录入（可选）</div>
+                              <form
+                                className="d-flex flex-column gap-2"
+                                onSubmit={async (e) => {
+                                  e.preventDefault();
+                                  if (!settingsChannelID) return;
+                                  const accessToken = codexManualAccessToken.trim();
+                                  const refreshToken = codexManualRefreshToken.trim();
+                                  if (!accessToken || !refreshToken) return;
+                                  setErr('');
+                                  setNotice('');
+                                  try {
+                                    const res = await createChannelCodexAccount(settingsChannelID, {
+                                      account_id: codexManualAccountID.trim() || undefined,
+                                      email: codexManualEmail.trim() || undefined,
+                                      access_token: accessToken,
+                                      refresh_token: refreshToken,
+                                      id_token: codexManualIDToken.trim() || undefined,
+                                      expires_at: codexManualExpiresAt.trim() || undefined,
+                                    });
+                                    if (!res.success) throw new Error(res.message || '保存失败');
+                                    setCodexManualAccountID('');
+                                    setCodexManualEmail('');
+                                    setCodexManualAccessToken('');
+                                    setCodexManualRefreshToken('');
+                                    setCodexManualIDToken('');
+                                    setCodexManualExpiresAt('');
+                                    await reloadCodexAccounts(settingsChannelID);
+                                    await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                                    setNotice(res.message || '已添加账号');
+                                  } catch (e) {
+                                    setErr(e instanceof Error ? e.message : '保存失败');
+                                  }
+                                }}
+                              >
+                                <input
+                                  className="form-control form-control-sm font-monospace"
+                                  placeholder="account_id（可选，留空则尝试从 id_token 解析）"
+                                  value={codexManualAccountID}
+                                  onChange={(e) => setCodexManualAccountID(e.target.value)}
+                                />
+                                <input
+                                  className="form-control form-control-sm"
+                                  type="email"
+                                  placeholder="邮箱（可选）"
+                                  value={codexManualEmail}
+                                  onChange={(e) => setCodexManualEmail(e.target.value)}
+                                />
+                                <input
+                                  className="form-control form-control-sm font-monospace"
+                                  placeholder="access_token"
+                                  value={codexManualAccessToken}
+                                  onChange={(e) => setCodexManualAccessToken(e.target.value)}
+                                  required
+                                />
+                                <input
+                                  className="form-control form-control-sm font-monospace"
+                                  placeholder="refresh_token"
+                                  value={codexManualRefreshToken}
+                                  onChange={(e) => setCodexManualRefreshToken(e.target.value)}
+                                  required
+                                />
+                                <input
+                                  className="form-control form-control-sm font-monospace"
+                                  placeholder="id_token（可选）"
+                                  value={codexManualIDToken}
+                                  onChange={(e) => setCodexManualIDToken(e.target.value)}
+                                />
+                                <input
+                                  className="form-control form-control-sm font-monospace"
+                                  placeholder="expires_at（可选，RFC3339）"
+                                  value={codexManualExpiresAt}
+                                  onChange={(e) => setCodexManualExpiresAt(e.target.value)}
+                                />
+                                <button type="submit" className="btn btn-sm btn-primary">
+                                  保存账号
+                                </button>
+                              </form>
+                            </div>
+                          </div>
+                        </div>
+
+                        {codexAccounts.length === 0 ? (
+                          <div className="text-muted small">暂无账号。</div>
+                        ) : (
+                          <div className="table-responsive">
+                            <table className="table table-hover align-middle mb-0">
+                              <thead className="table-light">
+                                <tr>
+                                  <th className="ps-3">账号</th>
+                                  <th>订阅与额度</th>
+                                  <th>状态</th>
+                                  <th className="text-end pe-3">操作</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {codexAccounts.map((acc) => {
+                                  const cooldownActive = !!acc.cooldown_until && new Date(acc.cooldown_until).getTime() > Date.now();
+                                  return (
+                                    <tr key={acc.id}>
+                                      <td className="ps-3">
+                                        <div className="d-flex flex-column">
+                                          <span className="fw-semibold text-dark">{acc.email || '未绑定邮箱'}</span>
+                                          <span className="text-muted small font-monospace">{acc.account_id || '-'}</span>
+                                          <span className="text-muted smaller">更新：{fmtDateTime(acc.updated_at)}</span>
+                                        </div>
+                                      </td>
+                                      <td>
+                                        {acc.quota_error || acc.balance_error ? (
+                                          <span className="text-danger small">{acc.quota_error || acc.balance_error}</span>
+                                        ) : (
+                                          <div className="d-flex flex-column small">
+                                            <span>可用额度：{acc.balance_total_available_usd ? `$${acc.balance_total_available_usd}` : '-'}</span>
+                                            <span className="text-muted">
+                                              5h：{typeof acc.quota_primary_used_percent === 'number' ? `${acc.quota_primary_used_percent}%` : '-'} · 周：
+                                              {typeof acc.quota_secondary_used_percent === 'number' ? `${acc.quota_secondary_used_percent}%` : '-'}
+                                            </span>
+                                          </div>
+                                        )}
+                                      </td>
+                                      <td>
+                                        {cooldownActive ? (
+                                          <span className="badge rounded-pill bg-warning bg-opacity-10 text-warning px-2">冷却中</span>
+                                        ) : acc.status === 1 ? (
+                                          <span className="badge rounded-pill bg-success bg-opacity-10 text-success px-2">运行中</span>
+                                        ) : (
+                                          <span className="badge rounded-pill bg-secondary bg-opacity-10 text-secondary px-2">已禁用</span>
+                                        )}
+                                      </td>
+                                      <td className="text-end pe-3">
+                                        <div className="d-inline-flex gap-2">
+                                          <button
+                                            type="button"
+                                            className="btn btn-sm btn-light border"
+                                            onClick={async () => {
+                                              if (!settingsChannelID) return;
+                                              setErr('');
+                                              setNotice('');
+                                              try {
+                                                const res = await refreshChannelCodexAccount(settingsChannelID, acc.id);
+                                                if (!res.success) throw new Error(res.message || '刷新失败');
+                                                await reloadCodexAccounts(settingsChannelID);
+                                                setNotice(res.message || '已刷新');
+                                              } catch (e) {
+                                                setErr(e instanceof Error ? e.message : '刷新失败');
+                                              }
+                                            }}
+                                          >
+                                            刷新
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="btn btn-sm btn-light border text-danger"
+                                            onClick={async () => {
+                                              if (!settingsChannelID) return;
+                                              if (!window.confirm('确认彻底删除该账号？且不可恢复。')) return;
+                                              setErr('');
+                                              setNotice('');
+                                              try {
+                                                const res = await deleteChannelCodexAccount(settingsChannelID, acc.id);
+                                                if (!res.success) throw new Error(res.message || '删除失败');
+                                                await reloadCodexAccounts(settingsChannelID);
+                                                await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                                                setNotice(res.message || '已删除');
+                                              } catch (e) {
+                                                setErr(e instanceof Error ? e.message : '删除失败');
+                                              }
+                                            }}
+                                          >
+                                            删除
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
                     ) : (
                       <>
                         <div className="form-text small text-muted mb-3">密钥将以明文存储，仅展示提示；删除不可恢复。</div>

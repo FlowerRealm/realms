@@ -505,3 +505,300 @@ func TestChannels_SettingsAndCredentials_RootFlow(t *testing.T) {
 		t.Fatalf("expected auto_ban=false, got true")
 	}
 }
+
+func TestChannels_CodexOAuthAccounts_RootFlow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	userID, err := st.CreateUser(ctx, "root@example.com", "root", pwHash, store.UserRoleRoot)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if userID <= 0 {
+		t.Fatalf("expected userID > 0")
+	}
+
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeCodexOAuth, "codex-main", "default", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel: %v", err)
+	}
+	ep, err := st.SetUpstreamEndpointBaseURL(ctx, channelID, "https://chatgpt.com/backend-api/codex")
+	if err != nil {
+		t.Fatalf("SetUpstreamEndpointBaseURL: %v", err)
+	}
+	existingEmail := "codex-user@example.com"
+	existingAccountID, err := st.CreateCodexOAuthAccount(ctx, ep.ID, "acc_existing", &existingEmail, "at_old", "rt_old", nil, nil)
+	if err != nil {
+		t.Fatalf("CreateCodexOAuthAccount: %v", err)
+	}
+
+	var (
+		startEndpointID   int64
+		startActorUserID  int64
+		completeState     string
+		completeCode      string
+		refreshEndpointID int64
+		refreshAccountID  int64
+	)
+
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+
+	cookieName := "realms_session"
+	sessionStore := cookie.NewStore([]byte("test-secret"))
+	sessionStore.Options(sessions.Options{
+		Path:     "/",
+		MaxAge:   2592000,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	engine.Use(sessions.Sessions(cookieName, sessionStore))
+
+	SetRouter(engine, Options{
+		Store:             st,
+		SelfMode:          false,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+		StartCodexOAuth: func(_ context.Context, endpointID int64, actorUserID int64) (string, error) {
+			startEndpointID = endpointID
+			startActorUserID = actorUserID
+			return "https://chatgpt.com/oauth/authorize?state=s1", nil
+		},
+		CompleteCodexOAuth: func(_ context.Context, endpointID int64, actorUserID int64, state string, code string) error {
+			if endpointID != ep.ID {
+				t.Fatalf("unexpected endpointID in complete: got=%d want=%d", endpointID, ep.ID)
+			}
+			if actorUserID != userID {
+				t.Fatalf("unexpected actorUserID in complete: got=%d want=%d", actorUserID, userID)
+			}
+			completeState = state
+			completeCode = code
+			return nil
+		},
+		RefreshCodexQuotasByEndpointID: func(_ context.Context, endpointID int64) error {
+			refreshEndpointID = endpointID
+			return nil
+		},
+		RefreshCodexQuotaByAccountID: func(_ context.Context, accID int64) error {
+			refreshAccountID = accID
+			return nil
+		},
+	})
+
+	// login
+	loginBody, _ := json.Marshal(map[string]any{
+		"login":    "root@example.com",
+		"password": "password123",
+	})
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/user/login", bytes.NewReader(loginBody))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	sessionCookie := ""
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == cookieName {
+			sessionCookie = c.String()
+			break
+		}
+	}
+	if sessionCookie == "" {
+		t.Fatalf("expected session cookie %q", cookieName)
+	}
+
+	// list accounts
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/channel/"+strconv.FormatInt(channelID, 10)+"/codex-accounts", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list codex accounts status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var listResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    []struct {
+			ID        int64  `json:"id"`
+			AccountID string `json:"account_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("json.Unmarshal list codex accounts: %v", err)
+	}
+	if !listResp.Success {
+		t.Fatalf("expected success, got message=%q", listResp.Message)
+	}
+	if len(listResp.Data) != 1 || listResp.Data[0].ID != existingAccountID || listResp.Data[0].AccountID != "acc_existing" {
+		t.Fatalf("unexpected codex account list: %#v", listResp.Data)
+	}
+
+	// start oauth
+	req = httptest.NewRequest(http.MethodPost, "http://example.com/api/channel/"+strconv.FormatInt(channelID, 10)+"/codex-oauth/start", bytes.NewReader([]byte("{}")))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("start codex oauth status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var startResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			AuthURL string `json:"auth_url"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &startResp); err != nil {
+		t.Fatalf("json.Unmarshal start codex oauth: %v", err)
+	}
+	if !startResp.Success {
+		t.Fatalf("expected start success, got message=%q", startResp.Message)
+	}
+	if startResp.Data.AuthURL == "" {
+		t.Fatalf("expected auth_url not empty")
+	}
+	if startEndpointID != ep.ID || startActorUserID != userID {
+		t.Fatalf("unexpected start args: endpoint=%d actor=%d", startEndpointID, startActorUserID)
+	}
+
+	// complete oauth callback
+	completeBody, _ := json.Marshal(map[string]any{
+		"callback_url": "http://localhost:1455/auth/callback?code=abc123&state=state789",
+	})
+	req = httptest.NewRequest(http.MethodPost, "http://example.com/api/channel/"+strconv.FormatInt(channelID, 10)+"/codex-oauth/complete", bytes.NewReader(completeBody))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("complete codex oauth status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var completeResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &completeResp); err != nil {
+		t.Fatalf("json.Unmarshal complete codex oauth: %v", err)
+	}
+	if !completeResp.Success {
+		t.Fatalf("expected complete success, got message=%q", completeResp.Message)
+	}
+	if completeCode != "abc123" || completeState != "state789" {
+		t.Fatalf("unexpected complete args: state=%q code=%q", completeState, completeCode)
+	}
+
+	// manual create account
+	createBody, _ := json.Marshal(map[string]any{
+		"account_id":    "acc_manual",
+		"email":         "manual@example.com",
+		"access_token":  "at_manual",
+		"refresh_token": "rt_manual",
+	})
+	req = httptest.NewRequest(http.MethodPost, "http://example.com/api/channel/"+strconv.FormatInt(channelID, 10)+"/codex-accounts", bytes.NewReader(createBody))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("create codex account status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var createResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("json.Unmarshal create codex account: %v", err)
+	}
+	if !createResp.Success || createResp.Data.ID <= 0 {
+		t.Fatalf("unexpected create codex account resp: %#v", createResp)
+	}
+
+	// refresh all by endpoint
+	req = httptest.NewRequest(http.MethodPost, "http://example.com/api/channel/"+strconv.FormatInt(channelID, 10)+"/codex-accounts/refresh", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("refresh codex accounts status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if refreshEndpointID != ep.ID {
+		t.Fatalf("unexpected refresh endpoint id: got=%d want=%d", refreshEndpointID, ep.ID)
+	}
+
+	// refresh one account
+	req = httptest.NewRequest(http.MethodPost, "http://example.com/api/channel/"+strconv.FormatInt(channelID, 10)+"/codex-accounts/"+strconv.FormatInt(existingAccountID, 10)+"/refresh", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("refresh one codex account status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if refreshAccountID != existingAccountID {
+		t.Fatalf("unexpected refresh account id: got=%d want=%d", refreshAccountID, existingAccountID)
+	}
+
+	// delete existing account
+	req = httptest.NewRequest(http.MethodDelete, "http://example.com/api/channel/"+strconv.FormatInt(channelID, 10)+"/codex-accounts/"+strconv.FormatInt(existingAccountID, 10), nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("delete codex account status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var delResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &delResp); err != nil {
+		t.Fatalf("json.Unmarshal delete codex account: %v", err)
+	}
+	if !delResp.Success {
+		t.Fatalf("expected delete success, got message=%q", delResp.Message)
+	}
+
+	// list should still include manual account only
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/channel/"+strconv.FormatInt(channelID, 10)+"/codex-accounts", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list codex accounts after delete status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("json.Unmarshal list codex accounts after delete: %v", err)
+	}
+	if !listResp.Success || len(listResp.Data) != 1 || listResp.Data[0].AccountID != "acc_manual" {
+		t.Fatalf("expected remaining manual account, got %#v", listResp)
+	}
+}
