@@ -1,0 +1,98 @@
+name: "🐞 Bug 报告"
+description: 报告可复现的问题，帮助维护者快速定位与修复
+title: "[Bug]: "
+labels:
+  - bug
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢你的反馈！
+
+        为了更快定位问题，请尽量提供**最小可复现信息**。
+        如果是安全漏洞，请勿公开提交 Issue，改走私密渠道：
+        https://github.com/flowerrealm/realms/security/policy
+
+  - type: checkboxes
+    id: precheck
+    attributes:
+      label: 提交前检查
+      options:
+        - label: 我已搜索现有 Issues，确认不是重复问题
+          required: true
+        - label: 我已阅读 CONTRIBUTING.md，并确认这是代码行为问题而非使用咨询
+          required: true
+        - label: 我确认本 Issue 不包含敏感信息（token/key/邮箱等）
+          required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题概述
+      description: 用 1-3 句话说明问题现象与影响
+      placeholder: 在 XX 场景下会发生 XX，导致 XX 无法使用
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro-steps
+    attributes:
+      label: 复现步骤
+      description: 请按步骤描述，最好附上最小复现请求/配置
+      placeholder: |
+        1. 使用配置 ...
+        2. 调用接口 ...
+        3. 观察到 ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+      placeholder: 期望返回 ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      placeholder: 实际返回 ...（可附错误码/报错片段）
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志与截图（可选）
+      description: 请先脱敏，不要粘贴真实 token/key
+      render: shell
+
+  - type: textarea
+    id: env
+    attributes:
+      label: 环境信息
+      description: 按需填写，便于定位兼容性问题
+      placeholder: |
+        - 部署方式: 本地 / Docker / 其他
+        - OS: Ubuntu 24.04
+        - Go: 1.22.x
+        - 数据库: SQLite / MySQL 8.x
+        - Realms 版本/commit: vX.Y.Z / abcdefg
+    validations:
+      required: true
+
+  - type: input
+    id: regression
+    attributes:
+      label: 回归信息（可选）
+      description: 如果这是回归问题，请说明最后一个正常版本
+      placeholder: 例如：在 v0.4.1 正常，v0.4.2 开始异常
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充信息（可选）
+      description: 相关 PR、Issue、上游变更、临时 workaround 等

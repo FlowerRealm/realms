@@ -1,6 +1,7 @@
 # 模块索引
 
 - `ci_github_actions.md`：CI（GitHub Actions）与 Codex CLI E2E 测试约定
+- `community_contribution_templates.md`：GitHub Issue / PR 协作模板与提交流程约定
 - `admin_users.md`：管理后台用户管理（`/admin/users`），支持手动加余额（`POST /admin/users/{user_id}/balance`）
 - `admin_channel_detail.md`：管理后台渠道详情（`/admin/channels/{channel_id}/detail`），按 Key/账号聚合展示近端用量与余额
 - `upstream_request_policy.md`：上游渠道请求字段策略（`service_tier` / `store` / `safety_identifier`）

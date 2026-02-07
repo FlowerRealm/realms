@@ -8,6 +8,8 @@
 
 ### 新增
 
+- **[GitHub/Collaboration]**: 新增社区协作模板：`Issue` 使用结构化表单（Bug 报告 + Feature 请求 + 安全/文档分流配置），并新增 `PR` 模板统一要求“变更概述、关联 Issue、验证方式、兼容性风险与检查清单”，对齐主流开源项目的提交流程实践（`.github/ISSUE_TEMPLATE/bug_report.yml`、`.github/ISSUE_TEMPLATE/feature_request.yml`、`.github/ISSUE_TEMPLATE/config.yml`、`.github/pull_request_template.md`）
+
 - **[Models/API/Web]**: 模型目录新增 `group_name` 分组能力，并打通“管理端可配置 + 用户端按组可见 + 页面分组/归属方二级展示”全链路；`/api/user/models/detail` 与 `/api/models/` 返回 `group_name`，admin create/update 支持设置分组（空值归一到 `default`）；SQLite schema + MySQL migration 新增字段与索引，导入导出支持 `group_name`，并补充组过滤与默认回退测试（`internal/store/managed_models.go`、`internal/store/schema_sqlite.sql`、`internal/store/migrations/0051_managed_models_group_name.sql`、`router/models_api_routes.go`、`web/src/pages/ModelsPage.tsx`、`web/src/pages/admin/ModelsAdminPage.tsx`、`tests/store/sqlite_grouping_test.go`）
   - 方案: [202602060620_model-visibility-grouping](plan/202602060620_model-visibility-grouping/)
 

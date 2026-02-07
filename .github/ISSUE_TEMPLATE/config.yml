@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "🔐 安全漏洞报告（私密）"
+    url: "https://github.com/flowerrealm/realms/security/policy"
+    about: "请勿公开提交安全漏洞，使用私密披露渠道。"
+  - name: "📚 文档与使用说明"
+    url: "https://flowerrealm.github.io/realms/"
+    about: "优先查阅文档，包含部署、配置与 API 说明。"
