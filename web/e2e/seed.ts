@@ -6,7 +6,7 @@ export const E2E_SEED = {
 
   // cmd/realms-e2e/main.go 固定的按量计费种子（模型/用户/Token）
   billing: {
-    model: 'gpt-4.1-mini',
+    model: 'gpt-5.2',
     user: {
       email: 'e2e-user@example.com',
       username: 'e2euser',

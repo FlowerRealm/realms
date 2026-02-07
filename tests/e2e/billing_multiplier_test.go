@@ -23,7 +23,7 @@ import (
 )
 
 func TestBilling_GroupMultiplierStacking_Payg_E2E(t *testing.T) {
-	const model = "gpt-4.1-mini"
+	const model = "gpt-5.2"
 
 	upstream := newMultiplierUpstreamServer(t, model)
 	st, db, dbPath := newMultiplierSQLiteStore(t)
@@ -111,7 +111,7 @@ func TestBilling_GroupMultiplierStacking_Payg_E2E(t *testing.T) {
 }
 
 func TestBilling_GroupMultiplierStacking_Subscription_E2E(t *testing.T) {
-	const model = "gpt-4.1-mini"
+	const model = "gpt-5.2"
 
 	upstream := newMultiplierUpstreamServer(t, model)
 	st, db, dbPath := newMultiplierSQLiteStore(t)

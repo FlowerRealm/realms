@@ -446,7 +446,7 @@ func TestChannels_SettingsAndCredentials_RootFlow(t *testing.T) {
 
 	// meta update
 	metaBody, _ := json.Marshal(map[string]any{
-		"test_model": "gpt-4.1-mini",
+		"test_model": "gpt-5.2",
 		"weight":     3,
 		"auto_ban":   false,
 	})
@@ -495,8 +495,8 @@ func TestChannels_SettingsAndCredentials_RootFlow(t *testing.T) {
 	if !detailResp.Success || detailResp.Data.ID != chID {
 		t.Fatalf("unexpected get channel resp: %#v", detailResp)
 	}
-	if detailResp.Data.TestModel == nil || *detailResp.Data.TestModel != "gpt-4.1-mini" {
-		t.Fatalf("expected test_model=gpt-4.1-mini, got %#v", detailResp.Data.TestModel)
+	if detailResp.Data.TestModel == nil || *detailResp.Data.TestModel != "gpt-5.2" {
+		t.Fatalf("expected test_model=gpt-5.2, got %#v", detailResp.Data.TestModel)
 	}
 	if detailResp.Data.Weight != 3 {
 		t.Fatalf("expected weight=3, got %d", detailResp.Data.Weight)

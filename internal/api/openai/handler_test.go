@@ -41,11 +41,11 @@ func TestResponses_Stream_ExtractsUsageFromSSE(t *testing.T) {
 			},
 		},
 		models: map[string]store.ManagedModel{
-			"gpt-4.1-mini": {ID: 1, PublicID: "gpt-4.1-mini", Status: 1},
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
 		},
 		bindings: map[string][]store.ChannelModelBinding{
-			"gpt-4.1-mini": {
-				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-4.1-mini", UpstreamModel: "gpt-4.1-mini", Status: 1},
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
 			},
 		},
 	}
@@ -64,7 +64,7 @@ func TestResponses_Stream_ExtractsUsageFromSSE(t *testing.T) {
 	q := &fakeQuota{}
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, q, fakeAudit{}, nil, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10})
 
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-4.1-mini","input":"hi","stream":true}`)))
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":true}`)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 	tokenID := int64(123)
@@ -499,15 +499,15 @@ func TestResponses_FailoverCredential(t *testing.T) {
 			},
 		},
 		models: map[string]store.ManagedModel{
-			"gpt-4.1-mini": {
+			"gpt-5.2": {
 				ID:       1,
-				PublicID: "gpt-4.1-mini",
+				PublicID: "gpt-5.2",
 				Status:   1,
 			},
 		},
 		bindings: map[string][]store.ChannelModelBinding{
-			"gpt-4.1-mini": {
-				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-4.1-mini", UpstreamModel: "gpt-4.1-mini", Status: 1},
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
 			},
 		},
 	}
@@ -516,7 +516,7 @@ func TestResponses_FailoverCredential(t *testing.T) {
 	doer := &fakeDoer{}
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-4.1-mini","input":"hi","stream":false}`)))
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", "k1")
 
@@ -1237,15 +1237,15 @@ func TestResponses_FailoverCredentialOn402PaymentRequired(t *testing.T) {
 			},
 		},
 		models: map[string]store.ManagedModel{
-			"gpt-4.1-mini": {
+			"gpt-5.2": {
 				ID:       1,
-				PublicID: "gpt-4.1-mini",
+				PublicID: "gpt-5.2",
 				Status:   1,
 			},
 		},
 		bindings: map[string][]store.ChannelModelBinding{
-			"gpt-4.1-mini": {
-				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-4.1-mini", UpstreamModel: "gpt-4.1-mini", Status: 1},
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
 			},
 		},
 	}
@@ -1254,7 +1254,7 @@ func TestResponses_FailoverCredentialOn402PaymentRequired(t *testing.T) {
 	doer := &failoverOnceDoer{failStatus: http.StatusPaymentRequired}
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-4.1-mini","input":"hi","stream":false}`)))
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", "k1")
 
@@ -1297,11 +1297,11 @@ func TestResponses_RouteKeyPrefersPromptCacheKeyInBody(t *testing.T) {
 			},
 		},
 		models: map[string]store.ManagedModel{
-			"gpt-4.1-mini": {ID: 1, PublicID: "gpt-4.1-mini", Status: 1},
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
 		},
 		bindings: map[string][]store.ChannelModelBinding{
-			"gpt-4.1-mini": {
-				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-4.1-mini", UpstreamModel: "gpt-4.1-mini", Status: 1},
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
 			},
 		},
 	}
@@ -1310,7 +1310,7 @@ func TestResponses_RouteKeyPrefersPromptCacheKeyInBody(t *testing.T) {
 	doer := &okDoer{}
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-4.1-mini","input":"hi","stream":false,"prompt_cache_key":"rk_body"}`)))
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false,"prompt_cache_key":"rk_body"}`)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", "rk_header")
 
@@ -1348,11 +1348,11 @@ func TestResponses_RouteKeyFallsBackToHeader(t *testing.T) {
 			},
 		},
 		models: map[string]store.ManagedModel{
-			"gpt-4.1-mini": {ID: 1, PublicID: "gpt-4.1-mini", Status: 1},
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
 		},
 		bindings: map[string][]store.ChannelModelBinding{
-			"gpt-4.1-mini": {
-				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-4.1-mini", UpstreamModel: "gpt-4.1-mini", Status: 1},
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
 			},
 		},
 	}
@@ -1361,7 +1361,7 @@ func TestResponses_RouteKeyFallsBackToHeader(t *testing.T) {
 	doer := &okDoer{}
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-4.1-mini","input":"hi","stream":false}`)))
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-RC-Route-Key", "rk_header")
 
@@ -1377,6 +1377,148 @@ func TestResponses_RouteKeyFallsBackToHeader(t *testing.T) {
 
 	if _, ok := sched.GetBinding(p.UserID, sched.RouteKeyHash("rk_header")); !ok {
 		t.Fatalf("expected binding for header route key when body prompt_cache_key missing")
+	}
+}
+
+func TestResponses_RouteKeyFallsBackToHeaderXSessionID(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	sched := scheduler.New(fs)
+	doer := &okDoer{}
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Session-Id", "rk_x_session")
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	if _, ok := sched.GetBinding(p.UserID, sched.RouteKeyHash("rk_x_session")); !ok {
+		t.Fatalf("expected binding for X-Session-Id route key")
+	}
+}
+
+func TestResponses_RouteKeyFallsBackToBodyMetadataSessionID(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	sched := scheduler.New(fs)
+	doer := &okDoer{}
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false,"metadata":{"session_id":"rk_meta"}}`)))
+	req.Header.Set("Content-Type", "application/json")
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	if _, ok := sched.GetBinding(p.UserID, sched.RouteKeyHash("rk_meta")); !ok {
+		t.Fatalf("expected binding for metadata.session_id route key")
+	}
+}
+
+func TestChatCompletions_RouteKeyFallsBackToRawBodySessionID(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	sched := scheduler.New(fs)
+	doer := &okDoer{}
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/chat/completions", bytes.NewReader([]byte(`{"model":"gpt-5.2","messages":[{"role":"user","content":"hi"}],"stream":false,"session_id":"rk_chat_raw"}`)))
+	req.Header.Set("Content-Type", "application/json")
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.ChatCompletions), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	if _, ok := sched.GetBinding(p.UserID, sched.RouteKeyHash("rk_chat_raw")); !ok {
+		t.Fatalf("expected binding for raw body session_id route key")
 	}
 }
 
@@ -1397,11 +1539,11 @@ func TestResponses_AuditFailoverDoesNotRecordResponseBody(t *testing.T) {
 			},
 		},
 		models: map[string]store.ManagedModel{
-			"gpt-4.1-mini": {ID: 1, PublicID: "gpt-4.1-mini", Status: 1},
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
 		},
 		bindings: map[string][]store.ChannelModelBinding{
-			"gpt-4.1-mini": {
-				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-4.1-mini", UpstreamModel: "gpt-4.1-mini", Status: 1},
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
 			},
 		},
 	}
@@ -1411,7 +1553,7 @@ func TestResponses_AuditFailoverDoesNotRecordResponseBody(t *testing.T) {
 	audit := &recordingAudit{}
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, audit, nil, upstream.SSEPumpOptions{})
 
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-4.1-mini","input":"hi","stream":false}`)))
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", "k1")
 
@@ -1463,11 +1605,11 @@ func TestResponses_AuditUpstreamErrorDoesNotRecordResponseBody(t *testing.T) {
 			},
 		},
 		models: map[string]store.ManagedModel{
-			"gpt-4.1-mini": {ID: 1, PublicID: "gpt-4.1-mini", Status: 1},
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
 		},
 		bindings: map[string][]store.ChannelModelBinding{
-			"gpt-4.1-mini": {
-				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-4.1-mini", UpstreamModel: "gpt-4.1-mini", Status: 1},
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
 			},
 		},
 	}
@@ -1477,7 +1619,7 @@ func TestResponses_AuditUpstreamErrorDoesNotRecordResponseBody(t *testing.T) {
 	audit := &recordingAudit{}
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, audit, nil, upstream.SSEPumpOptions{})
 
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-4.1-mini","input":"hi","stream":false}`)))
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
@@ -1528,15 +1670,15 @@ func TestResponses_QuotaCommitIncludesUpstreamChannelID(t *testing.T) {
 			},
 		},
 		models: map[string]store.ManagedModel{
-			"gpt-4.1-mini": {
+			"gpt-5.2": {
 				ID:       1,
-				PublicID: "gpt-4.1-mini",
+				PublicID: "gpt-5.2",
 				Status:   1,
 			},
 		},
 		bindings: map[string][]store.ChannelModelBinding{
-			"gpt-4.1-mini": {
-				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-4.1-mini", UpstreamModel: "gpt-4.1-mini", Status: 1},
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
 			},
 		},
 	}
@@ -1552,7 +1694,7 @@ func TestResponses_QuotaCommitIncludesUpstreamChannelID(t *testing.T) {
 	q := &fakeQuota{}
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, q, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-4.1-mini","input":"hi","stream":false}`)))
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
@@ -1604,15 +1746,15 @@ func TestResponses_QuotaCommitIgnoresUpstreamCostFields(t *testing.T) {
 			},
 		},
 		models: map[string]store.ManagedModel{
-			"gpt-4.1-mini": {
+			"gpt-5.2": {
 				ID:       1,
-				PublicID: "gpt-4.1-mini",
+				PublicID: "gpt-5.2",
 				Status:   1,
 			},
 		},
 		bindings: map[string][]store.ChannelModelBinding{
-			"gpt-4.1-mini": {
-				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-4.1-mini", UpstreamModel: "gpt-4.1-mini", Status: 1},
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
 			},
 		},
 	}
@@ -1629,7 +1771,7 @@ func TestResponses_QuotaCommitIgnoresUpstreamCostFields(t *testing.T) {
 	q := &fakeQuota{}
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, q, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-4.1-mini","input":"hi","stream":false}`)))
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
@@ -1682,16 +1824,16 @@ func TestResponses_GroupConstraintFiltersChannels(t *testing.T) {
 			},
 		},
 		models: map[string]store.ManagedModel{
-			"gpt-4.1-mini": {
+			"gpt-5.2": {
 				ID:       1,
-				PublicID: "gpt-4.1-mini",
+				PublicID: "gpt-5.2",
 				Status:   1,
 			},
 		},
 		bindings: map[string][]store.ChannelModelBinding{
-			"gpt-4.1-mini": {
-				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-4.1-mini", UpstreamModel: "gpt-4.1-mini", Status: 1},
-				{ID: 2, ChannelID: 2, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-4.1-mini", UpstreamModel: "gpt-4.1-mini", Status: 1},
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+				{ID: 2, ChannelID: 2, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
 			},
 		},
 	}
@@ -1700,7 +1842,7 @@ func TestResponses_GroupConstraintFiltersChannels(t *testing.T) {
 	doer := &fakeDoer{}
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
 
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-4.1-mini","input":"hi","stream":false}`)))
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", "k1")
 

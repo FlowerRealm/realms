@@ -58,7 +58,7 @@ func TestCodexCLI_E2E_FakeUpstream_Cache(t *testing.T) {
 
 	model := strings.TrimSpace(os.Getenv("REALMS_CI_MODEL"))
 	if model == "" {
-		model = "gpt-4.1-mini"
+		model = "gpt-5.2"
 	}
 
 	var upstreamCalls atomic.Int64

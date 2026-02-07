@@ -161,6 +161,28 @@ func TestExecutor_CodexOAuth_LeavesPathAndBody(t *testing.T) {
 	}
 }
 
+func TestApplyCodexHeaders_ReusesSessionIDFromSessionDashID(t *testing.T) {
+	h := make(http.Header)
+	h.Set("Session-Id", "sess-from-dash")
+
+	applyCodexHeaders(h, "")
+
+	if got := h.Get("Session_id"); got != "sess-from-dash" {
+		t.Fatalf("expected Session_id from Session-Id, got %q", got)
+	}
+}
+
+func TestApplyCodexHeaders_ReusesSessionIDFromXSessionID(t *testing.T) {
+	h := make(http.Header)
+	h.Set("X-Session-Id", "sess-from-x")
+
+	applyCodexHeaders(h, "")
+
+	if got := h.Get("Session_id"); got != "sess-from-x" {
+		t.Fatalf("expected Session_id from X-Session-Id, got %q", got)
+	}
+}
+
 func TestExecutor_Do_OpenAICompat_UnsupportedMaxOutputTokens_RewritesToMaxTokens(t *testing.T) {
 	var bodies []map[string]any
 

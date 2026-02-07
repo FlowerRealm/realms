@@ -36,7 +36,7 @@
 管理员为某个渠道配置可用模型集合，并为每个模型配置 upstream_model（可选）。
 
 #### 场景: 一个模型由多个渠道提供
-- `public_id=gpt-4.1-mini` 可同时绑定到多个 `openai_compatible` 渠道
+- `public_id=gpt-5.2` 可同时绑定到多个 `openai_compatible` 渠道
 - 请求到来时，只在这些渠道内做 failover
 
 ### 需求: 强制白名单 + alias 重写（数据面）

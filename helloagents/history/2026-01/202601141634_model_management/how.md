@@ -55,7 +55,7 @@ flowchart TD
 {
   "object": "list",
   "data": [
-    { "id": "gpt-4.1-mini", "object": "model", "created": 0, "owned_by": "openai_compatible" }
+    { "id": "gpt-5.2", "object": "model", "created": 0, "owned_by": "openai_compatible" }
   ]
 }
 ```

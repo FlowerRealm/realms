@@ -401,7 +401,7 @@ export function ModelsAdminPage() {
                   setCreateLookupNotice('');
                 }}
                 required
-                placeholder="例如：gpt-4.1-mini"
+                placeholder="例如：gpt-5.2"
               />
               <button
                 className="btn btn-outline-secondary"
@@ -615,7 +615,7 @@ export function ModelsAdminPage() {
               rows={10}
               value={importPricingJSON}
               onChange={(e) => setImportPricingJSON(e.target.value)}
-              placeholder='{"gpt-4.1-mini":{"input_usd_per_1m":0.15,"output_usd_per_1m":0.60,"cache_input_usd_per_1m":0.00,"cache_output_usd_per_1m":0.00}}'
+              placeholder='{"gpt-5.2":{"input_usd_per_1m":0.15,"output_usd_per_1m":0.60,"cache_input_usd_per_1m":0.00,"cache_output_usd_per_1m":0.00}}'
               required
             />
             <div className="form-text small text-muted">顶层支持对象或数组；支持 usd_per_1m 或 cost_per_token 格式。</div>

@@ -199,6 +199,9 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 
 	routeKey := extractRouteKeyFromPayload(payload)
 	if routeKey == "" {
+		routeKey = extractRouteKeyFromRawBody(rawBody)
+	}
+	if routeKey == "" {
 		routeKey = extractRouteKey(r)
 	}
 	routeKeyHash := h.sched.RouteKeyHash(routeKey)

@@ -127,8 +127,10 @@ Realms 本身不自带可用上游，启动后请先完成一次上游配置，�
 
 默认情况下，数据面只允许使用“已启用且已绑定到可用渠道”的模型。你需要：
 
-1) 在管理后台的模型目录（`/admin/models`）添加并启用一个模型（例如 `gpt-4.1-mini`）  
+1) 在管理后台的模型目录（`/admin/models`）添加并启用一个模型（默认推荐 `gpt-5.2`）  
 2) 在渠道的模型绑定页（`/admin/channels/{channel_id}/models`）把该模型绑定到你的 Channel（必要时配置 alias/upstream_model）
+
+> 文档中的默认示例模型统一为 `gpt-5.2`。
 
 > 自用模式下如果你只想“原样透传 model”，可以在「系统设置」开启 `feature_disable_models=true` 进入 model passthrough（会关闭 `GET /v1/models`；部分客户端可能依赖该接口）。
 
@@ -142,7 +144,7 @@ Realms 本身不自带可用上游，启动后请先完成一次上游配置，�
 curl "http://localhost:8080/v1/responses" \
   -H "Authorization: Bearer sk_..." \
   -H "Content-Type: application/json" \
-  -d '{"model":"gpt-4.1-mini","input":"hello"}'
+  -d '{"model":"gpt-5.2","input":"hello"}'
 ```
 
 ## 2) Web 控制台
@@ -200,7 +202,7 @@ $env:OPENAI_API_KEY = "sk_..."
 ```toml
 disable_response_storage = true
 model_provider = "realms"
-model = "gpt-4.1-mini"
+model = "gpt-5.2"
 
 [model_providers.realms]
 name = "Realms"
@@ -256,7 +258,7 @@ go test ./...
 需要在仓库 Secrets 中配置（占位名，勿提交真实密钥到仓库）：
 - `REALMS_CI_UPSTREAM_BASE_URL`：上游 OpenAI 兼容 `base_url`（例如 `https://api.openai.com` 或 `https://api.openai.com/v1`）
 - `REALMS_CI_UPSTREAM_API_KEY`：上游 API Key（例如 `sk-***`）
-- `REALMS_CI_MODEL`：用于 E2E 的模型名（例如 `gpt-4.1-mini`）
+- `REALMS_CI_MODEL`：用于 E2E 的模型名（例如 `gpt-5.2`）
 
 > 说明：E2E 同时包含一个“fake upstream”的用例，用于更稳定地覆盖 `cached_tokens` 的解析与落库；真实上游用例也会执行两次请求并要求第二次命中缓存（`cached_input_tokens > 0`）。
 
@@ -266,7 +268,7 @@ go test ./...
 npm install -g @openai/codex
 export REALMS_CI_UPSTREAM_BASE_URL="https://api.openai.com"
 export REALMS_CI_UPSTREAM_API_KEY="sk-***"
-export REALMS_CI_MODEL="gpt-4.1-mini"
+export REALMS_CI_MODEL="gpt-5.2"
 go test ./tests/e2e -run TestCodexCLI_E2E -count=1
 ```
 

@@ -45,7 +45,7 @@
     {
       "id": "s_...",
       "title": "历史会话",
-      "model": "gpt-4.1-mini",
+      "model": "gpt-5.2",
       "messages": [
         {"role": "user", "content": "你好"},
         {"role": "assistant", "content": "你好！"}

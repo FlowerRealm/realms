@@ -51,7 +51,7 @@
 1) Realms 简化格式（推荐给内部使用）：
 ```json
 {
-  "gpt-4.1-mini": {
+  "gpt-5.2": {
     "input_usd_per_1m": 0.15,
     "output_usd_per_1m": 0.60,
     "cache_input_usd_per_1m": 0.00,

@@ -51,7 +51,7 @@ const (
 	e2eTicketClosedSubject = "Playwright E2E Ticket (Closed)"
 
 	// Billing E2E seed（与 web/e2e/seed.ts 保持一致）
-	e2eModelPublicID = "gpt-4.1-mini"
+	e2eModelPublicID = "gpt-5.2"
 
 	e2eUserEmail           = "e2e-user@example.com"
 	e2eUserUsername        = "e2euser"

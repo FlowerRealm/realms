@@ -23,7 +23,7 @@ import (
 
 func TestBilling_PaygBalanceDebitsByTokensPricing_E2E(t *testing.T) {
 	const (
-		model = "gpt-4.1-mini"
+		model = "gpt-5.2"
 	)
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

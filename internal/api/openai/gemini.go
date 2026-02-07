@@ -173,7 +173,10 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 		cons.AllowGroups[g] = struct{}{}
 	}
 
-	routeKey := extractRouteKey(r)
+	routeKey := extractRouteKeyFromRawBody(body)
+	if routeKey == "" {
+		routeKey = extractRouteKey(r)
+	}
 	routeKeyHash := h.sched.RouteKeyHash(routeKey)
 
 	usageID := int64(0)

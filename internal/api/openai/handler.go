@@ -315,6 +315,9 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 
 	routeKey := extractRouteKeyFromPayload(payload)
 	if routeKey == "" {
+		routeKey = extractRouteKeyFromRawBody(rawBody)
+	}
+	if routeKey == "" {
 		routeKey = extractRouteKey(r)
 	}
 	routeKeyHash := h.sched.RouteKeyHash(routeKey)
@@ -933,6 +936,8 @@ func extractRouteKey(r *http.Request) string {
 		"Prompt-Cache-Key",
 		"X-Prompt-Cache-Key",
 		"X-RC-Route-Key",
+		"X-Session-Id",
+		"session-id",
 		"Conversation_id",
 		"Conversation-Id",
 		"conversation_id",
@@ -958,10 +963,49 @@ func extractRouteKeyFromPayload(payload map[string]any) string {
 	if payload == nil {
 		return ""
 	}
-	v, ok := payload["prompt_cache_key"]
+	for _, key := range []string{
+		"prompt_cache_key",
+		"session_id",
+		"conversation_id",
+		"previous_response_id",
+	} {
+		if s := normalizeRouteKey(payload[key]); s != "" {
+			return s
+		}
+	}
+
+	metaAny, ok := payload["metadata"]
 	if !ok {
 		return ""
 	}
+	meta, ok := metaAny.(map[string]any)
+	if !ok {
+		return ""
+	}
+	for _, key := range []string{
+		"prompt_cache_key",
+		"session_id",
+		"conversation_id",
+	} {
+		if s := normalizeRouteKey(meta[key]); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func extractRouteKeyFromRawBody(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ""
+	}
+	return extractRouteKeyFromPayload(payload)
+}
+
+func normalizeRouteKey(v any) string {
 	s, ok := v.(string)
 	if !ok {
 		return ""

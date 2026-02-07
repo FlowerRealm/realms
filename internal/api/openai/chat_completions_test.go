@@ -203,7 +203,7 @@ func TestChatCompletions_Stream_ForcesStreamOptionsIncludeUsage(t *testing.T) {
 		},
 		bindings: map[string][]store.ChannelModelBinding{
 			"m1": {
-				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "gpt-4.1-mini", Status: 1},
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "gpt-5.2", Status: 1},
 			},
 		},
 	}

@@ -21,7 +21,7 @@ import (
 )
 
 func TestBilling_InsufficientBalanceReturnsPaymentRequired_E2E(t *testing.T) {
-	const model = "gpt-4.1-mini"
+	const model = "gpt-5.2"
 
 	var upstreamCalls atomic.Int64
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

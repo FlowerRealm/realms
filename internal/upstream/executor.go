@@ -730,10 +730,20 @@ func applyCodexHeaders(h http.Header, accountID string) {
 	if strings.TrimSpace(h.Get("Version")) == "" {
 		h.Set("Version", "0.21.0")
 	}
-	if strings.TrimSpace(h.Get("Session_id")) == "" {
-		if v := newUUIDv4(); v != "" {
-			h.Set("Session_id", v)
+	sessionID := strings.TrimSpace(h.Get("Session_id"))
+	if sessionID == "" {
+		for _, key := range []string{"Session-Id", "X-Session-Id"} {
+			if v := strings.TrimSpace(h.Get(key)); v != "" {
+				sessionID = v
+				break
+			}
 		}
+	}
+	if sessionID == "" {
+		sessionID = newUUIDv4()
+	}
+	if sessionID != "" {
+		h.Set("Session_id", sessionID)
 	}
 
 	h.Set("User-Agent", "codex_cli_rs/0.50.0 (Mac OS 26.0.1; arm64) Apple_Terminal/464")

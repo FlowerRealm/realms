@@ -32,7 +32,7 @@
 
 - `REALMS_CI_UPSTREAM_BASE_URL`：上游 OpenAI 兼容 `base_url`（例如 `https://api.openai.com` 或 `https://api.openai.com/v1`）
 - `REALMS_CI_UPSTREAM_API_KEY`：上游 API Key（例如 `sk-***`）
-- `REALMS_CI_MODEL`：E2E 使用的模型名（例如 `gpt-4.1-mini`）
+- `REALMS_CI_MODEL`：E2E 使用的模型名（例如 `gpt-5.2`）
 
 ## E2E 用例（Codex CLI → Realms）
 
@@ -67,7 +67,7 @@ Codex CLI E2E（需要真实上游 secrets）：
 npm install -g @openai/codex
 export REALMS_CI_UPSTREAM_BASE_URL="https://api.openai.com"
 export REALMS_CI_UPSTREAM_API_KEY="sk-***"
-export REALMS_CI_MODEL="gpt-4.1-mini"
+export REALMS_CI_MODEL="gpt-5.2"
 go test ./tests/e2e -run TestCodexCLI_E2E -count=1
 ```
 
@@ -76,6 +76,6 @@ go test ./tests/e2e -run TestCodexCLI_E2E -count=1
 ```bash
 npm install -g @openai/codex
 export REALMS_CI_ENFORCE_E2E=1
-export REALMS_CI_MODEL="gpt-4.1-mini"
+export REALMS_CI_MODEL="gpt-5.2"
 go test ./tests/e2e -run TestCodexCLI_E2E_FakeUpstream_Cache -count=1
 ```

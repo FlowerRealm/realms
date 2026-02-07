@@ -80,7 +80,7 @@ flowchart TD
 
 #### [GET] /api/chat/models
 - **描述:** 返回“当前用户对话渠道”可用的模型列表（按 `managed_models` + `channel_models` 过滤）。
-- **响应:** `{"models":[{"id":"gpt-4.1-mini","owned_by":"realms"}]}`（结构可复用 `/v1/models` 的 item）
+- **响应:** `{"models":[{"id":"gpt-5.2","owned_by":"realms"}]}`（结构可复用 `/v1/models` 的 item）
 
 ### 管理侧（Admin，root）
 
