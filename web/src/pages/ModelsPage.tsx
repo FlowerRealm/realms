@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { listUserModelsDetail, type UserManagedModel } from '../api/models';
 import { formatUSDPlain } from '../format/money';
@@ -7,6 +7,93 @@ export function ModelsPage() {
   const [models, setModels] = useState<UserManagedModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
+  const [activeGroup, setActiveGroup] = useState<string>('default');
+
+  const groupedModels = useMemo(() => {
+    const buckets = new Map<string, UserManagedModel[]>();
+    for (const model of models) {
+      const groupName = (model.group_name || 'default').trim() || 'default';
+      const normalized: UserManagedModel = {
+        ...model,
+        group_name: groupName,
+        owned_by: (model.owned_by || '').trim() || 'unknown',
+      };
+      if (!buckets.has(groupName)) {
+        buckets.set(groupName, []);
+      }
+      buckets.get(groupName)!.push(normalized);
+    }
+
+    return Array.from(buckets.entries())
+      .map(([groupName, groupItems]) => {
+        const sortedModels = groupItems
+          .slice()
+          .sort((a, b) => {
+            const ownedA = (a.owned_by || 'unknown').toString();
+            const ownedB = (b.owned_by || 'unknown').toString();
+            if (ownedA === 'unknown' && ownedB !== 'unknown') return 1;
+            if (ownedB === 'unknown' && ownedA !== 'unknown') return -1;
+            if (ownedA !== ownedB) return ownedA.localeCompare(ownedB, 'en-US');
+            return a.public_id.localeCompare(b.public_id, 'en-US');
+          });
+        const ownerSet = new Set<string>();
+        for (const model of sortedModels) {
+          ownerSet.add((model.owned_by || 'unknown').trim() || 'unknown');
+        }
+        const owners = Array.from(ownerSet);
+        const displayName = owners.length === 1 ? owners[0] : `${owners[0]} +${owners.length - 1}`;
+        return {
+          groupName,
+          displayName,
+          owners,
+          models: sortedModels,
+        };
+      })
+      .sort((a, b) => {
+        if (a.groupName === 'default' && b.groupName !== 'default') return -1;
+        if (b.groupName === 'default' && a.groupName !== 'default') return 1;
+        return a.groupName.localeCompare(b.groupName, 'zh-CN');
+      });
+  }, [models]);
+
+  useEffect(() => {
+    if (groupedModels.length === 0) return;
+    if (groupedModels.some((g) => g.groupName === activeGroup)) return;
+    setActiveGroup(groupedModels[0].groupName);
+  }, [groupedModels, activeGroup]);
+
+  const currentGroup = useMemo(() => {
+    if (groupedModels.length === 0) return null;
+    return groupedModels.find((g) => g.groupName === activeGroup) || groupedModels[0];
+  }, [groupedModels, activeGroup]);
+
+  const currentGroupByOwner = useMemo(() => {
+    if (!currentGroup) return [];
+    const buckets = new Map<string, UserManagedModel[]>();
+    for (const model of currentGroup.models) {
+      const ownedBy = (model.owned_by || '').trim() || 'unknown';
+      if (!buckets.has(ownedBy)) {
+        buckets.set(ownedBy, []);
+      }
+      buckets.get(ownedBy)!.push({
+        ...model,
+        owned_by: ownedBy,
+      });
+    }
+
+    return Array.from(buckets.entries())
+      .map(([ownedBy, ownerModels]) => ({
+        ownedBy,
+        models: ownerModels
+          .slice()
+          .sort((a, b) => a.public_id.localeCompare(b.public_id, 'en-US')),
+      }))
+      .sort((a, b) => {
+        if (a.ownedBy === 'unknown' && b.ownedBy !== 'unknown') return 1;
+        if (b.ownedBy === 'unknown' && a.ownedBy !== 'unknown') return -1;
+        return a.ownedBy.localeCompare(b.ownedBy, 'en-US');
+      });
+  }, [currentGroup]);
 
   useEffect(() => {
     (async () => {
@@ -28,16 +115,7 @@ export function ModelsPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="card overflow-hidden">
-        <div className="card-header">
-          <div>
-            <h5 className="mb-0">
-              <span className="me-2 material-symbols-rounded">smart_toy</span>可用模型列表
-            </h5>
-            <small className="text-muted">由管理员维护（名单外模型将被拒绝）</small>
-          </div>
-        </div>
-
+      <div className="card overflow-hidden rlm-models-card">
         <div className="card-body p-0">
           {err ? (
             <div className="alert alert-danger m-3" role="alert">
@@ -53,72 +131,114 @@ export function ModelsPage() {
               暂无可用模型，请联系管理员配置模型目录。
             </div>
           ) : (
-            <div className="table-responsive">
-              <table className="table table-hover align-middle mb-0">
-                <thead className="table-light">
-                  <tr>
-                    <th className="ps-4">模型 ID</th>
-                    <th>归属方</th>
-                    <th>
-                      计费 <span className="text-muted small">（每 1M Token）</span>
-                    </th>
-                    <th className="text-end pe-4">状态</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {models.map((m) => (
-                    <tr key={m.public_id}>
-                      <td className="ps-4">
-                        <div className="d-flex align-items-center gap-2">
-                          {m.icon_url ? (
-                            <img
-                              className="rlm-model-icon"
-                              src={m.icon_url}
-                              alt={m.owned_by || 'realms'}
-                              title={m.owned_by || 'realms'}
-                              loading="lazy"
-                              onError={(e) => {
-                                (e.currentTarget as HTMLImageElement).style.display = 'none';
-                              }}
-                            />
-                          ) : null}
-                          <span className="font-monospace fw-medium text-primary">{m.public_id}</span>
-                        </div>
-                      </td>
-                      <td>
-                        {m.owned_by ? (
-                          <span className="badge bg-light text-dark border">{m.owned_by}</span>
-                        ) : (
-                          <span className="text-muted small">-</span>
-                        )}
-                      </td>
-                      <td className="text-muted small">
-                        <div className="d-flex flex-column gap-1">
-                          <div>
-                            <span className="text-muted">输入</span> <span className="me-1 material-symbols-rounded">attach_money</span>
-                            {formatUSDPlain(m.input_usd_per_1m)}
-                          </div>
-                          <div>
-                            <span className="text-muted">输出</span> <span className="me-1 material-symbols-rounded">attach_money</span>
-                            {formatUSDPlain(m.output_usd_per_1m)}
-                          </div>
-                          <div>
-                            <span className="text-muted">缓存输入</span> <span className="me-1 material-symbols-rounded">attach_money</span>
-                            {formatUSDPlain(m.cache_input_usd_per_1m)}
-                          </div>
-                          <div>
-                            <span className="text-muted">缓存输出</span> <span className="me-1 material-symbols-rounded">attach_money</span>
-                            {formatUSDPlain(m.cache_output_usd_per_1m)}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="text-end pe-4">
-                        <span className="badge bg-success-subtle text-success border border-success-subtle">可用</span>
-                      </td>
-                    </tr>
+            <div className="rlm-models-layout">
+              <aside className="rlm-models-groups">
+                <div className="rlm-models-groups-head">
+                  <span className="material-symbols-rounded">dataset</span> 归属方
+                </div>
+                <div className="rlm-models-group-list">
+                  {groupedModels.map((group) => (
+                    <button
+                      key={group.groupName}
+                      type="button"
+                      className={`rlm-models-group-item ${activeGroup === group.groupName ? 'active' : ''}`}
+                      onClick={() => setActiveGroup(group.groupName)}
+                    >
+                      <span className="rlm-models-group-name font-monospace">{group.displayName}</span>
+                      <span className="rlm-models-group-count">{group.models.length}</span>
+                    </button>
                   ))}
-                </tbody>
-              </table>
+                </div>
+              </aside>
+              <section className="rlm-models-main d-flex flex-column">
+                <div className="d-flex align-items-center justify-content-between p-3 border-bottom bg-white sticky-top" style={{ zIndex: 10 }}>
+                  <h5 className="mb-0 fs-6 fw-bold text-secondary">
+                    <span className="me-2 material-symbols-rounded align-middle">smart_toy</span>可用模型列表
+                  </h5>
+                  <span className="badge bg-secondary bg-opacity-10 text-secondary border">共 {currentGroup?.models.length || 0} 个模型</span>
+                </div>
+                
+                <div className="p-3 bg-light bg-opacity-25 flex-fill overflow-auto">
+                  {(currentGroup?.models || []).length === 0 ? (
+                    <div className="text-center py-5 text-muted">
+                      <span className="fs-1 d-block mb-3 material-symbols-rounded">folder_off</span>
+                      当前归属方视图暂无可用模型。
+                    </div>
+                  ) : (
+                    <div className="d-flex flex-column gap-2">
+                      {currentGroupByOwner.map((ownerGroup) => (
+                        <div key={`${currentGroup?.groupName}:${ownerGroup.ownedBy}`} className="d-flex flex-column gap-2">
+                          {ownerGroup.models.map((m) => (
+                            <div key={m.public_id} className="bg-white rounded border p-3 transition-all hover-shadow d-flex flex-wrap align-items-center justify-content-between gap-3">
+                              
+                              {/* Left: Identity */}
+                              <div className="d-flex align-items-center gap-3" style={{ minWidth: '200px' }}>
+                                {m.icon_url ? (
+                                  <img
+                                    className="rlm-model-icon rounded-3"
+                                    src={m.icon_url}
+                                    alt={m.owned_by || 'realms'}
+                                    title={m.owned_by || 'realms'}
+                                    loading="lazy"
+                                    style={{ width: '32px', height: '32px' }}
+                                    onError={(e) => {
+                                      (e.currentTarget as HTMLImageElement).style.display = 'none';
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="d-flex align-items-center justify-content-center bg-secondary bg-opacity-10 rounded-3 text-secondary" style={{ width: '32px', height: '32px' }}>
+                                    <span className="material-symbols-rounded" style={{ fontSize: '20px' }}>smart_toy</span>
+                                  </div>
+                                )}
+                                <div className="d-flex flex-column">
+                                  <span className="font-monospace fw-bold text-dark fs-6 text-break">{m.public_id}</span>
+                                  <span className="text-muted smaller" style={{ fontSize: '0.75rem' }}>{m.owned_by || 'Unknown'}</span>
+                                </div>
+                              </div>
+
+                              {/* Middle: Pricing */}
+                              <div className="d-flex flex-wrap align-items-center gap-3 text-secondary small flex-grow-1 justify-content-end justify-content-lg-center">
+                                {/* Normal Pricing */}
+                                <div className="d-flex align-items-center gap-3 px-2 py-1 bg-light rounded-pill border">
+                                  <div className="d-flex align-items-baseline gap-1">
+                                    <span className="text-muted smaller">In</span>
+                                    <span className="font-monospace fw-bold text-dark">${formatUSDPlain(m.input_usd_per_1m)}</span>
+                                  </div>
+                                  <div className="vr opacity-25"></div>
+                                  <div className="d-flex align-items-baseline gap-1">
+                                    <span className="text-muted smaller">Out</span>
+                                    <span className="font-monospace fw-bold text-dark">${formatUSDPlain(m.output_usd_per_1m)}</span>
+                                  </div>
+                                </div>
+
+                                {/* Cache Pricing */}
+                                {(parseFloat(m.cache_input_usd_per_1m) > 0 || parseFloat(m.cache_output_usd_per_1m) > 0) && (
+                                  <div className="d-flex align-items-center gap-3 px-2 py-1 bg-warning bg-opacity-10 rounded-pill border border-warning-subtle">
+                                    <div className="d-flex align-items-baseline gap-1">
+                                      <span className="text-warning-emphasis smaller">Cache In</span>
+                                      <span className="font-monospace fw-bold text-dark">${formatUSDPlain(m.cache_input_usd_per_1m)}</span>
+                                    </div>
+                                    <div className="vr opacity-25"></div>
+                                    <div className="d-flex align-items-baseline gap-1">
+                                      <span className="text-warning-emphasis smaller">Cache Out</span>
+                                      <span className="font-monospace fw-bold text-dark">${formatUSDPlain(m.cache_output_usd_per_1m)}</span>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Right: Status */}
+                              <div className="d-none d-md-block ps-2">
+                                <span className="badge bg-success bg-opacity-10 text-success border border-success-subtle rounded-pill px-3 py-2 fw-normal">可用</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </section>
             </div>
           )}
         </div>

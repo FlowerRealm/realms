@@ -133,12 +133,24 @@ func TestListEnabledManagedModelsWithBindingsForGroup_SQLite(t *testing.T) {
 	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, store.DefaultGroupPriceMultiplier, 5); err != nil {
 		t.Fatalf("CreateChannelGroup: %v", err)
 	}
-	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch1", "vip", 0, false, false, false, false)
+	vipChannelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch-vip", "vip", 0, false, false, false, false)
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel: %v", err)
 	}
+	defaultChannelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch-default", store.DefaultGroupName, 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel(default): %v", err)
+	}
+	if _, err := st.CreateChannelGroup(ctx, "admin", nil, 1, store.DefaultGroupPriceMultiplier, 5); err != nil {
+		t.Fatalf("CreateChannelGroup(admin): %v", err)
+	}
+	adminChannelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch-admin", "admin", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel(admin): %v", err)
+	}
 	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
-		PublicID:            "m1",
+		PublicID:            "m-vip",
+		GroupName:           "vip",
 		OwnedBy:             nil,
 		InputUSDPer1M:       decimal.NewFromInt(1),
 		OutputUSDPer1M:      decimal.NewFromInt(1),
@@ -146,22 +158,94 @@ func TestListEnabledManagedModelsWithBindingsForGroup_SQLite(t *testing.T) {
 		CacheOutputUSDPer1M: decimal.NewFromInt(0),
 		Status:              1,
 	}); err != nil {
-		t.Fatalf("CreateManagedModel: %v", err)
+		t.Fatalf("CreateManagedModel(vip): %v", err)
+	}
+	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
+		PublicID:            "m-default",
+		GroupName:           "",
+		OwnedBy:             nil,
+		InputUSDPer1M:       decimal.NewFromInt(1),
+		OutputUSDPer1M:      decimal.NewFromInt(1),
+		CacheInputUSDPer1M:  decimal.NewFromInt(0),
+		CacheOutputUSDPer1M: decimal.NewFromInt(0),
+		Status:              1,
+	}); err != nil {
+		t.Fatalf("CreateManagedModel(default): %v", err)
+	}
+	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
+		PublicID:            "m-vip-unbound",
+		GroupName:           "vip",
+		OwnedBy:             nil,
+		InputUSDPer1M:       decimal.NewFromInt(1),
+		OutputUSDPer1M:      decimal.NewFromInt(1),
+		CacheInputUSDPer1M:  decimal.NewFromInt(0),
+		CacheOutputUSDPer1M: decimal.NewFromInt(0),
+		Status:              1,
+	}); err != nil {
+		t.Fatalf("CreateManagedModel(vip-unbound): %v", err)
+	}
+	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
+		PublicID:            "m-vip-on-default-channel",
+		GroupName:           "vip",
+		OwnedBy:             nil,
+		InputUSDPer1M:       decimal.NewFromInt(1),
+		OutputUSDPer1M:      decimal.NewFromInt(1),
+		CacheInputUSDPer1M:  decimal.NewFromInt(0),
+		CacheOutputUSDPer1M: decimal.NewFromInt(0),
+		Status:              1,
+	}); err != nil {
+		t.Fatalf("CreateManagedModel(vip-on-default-channel): %v", err)
+	}
+	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
+		PublicID:            "m-admin",
+		GroupName:           "admin",
+		OwnedBy:             nil,
+		InputUSDPer1M:       decimal.NewFromInt(1),
+		OutputUSDPer1M:      decimal.NewFromInt(1),
+		CacheInputUSDPer1M:  decimal.NewFromInt(0),
+		CacheOutputUSDPer1M: decimal.NewFromInt(0),
+		Status:              1,
+	}); err != nil {
+		t.Fatalf("CreateManagedModel(admin): %v", err)
 	}
 	if _, err := st.CreateChannelModel(ctx, store.ChannelModelCreate{
-		ChannelID:     channelID,
-		PublicID:      "m1",
-		UpstreamModel: "m1",
+		ChannelID:     vipChannelID,
+		PublicID:      "m-vip",
+		UpstreamModel: "m-vip",
 		Status:        1,
 	}); err != nil {
-		t.Fatalf("CreateChannelModel: %v", err)
+		t.Fatalf("CreateChannelModel(vip): %v", err)
+	}
+	if _, err := st.CreateChannelModel(ctx, store.ChannelModelCreate{
+		ChannelID:     defaultChannelID,
+		PublicID:      "m-default",
+		UpstreamModel: "m-default",
+		Status:        1,
+	}); err != nil {
+		t.Fatalf("CreateChannelModel(default): %v", err)
+	}
+	if _, err := st.CreateChannelModel(ctx, store.ChannelModelCreate{
+		ChannelID:     defaultChannelID,
+		PublicID:      "m-vip-on-default-channel",
+		UpstreamModel: "m-vip-on-default-channel",
+		Status:        1,
+	}); err != nil {
+		t.Fatalf("CreateChannelModel(vip-on-default-channel): %v", err)
+	}
+	if _, err := st.CreateChannelModel(ctx, store.ChannelModelCreate{
+		ChannelID:     adminChannelID,
+		PublicID:      "m-admin",
+		UpstreamModel: "m-admin",
+		Status:        1,
+	}); err != nil {
+		t.Fatalf("CreateChannelModel(admin): %v", err)
 	}
 
 	ms, err := st.ListEnabledManagedModelsWithBindingsForGroup(ctx, "vip")
 	if err != nil {
 		t.Fatalf("ListEnabledManagedModelsWithBindingsForGroup: %v", err)
 	}
-	if len(ms) != 1 || ms[0].PublicID != "m1" {
+	if len(ms) != 1 || ms[0].PublicID != "m-vip" || ms[0].GroupName != "vip" {
 		t.Fatalf("unexpected managed models: %+v", ms)
 	}
 
@@ -169,7 +253,30 @@ func TestListEnabledManagedModelsWithBindingsForGroup_SQLite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEnabledManagedModelsWithBindingsForGroups: %v", err)
 	}
-	if len(ms2) != 1 || ms2[0].PublicID != "m1" {
+	if len(ms2) != 1 || ms2[0].PublicID != "m-vip" || ms2[0].GroupName != "vip" {
 		t.Fatalf("unexpected managed models (groups): %+v", ms2)
+	}
+
+	ms3, err := st.ListEnabledManagedModelsWithBindingsForGroups(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListEnabledManagedModelsWithBindingsForGroups(default): %v", err)
+	}
+	if len(ms3) != 1 || ms3[0].PublicID != "m-default" || ms3[0].GroupName != store.DefaultGroupName {
+		t.Fatalf("unexpected managed models (default groups): %+v", ms3)
+	}
+
+	ms4, err := st.ListEnabledManagedModelsWithBindingsForGroups(ctx, []string{"vip", store.DefaultGroupName})
+	if err != nil {
+		t.Fatalf("ListEnabledManagedModelsWithBindingsForGroups(vip+default): %v", err)
+	}
+	got := make(map[string]string, len(ms4))
+	for _, item := range ms4 {
+		got[item.PublicID] = item.GroupName
+	}
+	if len(got) != 3 || got["m-vip"] != "vip" || got["m-default"] != store.DefaultGroupName || got["m-vip-on-default-channel"] != "vip" {
+		t.Fatalf("unexpected managed models (vip+default): %+v", ms4)
+	}
+	if _, ok := got["m-admin"]; ok {
+		t.Fatalf("unexpected managed model leaked from foreign group: %+v", ms4)
 	}
 }

@@ -18,6 +18,7 @@ import (
 type managedModelView struct {
 	ID                  int64           `json:"id"`
 	PublicID            string          `json:"public_id"`
+	GroupName           string          `json:"group_name"`
 	OwnedBy             *string         `json:"owned_by,omitempty"`
 	InputUSDPer1M       decimal.Decimal `json:"input_usd_per_1m"`
 	OutputUSDPer1M      decimal.Decimal `json:"output_usd_per_1m"`
@@ -73,6 +74,7 @@ func setModelAPIRoutes(r gin.IRoutes, opts Options) {
 type userManagedModelView struct {
 	ID                  int64           `json:"id"`
 	PublicID            string          `json:"public_id"`
+	GroupName           string          `json:"group_name"`
 	OwnedBy             *string         `json:"owned_by,omitempty"`
 	InputUSDPer1M       decimal.Decimal `json:"input_usd_per_1m"`
 	OutputUSDPer1M      decimal.Decimal `json:"output_usd_per_1m"`
@@ -196,6 +198,7 @@ func userModelsDetailHandler(opts Options) gin.HandlerFunc {
 			out = append(out, userManagedModelView{
 				ID:                  m.ID,
 				PublicID:            m.PublicID,
+				GroupName:           m.GroupName,
 				OwnedBy:             m.OwnedBy,
 				InputUSDPer1M:       m.InputUSDPer1M,
 				OutputUSDPer1M:      m.OutputUSDPer1M,
@@ -214,6 +217,17 @@ func derefString(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+func normalizeManagedModelGroupNameInput(groupName *string) string {
+	if groupName == nil {
+		return store.DefaultGroupName
+	}
+	group := strings.TrimSpace(*groupName)
+	if group == "" {
+		return store.DefaultGroupName
+	}
+	return group
 }
 
 func adminListManagedModelsHandler(opts Options) gin.HandlerFunc {
@@ -268,6 +282,7 @@ func adminListManagedModelsHandler(opts Options) gin.HandlerFunc {
 			items = append(items, managedModelView{
 				ID:                  m.ID,
 				PublicID:            m.PublicID,
+				GroupName:           m.GroupName,
 				OwnedBy:             m.OwnedBy,
 				InputUSDPer1M:       m.InputUSDPer1M,
 				OutputUSDPer1M:      m.OutputUSDPer1M,
@@ -314,6 +329,7 @@ func adminGetManagedModelHandler(opts Options) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": managedModelView{
 			ID:                  m.ID,
 			PublicID:            m.PublicID,
+			GroupName:           m.GroupName,
 			OwnedBy:             m.OwnedBy,
 			InputUSDPer1M:       m.InputUSDPer1M,
 			OutputUSDPer1M:      m.OutputUSDPer1M,
@@ -334,6 +350,7 @@ func adminGetManagedModelHandler(opts Options) gin.HandlerFunc {
 func adminCreateManagedModelHandler(opts Options) gin.HandlerFunc {
 	type reqBody struct {
 		PublicID            string          `json:"public_id"`
+		GroupName           *string         `json:"group_name"`
 		OwnedBy             *string         `json:"owned_by"`
 		InputUSDPer1M       decimal.Decimal `json:"input_usd_per_1m"`
 		OutputUSDPer1M      decimal.Decimal `json:"output_usd_per_1m"`
@@ -363,6 +380,7 @@ func adminCreateManagedModelHandler(opts Options) gin.HandlerFunc {
 
 		id, err := opts.Store.CreateManagedModel(c.Request.Context(), store.ManagedModelCreate{
 			PublicID:            publicID,
+			GroupName:           normalizeManagedModelGroupNameInput(req.GroupName),
 			OwnedBy:             req.OwnedBy,
 			InputUSDPer1M:       req.InputUSDPer1M,
 			OutputUSDPer1M:      req.OutputUSDPer1M,
@@ -382,6 +400,7 @@ func adminUpdateManagedModelHandler(opts Options) gin.HandlerFunc {
 	type reqBody struct {
 		ID                  int64           `json:"id"`
 		PublicID            string          `json:"public_id"`
+		GroupName           *string         `json:"group_name"`
 		OwnedBy             *string         `json:"owned_by"`
 		InputUSDPer1M       decimal.Decimal `json:"input_usd_per_1m"`
 		OutputUSDPer1M      decimal.Decimal `json:"output_usd_per_1m"`
@@ -418,9 +437,15 @@ func adminUpdateManagedModelHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
+		groupName := current.GroupName
+		if req.GroupName != nil {
+			groupName = normalizeManagedModelGroupNameInput(req.GroupName)
+		}
+
 		up := store.ManagedModelUpdate{
 			ID:                  req.ID,
 			PublicID:            strings.TrimSpace(req.PublicID),
+			GroupName:           groupName,
 			OwnedBy:             req.OwnedBy,
 			InputUSDPer1M:       req.InputUSDPer1M,
 			OutputUSDPer1M:      req.OutputUSDPer1M,
@@ -430,6 +455,7 @@ func adminUpdateManagedModelHandler(opts Options) gin.HandlerFunc {
 		}
 		if statusOnly {
 			up.PublicID = current.PublicID
+			up.GroupName = current.GroupName
 			up.OwnedBy = current.OwnedBy
 			up.InputUSDPer1M = current.InputUSDPer1M
 			up.OutputUSDPer1M = current.OutputUSDPer1M

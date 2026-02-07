@@ -8,6 +8,15 @@
 
 ### 新增
 
+- **[Models/API/Web]**: 模型目录新增 `group_name` 分组能力，并打通“管理端可配置 + 用户端按组可见 + 页面分组/归属方二级展示”全链路；`/api/user/models/detail` 与 `/api/models/` 返回 `group_name`，admin create/update 支持设置分组（空值归一到 `default`）；SQLite schema + MySQL migration 新增字段与索引，导入导出支持 `group_name`，并补充组过滤与默认回退测试（`internal/store/managed_models.go`、`internal/store/schema_sqlite.sql`、`internal/store/migrations/0051_managed_models_group_name.sql`、`router/models_api_routes.go`、`web/src/pages/ModelsPage.tsx`、`web/src/pages/admin/ModelsAdminPage.tsx`、`tests/store/sqlite_grouping_test.go`）
+  - 方案: [202602060620_model-visibility-grouping](plan/202602060620_model-visibility-grouping/)
+
+- **[Web/Frontend]**: 用户模型页视觉重做，对齐 `new-api` 交互布局：左侧分组选择、右侧模型单行表格（每个模型仅一行），并优化分组选中态、表头层级与行 hover 反馈；使用 Playwright 登录 `pwadmin` 账号完成 `/models` 页面实测与截图核对（`web/src/pages/ModelsPage.tsx`、`web/src/index.css`、`output/playwright/models-newapi-style-default.png`、`output/playwright/models-newapi-style-selected.png`）
+  - 方案: [202602060620_model-visibility-grouping](plan/202602060620_model-visibility-grouping/)
+
+- **[Models/Web/Test]**: 明确并固化模型可见性规则：用户仅可见其所属用户组（`group_name`）内模型；前端展示改为“左侧归属方显示（不暴露 `default` 等原始组名）+ 右侧按 `owned_by` 二级归属方分组”，每个模型保持单行；补充 SQLite 回归测试覆盖多组查询不泄露异组模型，并用 Playwright 截图验证（`internal/store/managed_models.go`、`tests/store/sqlite_grouping_test.go`、`web/src/pages/ModelsPage.tsx`、`web/src/index.css`、`output/playwright/models-owner-grouping-default.png`、`output/playwright/models-owner-grouping-selected.png`、`output/playwright/models-owner-display-name.png`）
+  - 方案: [202602060620_model-visibility-grouping](plan/202602060620_model-visibility-grouping/)
+
 - **[CI/Web]**: 新增 Playwright Web E2E（Chromium Desktop）：通过 `cmd/realms-e2e` 自动创建临时 SQLite + seed 数据，自洽覆盖 SPA 路由，并在 CI 增加 `e2e-web` job（`.github/workflows/ci.yml`、`cmd/realms-e2e/main.go`、`web/playwright.config.ts`、`web/e2e/*`）
 
 - **[Web/E2E]**: 新增用量页隐私回归：用户侧 `/usage` 明细不展示上游渠道信息（`web/e2e/usage.spec.ts`）
@@ -57,6 +66,8 @@
   - 方案: [202601292030_packaging-deb-exe](plan/202601292030_packaging-deb-exe/)
 
 ### 修复
+
+- **[Router/Dev]**: 修复 `make dev`（Gin Debug + gzip NoRoute）下 API 未命中路由时的日志噪声：`/api/*` 的 SPA 兜底由 `c.Status(404)` 改为 `c.AbortWithStatus(404)`，避免 `serveError` 在 gzip writer 关闭后再次写入触发 `flate: closed writer`（`router/web_spa_routes.go`、`router/web_spa_routes_test.go`）
 
 - **[Usage/Privacy]**: 用户侧用量“请求明细”彻底移除上游标识与上游明细 body：`/api/usage/events` 不再返回 `upstream_endpoint_id/upstream_credential_id`，`/api/usage/events/:event_id/detail` 不下发 `upstream_request_body/upstream_response_body`；前端在对应区域提示“仅管理员可查看”，并增强 Playwright 回归覆盖失败请求（`router/usage_api_routes.go`、`web/src/pages/UsagePage.tsx`、`cmd/realms-e2e/main.go`、`web/e2e/usage.spec.ts`、`router/usage_api_routes_test.go`）
   - 方案: [202602042228_usage-privacy-hide-upstream-detail](archive/2026-02/202602042228_usage-privacy-hide-upstream-detail/)

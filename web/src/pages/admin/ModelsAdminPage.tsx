@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { BootstrapModal } from '../../components/BootstrapModal';
 import { closeModalById } from '../../components/modal';
+import { listAdminChannelGroups } from '../../api/admin/channelGroups';
 import {
   createManagedModelAdmin,
   deleteManagedModelAdmin,
@@ -20,6 +21,7 @@ function statusBadge(status: number): { cls: string; label: string } {
 
 type ModelForm = {
   public_id: string;
+  group_name: string;
   owned_by: string;
   input_usd_per_1m: string;
   output_usd_per_1m: string;
@@ -31,6 +33,7 @@ type ModelForm = {
 function modelToForm(m: ManagedModel): ModelForm {
   return {
     public_id: m.public_id || '',
+    group_name: (m.group_name || 'default').toString(),
     owned_by: (m.owned_by || '').toString(),
     input_usd_per_1m: m.input_usd_per_1m || '0',
     output_usd_per_1m: m.output_usd_per_1m || '0',
@@ -42,6 +45,7 @@ function modelToForm(m: ManagedModel): ModelForm {
 
 export function ModelsAdminPage() {
   const [models, setModels] = useState<ManagedModel[]>([]);
+  const [groupNames, setGroupNames] = useState<string[]>(['default']);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
@@ -59,6 +63,7 @@ export function ModelsAdminPage() {
 
   const [createForm, setCreateForm] = useState<ModelForm>({
     public_id: '',
+    group_name: 'default',
     owned_by: '',
     input_usd_per_1m: '5',
     output_usd_per_1m: '15',
@@ -70,6 +75,7 @@ export function ModelsAdminPage() {
   const [editing, setEditing] = useState<ManagedModel | null>(null);
   const [editForm, setEditForm] = useState<ModelForm>({
     public_id: '',
+    group_name: 'default',
     owned_by: '',
     input_usd_per_1m: '0',
     output_usd_per_1m: '0',
@@ -79,6 +85,25 @@ export function ModelsAdminPage() {
   });
 
   const enabledCount = useMemo(() => models.filter((m) => m.status === 1).length, [models]);
+  const selectableGroups = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    const append = (name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed || seen.has(trimmed)) return;
+      seen.add(trimmed);
+      out.push(trimmed);
+    };
+    append('default');
+    groupNames.forEach((name) => append(name));
+    append(createForm.group_name);
+    append(editForm.group_name);
+    return out.sort((a, b) => {
+      if (a === 'default') return -1;
+      if (b === 'default') return 1;
+      return a.localeCompare(b, 'zh-CN');
+    });
+  }, [groupNames, createForm.group_name, editForm.group_name]);
 
   async function refresh() {
     setErr('');
@@ -96,8 +121,20 @@ export function ModelsAdminPage() {
     }
   }
 
+  async function refreshGroupNames() {
+    try {
+      const res = await listAdminChannelGroups();
+      if (!res.success) return;
+      const names = (res.data || []).map((g) => (g?.name || '').trim()).filter((name) => name.length > 0);
+      setGroupNames(names);
+    } catch {
+      setGroupNames((prev) => (prev.length ? prev : ['default']));
+    }
+  }
+
   useEffect(() => {
     void refresh();
+    void refreshGroupNames();
   }, []);
 
   useEffect(() => {
@@ -159,6 +196,7 @@ export function ModelsAdminPage() {
                 <thead className="table-light">
                   <tr>
                     <th className="ps-4">对外 ID</th>
+                    <th>模型分组</th>
                     <th>归属方</th>
                     <th>
                       计费 <span className="text-muted small">（每 1M Token）</span>
@@ -170,13 +208,13 @@ export function ModelsAdminPage() {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={5} className="text-center py-5 text-muted">
+                      <td colSpan={6} className="text-center py-5 text-muted">
                         加载中…
                       </td>
                     </tr>
                   ) : models.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="text-center py-5 text-muted">
+                      <td colSpan={6} className="text-center py-5 text-muted">
                         <span className="fs-1 d-block mb-3 material-symbols-rounded">inbox</span>
                         暂无模型，请先新增模型后再对外提供服务。
                       </td>
@@ -202,6 +240,9 @@ export function ModelsAdminPage() {
                               ) : null}
                               <span className="font-monospace">{m.public_id}</span>
                             </div>
+                          </td>
+                          <td>
+                            <span className="badge rounded-pill bg-info bg-opacity-10 text-info px-2">{(m.group_name || 'default').toString()}</span>
                           </td>
                           <td>
                             {m.owned_by ? <span className="badge rounded-pill bg-light text-secondary border px-2">{m.owned_by}</span> : <span className="text-muted small">-</span>}
@@ -306,6 +347,7 @@ export function ModelsAdminPage() {
         onHidden={() => {
           setCreateForm({
             public_id: '',
+            group_name: 'default',
             owned_by: '',
             input_usd_per_1m: '5',
             output_usd_per_1m: '15',
@@ -328,6 +370,7 @@ export function ModelsAdminPage() {
             try {
               const res = await createManagedModelAdmin({
                 public_id: createForm.public_id.trim(),
+                group_name: createForm.group_name.trim() || 'default',
                 owned_by: createForm.owned_by.trim() ? createForm.owned_by.trim() : null,
                 input_usd_per_1m: createForm.input_usd_per_1m,
                 output_usd_per_1m: createForm.output_usd_per_1m,
@@ -432,6 +475,16 @@ export function ModelsAdminPage() {
             <select className="form-select" value={createForm.status} onChange={(e) => setCreateForm((p) => ({ ...p, status: Number.parseInt(e.target.value, 10) || 0 }))}>
               <option value={1}>启用</option>
               <option value={0}>禁用</option>
+            </select>
+          </div>
+          <div className="col-md-4">
+            <label className="form-label">模型分组（group_name）</label>
+            <select className="form-select" value={createForm.group_name} onChange={(e) => setCreateForm((p) => ({ ...p, group_name: e.target.value }))}>
+              {selectableGroups.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
             </select>
           </div>
           <div className="col-12">
@@ -692,6 +745,7 @@ export function ModelsAdminPage() {
                 const res = await updateManagedModelAdmin({
                   ...editing,
                   public_id: editForm.public_id.trim(),
+                  group_name: editForm.group_name.trim() || 'default',
                   owned_by: editForm.owned_by.trim() ? editForm.owned_by.trim() : null,
                   input_usd_per_1m: editForm.input_usd_per_1m,
                   output_usd_per_1m: editForm.output_usd_per_1m,
@@ -719,6 +773,16 @@ export function ModelsAdminPage() {
               <select className="form-select" value={editForm.status} onChange={(e) => setEditForm((p) => ({ ...p, status: Number.parseInt(e.target.value, 10) || 0 }))}>
                 <option value={1}>启用</option>
                 <option value={0}>禁用</option>
+              </select>
+            </div>
+            <div className="col-md-4">
+              <label className="form-label">模型分组（group_name）</label>
+              <select className="form-select" value={editForm.group_name} onChange={(e) => setEditForm((p) => ({ ...p, group_name: e.target.value }))}>
+                {selectableGroups.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
               </select>
             </div>
             <div className="col-12">

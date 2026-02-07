@@ -420,6 +420,7 @@ CREATE INDEX IF NOT EXISTS `idx_parent_order` ON `channel_group_members` (`paren
 CREATE TABLE IF NOT EXISTS `managed_models` (
   `id` INTEGER PRIMARY KEY AUTOINCREMENT,
   `public_id` TEXT NOT NULL,
+  `group_name` TEXT NOT NULL DEFAULT 'default',
   `upstream_model` TEXT NULL,
   `owned_by` TEXT NULL,
   `input_usd_per_1m` DECIMAL(20,6) NOT NULL DEFAULT 5.000000,
@@ -431,6 +432,7 @@ CREATE TABLE IF NOT EXISTS `managed_models` (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS `uk_managed_models_public_id` ON `managed_models` (`public_id`);
 CREATE INDEX IF NOT EXISTS `idx_managed_models_status` ON `managed_models` (`status`);
+CREATE INDEX IF NOT EXISTS `idx_managed_models_status_group` ON `managed_models` (`status`, `group_name`);
 
 CREATE TABLE IF NOT EXISTS `channel_models` (
   `id` INTEGER PRIMARY KEY AUTOINCREMENT,

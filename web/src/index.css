@@ -102,6 +102,159 @@ tr:hover .rlm-model-icon {
   filter: grayscale(0);
 }
 
+.rlm-models-card {
+  overflow: hidden;
+}
+.rlm-models-total-badge {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.rlm-models-layout {
+  display: grid;
+  grid-template-columns: 244px minmax(0, 1fr);
+  min-height: 560px;
+}
+.rlm-models-groups {
+  border-right: 1px solid rgba(0, 0, 0, 0.06);
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.95) 0%, rgba(241, 245, 249, 0.72) 100%);
+}
+.rlm-models-groups-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.9rem 1rem;
+  font-weight: 600;
+  color: #475569;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+.rlm-models-groups-head .material-symbols-rounded {
+  font-size: 1.05rem;
+  color: #8b5cf6;
+}
+.rlm-models-group-list {
+  padding: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.rlm-models-group-item {
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #475569;
+  padding: 0.55rem 0.7rem;
+  border-radius: 0.65rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  transition: all 0.18s ease-in-out;
+  font-size: 0.88rem;
+}
+.rlm-models-group-item:hover {
+  background: rgba(139, 92, 246, 0.08);
+  border-color: rgba(139, 92, 246, 0.14);
+  color: #6d28d9;
+}
+.rlm-models-group-item.active {
+  background: rgba(139, 92, 246, 0.14);
+  border-color: rgba(139, 92, 246, 0.25);
+  color: #5b21b6;
+  box-shadow: inset 2px 0 0 #8b5cf6;
+}
+.rlm-models-group-name {
+  max-width: 168px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rlm-models-group-count {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(139, 92, 246, 0.24);
+  color: #6d28d9;
+  font-size: 0.74rem;
+  padding: 0.1rem 0.45rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.rlm-models-group-item.active .rlm-models-group-count {
+  background: rgba(109, 40, 217, 0.12);
+  border-color: rgba(109, 40, 217, 0.35);
+}
+.rlm-models-main {
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.52);
+}
+.rlm-models-main-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.88) 0%, rgba(255, 255, 255, 0.66) 100%);
+}
+.rlm-models-main-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.rlm-models-main-title code {
+  max-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rlm-models-table-wrap {
+  min-height: 0;
+}
+.rlm-models-table th {
+  padding-top: 0.72rem;
+  padding-bottom: 0.72rem;
+}
+.rlm-models-table td {
+  padding-top: 0.68rem;
+  padding-bottom: 0.68rem;
+}
+.rlm-owner-sections {
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.rlm-owner-section {
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 0.65rem;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.68);
+}
+.rlm-owner-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.9) 0%, rgba(255, 255, 255, 0.7) 100%);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+.rlm-owner-badge {
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  font-weight: 600;
+}
+.rlm-models-table tbody tr {
+  transition: background-color 0.16s ease-in-out;
+}
+.rlm-models-table tbody tr:hover {
+  background-color: rgba(139, 92, 246, 0.045);
+}
+.rlm-model-pricing {
+  color: #64748b;
+  font-size: 0.81rem;
+}
+
 /* Animations */
 @keyframes fadeIn {
   from {
@@ -514,5 +667,28 @@ h6,
   }
   .content-scrollable {
     padding: 1rem;
+  }
+  .rlm-models-layout {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+  .rlm-models-groups {
+    border-right: 0;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  }
+  .rlm-models-group-list {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 0.65rem;
+    gap: 0.5rem;
+  }
+  .rlm-models-group-item {
+    width: auto;
+    min-width: 148px;
+    flex: 0 0 auto;
+  }
+  .rlm-models-main-title code {
+    max-width: 170px;
   }
 }

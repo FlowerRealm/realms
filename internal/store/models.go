@@ -242,6 +242,7 @@ type OAuthAppToken struct {
 type ManagedModel struct {
 	ID                  int64
 	PublicID            string
+	GroupName           string
 	UpstreamModel       *string
 	OwnedBy             *string
 	InputUSDPer1M       decimal.Decimal

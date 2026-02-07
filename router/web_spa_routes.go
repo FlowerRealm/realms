@@ -38,7 +38,7 @@ func setWebSPARoutes(r *gin.Engine, opts Options) {
 
 	r.NoRoute(func(c *gin.Context) {
 		if isAPIPrefix(c.Request.URL.Path) {
-			c.Status(http.StatusNotFound)
+			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}
 		c.Header("Cache-Control", "no-cache")

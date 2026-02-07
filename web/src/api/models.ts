@@ -6,6 +6,7 @@ export type DashboardModels = Record<string, string[]>;
 export type ManagedModel = {
   id: number;
   public_id: string;
+  group_name: string;
   owned_by?: string | null;
   input_usd_per_1m: string;
   output_usd_per_1m: string;
@@ -18,6 +19,7 @@ export type ManagedModel = {
 export type UserManagedModel = {
   id: number;
   public_id: string;
+  group_name: string;
   owned_by?: string | null;
   input_usd_per_1m: string;
   output_usd_per_1m: string;

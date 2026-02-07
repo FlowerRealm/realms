@@ -14,6 +14,7 @@ import (
 
 type ManagedModelCreate struct {
 	PublicID            string
+	GroupName           string
 	OwnedBy             *string
 	InputUSDPer1M       decimal.Decimal
 	OutputUSDPer1M      decimal.Decimal
@@ -25,6 +26,7 @@ type ManagedModelCreate struct {
 type ManagedModelUpdate struct {
 	ID                  int64
 	PublicID            string
+	GroupName           string
 	OwnedBy             *string
 	InputUSDPer1M       decimal.Decimal
 	OutputUSDPer1M      decimal.Decimal
@@ -44,9 +46,17 @@ func normalizeManagedModelPricing(m *ManagedModel) error {
 	return nil
 }
 
+func normalizeManagedModelGroupName(groupName string) string {
+	groupName = strings.TrimSpace(groupName)
+	if groupName == "" {
+		return DefaultGroupName
+	}
+	return groupName
+}
+
 func (s *Store) ListManagedModels(ctx context.Context) ([]ManagedModel, error) {
 	rows, err := s.db.QueryContext(ctx, `
-	SELECT id, public_id, upstream_model, owned_by,
+	SELECT id, public_id, group_name, upstream_model, owned_by,
 	       input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m,
 	       status, created_at
 	FROM managed_models
@@ -60,14 +70,16 @@ func (s *Store) ListManagedModels(ctx context.Context) ([]ManagedModel, error) {
 	var out []ManagedModel
 	for rows.Next() {
 		var m ManagedModel
+		var groupName sql.NullString
 		var upstreamModel sql.NullString
 		var ownedBy sql.NullString
-		if err := rows.Scan(&m.ID, &m.PublicID, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.PublicID, &groupName, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt); err != nil {
 			return nil, fmt.Errorf("扫描 managed_models 失败: %w", err)
 		}
 		if err := normalizeManagedModelPricing(&m); err != nil {
 			return nil, err
 		}
+		m.GroupName = normalizeManagedModelGroupName(groupName.String)
 		if upstreamModel.Valid {
 			v := upstreamModel.String
 			m.UpstreamModel = &v
@@ -86,7 +98,7 @@ func (s *Store) ListManagedModels(ctx context.Context) ([]ManagedModel, error) {
 
 func (s *Store) ListEnabledManagedModels(ctx context.Context) ([]ManagedModel, error) {
 	rows, err := s.db.QueryContext(ctx, `
-	SELECT id, public_id, upstream_model, owned_by,
+	SELECT id, public_id, group_name, upstream_model, owned_by,
 	       input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m,
 	       status, created_at
 	FROM managed_models
@@ -101,14 +113,16 @@ func (s *Store) ListEnabledManagedModels(ctx context.Context) ([]ManagedModel, e
 	var out []ManagedModel
 	for rows.Next() {
 		var m ManagedModel
+		var groupName sql.NullString
 		var upstreamModel sql.NullString
 		var ownedBy sql.NullString
-		if err := rows.Scan(&m.ID, &m.PublicID, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.PublicID, &groupName, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt); err != nil {
 			return nil, fmt.Errorf("扫描 managed_models 失败: %w", err)
 		}
 		if err := normalizeManagedModelPricing(&m); err != nil {
 			return nil, err
 		}
+		m.GroupName = normalizeManagedModelGroupName(groupName.String)
 		if upstreamModel.Valid {
 			v := upstreamModel.String
 			m.UpstreamModel = &v
@@ -127,7 +141,7 @@ func (s *Store) ListEnabledManagedModels(ctx context.Context) ([]ManagedModel, e
 
 func (s *Store) ListEnabledManagedModelsWithBindings(ctx context.Context) ([]ManagedModel, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT DISTINCT m.id, m.public_id, m.upstream_model, m.owned_by,
+SELECT DISTINCT m.id, m.public_id, m.group_name, m.upstream_model, m.owned_by,
        m.input_usd_per_1m, m.output_usd_per_1m, m.cache_input_usd_per_1m, m.cache_output_usd_per_1m,
        m.status, m.created_at
 FROM managed_models m
@@ -144,14 +158,16 @@ ORDER BY m.id DESC
 	var out []ManagedModel
 	for rows.Next() {
 		var m ManagedModel
+		var groupName sql.NullString
 		var upstreamModel sql.NullString
 		var ownedBy sql.NullString
-		if err := rows.Scan(&m.ID, &m.PublicID, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.PublicID, &groupName, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt); err != nil {
 			return nil, fmt.Errorf("扫描可用 managed_models 失败: %w", err)
 		}
 		if err := normalizeManagedModelPricing(&m); err != nil {
 			return nil, err
 		}
+		m.GroupName = normalizeManagedModelGroupName(groupName.String)
 		if upstreamModel.Valid {
 			v := upstreamModel.String
 			m.UpstreamModel = &v
@@ -173,7 +189,7 @@ func (s *Store) ListEnabledManagedModelsWithBindingsForChannel(ctx context.Conte
 		return nil, errors.New("channel_id 不能为空")
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT DISTINCT m.id, m.public_id, m.upstream_model, m.owned_by,
+SELECT DISTINCT m.id, m.public_id, m.group_name, m.upstream_model, m.owned_by,
        m.input_usd_per_1m, m.output_usd_per_1m, m.cache_input_usd_per_1m, m.cache_output_usd_per_1m,
        m.status, m.created_at
 FROM managed_models m
@@ -190,14 +206,16 @@ ORDER BY m.id DESC
 	var out []ManagedModel
 	for rows.Next() {
 		var m ManagedModel
+		var groupName sql.NullString
 		var upstreamModel sql.NullString
 		var ownedBy sql.NullString
-		if err := rows.Scan(&m.ID, &m.PublicID, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.PublicID, &groupName, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt); err != nil {
 			return nil, fmt.Errorf("扫描可用 managed_models 失败: %w", err)
 		}
 		if err := normalizeManagedModelPricing(&m); err != nil {
 			return nil, err
 		}
+		m.GroupName = normalizeManagedModelGroupName(groupName.String)
 		if upstreamModel.Valid {
 			v := upstreamModel.String
 			m.UpstreamModel = &v
@@ -221,29 +239,33 @@ func (s *Store) ListEnabledManagedModelsWithBindingsForGroup(ctx context.Context
 	}
 	groupsCol := "`groups`"
 	query := fmt.Sprintf(`
-SELECT DISTINCT m.id, m.public_id, m.upstream_model, m.owned_by,
+SELECT DISTINCT m.id, m.public_id, m.group_name, m.upstream_model, m.owned_by,
        m.input_usd_per_1m, m.output_usd_per_1m, m.cache_input_usd_per_1m, m.cache_output_usd_per_1m,
        m.status, m.created_at
 FROM managed_models m
 JOIN channel_models cm ON cm.public_id=m.public_id AND cm.status=1
 JOIN upstream_channels ch ON ch.id=cm.channel_id AND ch.status=1
-WHERE m.status=1 AND FIND_IN_SET(?, ch.%s) > 0
+WHERE m.status=1
+  AND COALESCE(NULLIF(TRIM(m.group_name), ''), '%s')=?
+  AND FIND_IN_SET(?, ch.%s) > 0
 ORDER BY m.id DESC
-`, groupsCol)
+`, DefaultGroupName, groupsCol)
 	if s.dialect == DialectSQLite {
 		query = fmt.Sprintf(`
-SELECT DISTINCT m.id, m.public_id, m.upstream_model, m.owned_by,
+SELECT DISTINCT m.id, m.public_id, m.group_name, m.upstream_model, m.owned_by,
        m.input_usd_per_1m, m.output_usd_per_1m, m.cache_input_usd_per_1m, m.cache_output_usd_per_1m,
        m.status, m.created_at
 FROM managed_models m
 JOIN channel_models cm ON cm.public_id=m.public_id AND cm.status=1
 JOIN upstream_channels ch ON ch.id=cm.channel_id AND ch.status=1
-WHERE m.status=1 AND INSTR(',' || REPLACE(IFNULL(ch.%s, ''), ' ', '') || ',', ',' || ? || ',') > 0
+WHERE m.status=1
+  AND COALESCE(NULLIF(TRIM(m.group_name), ''), '%s')=?
+  AND INSTR(',' || REPLACE(IFNULL(ch.%s, ''), ' ', '') || ',', ',' || ? || ',') > 0
 ORDER BY m.id DESC
-`, groupsCol)
+`, DefaultGroupName, groupsCol)
 	}
 
-	rows, err := s.db.QueryContext(ctx, query, groupName)
+	rows, err := s.db.QueryContext(ctx, query, groupName, groupName)
 	if err != nil {
 		return nil, fmt.Errorf("查询可用 managed_models 失败: %w", err)
 	}
@@ -252,14 +274,16 @@ ORDER BY m.id DESC
 	var out []ManagedModel
 	for rows.Next() {
 		var m ManagedModel
+		var dbGroupName sql.NullString
 		var upstreamModel sql.NullString
 		var ownedBy sql.NullString
-		if err := rows.Scan(&m.ID, &m.PublicID, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.PublicID, &dbGroupName, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt); err != nil {
 			return nil, fmt.Errorf("扫描可用 managed_models 失败: %w", err)
 		}
 		if err := normalizeManagedModelPricing(&m); err != nil {
 			return nil, err
 		}
+		m.GroupName = normalizeManagedModelGroupName(dbGroupName.String)
 		if upstreamModel.Valid {
 			v := upstreamModel.String
 			m.UpstreamModel = &v
@@ -298,16 +322,26 @@ func (s *Store) ListEnabledManagedModelsWithBindingsForGroups(ctx context.Contex
 	}
 
 	var b strings.Builder
-	b.WriteString(`
-SELECT DISTINCT m.id, m.public_id, m.upstream_model, m.owned_by,
+	b.WriteString(fmt.Sprintf(`
+SELECT DISTINCT m.id, m.public_id, m.group_name, m.upstream_model, m.owned_by,
        m.input_usd_per_1m, m.output_usd_per_1m, m.cache_input_usd_per_1m, m.cache_output_usd_per_1m,
        m.status, m.created_at
 FROM managed_models m
 JOIN channel_models cm ON cm.public_id=m.public_id AND cm.status=1
 JOIN upstream_channels ch ON ch.id=cm.channel_id AND ch.status=1
-WHERE m.status=1 AND (`)
+WHERE m.status=1
+  AND COALESCE(NULLIF(TRIM(m.group_name), ''), '%s') IN (`, DefaultGroupName))
 
-	args := make([]any, 0, len(groupNames))
+	args := make([]any, 0, len(groupNames)*2)
+	for i, g := range groupNames {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString("?")
+		args = append(args, g)
+	}
+	b.WriteString(")\n  AND (")
+
 	for i, g := range groupNames {
 		if i > 0 {
 			b.WriteString(" OR ")
@@ -330,14 +364,16 @@ WHERE m.status=1 AND (`)
 	var out []ManagedModel
 	for rows.Next() {
 		var m ManagedModel
+		var dbGroupName sql.NullString
 		var upstreamModel sql.NullString
 		var ownedBy sql.NullString
-		if err := rows.Scan(&m.ID, &m.PublicID, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.PublicID, &dbGroupName, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt); err != nil {
 			return nil, fmt.Errorf("扫描可用 managed_models 失败: %w", err)
 		}
 		if err := normalizeManagedModelPricing(&m); err != nil {
 			return nil, err
 		}
+		m.GroupName = normalizeManagedModelGroupName(dbGroupName.String)
 		if upstreamModel.Valid {
 			v := upstreamModel.String
 			m.UpstreamModel = &v
@@ -356,15 +392,16 @@ WHERE m.status=1 AND (`)
 
 func (s *Store) GetManagedModelByID(ctx context.Context, id int64) (ManagedModel, error) {
 	var m ManagedModel
+	var groupName sql.NullString
 	var upstreamModel sql.NullString
 	var ownedBy sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-SELECT id, public_id, upstream_model, owned_by,
+SELECT id, public_id, group_name, upstream_model, owned_by,
        input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m,
        status, created_at
 FROM managed_models
 WHERE id=?
-`, id).Scan(&m.ID, &m.PublicID, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt)
+`, id).Scan(&m.ID, &m.PublicID, &groupName, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ManagedModel{}, sql.ErrNoRows
@@ -374,6 +411,7 @@ WHERE id=?
 	if err := normalizeManagedModelPricing(&m); err != nil {
 		return ManagedModel{}, err
 	}
+	m.GroupName = normalizeManagedModelGroupName(groupName.String)
 	if upstreamModel.Valid {
 		v := upstreamModel.String
 		m.UpstreamModel = &v
@@ -387,16 +425,17 @@ WHERE id=?
 
 func (s *Store) GetManagedModelByPublicID(ctx context.Context, publicID string) (ManagedModel, error) {
 	var m ManagedModel
+	var groupName sql.NullString
 	var upstreamModel sql.NullString
 	var ownedBy sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-SELECT id, public_id, upstream_model, owned_by,
+SELECT id, public_id, group_name, upstream_model, owned_by,
        input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m,
        status, created_at
 FROM managed_models
 WHERE public_id=?
 LIMIT 1
-`, publicID).Scan(&m.ID, &m.PublicID, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt)
+`, publicID).Scan(&m.ID, &m.PublicID, &groupName, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ManagedModel{}, sql.ErrNoRows
@@ -406,6 +445,7 @@ LIMIT 1
 	if err := normalizeManagedModelPricing(&m); err != nil {
 		return ManagedModel{}, err
 	}
+	m.GroupName = normalizeManagedModelGroupName(groupName.String)
 	if upstreamModel.Valid {
 		v := upstreamModel.String
 		m.UpstreamModel = &v
@@ -419,16 +459,17 @@ LIMIT 1
 
 func (s *Store) GetEnabledManagedModelByPublicID(ctx context.Context, publicID string) (ManagedModel, error) {
 	var m ManagedModel
+	var groupName sql.NullString
 	var upstreamModel sql.NullString
 	var ownedBy sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-SELECT id, public_id, upstream_model, owned_by,
+SELECT id, public_id, group_name, upstream_model, owned_by,
        input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m,
        status, created_at
 FROM managed_models
 WHERE public_id=? AND status=1
 LIMIT 1
-`, publicID).Scan(&m.ID, &m.PublicID, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt)
+`, publicID).Scan(&m.ID, &m.PublicID, &groupName, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ManagedModel{}, sql.ErrNoRows
@@ -438,6 +479,7 @@ LIMIT 1
 	if err := normalizeManagedModelPricing(&m); err != nil {
 		return ManagedModel{}, err
 	}
+	m.GroupName = normalizeManagedModelGroupName(groupName.String)
 	if upstreamModel.Valid {
 		v := upstreamModel.String
 		m.UpstreamModel = &v
@@ -450,6 +492,7 @@ LIMIT 1
 }
 
 func (s *Store) CreateManagedModel(ctx context.Context, in ManagedModelCreate) (int64, error) {
+	in.GroupName = normalizeManagedModelGroupName(in.GroupName)
 	inUSD := in.InputUSDPer1M.Truncate(USDScale)
 	outUSD := in.OutputUSDPer1M.Truncate(USDScale)
 	cacheInUSD := in.CacheInputUSDPer1M.Truncate(USDScale)
@@ -459,15 +502,15 @@ func (s *Store) CreateManagedModel(ctx context.Context, in ManagedModelCreate) (
 	}
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO managed_models(
-  public_id, owned_by,
+  public_id, group_name, owned_by,
   input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m,
   status, created_at
 ) VALUES(
-  ?, ?,
+  ?, ?, ?,
   ?, ?, ?, ?,
   ?, CURRENT_TIMESTAMP
 )
-`, in.PublicID, in.OwnedBy, inUSD, outUSD, cacheInUSD, cacheOutUSD, in.Status)
+`, in.PublicID, in.GroupName, in.OwnedBy, inUSD, outUSD, cacheInUSD, cacheOutUSD, in.Status)
 	if err != nil {
 		return 0, fmt.Errorf("创建 managed_model 失败: %w", err)
 	}
@@ -482,6 +525,7 @@ func (s *Store) UpdateManagedModel(ctx context.Context, in ManagedModelUpdate) e
 	if in.ID == 0 {
 		return errors.New("id 不能为空")
 	}
+	in.GroupName = normalizeManagedModelGroupName(in.GroupName)
 	inUSD := in.InputUSDPer1M.Truncate(USDScale)
 	outUSD := in.OutputUSDPer1M.Truncate(USDScale)
 	cacheInUSD := in.CacheInputUSDPer1M.Truncate(USDScale)
@@ -506,11 +550,11 @@ func (s *Store) UpdateManagedModel(ctx context.Context, in ManagedModelUpdate) e
 
 	if _, err := tx.ExecContext(ctx, `
 UPDATE managed_models
-SET public_id=?, owned_by=?,
+SET public_id=?, group_name=?, owned_by=?,
     input_usd_per_1m=?, output_usd_per_1m=?, cache_input_usd_per_1m=?, cache_output_usd_per_1m=?,
     status=?
 WHERE id=?
-`, in.PublicID, in.OwnedBy, inUSD, outUSD, cacheInUSD, cacheOutUSD, in.Status, in.ID); err != nil {
+`, in.PublicID, in.GroupName, in.OwnedBy, inUSD, outUSD, cacheInUSD, cacheOutUSD, in.Status, in.ID); err != nil {
 		return fmt.Errorf("更新 managed_model 失败: %w", err)
 	}
 
@@ -642,11 +686,11 @@ WHERE id=?
 
 	insertStmt, err := tx.PrepareContext(ctx, `
 INSERT INTO managed_models(
-  public_id, owned_by,
+  public_id, group_name, owned_by,
   input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m,
   status, created_at
 ) VALUES(
-  ?, NULL,
+  ?, ?, NULL,
   ?, ?, ?, ?,
   0, CURRENT_TIMESTAMP
 )
@@ -674,7 +718,7 @@ INSERT INTO managed_models(
 			res.Updated = append(res.Updated, publicID)
 			continue
 		}
-		if _, err := insertStmt.ExecContext(ctx, publicID, it.InputUSDPer1M, it.OutputUSDPer1M, it.CacheInputUSDPer1M, it.CacheOutputUSDPer1M); err != nil {
+		if _, err := insertStmt.ExecContext(ctx, publicID, DefaultGroupName, it.InputUSDPer1M, it.OutputUSDPer1M, it.CacheInputUSDPer1M, it.CacheOutputUSDPer1M); err != nil {
 			return UpsertManagedModelPricingResult{}, fmt.Errorf("创建 managed_model(%s) 失败: %w", publicID, err)
 		}
 		res.Added = append(res.Added, publicID)

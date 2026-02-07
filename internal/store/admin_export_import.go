@@ -87,6 +87,7 @@ type AdminConfigUpstreamEndpoint struct {
 
 type AdminConfigManagedModel struct {
 	PublicID            string          `json:"public_id"`
+	GroupName           string          `json:"group_name,omitempty"`
 	UpstreamModel       *string         `json:"upstream_model,omitempty"`
 	OwnedBy             *string         `json:"owned_by,omitempty"`
 	InputUSDPer1M       decimal.Decimal `json:"input_usd_per_1m"`
@@ -283,6 +284,7 @@ func (s *Store) ExportAdminConfig(ctx context.Context) (AdminConfigExport, error
 	for _, m := range managed {
 		out.ManagedModels = append(out.ManagedModels, AdminConfigManagedModel{
 			PublicID:            strings.TrimSpace(m.PublicID),
+			GroupName:           normalizeManagedModelGroupName(m.GroupName),
 			UpstreamModel:       m.UpstreamModel,
 			OwnedBy:             m.OwnedBy,
 			InputUSDPer1M:       m.InputUSDPer1M,
@@ -778,9 +780,10 @@ ON CONFLICT(channel_id) DO UPDATE SET
 	}
 
 	stmtUpsertManagedModel := `
-INSERT INTO managed_models(public_id, upstream_model, owned_by, input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m, status, created_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+INSERT INTO managed_models(public_id, group_name, upstream_model, owned_by, input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m, status, created_at)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 ON DUPLICATE KEY UPDATE
+  group_name=VALUES(group_name),
   upstream_model=VALUES(upstream_model),
   owned_by=VALUES(owned_by),
   input_usd_per_1m=VALUES(input_usd_per_1m),
@@ -791,9 +794,10 @@ ON DUPLICATE KEY UPDATE
 `
 	if s.dialect == DialectSQLite {
 		stmtUpsertManagedModel = `
-INSERT INTO managed_models(public_id, upstream_model, owned_by, input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m, status, created_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+INSERT INTO managed_models(public_id, group_name, upstream_model, owned_by, input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m, status, created_at)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 ON CONFLICT(public_id) DO UPDATE SET
+  group_name=excluded.group_name,
   upstream_model=excluded.upstream_model,
   owned_by=excluded.owned_by,
   input_usd_per_1m=excluded.input_usd_per_1m,
@@ -820,7 +824,8 @@ ON CONFLICT(public_id) DO UPDATE SET
 		if status != 0 && status != 1 {
 			status = 1
 		}
-		if _, err := tx.ExecContext(ctx, stmtUpsertManagedModel, publicID, m.UpstreamModel, m.OwnedBy, inUSD, outUSD, cacheInUSD, cacheOutUSD, status); err != nil {
+		groupName := normalizeManagedModelGroupName(m.GroupName)
+		if _, err := tx.ExecContext(ctx, stmtUpsertManagedModel, publicID, groupName, m.UpstreamModel, m.OwnedBy, inUSD, outUSD, cacheInUSD, cacheOutUSD, status); err != nil {
 			return AdminConfigImportReport{}, fmt.Errorf("导入 managed_models 失败: %w", err)
 		}
 	}

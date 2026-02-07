@@ -38,6 +38,9 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 		if err := ensureSQLiteUsersUsernameRules(db); err != nil {
 			return err
 		}
+		if err := ensureSQLiteManagedModelGroupNameColumn(db); err != nil {
+			return err
+		}
 		return ensureSQLiteChannelGroupMembers(db)
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -65,6 +68,9 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 		return fmt.Errorf("提交 SQLite schema 初始化失败: %w", err)
 	}
 	if err := ensureSQLiteUsersUsernameRules(db); err != nil {
+		return err
+	}
+	if err := ensureSQLiteManagedModelGroupNameColumn(db); err != nil {
 		return err
 	}
 	return ensureSQLiteChannelGroupMembers(db)
