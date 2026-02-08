@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 
 import { BootstrapModal } from '../../components/BootstrapModal';
 import { closeModalById } from '../../components/modal';
@@ -13,6 +13,7 @@ import {
   getChannel,
   getChannelKey,
   getChannelsPage,
+  getChannelTimeSeries,
   getPinnedChannelInfo,
   listChannelCodexAccounts,
   listChannelCredentials,
@@ -37,7 +38,7 @@ import {
   type ChannelModelProbeResult,
   type ChannelProbeSummary,
   type ChannelTestProgressEvent,
-  type ChannelUsageOverview,
+  type ChannelTimeSeriesPoint,
   type CodexOAuthAccount,
   type PinnedChannelInfo,
 } from '../../api/channels';
@@ -71,6 +72,12 @@ function healthBadge(ch: Channel): { cls: string; label: string; hint?: string }
   return { cls: 'badge bg-danger bg-opacity-10 text-danger border border-danger-subtle', label: `异常 · ${latency}` };
 }
 
+type ChartInstance = {
+  destroy?: () => void;
+};
+
+type ChartConstructor = new (ctx: CanvasRenderingContext2D, config: unknown) => ChartInstance;
+
 type ChannelModelLiveState = {
   model: string;
   status: 'pending' | 'running' | 'success' | 'failed';
@@ -100,12 +107,18 @@ export function ChannelsPage() {
   const [notice, setNotice] = useState('');
   const [testingChannelID, setTestingChannelID] = useState<number | null>(null);
   const [expandedChannelID, setExpandedChannelID] = useState<number | null>(null);
-  const [testPanels, setTestPanels] = useState<Record<number, ChannelTestPanelState>>({});
+  const [, setTestPanels] = useState<Record<number, ChannelTestPanelState>>({});
 
   const [usageStart, setUsageStart] = useState('');
   const [usageEnd, setUsageEnd] = useState('');
   const [usageRangeDirty, setUsageRangeDirty] = useState(false);
-  const [usageOverview, setUsageOverview] = useState<ChannelUsageOverview | null>(null);
+  const detailTimeLineRef = useRef<HTMLCanvasElement | null>(null);
+  const detailTimeLineChartRef = useRef<ChartInstance | null>(null);
+  const [detailSeries, setDetailSeries] = useState<ChannelTimeSeriesPoint[]>([]);
+  const [detailSeriesLoading, setDetailSeriesLoading] = useState(false);
+  const [detailSeriesErr, setDetailSeriesErr] = useState('');
+  const [detailField, setDetailField] = useState<'committed_usd' | 'tokens' | 'cache_ratio' | 'avg_first_token_latency' | 'tokens_per_second'>('committed_usd');
+  const [detailGranularity, setDetailGranularity] = useState<'hour' | 'day'>('hour');
 
   const [draggingID, setDraggingID] = useState<number | null>(null);
   const [dropOverID, setDropOverID] = useState<number | null>(null);
@@ -236,6 +249,23 @@ export function ChannelsPage() {
     return d.toLocaleString('zh-CN', { hour12: false });
   }
 
+  function formatSeriesValue(field: 'committed_usd' | 'tokens' | 'cache_ratio' | 'avg_first_token_latency' | 'tokens_per_second', p: ChannelTimeSeriesPoint): string {
+    switch (field) {
+      case 'committed_usd':
+        return `${p.committed_usd.toFixed(4)} USD`;
+      case 'tokens':
+        return fmtNumber(p.tokens);
+      case 'cache_ratio':
+        return `${p.cache_ratio.toFixed(1)}%`;
+      case 'avg_first_token_latency':
+        return `${p.avg_first_token_latency.toFixed(1)} ms`;
+      case 'tokens_per_second':
+        return p.tokens_per_second.toFixed(2);
+      default:
+        return '-';
+    }
+  }
+
   function upsertModelState(models: ChannelModelLiveState[], model: string, patch: Partial<ChannelModelLiveState>): ChannelModelLiveState[] {
     const idx = models.findIndex((item) => item.model === model);
     if (idx < 0) {
@@ -315,19 +345,6 @@ export function ChannelsPage() {
     });
   }
 
-  function modelStatusBadge(status: ChannelModelLiveState['status']): { cls: string; label: string } {
-    switch (status) {
-      case 'running':
-        return { cls: 'badge bg-primary-subtle text-primary-emphasis border', label: '测试中' };
-      case 'success':
-        return { cls: 'badge bg-success-subtle text-success-emphasis border', label: '成功' };
-      case 'failed':
-        return { cls: 'badge bg-danger-subtle text-danger-emphasis border', label: '失败' };
-      default:
-        return { cls: 'badge bg-light text-secondary border', label: '等待中' };
-    }
-  }
-
   async function refresh(params?: { start?: string; end?: string }) {
     setErr('');
     setNotice('');
@@ -351,7 +368,6 @@ export function ChannelsPage() {
       if (!pageRes.success) throw new Error(pageRes.message || '加载渠道失败');
       setUsageStart(pageRes.data?.start || '');
       setUsageEnd(pageRes.data?.end || '');
-      setUsageOverview(pageRes.data?.overview || null);
       setChannels(pageRes.data?.channels || []);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败');
@@ -372,6 +388,39 @@ export function ChannelsPage() {
     }, 400);
     return () => window.clearTimeout(t);
   }, [usageRangeDirty, usageStart, usageEnd]);
+
+  useEffect(() => {
+    if (!expandedChannelID) {
+      setDetailSeries([]);
+      setDetailSeriesErr('');
+      setDetailSeriesLoading(false);
+      return;
+    }
+    let active = true;
+    void (async () => {
+      setDetailSeriesErr('');
+      setDetailSeriesLoading(true);
+      try {
+        const res = await getChannelTimeSeries(expandedChannelID, {
+          start: usageStart.trim() || undefined,
+          end: usageEnd.trim() || undefined,
+          granularity: detailGranularity,
+        });
+        if (!res.success) throw new Error(res.message || '加载时间序列失败');
+        if (!active) return;
+        setDetailSeries(res.data?.points || []);
+      } catch (e) {
+        if (!active) return;
+        setDetailSeries([]);
+        setDetailSeriesErr(e instanceof Error ? e.message : '加载时间序列失败');
+      } finally {
+        if (active) setDetailSeriesLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [expandedChannelID, usageStart, usageEnd, detailGranularity]);
 
   useEffect(() => {
     void (async () => {
@@ -648,6 +697,103 @@ export function ChannelsPage() {
     void loadChannelSettings(settingsChannelID);
   }, [settingsChannelID, loadChannelSettings]);
 
+  useEffect(() => {
+    const ChartCtor = (window as unknown as { Chart?: ChartConstructor }).Chart;
+
+    const destroy = (ref: MutableRefObject<ChartInstance | null>) => {
+      try {
+        ref.current?.destroy?.();
+      } catch {
+        // ignore
+      }
+      ref.current = null;
+    };
+
+    destroy(detailTimeLineChartRef);
+
+    if (!ChartCtor || !expandedChannelID || detailSeries.length === 0) return;
+    const channel = channels.find((c) => c.id === expandedChannelID);
+    if (!channel) return;
+    const ctx = detailTimeLineRef.current?.getContext('2d');
+    if (!ctx) return;
+
+    const fieldMeta: Record<string, { label: string; color: string; read: (p: ChannelTimeSeriesPoint) => number }> = {
+      committed_usd: {
+        label: '消耗 (USD)',
+        color: 'rgba(99, 102, 241, 0.95)',
+        read: (p) => p.committed_usd,
+      },
+      tokens: {
+        label: 'Token',
+        color: 'rgba(16, 185, 129, 0.95)',
+        read: (p) => p.tokens,
+      },
+      cache_ratio: {
+        label: '缓存率 (%)',
+        color: 'rgba(245, 158, 11, 0.95)',
+        read: (p) => p.cache_ratio,
+      },
+      avg_first_token_latency: {
+        label: '首字延迟 (ms)',
+        color: 'rgba(239, 68, 68, 0.95)',
+        read: (p) => p.avg_first_token_latency,
+      },
+      tokens_per_second: {
+        label: 'Tokens/s',
+        color: 'rgba(14, 165, 233, 0.95)',
+        read: (p) => p.tokens_per_second,
+      },
+    };
+    const meta = fieldMeta[detailField];
+    const datasets = [
+      {
+        label: meta.label,
+        data: detailSeries.map((p) => meta.read(p)),
+        borderColor: meta.color,
+        backgroundColor: meta.color.replace('0.95', '0.18'),
+        pointRadius: 2,
+        tension: 0.2,
+      },
+    ];
+
+    detailTimeLineChartRef.current = new ChartCtor(ctx, {
+      type: 'line',
+      data: {
+        labels: detailSeries.map((p) => p.bucket),
+        datasets,
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'bottom' },
+          title: { display: true, text: `${channel.name || `渠道 #${channel.id}`} · 时间序列` },
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: {
+              autoSkip: true,
+              maxTicksLimit: detailGranularity === 'hour' ? 10 : 14,
+              maxRotation: 0,
+              minRotation: 0,
+            },
+          },
+          y: {
+            beginAtZero: true,
+            suggestedMax: detailField === 'cache_ratio' ? 100 : undefined,
+            grid: { color: 'rgba(148, 163, 184, 0.18)' },
+          },
+        },
+      },
+    });
+
+    return () => {
+      destroy(detailTimeLineChartRef);
+    };
+  }, [channels, expandedChannelID, detailSeries, detailField, detailGranularity]);
+
   return (
     <div className="fade-in-up">
       <div className="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-3">
@@ -691,57 +837,6 @@ export function ChannelsPage() {
           <div className="form-text small text-muted mb-0">统计区间（可选）：修改后自动更新。</div>
         </div>
       </div>
-
-      {usageOverview ? (
-        <div className="card border-0 shadow-sm overflow-hidden mb-4">
-          <div className="bg-primary bg-opacity-10 py-3 px-4 d-flex justify-content-between align-items-center">
-            <span className="text-primary fw-bold text-uppercase small">请求统计总览</span>
-            <span className="text-primary text-opacity-75 small">
-              区间：{usageStart || '-'} ~ {usageEnd || '-'}
-            </span>
-          </div>
-          <div className="card-body py-3">
-            <div className="row g-3">
-              <div className="col-sm-6 col-xl-2">
-                <div className="metric-card p-3 rounded-3 border h-100">
-                  <div className="text-muted smaller mb-1">请求数</div>
-                  <div className="h5 fw-bold mb-0">{fmtNumber(usageOverview.requests || 0)}</div>
-                </div>
-              </div>
-              <div className="col-sm-6 col-xl-2">
-                <div className="metric-card p-3 rounded-3 border h-100">
-                  <div className="text-muted smaller mb-1">Token</div>
-                  <div className="h5 fw-bold mb-0">{fmtNumber(usageOverview.tokens || 0)}</div>
-                </div>
-              </div>
-              <div className="col-sm-6 col-xl-2">
-                <div className="metric-card p-3 rounded-3 border h-100">
-                  <div className="text-muted smaller mb-1">消耗</div>
-                  <div className="h5 fw-bold mb-0 font-monospace">{usageOverview.committed_usd || '0'}</div>
-                </div>
-              </div>
-              <div className="col-sm-6 col-xl-2">
-                <div className="metric-card p-3 rounded-3 border h-100">
-                  <div className="text-muted smaller mb-1">缓存率</div>
-                  <div className="h5 fw-bold mb-0">{usageOverview.cache_ratio || '0.0%'}</div>
-                </div>
-              </div>
-              <div className="col-sm-6 col-xl-2">
-                <div className="metric-card p-3 rounded-3 border h-100">
-                  <div className="text-muted smaller mb-1">平均首字延迟</div>
-                  <div className="h5 fw-bold mb-0">{usageOverview.avg_first_token_latency || '-'}</div>
-                </div>
-              </div>
-              <div className="col-sm-6 col-xl-2">
-                <div className="metric-card p-3 rounded-3 border h-100">
-                  <div className="text-muted smaller mb-1">平均 Tokens/s</div>
-                  <div className="h5 fw-bold mb-0">{usageOverview.tokens_per_second || '-'}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       {notice ? (
         <div className="alert alert-success d-flex align-items-center mb-4" role="alert">
@@ -814,7 +909,6 @@ export function ChannelsPage() {
                       const runtime = ch.runtime;
                       const usage = ch.usage;
                       const checkedAt = fmtHHMM(ch.last_test_at);
-                      const panel = testPanels[ch.id];
                       const panelOpen = expandedChannelID === ch.id;
                       const testRunning = testingChannelID === ch.id;
                       const anyTesting = testingChannelID !== null;
@@ -902,43 +996,22 @@ export function ChannelsPage() {
 	                                  </span>
 	                                ) : null}
 	                              </div>
-	                              {ch.base_url ? (
-	                                <span
-	                                  className="text-muted font-monospace small d-inline-block mt-1 user-select-all"
-	                                  style={{ maxWidth: 360, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
-	                                  title={ch.base_url}
-	                                >
-	                                  {ch.base_url}
-	                                </span>
-	                              ) : null}
-
-		                              <div className="d-flex flex-wrap align-items-center gap-3 small text-muted mt-2">
-		                                <div className="d-flex align-items-center">
-		                                  <span className="me-1">组:</span>
-		                                  <span className="text-secondary font-monospace user-select-all">
-		                                    {ch.groups || 'default'}
-		                                  </span>
-		                                </div>
-	                                <div className="vr bg-secondary bg-opacity-25" style={{ height: 14 }}></div>
-	                                <div className="d-flex align-items-center">
-	                                  <span className="me-1">消耗:</span>
-                                  <span className="font-monospace fw-bold text-dark">{usage?.committed_usd ?? '0'}</span>
-                                </div>
+                              <div className="d-flex flex-wrap align-items-center gap-2 small text-muted mt-1">
+                                {ch.base_url ? (
+                                  <span
+                                    className="font-monospace d-inline-block user-select-all"
+                                    style={{ maxWidth: 360, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                                    title={ch.base_url}
+                                  >
+                                    {ch.base_url}
+                                  </span>
+                                ) : null}
                                 <div className="d-flex align-items-center">
-                                  <span className="me-1">Token:</span>
-                                  <span className="fw-medium text-dark">{fmtNumber(usage?.tokens ?? 0)}</span>
-                                </div>
-                                <div className="d-flex align-items-center">
-                                  <span className="me-1">缓存:</span>
-                                  <span className="fw-medium text-success">{usage?.cache_ratio ?? '0.0%'}</span>
-                                </div>
-                                <div className="d-flex align-items-center">
-                                  <span className="me-1">首字:</span>
-                                  <span className="fw-medium text-dark">{usage?.avg_first_token_latency ?? '-'}</span>
-                                </div>
-                                <div className="d-flex align-items-center">
-                                  <span className="me-1">Tokens/s:</span>
-                                  <span className="fw-medium text-dark">{usage?.tokens_per_second ?? '-'}</span>
+                                  {ch.base_url ? <span className="text-secondary">·</span> : null}
+                                  <span className={`${ch.base_url ? 'ms-2 ' : ''}me-1`}>组:</span>
+                                  <span className="text-secondary font-monospace user-select-all">
+                                    {ch.groups || 'default'}
+                                  </span>
                                 </div>
                               </div>
                             </div>
@@ -975,6 +1048,15 @@ export function ChannelsPage() {
                           <td className="text-end pe-4 text-nowrap">
                             <div className="d-flex gap-1 justify-content-end">
                               <button
+                                className={`btn btn-sm ${panelOpen ? 'btn-primary' : 'btn-light border text-primary'}`}
+                                type="button"
+                                title={panelOpen ? '收起详情' : '展示详情'}
+                                onClick={() => setExpandedChannelID((prev) => (prev === ch.id ? null : ch.id))}
+                              >
+                                <i className={`me-1 ${panelOpen ? 'ri-eye-off-line' : 'ri-eye-line'}`}></i>
+                                {panelOpen ? '收起详情' : '展示详情'}
+                              </button>
+                              <button
                                 className="btn btn-sm btn-light border text-primary"
                                 type="button"
                                 title="测试连接"
@@ -984,7 +1066,6 @@ export function ChannelsPage() {
                                   setErr('');
                                   setNotice('');
                                   setTestingChannelID(ch.id);
-                                  setExpandedChannelID(ch.id);
                                   setTestPanels((prev) => ({
                                     ...prev,
                                     [ch.id]: {
@@ -1115,71 +1196,102 @@ export function ChannelsPage() {
                           </td>
                         </tr>
                         {panelOpen ? (
-                          <tr className="bg-light-subtle">
+                          <tr className="bg-light-subtle rlm-channel-detail-row">
                             <td colSpan={5} className="px-4 py-3">
-                              {!panel ? (
-                                <div style={{ minHeight: 40 }}></div>
-                              ) : (
-                                <>
-                                  <div className="d-flex flex-wrap align-items-center gap-3 small">
-                                    <span className={`badge ${panel.running ? 'bg-primary-subtle text-primary-emphasis border' : 'bg-light text-secondary border'}`}>
-                                      {panel.running ? '测试进行中' : '测试完成'}
-                                    </span>
-                                    {panel.source ? <span className="text-muted">来源：{panel.source}</span> : null}
-                                    {panel.total > 0 ? (
-                                      <span className="text-muted">
-                                        进度：{panel.done}/{panel.total}
-                                      </span>
-                                    ) : null}
-                                    {panel.currentModel ? (
-                                      <span className="text-primary">当前模型：{panel.currentModel}</span>
-                                    ) : null}
-                                    {panel.summary?.latency_ms ? (
-                                      <span className="text-muted">耗时：{panel.summary.latency_ms}ms</span>
-                                    ) : null}
+                              <div className="d-flex flex-wrap align-items-center gap-3 small text-muted">
+                                <div className="d-flex align-items-center">
+                                  <span className="me-1">消耗:</span>
+                                  <span className="font-monospace fw-bold text-dark">{usage?.committed_usd ?? '0'}</span>
+                                </div>
+                                <div className="d-flex align-items-center">
+                                  <span className="me-1">Token:</span>
+                                  <span className="fw-medium text-dark">{fmtNumber(usage?.tokens ?? 0)}</span>
+                                </div>
+                                <div className="d-flex align-items-center">
+                                  <span className="me-1">缓存:</span>
+                                  <span className="fw-medium text-success">{usage?.cache_ratio ?? '0.0%'}</span>
+                                </div>
+                                <div className="d-flex align-items-center">
+                                  <span className="me-1">首字:</span>
+                                  <span className="fw-medium text-dark">{usage?.avg_first_token_latency ?? '-'}</span>
+                                </div>
+                                <div className="d-flex align-items-center">
+                                  <span className="me-1">Tokens/s:</span>
+                                  <span className="fw-medium text-dark">{usage?.tokens_per_second ?? '-'}</span>
+                                </div>
+                              </div>
+                              <div className="border rounded-3 p-3 bg-white mt-3">
+                                <div className="d-flex flex-wrap align-items-center gap-3 mb-2">
+                                  <div className="d-flex align-items-center gap-2">
+                                    <label className="small text-muted mb-0">字段</label>
+                                    <select
+                                      className="form-select form-select-sm"
+                                      style={{ width: 170 }}
+                                      value={detailField}
+                                      onChange={(e) =>
+                                        setDetailField(
+                                          e.target.value as 'committed_usd' | 'tokens' | 'cache_ratio' | 'avg_first_token_latency' | 'tokens_per_second',
+                                        )
+                                      }
+                                    >
+                                      <option value="committed_usd">消耗 (USD)</option>
+                                      <option value="tokens">Token</option>
+                                      <option value="cache_ratio">缓存率 (%)</option>
+                                      <option value="avg_first_token_latency">首字延迟 (ms)</option>
+                                      <option value="tokens_per_second">Tokens/s</option>
+                                    </select>
                                   </div>
-                                  {panel.summaryMessage ? <div className="mt-2 small text-muted">{panel.summaryMessage}</div> : null}
-                                  <div className="table-responsive mt-2">
-                                    <table className="table table-sm align-middle mb-0">
-                                      <thead>
-                                        <tr className="text-muted">
-                                          <th style={{ width: '30%' }}>模型</th>
-                                          <th style={{ width: '15%' }}>状态</th>
-                                          <th style={{ width: '15%' }}>路径</th>
-                                          <th style={{ width: '10%' }}>TTFT</th>
-                                          <th>信息</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {panel.models.length === 0 ? (
-                                          <tr>
-                                            <td colSpan={5} className="text-muted py-2">
-                                              等待测试开始...
-                                            </td>
-                                          </tr>
-                                        ) : (
-                                          panel.models.map((item) => {
-                                            const badge = modelStatusBadge(item.status);
-                                            return (
-                                              <tr key={item.model}>
-                                                <td className="font-monospace small">{item.model}</td>
-                                                <td>
-                                                  <span className={badge.cls}>{badge.label}</span>
-                                                </td>
-                                                <td className="small text-muted">{item.result?.success_path || '-'}</td>
-                                                <td className="small text-muted">
-                                                  {typeof item.result?.ttft_ms === 'number' ? `${item.result.ttft_ms}ms` : '-'}
-                                                </td>
-                                                <td className="small text-muted">{item.message || '-'}</td>
+                                  <div className="d-flex align-items-center gap-2">
+                                    <label className="small text-muted mb-0">颗粒度</label>
+                                    <select
+                                      className="form-select form-select-sm"
+                                      style={{ width: 120 }}
+                                      value={detailGranularity}
+                                      onChange={(e) => setDetailGranularity(e.target.value as 'hour' | 'day')}
+                                    >
+                                      <option value="hour">按小时</option>
+                                      <option value="day">按天</option>
+                                    </select>
+                                  </div>
+                                </div>
+                                <div className="small text-muted mb-2">时间区间：{usageStart || '-'} ~ {usageEnd || '-'}</div>
+                                {detailSeriesErr ? <div className="alert alert-danger py-2 mb-2">{detailSeriesErr}</div> : null}
+                                {detailSeriesLoading ? (
+                                  <div className="text-muted small py-4">时间序列加载中…</div>
+                                ) : detailSeries.length === 0 ? (
+                                  <div className="text-muted small py-4">当前区间暂无可绘制的时间序列数据。</div>
+                                ) : (
+                                  <>
+                                    <div style={{ height: 280 }}>
+                                      <canvas ref={panelOpen ? detailTimeLineRef : undefined}></canvas>
+                                    </div>
+                                    <div className="mt-3 border-top pt-2">
+                                      <div className="d-flex justify-content-between align-items-center mb-2">
+                                        <div className="small text-muted">时间点明细</div>
+                                        <span className="badge bg-light text-secondary border">共 {detailSeries.length} 个时间点</span>
+                                      </div>
+                                      <div className="rlm-timeseries-table-wrap table-responsive">
+                                        <table className="table table-sm table-hover align-middle mb-0 rlm-timeseries-table">
+                                          <thead className="table-light">
+                                            <tr>
+                                              <th style={{ width: '45%' }}>时间点</th>
+                                              <th>值</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {detailSeries.map((point, idx) => (
+                                              <tr key={`${point.bucket}-${idx}`}>
+                                                <td className="font-monospace small text-muted">{point.bucket}</td>
+                                                <td className="small fw-semibold text-dark">{formatSeriesValue(detailField, point)}</td>
                                               </tr>
-                                            );
-                                          })
-                                        )}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                </>
-                              )}
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         ) : null}

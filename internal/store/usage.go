@@ -1317,6 +1317,17 @@ type TimeSeriesUsageStats struct {
 	CommittedUSD decimal.Decimal
 }
 
+type ChannelTimeSeriesUsageStats struct {
+	Time               time.Time
+	Requests           int64
+	Tokens             int64
+	CommittedUSD       decimal.Decimal
+	CacheRatio         float64
+	FirstTokenSamples  int64
+	AvgFirstTokenMS    float64
+	OutputTokensPerSec float64
+}
+
 func (s *Store) GetUsageTimeSeriesRange(ctx context.Context, userID int64, since, until time.Time) ([]TimeSeriesUsageStats, error) {
 	query := `
 SELECT
@@ -1366,6 +1377,103 @@ ORDER BY hr ASC
 			row.CommittedUSD = cost.Decimal.Truncate(USDScale)
 		}
 		out = append(out, row)
+	}
+	return out, nil
+}
+
+func (s *Store) GetChannelUsageTimeSeriesRange(ctx context.Context, channelID int64, since, until time.Time, granularity string) ([]ChannelTimeSeriesUsageStats, error) {
+	if channelID <= 0 {
+		return nil, fmt.Errorf("channelID 不合法")
+	}
+	bucketExprMySQL := "DATE_FORMAT(time, '%Y-%m-%d %H:00:00')"
+	bucketExprSQLite := "STRFTIME('%Y-%m-%d %H:00:00', time)"
+	switch granularity {
+	case "", "hour":
+		granularity = "hour"
+	case "day":
+		bucketExprMySQL = "DATE_FORMAT(time, '%Y-%m-%d 00:00:00')"
+		bucketExprSQLite = "STRFTIME('%Y-%m-%d 00:00:00', time)"
+	default:
+		return nil, fmt.Errorf("granularity 不合法")
+	}
+	query := `
+SELECT
+  ` + bucketExprMySQL + ` as hr,
+  COUNT(1),
+  SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)),
+  SUM(CASE WHEN state=? THEN committed_usd ELSE 0 END),
+  SUM(COALESCE(cached_input_tokens, 0) + COALESCE(cached_output_tokens, 0)),
+  SUM(CASE WHEN first_token_latency_ms IS NOT NULL AND first_token_latency_ms > 0 THEN first_token_latency_ms ELSE 0 END),
+  SUM(CASE WHEN first_token_latency_ms IS NOT NULL AND first_token_latency_ms > 0 THEN 1 ELSE 0 END),
+  SUM(COALESCE(output_tokens, 0)),
+  SUM(CASE WHEN latency_ms > first_token_latency_ms THEN latency_ms - first_token_latency_ms ELSE 0 END)
+FROM usage_events
+WHERE upstream_channel_id=? AND time >= ? AND time < ?
+GROUP BY hr
+ORDER BY hr ASC
+`
+	if s.dialect == DialectSQLite {
+		query = `
+SELECT
+  ` + bucketExprSQLite + ` as hr,
+  COUNT(1),
+  SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)),
+  SUM(CASE WHEN state=? THEN committed_usd ELSE 0 END),
+  SUM(COALESCE(cached_input_tokens, 0) + COALESCE(cached_output_tokens, 0)),
+  SUM(CASE WHEN first_token_latency_ms IS NOT NULL AND first_token_latency_ms > 0 THEN first_token_latency_ms ELSE 0 END),
+  SUM(CASE WHEN first_token_latency_ms IS NOT NULL AND first_token_latency_ms > 0 THEN 1 ELSE 0 END),
+  SUM(COALESCE(output_tokens, 0)),
+  SUM(CASE WHEN latency_ms > first_token_latency_ms THEN latency_ms - first_token_latency_ms ELSE 0 END)
+FROM usage_events
+WHERE upstream_channel_id=? AND time >= ? AND time < ?
+GROUP BY hr
+ORDER BY hr ASC
+`
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, UsageStateCommitted, channelID, since, until)
+	if err != nil {
+		return nil, fmt.Errorf("查询渠道时间序列失败: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ChannelTimeSeriesUsageStats
+	for rows.Next() {
+		var row ChannelTimeSeriesUsageStats
+		var hr string
+		var tokens sql.NullInt64
+		var committedUSD decimal.NullDecimal
+		var cachedTokens sql.NullInt64
+		var firstTokenLatencySum sql.NullInt64
+		var firstTokenSamples sql.NullInt64
+		var outputTokens sql.NullInt64
+		var decodeLatencyMS sql.NullInt64
+		if err := rows.Scan(&hr, &row.Requests, &tokens, &committedUSD, &cachedTokens, &firstTokenLatencySum, &firstTokenSamples, &outputTokens, &decodeLatencyMS); err != nil {
+			return nil, fmt.Errorf("扫描渠道时间序列失败: %w", err)
+		}
+		row.Time, _ = time.Parse("2006-01-02 15:04:05", hr)
+		if tokens.Valid {
+			row.Tokens = tokens.Int64
+		}
+		if committedUSD.Valid {
+			row.CommittedUSD = committedUSD.Decimal.Truncate(USDScale)
+		}
+		if cachedTokens.Valid && row.Tokens > 0 {
+			row.CacheRatio = float64(cachedTokens.Int64) / float64(row.Tokens)
+		}
+		if firstTokenSamples.Valid {
+			row.FirstTokenSamples = firstTokenSamples.Int64
+		}
+		if firstTokenLatencySum.Valid && row.FirstTokenSamples > 0 {
+			row.AvgFirstTokenMS = float64(firstTokenLatencySum.Int64) / float64(row.FirstTokenSamples)
+		}
+		if outputTokens.Valid && decodeLatencyMS.Valid {
+			row.OutputTokensPerSec = computeOutputTokensPerSecond(outputTokens.Int64, decodeLatencyMS.Int64)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历渠道时间序列失败: %w", err)
 	}
 	return out, nil
 }

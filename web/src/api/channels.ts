@@ -85,6 +85,24 @@ export type ChannelsPageResponse = {
   channels: ChannelAdminItem[];
 };
 
+export type ChannelTimeSeriesPoint = {
+  bucket: string;
+  committed_usd: number;
+  tokens: number;
+  cache_ratio: number;
+  avg_first_token_latency: number;
+  tokens_per_second: number;
+};
+
+export type ChannelTimeSeriesResponse = {
+  admin_time_zone: string;
+  channel_id: number;
+  start: string;
+  end: string;
+  granularity: 'hour' | 'day';
+  points: ChannelTimeSeriesPoint[];
+};
+
 export type CreateChannelRequest = {
   type: string;
   name: string;
@@ -127,6 +145,11 @@ export async function listChannels() {
 
 export async function getChannelsPage(params?: { start?: string; end?: string }) {
   const res = await api.get<APIResponse<ChannelsPageResponse>>('/api/channel/page', { params });
+  return res.data;
+}
+
+export async function getChannelTimeSeries(channelID: number, params?: { start?: string; end?: string; granularity?: 'hour' | 'day' }) {
+  const res = await api.get<APIResponse<ChannelTimeSeriesResponse>>(`/api/channel/${channelID}/timeseries`, { params });
   return res.data;
 }
 

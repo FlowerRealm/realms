@@ -102,6 +102,17 @@ tr:hover .rlm-model-icon {
   filter: grayscale(0);
 }
 
+.table-hover > tbody > tr.rlm-channel-detail-row {
+  --bs-table-hover-bg: transparent;
+  --bs-table-hover-color: inherit;
+}
+
+.table-hover > tbody > tr.rlm-channel-detail-row:hover > * {
+  color: inherit;
+  --bs-table-bg-state: transparent;
+  --bs-table-accent-bg: transparent;
+}
+
 .rlm-models-card {
   overflow: hidden;
 }
@@ -613,6 +624,18 @@ h6,
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 0.5rem;
   padding: 0.75rem;
+}
+
+.rlm-timeseries-table-wrap {
+  max-height: 240px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 0.5rem;
+}
+
+.rlm-timeseries-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
 .quick-range-btn {

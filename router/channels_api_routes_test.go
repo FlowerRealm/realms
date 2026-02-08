@@ -240,6 +240,84 @@ func TestChannels_PageAndReorder_RootFlow(t *testing.T) {
 		t.Fatalf("expected ch1 in response")
 	}
 
+	// channel timeseries
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/channel/"+strconv.FormatInt(ch1, 10)+"/timeseries", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("timeseries status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var tsResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			ChannelID   int64  `json:"channel_id"`
+			Granularity string `json:"granularity"`
+			Points      []struct {
+				Bucket               string  `json:"bucket"`
+				CommittedUSD         float64 `json:"committed_usd"`
+				Tokens               int64   `json:"tokens"`
+				CacheRatio           float64 `json:"cache_ratio"`
+				AvgFirstTokenLatency float64 `json:"avg_first_token_latency"`
+				TokensPerSecond      float64 `json:"tokens_per_second"`
+			} `json:"points"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &tsResp); err != nil {
+		t.Fatalf("json.Unmarshal timeseries: %v", err)
+	}
+	if !tsResp.Success {
+		t.Fatalf("expected timeseries success, got message=%q", tsResp.Message)
+	}
+	if tsResp.Data.ChannelID != ch1 {
+		t.Fatalf("expected channel_id=%d, got %d", ch1, tsResp.Data.ChannelID)
+	}
+	if tsResp.Data.Granularity != "hour" {
+		t.Fatalf("expected granularity=hour, got %q", tsResp.Data.Granularity)
+	}
+	if len(tsResp.Data.Points) == 0 {
+		t.Fatalf("expected non-empty timeseries points")
+	}
+	p := tsResp.Data.Points[0]
+	if p.Bucket == "" {
+		t.Fatalf("expected non-empty point bucket")
+	}
+	if p.Tokens != 150 {
+		t.Fatalf("expected tokens=150, got %d", p.Tokens)
+	}
+	if p.CommittedUSD < 1.22 || p.CommittedUSD > 1.24 {
+		t.Fatalf("expected committed_usd around 1.23, got %.4f", p.CommittedUSD)
+	}
+	if p.CacheRatio < 9.9 || p.CacheRatio > 10.1 {
+		t.Fatalf("expected cache_ratio around 10.0, got %.4f", p.CacheRatio)
+	}
+	if p.AvgFirstTokenLatency < 199.9 || p.AvgFirstTokenLatency > 200.1 {
+		t.Fatalf("expected avg_first_token_latency around 200, got %.4f", p.AvgFirstTokenLatency)
+	}
+	if p.TokensPerSecond < 62.49 || p.TokensPerSecond > 62.51 {
+		t.Fatalf("expected tokens_per_second around 62.50, got %.4f", p.TokensPerSecond)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/channel/"+strconv.FormatInt(ch1, 10)+"/timeseries?granularity=day", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("timeseries(day) status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &tsResp); err != nil {
+		t.Fatalf("json.Unmarshal timeseries(day): %v", err)
+	}
+	if !tsResp.Success {
+		t.Fatalf("expected timeseries(day) success, got message=%q", tsResp.Message)
+	}
+	if tsResp.Data.Granularity != "day" {
+		t.Fatalf("expected granularity=day, got %q", tsResp.Data.Granularity)
+	}
+
 	// reorder: place ch1 before ch2 (keep other channels in-place)
 	ids := make([]int64, 0, len(pageResp.Data.Channels))
 	for _, it := range pageResp.Data.Channels {

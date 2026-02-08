@@ -69,6 +69,8 @@ func setChannelAPIRoutes(r gin.IRoutes, opts Options) {
 	r.GET("/channel/", admin, listChannelsHandler(opts))
 	r.GET("/channel/page", admin, channelsPageHandler(opts))
 	r.GET("/channel/page/", admin, channelsPageHandler(opts))
+	r.GET("/channel/:channel_id/timeseries", admin, channelTimeSeriesHandler(opts))
+	r.GET("/channel/:channel_id/timeseries/", admin, channelTimeSeriesHandler(opts))
 	r.GET("/channel/pinned", admin, pinnedChannelInfoHandler(opts))
 
 	r.POST("/channel", admin, createChannelHandler(opts))
@@ -195,6 +197,24 @@ type channelsPageResponse struct {
 	End           string                   `json:"end"`
 	Overview      channelUsageOverviewView `json:"overview"`
 	Channels      []channelAdminListItem   `json:"channels"`
+}
+
+type channelTimeSeriesPointView struct {
+	Bucket               string  `json:"bucket"`
+	CommittedUSD         float64 `json:"committed_usd"`
+	Tokens               int64   `json:"tokens"`
+	CacheRatio           float64 `json:"cache_ratio"`
+	AvgFirstTokenLatency float64 `json:"avg_first_token_latency"`
+	TokensPerSecond      float64 `json:"tokens_per_second"`
+}
+
+type channelTimeSeriesResponse struct {
+	AdminTimeZone string                       `json:"admin_time_zone"`
+	ChannelID     int64                        `json:"channel_id"`
+	Start         string                       `json:"start"`
+	End           string                       `json:"end"`
+	Granularity   string                       `json:"granularity"`
+	Points        []channelTimeSeriesPointView `json:"points"`
 }
 
 func formatAvgFirstTokenLatency(ms float64, samples int64) string {
@@ -353,6 +373,98 @@ func channelsPageHandler(opts Options) gin.HandlerFunc {
 					BindingRuntime:       bindingRuntimeForAPI(opts),
 				},
 				Channels: out,
+			},
+		})
+	}
+}
+
+func channelTimeSeriesHandler(opts Options) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if opts.Store == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			return
+		}
+		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
+		if err != nil || channelID <= 0 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
+			return
+		}
+
+		loc, tzName := adminTimeLocation(c.Request.Context(), opts)
+
+		nowUTC := time.Now().UTC()
+		nowLocal := nowUTC.In(loc)
+		todayStartLocal := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc)
+		todayStr := todayStartLocal.Format("2006-01-02")
+
+		q := c.Request.URL.Query()
+		startStr := strings.TrimSpace(q.Get("start"))
+		endStr := strings.TrimSpace(q.Get("end"))
+		granularity := strings.TrimSpace(strings.ToLower(q.Get("granularity")))
+		if granularity == "" {
+			granularity = "hour"
+		}
+		if granularity != "hour" && granularity != "day" {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "granularity 仅支持 hour/day"})
+			return
+		}
+		if startStr == "" {
+			startStr = todayStr
+		}
+		if endStr == "" {
+			endStr = startStr
+		}
+		sinceLocal, err := time.ParseInLocation("2006-01-02", startStr, loc)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "start 不合法（格式：YYYY-MM-DD）"})
+			return
+		}
+		endDateLocal, err := time.ParseInLocation("2006-01-02", endStr, loc)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "end 不合法（格式：YYYY-MM-DD）"})
+			return
+		}
+		if sinceLocal.After(endDateLocal) {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "start 不能晚于 end"})
+			return
+		}
+		if endDateLocal.After(todayStartLocal) {
+			endDateLocal = todayStartLocal
+			endStr = todayStr
+		}
+		untilLocal := endDateLocal.AddDate(0, 0, 1)
+		if endStr == todayStr {
+			untilLocal = nowLocal
+		}
+
+		rows, err := opts.Store.GetChannelUsageTimeSeriesRange(c.Request.Context(), channelID, sinceLocal.UTC(), untilLocal.UTC(), granularity)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询渠道时间序列失败"})
+			return
+		}
+
+		points := make([]channelTimeSeriesPointView, 0, len(rows))
+		for _, row := range rows {
+			points = append(points, channelTimeSeriesPointView{
+				Bucket:               row.Time.In(loc).Format("2006-01-02 15:04"),
+				CommittedUSD:         row.CommittedUSD.InexactFloat64(),
+				Tokens:               row.Tokens,
+				CacheRatio:           row.CacheRatio * 100,
+				AvgFirstTokenLatency: row.AvgFirstTokenMS,
+				TokensPerSecond:      row.OutputTokensPerSec,
+			})
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data": channelTimeSeriesResponse{
+				AdminTimeZone: tzName,
+				ChannelID:     channelID,
+				Start:         startStr,
+				End:           endStr,
+				Granularity:   granularity,
+				Points:        points,
 			},
 		})
 	}
