@@ -26,23 +26,23 @@ type ChartInstance = {
 
 type ChartConstructor = new (ctx: CanvasRenderingContext2D, config: unknown) => ChartInstance;
 
-function todayLocal() {
+function todayUTC() {
   const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const dd = String(now.getDate()).padStart(2, '0');
+  const yyyy = now.getUTCFullYear();
+  const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(now.getUTCDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function formatUTCDateTime(iso: string): string {
+function formatLocalDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  const yyyy = d.getUTCFullYear();
-  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(d.getUTCDate()).padStart(2, '0');
-  const hh = String(d.getUTCHours()).padStart(2, '0');
-  const mi = String(d.getUTCMinutes()).padStart(2, '0');
-  const ss = String(d.getUTCSeconds()).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
 }
 
@@ -180,19 +180,19 @@ function clampCached(total: number, cached: number): number {
 
 function quickRangeKey(start: string, end: string): 'today' | 'yesterday' | '7d' | null {
   const fmt = (d: Date) => {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(d.getUTCDate()).padStart(2, '0');
     return `${y}-${m}-${dd}`;
   };
   const now = new Date();
   const today = fmt(now);
   const yesterdayDate = new Date(now);
-  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  yesterdayDate.setUTCDate(yesterdayDate.getUTCDate() - 1);
   const yesterday = fmt(yesterdayDate);
 
   const last7StartDate = new Date(now);
-  last7StartDate.setDate(last7StartDate.getDate() - 6);
+  last7StartDate.setUTCDate(last7StartDate.getUTCDate() - 6);
   const last7Start = fmt(last7StartDate);
 
   if (start === today && end === today) return 'today';
@@ -202,8 +202,8 @@ function quickRangeKey(start: string, end: string): 'today' | 'yesterday' | '7d'
 }
 
 export function UsagePage() {
-  const [start, setStart] = useState(todayLocal());
-  const [end, setEnd] = useState(todayLocal());
+  const [start, setStart] = useState(todayUTC());
+  const [end, setEnd] = useState(todayUTC());
   const [limit, setLimit] = useState(50);
 
   const [loading, setLoading] = useState(true);
@@ -213,6 +213,7 @@ export function UsagePage() {
   const [modelByPublicID, setModelByPublicID] = useState<Record<string, UserManagedModel>>({});
 
   const [window0, setWindow0] = useState<UsageWindow | null>(null);
+  const [windowTimeZone, setWindowTimeZone] = useState('UTC');
   const [events, setEvents] = useState<UsageEvent[]>([]);
   const [nextBeforeID, setNextBeforeID] = useState<number | null>(null);
   const [beforeStack, setBeforeStack] = useState<number[]>([]);
@@ -275,11 +276,13 @@ export function UsagePage() {
 
       const first = w.data?.windows?.[0] ?? null;
       setWindow0(first);
+      setWindowTimeZone((w.data?.time_zone || '').trim() || 'UTC');
       setEvents(e.data?.events || []);
       setNextBeforeID(e.data?.next_before_id || null);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败');
       setWindow0(null);
+      setWindowTimeZone('UTC');
       setEvents([]);
       setNextBeforeID(null);
     } finally {
@@ -394,6 +397,7 @@ export function UsagePage() {
         const res = await getUsageTimeSeries(start, end, detailGranularity);
         if (!res.success) throw new Error(res.message || '时间序列加载失败');
         if (!active) return;
+        setWindowTimeZone((res.data?.time_zone || '').trim() || 'UTC');
         setDetailSeries(res.data?.points || []);
       } catch (e) {
         if (!active) return;
@@ -521,7 +525,7 @@ export function UsagePage() {
           <div className="d-flex align-items-center mb-1">
             <h4 className="fw-bold mb-0 text-dark">用量统计</h4>
             <span className="badge rounded-pill bg-primary bg-opacity-10 text-primary border border-primary border-opacity-10 ms-2 small fw-normal">
-              UTC
+              {windowTimeZone}
             </span>
           </div>
           <p className="text-muted smaller mb-0">查看您的模型使用额度与请求明细数据。</p>
@@ -549,7 +553,7 @@ export function UsagePage() {
             type="button"
             className={activeQuick === 'today' ? 'btn btn-sm btn-primary text-white border-primary' : 'btn btn-sm btn-white border text-dark'}
             onClick={async () => {
-              const d = todayLocal();
+              const d = todayUTC();
               setStart(d);
               setEnd(d);
               setBeforeStack([]);
@@ -563,10 +567,10 @@ export function UsagePage() {
             className={activeQuick === 'yesterday' ? 'btn btn-sm btn-primary text-white border-primary' : 'btn btn-sm btn-white border text-dark'}
             onClick={async () => {
               const base = new Date();
-              base.setDate(base.getDate() - 1);
-              const y = base.getFullYear();
-              const m = String(base.getMonth() + 1).padStart(2, '0');
-              const dd = String(base.getDate()).padStart(2, '0');
+              base.setUTCDate(base.getUTCDate() - 1);
+              const y = base.getUTCFullYear();
+              const m = String(base.getUTCMonth() + 1).padStart(2, '0');
+              const dd = String(base.getUTCDate()).padStart(2, '0');
               const d = `${y}-${m}-${dd}`;
               setStart(d);
               setEnd(d);
@@ -582,11 +586,11 @@ export function UsagePage() {
             onClick={async () => {
               const endDate = new Date();
               const startDate = new Date(endDate);
-              startDate.setDate(startDate.getDate() - 6);
+              startDate.setUTCDate(startDate.getUTCDate() - 6);
               const fmt = (d: Date) => {
-                const y = d.getFullYear();
-                const m = String(d.getMonth() + 1).padStart(2, '0');
-                const dd = String(d.getDate()).padStart(2, '0');
+                const y = d.getUTCFullYear();
+                const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+                const dd = String(d.getUTCDate()).padStart(2, '0');
                 return `${y}-${m}-${dd}`;
               };
               const s = fmt(startDate);
@@ -632,9 +636,9 @@ export function UsagePage() {
             <div className="card border-0 overflow-hidden">
               <div className="bg-primary bg-opacity-10 py-3 px-4 d-flex justify-content-between align-items-center">
                 <div>
-                  <span className="text-primary fw-bold text-uppercase small">统计区间（UTC）</span>
+                  <span className="text-primary fw-bold text-uppercase small">统计区间（{windowTimeZone}）</span>
                   <span className="text-muted smaller ms-2">
-                    统计区间: {formatUTCDateTime(window0.since)} ~ {formatUTCDateTime(window0.until)}
+                    统计区间: {formatLocalDateTime(window0.since)} ~ {formatLocalDateTime(window0.until)}
                   </span>
                 </div>
                 <div className="text-primary smaller">
@@ -788,7 +792,7 @@ export function UsagePage() {
                     </div>
                   </div>
                 </div>
-                <div className="small text-muted mb-2">时间区间（UTC）：{start} ~ {end}</div>
+                <div className="small text-muted mb-2">时间区间（{windowTimeZone}）：{start} ~ {end}</div>
                 {detailSeriesErr ? <div className="alert alert-danger py-2 mb-2">{detailSeriesErr}</div> : null}
                 {detailSeriesLoading ? (
                   <div className="text-muted small py-4">时间序列加载中…</div>
@@ -814,7 +818,7 @@ export function UsagePage() {
                   <table className="table table-hover align-middle mb-0 border-0">
                     <thead className="bg-light text-muted smaller uppercase">
                       <tr>
-                        <th className="ps-4 border-0">时间（UTC）</th>
+                        <th className="ps-4 border-0">时间（本地）</th>
                         <th className="border-0">接口 / 模型</th>
                         <th className="text-center border-0">状态码</th>
                         <th className="text-end border-0">耗时</th>
@@ -1032,7 +1036,7 @@ function FragmentUsageRow({
 	      <tr className="rlm-usage-row" role="button" aria-expanded={isOpen} onClick={() => void onToggle()}>
 	        <td className="ps-4 text-nowrap font-monospace">
 	          <span className="material-symbols-rounded text-muted rlm-usage-chevron me-1 align-middle">chevron_right</span>
-          <span className="align-middle">{formatUTCDateTime(ev.time)}</span>
+          <span className="align-middle">{formatLocalDateTime(ev.time)}</span>
         </td>
         <td className="text-nowrap">
           <div className="badge bg-light text-dark border fw-normal">{model}</div>

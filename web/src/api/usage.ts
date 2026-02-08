@@ -1,6 +1,16 @@
 import { api } from './client';
 import type { APIResponse } from './types';
 
+function browserTimeZone(): string | undefined {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (!tz || !tz.trim()) return undefined;
+    return tz.trim();
+  } catch {
+    return undefined;
+  }
+}
+
 export type UsageWindow = {
   window: string;
   since: string;
@@ -22,6 +32,7 @@ export type UsageWindow = {
 };
 
 export type UsageWindowsResponse = {
+  time_zone?: string;
   now: string;
   subscription?: {
     active: boolean;
@@ -77,6 +88,7 @@ export type UsageTimeSeriesPoint = {
 };
 
 export type UsageTimeSeriesResponse = {
+  time_zone?: string;
   start: string;
   end: string;
   granularity: 'hour' | 'day';
@@ -88,6 +100,7 @@ export async function getUsageWindows(start?: string, end?: string) {
     params: {
       start: start || undefined,
       end: end || undefined,
+      tz: browserTimeZone(),
     },
   });
   return res.data;
@@ -100,6 +113,7 @@ export async function getUsageEvents(limit = 100, beforeID?: number, start?: str
       before_id: beforeID || undefined,
       start: start || undefined,
       end: end || undefined,
+      tz: browserTimeZone(),
     },
   });
   return res.data;
@@ -111,6 +125,7 @@ export async function getUsageTimeSeries(start?: string, end?: string, granulari
       start: start || undefined,
       end: end || undefined,
       granularity: granularity || undefined,
+      tz: browserTimeZone(),
     },
   });
   return res.data;

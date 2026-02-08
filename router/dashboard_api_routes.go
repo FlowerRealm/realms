@@ -77,15 +77,7 @@ func dashboardHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
-		now := time.Now()
-
-		// Calculate today's usage (since midnight Asia/Shanghai) to match legacy SSR behavior.
-		loc, _ := time.LoadLocation("Asia/Shanghai")
-		if loc == nil {
-			loc = time.FixedZone("CST", 8*60*60)
-		}
-		todayLocal := now.In(loc)
-		todayStart := time.Date(todayLocal.Year(), todayLocal.Month(), todayLocal.Day(), 0, 0, 0, 0, loc)
+		todayStart, now := dashboardUTCDayRange(time.Now())
 
 		todayCommitted, todayReserved, err := opts.Store.SumCommittedAndReservedUSD(c.Request.Context(), store.UsageSumWithReservedInput{
 			UserID: userID,
@@ -163,7 +155,7 @@ func dashboardHandler(opts Options) gin.HandlerFunc {
 
 		timeMap := make(map[string]store.TimeSeriesUsageStats, len(timeStats))
 		for _, ts := range timeStats {
-			timeMap[ts.Time.In(loc).Format("15:00")] = ts
+			timeMap[ts.Time.UTC().Format("15:00")] = ts
 		}
 
 		palette := []string{"#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16", "#14b8a6", "#64748b"}
@@ -183,7 +175,7 @@ func dashboardHandler(opts Options) gin.HandlerFunc {
 			})
 		}
 		for i := 0; i < 24; i++ {
-			hr := time.Date(todayStart.Year(), todayStart.Month(), todayStart.Day(), i, 0, 0, 0, loc)
+			hr := time.Date(todayStart.Year(), todayStart.Month(), todayStart.Day(), i, 0, 0, 0, time.UTC)
 			label := hr.Format("15:00")
 			if ts, ok := timeMap[label]; ok {
 				f, _ := ts.CommittedUSD.Float64()
@@ -218,6 +210,12 @@ func dashboardHandler(opts Options) gin.HandlerFunc {
 			},
 		})
 	}
+}
+
+func dashboardUTCDayRange(now time.Time) (todayStartUTC, nowUTC time.Time) {
+	nowUTC = now.UTC()
+	todayStartUTC = time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 0, 0, 0, 0, time.UTC)
+	return todayStartUTC, nowUTC
 }
 
 func formatDecimalPlain(d decimal.Decimal, scale int32) string {

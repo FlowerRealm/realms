@@ -41,6 +41,7 @@ type subscriptionAPI struct {
 }
 
 type usageWindowsAPIResponse struct {
+	TimeZone     string           `json:"time_zone"`
 	Now          time.Time        `json:"now"`
 	Subscription subscriptionAPI  `json:"subscription"`
 	Windows      []usageWindowAPI `json:"windows"`
@@ -62,6 +63,7 @@ type usageTimeSeriesPointAPI struct {
 }
 
 type usageTimeSeriesAPIResponse struct {
+	TimeZone    string                    `json:"time_zone"`
 	Start       string                    `json:"start"`
 	End         string                    `json:"end"`
 	Granularity string                    `json:"granularity"`
@@ -116,8 +118,13 @@ func usageWindowsHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
+		loc, tzName, ok := usageRequestLocation(c)
+		if !ok {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "tz 不合法（需为 IANA 时区名，如 Asia/Shanghai）"})
+			return
+		}
 		now := time.Now().UTC()
-		since, until, ok := parseDateRangeUTC(now, strings.TrimSpace(c.Query("start")), strings.TrimSpace(c.Query("end")))
+		since, until, sinceLocal, untilLocal, ok := parseDateRangeInLocation(now, strings.TrimSpace(c.Query("start")), strings.TrimSpace(c.Query("end")), loc)
 		if !ok {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "start/end 不合法（格式：YYYY-MM-DD）"})
 			return
@@ -130,7 +137,8 @@ func usageWindowsHandler(opts Options) gin.HandlerFunc {
 		}
 
 		var resp usageWindowsAPIResponse
-		resp.Now = now
+		resp.TimeZone = tzName
+		resp.Now = now.In(loc)
 		if len(subs) > 0 {
 			resp.Subscription = subscriptionAPI{
 				Active:   true,
@@ -165,8 +173,8 @@ func usageWindowsHandler(opts Options) gin.HandlerFunc {
 
 		resp.Windows = append(resp.Windows, usageWindowAPI{
 			Window:             "range",
-			Since:              since,
-			Until:              until,
+			Since:              sinceLocal,
+			Until:              untilLocal,
 			Requests:           tokenStats.Requests,
 			Tokens:             tokenStats.Tokens,
 			RPM:                recentStats.Requests,
@@ -232,8 +240,13 @@ func usageEventsHandler(opts Options) gin.HandlerFunc {
 		var events []store.UsageEvent
 		var err error
 		if useRange {
+			loc, _, ok := usageRequestLocation(c)
+			if !ok {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "tz 不合法（需为 IANA 时区名，如 Asia/Shanghai）"})
+				return
+			}
 			now := time.Now().UTC()
-			since, until, ok := parseDateRangeUTC(now, startStr, endStr)
+			since, until, _, _, ok := parseDateRangeInLocation(now, startStr, endStr, loc)
 			if !ok {
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "start/end 不合法（格式：YYYY-MM-DD）"})
 				return
@@ -386,16 +399,21 @@ func usageTimeSeriesHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
+		loc, tzName, ok := usageRequestLocation(c)
+		if !ok {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "tz 不合法（需为 IANA 时区名，如 Asia/Shanghai）"})
+			return
+		}
 		now := time.Now().UTC()
 		startStr := strings.TrimSpace(c.Query("start"))
 		endStr := strings.TrimSpace(c.Query("end"))
-		since, until, ok := parseDateRangeUTC(now, startStr, endStr)
+		since, until, sinceLocal, untilLocal, ok := parseDateRangeInLocation(now, startStr, endStr, loc)
 		if !ok {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "start/end 不合法（格式：YYYY-MM-DD）"})
 			return
 		}
-		startResp := since.Format("2006-01-02")
-		endResp := until.Add(-time.Second).Format("2006-01-02")
+		startResp := sinceLocal.Format("2006-01-02")
+		endResp := untilLocal.Add(-time.Second).Format("2006-01-02")
 
 		granularity := strings.TrimSpace(strings.ToLower(c.Query("granularity")))
 		if granularity == "" {
@@ -414,7 +432,7 @@ func usageTimeSeriesHandler(opts Options) gin.HandlerFunc {
 		points := make([]usageTimeSeriesPointAPI, 0, len(rows))
 		for _, row := range rows {
 			points = append(points, usageTimeSeriesPointAPI{
-				Bucket:               row.Time.UTC().Format("2006-01-02 15:04"),
+				Bucket:               row.Time.In(loc).Format("2006-01-02 15:04"),
 				Requests:             row.Requests,
 				Tokens:               row.Tokens,
 				CommittedUSD:         row.CommittedUSD.InexactFloat64(),
@@ -428,6 +446,7 @@ func usageTimeSeriesHandler(opts Options) gin.HandlerFunc {
 			"success": true,
 			"message": "",
 			"data": usageTimeSeriesAPIResponse{
+				TimeZone:    tzName,
 				Start:       startResp,
 				End:         endResp,
 				Granularity: granularity,
@@ -437,9 +456,28 @@ func usageTimeSeriesHandler(opts Options) gin.HandlerFunc {
 	}
 }
 
-func parseDateRangeUTC(now time.Time, startStr, endStr string) (since time.Time, until time.Time, ok bool) {
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	todayStr := todayStart.Format("2006-01-02")
+func usageRequestLocation(c *gin.Context) (*time.Location, string, bool) {
+	tz := normalizeAdminTimeZoneName(strings.TrimSpace(c.Query("tz")))
+	if tz == "" {
+		return time.UTC, "UTC", true
+	}
+	if tz == "UTC" {
+		return time.UTC, "UTC", true
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil || loc == nil {
+		return nil, "", false
+	}
+	return loc, tz, true
+}
+
+func parseDateRangeInLocation(nowUTC time.Time, startStr, endStr string, loc *time.Location) (sinceUTC time.Time, untilUTC time.Time, sinceLocal time.Time, untilLocal time.Time, ok bool) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	nowLocal := nowUTC.In(loc)
+	todayStartLocal := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc)
+	todayStr := todayStartLocal.Format("2006-01-02")
 
 	if startStr == "" {
 		startStr = todayStr
@@ -448,25 +486,36 @@ func parseDateRangeUTC(now time.Time, startStr, endStr string) (since time.Time,
 		endStr = startStr
 	}
 
-	since, err := time.Parse("2006-01-02", startStr)
+	sinceLocal, err := time.ParseInLocation("2006-01-02", startStr, loc)
 	if err != nil {
-		return time.Time{}, time.Time{}, false
+		return time.Time{}, time.Time{}, time.Time{}, time.Time{}, false
 	}
-	endDate, err := time.Parse("2006-01-02", endStr)
+	endDateLocal, err := time.ParseInLocation("2006-01-02", endStr, loc)
 	if err != nil {
-		return time.Time{}, time.Time{}, false
+		return time.Time{}, time.Time{}, time.Time{}, time.Time{}, false
 	}
-	if since.After(endDate) {
-		return time.Time{}, time.Time{}, false
+	if sinceLocal.After(endDateLocal) {
+		return time.Time{}, time.Time{}, time.Time{}, time.Time{}, false
 	}
-	if endDate.After(todayStart) {
-		endDate = todayStart
+	if endDateLocal.After(todayStartLocal) {
+		endDateLocal = todayStartLocal
 		endStr = todayStr
 	}
-
-	until = endDate.Add(24 * time.Hour)
-	if endStr == todayStr {
-		until = now
+	if sinceLocal.After(endDateLocal) {
+		return time.Time{}, time.Time{}, time.Time{}, time.Time{}, false
 	}
-	return since, until, true
+
+	untilLocal = endDateLocal.Add(24 * time.Hour)
+	if endStr == todayStr {
+		untilLocal = nowLocal
+	}
+	return sinceLocal.UTC(), untilLocal.UTC(), sinceLocal, untilLocal, true
+}
+
+func parseDateRangeUTC(now time.Time, startStr, endStr string) (since time.Time, until time.Time, ok bool) {
+	sinceUTC, untilUTC, _, _, ok := parseDateRangeInLocation(now.UTC(), startStr, endStr, time.UTC)
+	if !ok {
+		return time.Time{}, time.Time{}, false
+	}
+	return sinceUTC, untilUTC, true
 }
