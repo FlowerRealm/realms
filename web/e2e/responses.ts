@@ -37,9 +37,20 @@ export async function postResponsesWithRetry(request: APIRequestContext, req: Re
   let lastResponse: APIResponse | null = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const input = [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'input_text',
+            text: req.input,
+          },
+        ],
+      },
+    ];
     const response = await request.post('/v1/responses', {
       headers: { Authorization: `Bearer ${req.token}` },
-      data: { model: req.model, input: req.input, stream: false },
+      data: { model: req.model, input, stream: false },
     });
     lastResponse = response;
 

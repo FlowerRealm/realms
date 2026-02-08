@@ -81,6 +81,69 @@ jobs:
       - name: Build web
         run: npm --prefix web run build
 
+      - name: Upstream preflight (models + responses)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          raw_base="${REALMS_E2E_UPSTREAM_BASE_URL%/}"
+          if [[ "${raw_base}" == */v1 ]]; then
+            api_base="${raw_base}"
+          else
+            api_base="${raw_base}/v1"
+          fi
+
+          echo "preflight api_base=${api_base}"
+
+          models_body="$(mktemp)"
+          models_code="$(
+            curl -sS -m 30 -o "${models_body}" -w '%{http_code}' \
+              -H "Authorization: Bearer ${REALMS_E2E_UPSTREAM_API_KEY}" \
+              "${api_base}/models"
+          )"
+          echo "models status=${models_code}"
+          sed -n '1,8p' "${models_body}" || true
+
+          resp_body="$(mktemp)"
+          resp_code="$(
+            curl -sS -m 45 -o "${resp_body}" -w '%{http_code}' \
+              -H "Authorization: Bearer ${REALMS_E2E_UPSTREAM_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -X POST "${api_base}/responses" \
+              --data "$(cat <<JSON
+          {
+            "model": "${REALMS_E2E_BILLING_MODEL}",
+            "input": [
+              {
+                "role": "user",
+                "content": [
+                  { "type": "input_text", "text": "ci-preflight" }
+                ]
+              }
+            ],
+            "stream": false
+          }
+          JSON
+          )"
+          )"
+          echo "responses status=${resp_code}"
+          sed -n '1,20p' "${resp_body}" || true
+
+          case "${models_code}" in
+            2*|4*) ;;
+            *)
+              echo "preflight failed: unexpected /models status ${models_code}"
+              exit 1
+              ;;
+          esac
+          case "${resp_code}" in
+            2*|4*) ;;
+            *)
+              echo "preflight failed: unexpected /responses status ${resp_code}"
+              exit 1
+              ;;
+          esac
+
       - name: E2E (Playwright -> Realms SPA -> Real Upstream)
         run: npm --prefix web run test:e2e:ci
 
