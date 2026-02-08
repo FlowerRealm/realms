@@ -1,6 +1,8 @@
 package router
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -1876,137 +1878,649 @@ func testChannelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
 			return
 		}
-		ok, latency, msg := testChannelOnce(c.Request.Context(), opts.Store, channelID)
-		if !ok {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
+		if wantProbeStream(c) {
+			streamChannelTestHandler(c, opts.Store, channelID)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"success": true, "message": msg, "data": gin.H{"latency_ms": latency}})
+		ok, latency, msg, probe := testChannelOnceDetailed(c.Request.Context(), opts.Store, channelID, nil)
+		c.JSON(http.StatusOK, buildChannelTestResponse(ok, latency, msg, probe))
 	}
 }
 
 func testChannelOnce(ctx context.Context, st *store.Store, channelID int64) (ok bool, latencyMS int, message string) {
+	ok, latencyMS, message, _ = testChannelOnceDetailed(ctx, st, channelID, nil)
+	return ok, latencyMS, message
+}
+
+func testChannelOnceDetailed(
+	ctx context.Context,
+	st *store.Store,
+	channelID int64,
+	progress func(channelProbeProgressEvent),
+) (ok bool, latencyMS int, message string, summary channelProbeSummary) {
+	summary = channelProbeSummary{Results: []channelModelProbeResult{}}
 	if st == nil {
-		return false, 0, "store 未初始化"
+		summary.Message = "store 未初始化"
+		return false, 0, summary.Message, summary
 	}
 	ch, err := st.GetUpstreamChannelByID(ctx, channelID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return false, 0, "channel 不存在"
+			summary.Message = "channel 不存在"
+			return false, 0, summary.Message, summary
 		}
-		return false, 0, "查询 channel 失败"
+		summary.Message = "查询 channel 失败"
+		return false, 0, summary.Message, summary
 	}
 	if ch.Type == store.UpstreamTypeCodexOAuth {
-		return false, 0, "codex_oauth Channel 不支持测试"
+		summary.Message = "codex_oauth Channel 不支持测试"
+		return false, 0, summary.Message, summary
 	}
 
 	ep, err := st.GetUpstreamEndpointByChannelID(ctx, ch.ID)
 	if err != nil || ep.ID <= 0 {
-		return false, 0, "endpoint 不存在"
+		summary.Message = "endpoint 不存在"
+		return false, 0, summary.Message, summary
 	}
 
 	start := time.Now()
-	ok, msg := probeUpstream(ctx, st, ch, ep)
+	summary = probeUpstream(ctx, st, ch, ep, progress)
 	latencyMS = int(time.Since(start).Milliseconds())
 	if latencyMS < 0 {
 		latencyMS = 0
 	}
+	summary.LatencyMS = latencyMS
+	ok = summary.OK
+	message = summary.Message
 	_ = st.UpdateUpstreamChannelTest(ctx, ch.ID, ok, latencyMS)
-	return ok, latencyMS, msg
+	return ok, latencyMS, message, summary
 }
 
-func probeUpstream(ctx context.Context, st *store.Store, ch store.UpstreamChannel, ep store.UpstreamEndpoint) (bool, string) {
-	targetPath := "/v1/models"
-	method := http.MethodGet
-	var body io.Reader
+func probeUpstream(
+	ctx context.Context,
+	st *store.Store,
+	ch store.UpstreamChannel,
+	ep store.UpstreamEndpoint,
+	progress func(channelProbeProgressEvent),
+) channelProbeSummary {
+	models, source, err := resolveChannelTestModels(ctx, st, ch)
+	if err != nil {
+		return channelProbeSummary{
+			OK:      false,
+			Message: "加载模型配置失败",
+			Source:  source,
+			Results: []channelModelProbeResult{},
+		}
+	}
+	if len(models) == 0 {
+		return channelProbeSummary{
+			OK:      false,
+			Message: "未配置可测试模型（请先绑定模型或设置默认测试模型）",
+			Source:  source,
+			Results: []channelModelProbeResult{},
+		}
+	}
 
+	plan, err := buildChannelProbePlan(ctx, st, ch, ep)
+	if err != nil {
+		return channelProbeSummary{
+			OK:      false,
+			Message: err.Error(),
+			Source:  source,
+			Results: []channelModelProbeResult{},
+		}
+	}
+	if len(plan.Attempts) == 0 {
+		return channelProbeSummary{
+			OK:      false,
+			Message: "测试方案为空",
+			Source:  source,
+			Results: []channelModelProbeResult{},
+		}
+	}
+	if progress != nil {
+		progress(channelProbeProgressEvent{
+			Type:   "start",
+			Source: source,
+			Total:  len(models),
+			Models: append([]string(nil), models...),
+		})
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	results := make([]channelModelProbeResult, 0, len(models))
+	for idx, model := range models {
+		if progress != nil {
+			progress(channelProbeProgressEvent{
+				Type:   "model_start",
+				Source: source,
+				Index:  idx + 1,
+				Total:  len(models),
+				Model:  model,
+			})
+		}
+		result := probeSingleModel(ctx, client, ep.BaseURL, plan, model)
+		results = append(results, result)
+		if progress != nil {
+			copied := result
+			progress(channelProbeProgressEvent{
+				Type:   "model_done",
+				Source: source,
+				Index:  idx + 1,
+				Total:  len(models),
+				Model:  model,
+				Result: &copied,
+			})
+		}
+	}
+	return summarizeChannelProbeResults(source, results)
+}
+
+func wantProbeStream(c *gin.Context) bool {
+	raw := strings.TrimSpace(c.Query("stream"))
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func buildChannelTestResponse(ok bool, latencyMS int, message string, probe channelProbeSummary) gin.H {
+	return gin.H{
+		"success": ok,
+		"message": message,
+		"data": gin.H{
+			"latency_ms": latencyMS,
+			"probe":      probe,
+		},
+	}
+}
+
+func streamChannelTestHandler(c *gin.Context, st *store.Store, channelID int64) {
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "当前连接不支持流式输出"})
+		return
+	}
+	header := c.Writer.Header()
+	header.Set("Content-Type", "text/event-stream")
+	header.Set("Cache-Control", "no-cache, no-transform")
+	header.Set("Connection", "keep-alive")
+	header.Set("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
+	flusher.Flush()
+
+	writeEvent := func(name string, payload any) bool {
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return false
+		}
+		if _, err := c.Writer.Write([]byte("event: " + name + "\n")); err != nil {
+			return false
+		}
+		if _, err := c.Writer.Write([]byte("data: " + string(b) + "\n\n")); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+
+	streamOpen := true
+	progress := func(evt channelProbeProgressEvent) {
+		if !streamOpen {
+			return
+		}
+		if !writeEvent(evt.Type, evt) {
+			streamOpen = false
+		}
+	}
+	okResult, latencyMS, msg, probe := testChannelOnceDetailed(c.Request.Context(), st, channelID, progress)
+	if !streamOpen {
+		return
+	}
+	_ = writeEvent("summary", buildChannelTestResponse(okResult, latencyMS, msg, probe))
+}
+
+type channelProbePlan struct {
+	Headers  http.Header
+	Attempts []channelProbeAttempt
+}
+
+type channelProbeAttempt struct {
+	TargetPath string
+	BuildBody  func(model string) ([]byte, error)
+}
+
+type channelModelProbeResult struct {
+	Model        string `json:"model"`
+	OK           bool   `json:"ok"`
+	Message      string `json:"message"`
+	SuccessPath  string `json:"success_path,omitempty"`
+	UsedFallback bool   `json:"used_fallback,omitempty"`
+	TTFTMS       int    `json:"ttft_ms,omitempty"`
+	Sample       string `json:"sample,omitempty"`
+}
+
+type channelProbeSummary struct {
+	OK            bool                      `json:"ok"`
+	Message       string                    `json:"message"`
+	Source        string                    `json:"source,omitempty"`
+	Total         int                       `json:"total"`
+	Success       int                       `json:"success"`
+	ResponsesOK   int                       `json:"responses_ok"`
+	ChatOK        int                       `json:"chat_ok"`
+	FallbackCount int                       `json:"fallback_count"`
+	AvgTTFTMS     int                       `json:"avg_ttft_ms,omitempty"`
+	Sample        string                    `json:"sample,omitempty"`
+	LatencyMS     int                       `json:"latency_ms,omitempty"`
+	Results       []channelModelProbeResult `json:"results"`
+}
+
+type channelProbeProgressEvent struct {
+	Type   string                   `json:"type"`
+	Source string                   `json:"source,omitempty"`
+	Index  int                      `json:"index,omitempty"`
+	Total  int                      `json:"total,omitempty"`
+	Model  string                   `json:"model,omitempty"`
+	Models []string                 `json:"models,omitempty"`
+	Result *channelModelProbeResult `json:"result,omitempty"`
+}
+
+func buildChannelProbePlan(ctx context.Context, st *store.Store, ch store.UpstreamChannel, ep store.UpstreamEndpoint) (channelProbePlan, error) {
 	h := make(http.Header)
-	h.Set("Accept", "application/json")
+	h.Set("Accept", "text/event-stream")
 	h.Set("User-Agent", "realms-channel-test/1.0")
+	h.Set("Content-Type", "application/json; charset=utf-8")
 
 	switch ch.Type {
 	case store.UpstreamTypeOpenAICompatible:
 		creds, err := st.ListOpenAICompatibleCredentialsByEndpoint(ctx, ep.ID)
 		if err != nil || len(creds) == 0 {
-			return false, "暂无可用 key"
+			return channelProbePlan{}, fmt.Errorf("暂无可用 key")
 		}
 		sec, err := st.GetOpenAICompatibleCredentialSecret(ctx, creds[0].ID)
 		if err != nil || strings.TrimSpace(sec.APIKey) == "" {
-			return false, "读取 key 失败"
+			return channelProbePlan{}, fmt.Errorf("读取 key 失败")
 		}
 		h.Set("Authorization", "Bearer "+strings.TrimSpace(sec.APIKey))
+		h.Set("x-api-key", strings.TrimSpace(sec.APIKey))
+		if ch.OpenAIOrganization != nil {
+			if org := strings.TrimSpace(*ch.OpenAIOrganization); org != "" {
+				h.Set("OpenAI-Organization", org)
+			}
+		}
+		return channelProbePlan{
+			Headers: h,
+			Attempts: []channelProbeAttempt{
+				{
+					TargetPath: "/v1/responses",
+					BuildBody: func(model string) ([]byte, error) {
+						payload := map[string]any{
+							"model": model,
+							"input": []map[string]any{
+								{
+									"role": "user",
+									"content": []map[string]any{
+										{
+											"type": "input_text",
+											"text": "are you ok?",
+										},
+									},
+								},
+							},
+							"stream":            true,
+							"store":             false,
+							"max_output_tokens": 16,
+						}
+						return json.Marshal(payload)
+					},
+				},
+				{
+					TargetPath: "/v1/chat/completions",
+					BuildBody: func(model string) ([]byte, error) {
+						payload := map[string]any{
+							"model": model,
+							"messages": []map[string]any{
+								{"role": "user", "content": "are you ok?"},
+							},
+							"stream":     true,
+							"max_tokens": 16,
+						}
+						return json.Marshal(payload)
+					},
+				},
+			},
+		}, nil
 	case store.UpstreamTypeAnthropic:
-		// 只做连通性探测：POST /v1/messages 发送空 JSON，期望返回 400（参数错误）或 2xx。
-		method = http.MethodPost
-		targetPath = "/v1/messages"
-		body = strings.NewReader(`{}`)
-		h.Set("Content-Type", "application/json; charset=utf-8")
-		h.Set("anthropic-version", "2023-06-01")
 		creds, err := st.ListAnthropicCredentialsByEndpoint(ctx, ep.ID)
 		if err != nil || len(creds) == 0 {
-			return false, "暂无可用 key"
+			return channelProbePlan{}, fmt.Errorf("暂无可用 key")
 		}
 		sec, err := st.GetAnthropicCredentialSecret(ctx, creds[0].ID)
 		if err != nil || strings.TrimSpace(sec.APIKey) == "" {
-			return false, "读取 key 失败"
+			return channelProbePlan{}, fmt.Errorf("读取 key 失败")
 		}
 		h.Set("x-api-key", strings.TrimSpace(sec.APIKey))
+		h.Set("anthropic-version", "2023-06-01")
+		return channelProbePlan{
+			Headers: h,
+			Attempts: []channelProbeAttempt{
+				{
+					TargetPath: "/v1/messages",
+					BuildBody: func(model string) ([]byte, error) {
+						payload := map[string]any{
+							"model":      model,
+							"max_tokens": 16,
+							"messages": []map[string]any{
+								{"role": "user", "content": "are you ok?"},
+							},
+							"stream": true,
+						}
+						return json.Marshal(payload)
+					},
+				},
+			},
+		}, nil
 	default:
-		return false, "不支持的渠道类型"
+		return channelProbePlan{}, fmt.Errorf("不支持的渠道类型")
+	}
+}
+
+func resolveChannelTestModels(ctx context.Context, st *store.Store, ch store.UpstreamChannel) ([]string, string, error) {
+	bindings, err := st.ListChannelModelsByChannelID(ctx, ch.ID)
+	if err != nil {
+		return nil, "", err
 	}
 
-	u, err := buildUpstreamURL(ep.BaseURL, targetPath)
-	if err != nil {
-		return false, "base_url 不合法"
+	models := make([]string, 0, len(bindings))
+	seen := make(map[string]struct{}, len(bindings))
+	for _, b := range bindings {
+		if b.Status != 1 {
+			continue
+		}
+		pid := strings.TrimSpace(b.PublicID)
+		if pid == "" {
+			continue
+		}
+		model := strings.TrimSpace(b.UpstreamModel)
+		if model == "" {
+			model = pid
+		}
+		if model == "" {
+			continue
+		}
+		if _, ok := seen[model]; ok {
+			continue
+		}
+		seen[model] = struct{}{}
+		models = append(models, model)
+	}
+	if len(models) > 0 {
+		return models, "模型绑定", nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, u, body)
-	if err != nil {
-		return false, "创建请求失败"
-	}
-	for k, vs := range h {
-		for _, v := range vs {
-			req.Header.Add(k, v)
+	if ch.TestModel != nil {
+		m := strings.TrimSpace(*ch.TestModel)
+		if m != "" {
+			return []string{m}, "默认测试模型", nil
 		}
 	}
+	return nil, "", nil
+}
 
-	client := &http.Client{Timeout: 12 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return false, "请求失败"
-	}
-	defer resp.Body.Close()
+func probeSingleModel(ctx context.Context, client *http.Client, baseURL string, plan channelProbePlan, model string) channelModelProbeResult {
+	attemptErrors := make([]string, 0, len(plan.Attempts))
+	for idx, attempt := range plan.Attempts {
+		targetURL, err := buildUpstreamURL(baseURL, attempt.TargetPath)
+		if err != nil {
+			return channelModelProbeResult{Model: model, Message: "base_url 不合法"}
+		}
+		body, err := attempt.BuildBody(model)
+		if err != nil {
+			return channelModelProbeResult{Model: model, Message: "构造请求失败"}
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
+		if err != nil {
+			return channelModelProbeResult{Model: model, Message: "创建请求失败"}
+		}
+		for k, vs := range plan.Headers {
+			for _, v := range vs {
+				req.Header.Add(k, v)
+			}
+		}
 
-	switch ch.Type {
-	case store.UpstreamTypeAnthropic:
-		// 400 表示服务可达但参数不完整；401/403 表示 key 不可用。
+		resp, err := client.Do(req)
+		if err != nil {
+			attemptErrors = append(attemptErrors, attempt.TargetPath+" 请求失败: "+err.Error())
+			continue
+		}
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			return true, "OK"
+			contentType := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type")))
+			if !strings.Contains(contentType, "text/event-stream") {
+				bodyPreview, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+				_ = resp.Body.Close()
+				msg := attempt.TargetPath + " 非流式响应（content-type=" + contentType + "）"
+				if trimmed := strings.TrimSpace(string(bodyPreview)); trimmed != "" {
+					msg += ": " + trimmed
+				}
+				attemptErrors = append(attemptErrors, msg)
+				continue
+			}
+
+			ttftMS, sample, parseErr := parseProbeSSE(resp.Body)
+			_ = resp.Body.Close()
+			if parseErr != nil {
+				attemptErrors = append(attemptErrors, attempt.TargetPath+" SSE 解析失败: "+parseErr.Error())
+				continue
+			}
+			return channelModelProbeResult{
+				Model:        model,
+				OK:           true,
+				Message:      "OK",
+				SuccessPath:  attempt.TargetPath,
+				UsedFallback: idx > 0,
+				TTFTMS:       ttftMS,
+				Sample:       sample,
+			}
 		}
-		if resp.StatusCode == http.StatusBadRequest {
-			return true, "OK（400 参数错误，连通性正常）"
-		}
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		bodyPreview, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		_ = resp.Body.Close()
+
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			return false, "鉴权失败（" + strconv.Itoa(resp.StatusCode) + "）"
+			return channelModelProbeResult{Model: model, Message: attempt.TargetPath + " 鉴权失败（" + strconv.Itoa(resp.StatusCode) + "）"}
 		}
-		if len(b) > 0 {
-			return false, "失败（" + strconv.Itoa(resp.StatusCode) + "）: " + strings.TrimSpace(string(b))
+		lastMsg := attempt.TargetPath + " 失败（" + strconv.Itoa(resp.StatusCode) + "）"
+		if trimmed := strings.TrimSpace(string(bodyPreview)); trimmed != "" {
+			lastMsg += ": " + trimmed
 		}
-		return false, "失败（" + strconv.Itoa(resp.StatusCode) + "）"
+		attemptErrors = append(attemptErrors, lastMsg)
+	}
+	if len(attemptErrors) == 0 {
+		return channelModelProbeResult{Model: model, Message: "请求失败"}
+	}
+	return channelModelProbeResult{Model: model, Message: strings.Join(attemptErrors, " -> ")}
+}
+
+func parseProbeSSE(body io.Reader) (int, string, error) {
+	if body == nil {
+		return 0, "", fmt.Errorf("empty body")
+	}
+
+	start := time.Now()
+	firstDataAt := time.Time{}
+	seenData := false
+	var sample strings.Builder
+	const sampleMaxLen = 120
+
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 16*1024), 512*1024)
+	for scanner.Scan() {
+		line := strings.TrimRight(scanner.Text(), "\r")
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" {
+			continue
+		}
+		if firstDataAt.IsZero() {
+			firstDataAt = time.Now()
+		}
+		seenData = true
+		if payload == "[DONE]" {
+			break
+		}
+		if sample.Len() >= sampleMaxLen {
+			continue
+		}
+		chunk := extractSSETextChunk(payload)
+		if chunk == "" {
+			continue
+		}
+		remain := sampleMaxLen - sample.Len()
+		if len(chunk) > remain {
+			chunk = chunk[:remain]
+		}
+		sample.WriteString(chunk)
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, "", err
+	}
+	if !seenData {
+		return 0, "", fmt.Errorf("未收到 data 事件")
+	}
+	ttftMS := 0
+	if !firstDataAt.IsZero() {
+		ttftMS = int(firstDataAt.Sub(start).Milliseconds())
+		if ttftMS < 0 {
+			ttftMS = 0
+		}
+	}
+	return ttftMS, strings.TrimSpace(sample.String()), nil
+}
+
+func extractSSETextChunk(payload string) string {
+	var evt map[string]any
+	if err := json.Unmarshal([]byte(payload), &evt); err != nil {
+		return ""
+	}
+
+	if typ := stringFromAny(evt["type"]); typ == "response.output_text.delta" {
+		if d := stringFromAny(evt["delta"]); d != "" {
+			return d
+		}
+	}
+	if typ := stringFromAny(evt["type"]); typ == "response.output_text.done" {
+		if t := stringFromAny(evt["text"]); t != "" {
+			return t
+		}
+	}
+
+	if choices, ok := evt["choices"].([]any); ok && len(choices) > 0 {
+		if c0, ok := choices[0].(map[string]any); ok {
+			if delta, ok := c0["delta"].(map[string]any); ok {
+				if content := stringFromAny(delta["content"]); content != "" {
+					return content
+				}
+			}
+		}
+	}
+
+	if delta, ok := evt["delta"].(map[string]any); ok {
+		if text := stringFromAny(delta["text"]); text != "" {
+			return text
+		}
+	}
+
+	if text := stringFromAny(evt["text"]); text != "" {
+		return text
+	}
+	return ""
+}
+
+func stringFromAny(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
 	default:
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			return true, "OK"
-		}
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			return false, "鉴权失败（" + strconv.Itoa(resp.StatusCode) + "）"
-		}
-		if len(b) > 0 {
-			return false, "失败（" + strconv.Itoa(resp.StatusCode) + "）: " + strings.TrimSpace(string(b))
-		}
-		return false, "失败（" + strconv.Itoa(resp.StatusCode) + "）"
+		return ""
 	}
+}
+
+func summarizeChannelProbeResults(source string, results []channelModelProbeResult) channelProbeSummary {
+	summary := channelProbeSummary{
+		OK:      false,
+		Source:  source,
+		Total:   len(results),
+		Results: append([]channelModelProbeResult(nil), results...),
+	}
+	if len(results) == 0 {
+		summary.Message = "未执行任何模型测试"
+		return summary
+	}
+
+	okCount := 0
+	responsesOK := 0
+	chatOK := 0
+	fallbackCount := 0
+	ttftTotal := 0
+	ttftSamples := 0
+	firstSample := ""
+	failures := make([]string, 0, len(results))
+	for _, r := range results {
+		if r.OK {
+			okCount++
+			switch r.SuccessPath {
+			case "/v1/responses":
+				responsesOK++
+			case "/v1/chat/completions":
+				chatOK++
+			}
+			if r.UsedFallback {
+				fallbackCount++
+			}
+			if r.TTFTMS > 0 {
+				ttftTotal += r.TTFTMS
+				ttftSamples++
+			}
+			if firstSample == "" && strings.TrimSpace(r.Sample) != "" {
+				firstSample = strings.TrimSpace(r.Sample)
+			}
+			continue
+		}
+		failures = append(failures, r.Model+"："+r.Message)
+	}
+
+	total := len(results)
+	extra := "；responses=" + strconv.Itoa(responsesOK) + "，chat=" + strconv.Itoa(chatOK) + "，fallback=" + strconv.Itoa(fallbackCount)
+	if ttftSamples > 0 {
+		summary.AvgTTFTMS = ttftTotal / ttftSamples
+		extra += "，avg_ttft=" + strconv.Itoa(summary.AvgTTFTMS) + "ms"
+	}
+	if firstSample != "" {
+		summary.Sample = firstSample
+		extra += "，sample=\"" + firstSample + "\""
+	}
+	summary.Success = okCount
+	summary.ResponsesOK = responsesOK
+	summary.ChatOK = chatOK
+	summary.FallbackCount = fallbackCount
+
+	if okCount == total {
+		summary.OK = true
+		summary.Message = "OK（" + source + "）：" + strconv.Itoa(total) + "/" + strconv.Itoa(total) + " 个模型可用" + extra
+		return summary
+	}
+	if len(failures) > 3 {
+		failures = failures[:3]
+	}
+	if okCount == 0 {
+		summary.Message = "失败（" + source + "）：0/" + strconv.Itoa(total) + " 个模型可用；失败示例：" + strings.Join(failures, "；")
+		return summary
+	}
+	summary.Message = "部分失败（" + source + "）：通过 " + strconv.Itoa(okCount) + "/" + strconv.Itoa(total) + "；失败示例：" + strings.Join(failures, "；")
+	return summary
 }
 
 func buildUpstreamURL(baseURL string, targetPath string) (string, error) {
@@ -2015,11 +2529,8 @@ func buildUpstreamURL(baseURL string, targetPath string) (string, error) {
 		return "", err
 	}
 	basePath := strings.TrimRight(base.Path, "/")
-	if strings.HasSuffix(basePath, "/v1") && strings.HasPrefix(targetPath, "/v1/") {
-		targetPath = strings.TrimPrefix(targetPath, "/v1")
-		if targetPath == "" {
-			targetPath = "/"
-		}
+	if strings.HasPrefix(targetPath, "/v1/") && strings.HasSuffix(basePath, "/v1") {
+		targetPath = basePath + strings.TrimPrefix(targetPath, "/v1")
 	}
 	return base.ResolveReference(&url.URL{Path: targetPath}).String(), nil
 }

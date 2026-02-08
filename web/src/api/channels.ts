@@ -251,8 +251,172 @@ export async function deleteChannel(channelID: number) {
 }
 
 export async function testChannel(channelID: number) {
-  const res = await api.get<APIResponse<{ latency_ms: number }>>(`/api/channel/test/${channelID}`);
+  const res = await api.get<APIResponse<{ latency_ms: number; probe?: ChannelProbeSummary }>>(`/api/channel/test/${channelID}`);
   return res.data;
+}
+
+export type ChannelModelProbeResult = {
+  model: string;
+  ok: boolean;
+  message: string;
+  success_path?: string;
+  used_fallback?: boolean;
+  ttft_ms?: number;
+  sample?: string;
+};
+
+export type ChannelProbeSummary = {
+  ok: boolean;
+  message: string;
+  source?: string;
+  total: number;
+  success: number;
+  responses_ok: number;
+  chat_ok: number;
+  fallback_count: number;
+  avg_ttft_ms?: number;
+  sample?: string;
+  latency_ms?: number;
+  results: ChannelModelProbeResult[];
+};
+
+export type ChannelTestProgressEvent =
+  | {
+      type: 'start';
+      source?: string;
+      total?: number;
+      models?: string[];
+    }
+  | {
+      type: 'model_start';
+      source?: string;
+      index?: number;
+      total?: number;
+      model?: string;
+    }
+  | {
+      type: 'model_done';
+      source?: string;
+      index?: number;
+      total?: number;
+      model?: string;
+      result?: ChannelModelProbeResult;
+    };
+
+type SSEFrame = {
+  event: string;
+  data: string;
+};
+
+function parseSSEFrames(chunk: string): { frames: SSEFrame[]; rest: string } {
+  const normalized = chunk.replace(/\r\n/g, '\n');
+  const parts = normalized.split('\n\n');
+  const rest = parts.pop() ?? '';
+  const frames: SSEFrame[] = [];
+  for (const part of parts) {
+    let event = 'message';
+    const dataLines: string[] = [];
+    for (const line of part.split('\n')) {
+      if (line.startsWith('event:')) {
+        event = line.slice('event:'.length).trim() || 'message';
+        continue;
+      }
+      if (line.startsWith('data:')) {
+        dataLines.push(line.slice('data:'.length).trimStart());
+      }
+    }
+    if (dataLines.length > 0) {
+      frames.push({ event, data: dataLines.join('\n') });
+    }
+  }
+  return { frames, rest };
+}
+
+function resolveTestStreamURL(channelID: number): string {
+  return api.getUri({ url: `/api/channel/test/${channelID}`, params: { stream: 1 } });
+}
+
+function readRealmsUserHeader(): string {
+  try {
+    const raw = localStorage.getItem('user');
+    if (!raw) return '';
+    const parsed = JSON.parse(raw) as { id?: number };
+    const id = parsed?.id;
+    if (typeof id === 'number' && id > 0) {
+      return String(id);
+    }
+  } catch {
+    // ignore
+  }
+  return '';
+}
+
+export async function testChannelStream(
+  channelID: number,
+  onProgress?: (evt: ChannelTestProgressEvent) => void,
+): Promise<APIResponse<{ latency_ms: number; probe?: ChannelProbeSummary }>> {
+  const headers: Record<string, string> = {
+    Accept: 'text/event-stream',
+    'Cache-Control': 'no-store',
+  };
+  const realmsUser = readRealmsUserHeader();
+  if (realmsUser) headers['Realms-User'] = realmsUser;
+
+  const resp = await fetch(resolveTestStreamURL(channelID), {
+    method: 'GET',
+    credentials: 'include',
+    headers,
+  });
+  if (!resp.ok) {
+    const text = (await resp.text()).trim();
+    throw new Error(text || `测试失败（HTTP ${resp.status}）`);
+  }
+
+  const contentType = resp.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    return (await resp.json()) as APIResponse<{ latency_ms: number; probe?: ChannelProbeSummary }>;
+  }
+  if (!contentType.includes('text/event-stream') || !resp.body) {
+    throw new Error(`测试接口返回非流式内容（${contentType || 'unknown'}）`);
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalResult: APIResponse<{ latency_ms: number; probe?: ChannelProbeSummary }> | null = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parsed = parseSSEFrames(buffer);
+    buffer = parsed.rest;
+    for (const frame of parsed.frames) {
+      if (frame.event === 'summary') {
+        finalResult = JSON.parse(frame.data) as APIResponse<{ latency_ms: number; probe?: ChannelProbeSummary }>;
+        continue;
+      }
+      if (frame.event === 'start' || frame.event === 'model_start' || frame.event === 'model_done') {
+        onProgress?.(JSON.parse(frame.data) as ChannelTestProgressEvent);
+      }
+    }
+  }
+  buffer += decoder.decode();
+  const tail = parseSSEFrames(buffer).frames;
+  for (const frame of tail) {
+    if (frame.event === 'summary') {
+      finalResult = JSON.parse(frame.data) as APIResponse<{ latency_ms: number; probe?: ChannelProbeSummary }>;
+      continue;
+    }
+    if (frame.event === 'start' || frame.event === 'model_start' || frame.event === 'model_done') {
+      onProgress?.(JSON.parse(frame.data) as ChannelTestProgressEvent);
+    }
+  }
+
+  if (!finalResult) {
+    throw new Error('测试流未返回总结结果');
+  }
+  return finalResult;
 }
 
 export async function testAllChannels() {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { BootstrapModal } from '../../components/BootstrapModal';
 import { closeModalById } from '../../components/modal';
@@ -21,7 +21,7 @@ import {
   refreshChannelCodexAccounts,
   reorderChannels,
   startChannelCodexOAuth,
-  testChannel,
+  testChannelStream,
   updateChannel,
   updateChannelHeaderOverride,
   updateChannelMeta,
@@ -34,6 +34,9 @@ import {
   type Channel,
   type ChannelAdminItem,
   type ChannelCredential,
+  type ChannelModelProbeResult,
+  type ChannelProbeSummary,
+  type ChannelTestProgressEvent,
   type ChannelUsageOverview,
   type CodexOAuthAccount,
   type PinnedChannelInfo,
@@ -68,6 +71,24 @@ function healthBadge(ch: Channel): { cls: string; label: string; hint?: string }
   return { cls: 'badge bg-danger bg-opacity-10 text-danger border border-danger-subtle', label: `异常 · ${latency}` };
 }
 
+type ChannelModelLiveState = {
+  model: string;
+  status: 'pending' | 'running' | 'success' | 'failed';
+  message: string;
+  result?: ChannelModelProbeResult;
+};
+
+type ChannelTestPanelState = {
+  running: boolean;
+  source: string;
+  total: number;
+  done: number;
+  currentModel: string;
+  models: ChannelModelLiveState[];
+  summary?: ChannelProbeSummary;
+  summaryMessage: string;
+};
+
 export function ChannelsPage() {
   const [channels, setChannels] = useState<ChannelAdminItem[]>([]);
   const [managedModelIDs, setManagedModelIDs] = useState<string[]>([]);
@@ -77,6 +98,9 @@ export function ChannelsPage() {
   const [reordering, setReordering] = useState(false);
   const [err, setErr] = useState('');
   const [notice, setNotice] = useState('');
+  const [testingChannelID, setTestingChannelID] = useState<number | null>(null);
+  const [expandedChannelID, setExpandedChannelID] = useState<number | null>(null);
+  const [testPanels, setTestPanels] = useState<Record<number, ChannelTestPanelState>>({});
 
   const [usageStart, setUsageStart] = useState('');
   const [usageEnd, setUsageEnd] = useState('');
@@ -210,6 +234,98 @@ export function ChannelsPage() {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return '-';
     return d.toLocaleString('zh-CN', { hour12: false });
+  }
+
+  function upsertModelState(models: ChannelModelLiveState[], model: string, patch: Partial<ChannelModelLiveState>): ChannelModelLiveState[] {
+    const idx = models.findIndex((item) => item.model === model);
+    if (idx < 0) {
+      return [...models, { model, status: 'pending', message: '', ...patch }];
+    }
+    const next = [...models];
+    next[idx] = { ...next[idx], ...patch };
+    return next;
+  }
+
+  function applyTestProgress(channelID: number, evt: ChannelTestProgressEvent) {
+    setTestPanels((prev) => {
+      const current = prev[channelID] || {
+        running: true,
+        source: '',
+        total: 0,
+        done: 0,
+        currentModel: '',
+        models: [],
+        summaryMessage: '',
+      };
+      if (evt.type === 'start') {
+        const modelList = Array.isArray(evt.models) ? evt.models : [];
+        return {
+          ...prev,
+          [channelID]: {
+            ...current,
+            running: true,
+            source: evt.source || current.source,
+            total: evt.total || modelList.length,
+            done: 0,
+            currentModel: '',
+            models: modelList.map((model) => ({ model, status: 'pending', message: '' })),
+            summary: undefined,
+            summaryMessage: '',
+          },
+        };
+      }
+      if (evt.type === 'model_start') {
+        const model = evt.model || '';
+        return {
+          ...prev,
+          [channelID]: {
+            ...current,
+            running: true,
+            source: evt.source || current.source,
+            total: evt.total || current.total,
+            currentModel: model,
+            models: model ? upsertModelState(current.models, model, { status: 'running', message: '测试中...' }) : current.models,
+          },
+        };
+      }
+      if (evt.type === 'model_done') {
+        const model = evt.model || evt.result?.model || '';
+        const result = evt.result;
+        const done = Math.max(current.done, evt.index || current.done);
+        return {
+          ...prev,
+          [channelID]: {
+            ...current,
+            running: true,
+            source: evt.source || current.source,
+            total: evt.total || current.total,
+            done,
+            currentModel: done >= (evt.total || current.total || 0) ? '' : current.currentModel,
+            models: model
+              ? upsertModelState(current.models, model, {
+                  status: result?.ok ? 'success' : 'failed',
+                  message: result?.message || '',
+                  result,
+                })
+              : current.models,
+          },
+        };
+      }
+      return prev;
+    });
+  }
+
+  function modelStatusBadge(status: ChannelModelLiveState['status']): { cls: string; label: string } {
+    switch (status) {
+      case 'running':
+        return { cls: 'badge bg-primary-subtle text-primary-emphasis border', label: '测试中' };
+      case 'success':
+        return { cls: 'badge bg-success-subtle text-success-emphasis border', label: '成功' };
+      case 'failed':
+        return { cls: 'badge bg-danger-subtle text-danger-emphasis border', label: '失败' };
+      default:
+        return { cls: 'badge bg-light text-secondary border', label: '等待中' };
+    }
   }
 
   async function refresh(params?: { start?: string; end?: string }) {
@@ -695,13 +811,22 @@ export function ChannelsPage() {
                       const st = statusBadge(ch.status);
                       const hb = healthBadge(ch);
                       const isPinned = !!pinned?.pinned_active && pinned.pinned_channel_id === ch.id;
-	                      const runtime = ch.runtime;
-	                      const usage = ch.usage;
-	                      const checkedAt = fmtHHMM(ch.last_test_at);
-	                      return (
+                      const runtime = ch.runtime;
+                      const usage = ch.usage;
+                      const checkedAt = fmtHHMM(ch.last_test_at);
+                      const panel = testPanels[ch.id];
+                      const panelOpen = expandedChannelID === ch.id;
+                      const testRunning = testingChannelID === ch.id;
+                      const anyTesting = testingChannelID !== null;
+                      return (
+                        <Fragment key={ch.id}>
                         <tr
-                          key={ch.id}
                           className={dropOverID === ch.id ? 'table-primary' : undefined}
+                          onClick={(e) => {
+                            const target = e.target as HTMLElement;
+                            if (target.closest('button, a, input, textarea, select, label')) return;
+                            setExpandedChannelID((prev) => (prev === ch.id ? null : ch.id));
+                          }}
                           onDragOver={(e) => {
                             if (loading || reordering) return;
                             e.preventDefault();
@@ -853,22 +978,84 @@ export function ChannelsPage() {
                                 className="btn btn-sm btn-light border text-primary"
                                 type="button"
                                 title="测试连接"
-                                disabled={loading || reordering || ch.type === 'codex_oauth'}
+                                disabled={loading || reordering || ch.type === 'codex_oauth' || anyTesting}
                                 onClick={async () => {
                                   if (ch.type === 'codex_oauth') return;
                                   setErr('');
                                   setNotice('');
+                                  setTestingChannelID(ch.id);
+                                  setExpandedChannelID(ch.id);
+                                  setTestPanels((prev) => ({
+                                    ...prev,
+                                    [ch.id]: {
+                                      running: true,
+                                      source: '',
+                                      total: 0,
+                                      done: 0,
+                                      currentModel: '',
+                                      models: [],
+                                      summary: undefined,
+                                      summaryMessage: '',
+                                    },
+                                  }));
                                   try {
-                                    const res = await testChannel(ch.id);
+                                    const res = await testChannelStream(ch.id, (evt) => applyTestProgress(ch.id, evt));
+                                    const probe = res.data?.probe;
+                                    setTestPanels((prev) => {
+                                      const current = prev[ch.id];
+                                      if (!current) return prev;
+                                      const finalModels =
+                                        probe?.results?.length && probe.results.length > 0
+                                          ? probe.results.map((item) => ({
+                                              model: item.model,
+                                              status: item.ok ? ('success' as const) : ('failed' as const),
+                                              message: item.message || '',
+                                              result: item,
+                                            }))
+                                          : current.models;
+                                      return {
+                                        ...prev,
+                                        [ch.id]: {
+                                          ...current,
+                                          running: false,
+                                          source: probe?.source || current.source,
+                                          total: probe?.total ?? current.total,
+                                          done: probe?.total ?? current.done,
+                                          currentModel: '',
+                                          models: finalModels,
+                                          summary: probe,
+                                          summaryMessage: res.message || probe?.message || '',
+                                        },
+                                      };
+                                    });
                                     if (!res.success) throw new Error(res.message || '测试失败');
                                     setNotice(res.message || '测试成功');
                                     await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
                                   } catch (e) {
                                     setErr(e instanceof Error ? e.message : '测试失败');
+                                  } finally {
+                                    setTestingChannelID((prev) => (prev === ch.id ? null : prev));
+                                    setTestPanels((prev) => {
+                                      const current = prev[ch.id];
+                                      if (!current) return prev;
+                                      return {
+                                        ...prev,
+                                        [ch.id]: {
+                                          ...current,
+                                          running: false,
+                                          currentModel: '',
+                                        },
+                                      };
+                                    });
                                   }
                                 }}
                               >
-                                <i className="ri-flashlight-line me-1"></i>测试
+                                {testRunning ? (
+                                  <span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                                ) : (
+                                  <i className="ri-flashlight-line me-1"></i>
+                                )}
+                                {testRunning ? '测试中' : '测试'}
                               </button>
 
                               <button
@@ -927,6 +1114,76 @@ export function ChannelsPage() {
                             </div>
                           </td>
                         </tr>
+                        {panelOpen ? (
+                          <tr className="bg-light-subtle">
+                            <td colSpan={5} className="px-4 py-3">
+                              {!panel ? (
+                                <div style={{ minHeight: 40 }}></div>
+                              ) : (
+                                <>
+                                  <div className="d-flex flex-wrap align-items-center gap-3 small">
+                                    <span className={`badge ${panel.running ? 'bg-primary-subtle text-primary-emphasis border' : 'bg-light text-secondary border'}`}>
+                                      {panel.running ? '测试进行中' : '测试完成'}
+                                    </span>
+                                    {panel.source ? <span className="text-muted">来源：{panel.source}</span> : null}
+                                    {panel.total > 0 ? (
+                                      <span className="text-muted">
+                                        进度：{panel.done}/{panel.total}
+                                      </span>
+                                    ) : null}
+                                    {panel.currentModel ? (
+                                      <span className="text-primary">当前模型：{panel.currentModel}</span>
+                                    ) : null}
+                                    {panel.summary?.latency_ms ? (
+                                      <span className="text-muted">耗时：{panel.summary.latency_ms}ms</span>
+                                    ) : null}
+                                  </div>
+                                  {panel.summaryMessage ? <div className="mt-2 small text-muted">{panel.summaryMessage}</div> : null}
+                                  <div className="table-responsive mt-2">
+                                    <table className="table table-sm align-middle mb-0">
+                                      <thead>
+                                        <tr className="text-muted">
+                                          <th style={{ width: '30%' }}>模型</th>
+                                          <th style={{ width: '15%' }}>状态</th>
+                                          <th style={{ width: '15%' }}>路径</th>
+                                          <th style={{ width: '10%' }}>TTFT</th>
+                                          <th>信息</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {panel.models.length === 0 ? (
+                                          <tr>
+                                            <td colSpan={5} className="text-muted py-2">
+                                              等待测试开始...
+                                            </td>
+                                          </tr>
+                                        ) : (
+                                          panel.models.map((item) => {
+                                            const badge = modelStatusBadge(item.status);
+                                            return (
+                                              <tr key={item.model}>
+                                                <td className="font-monospace small">{item.model}</td>
+                                                <td>
+                                                  <span className={badge.cls}>{badge.label}</span>
+                                                </td>
+                                                <td className="small text-muted">{item.result?.success_path || '-'}</td>
+                                                <td className="small text-muted">
+                                                  {typeof item.result?.ttft_ms === 'number' ? `${item.result.ttft_ms}ms` : '-'}
+                                                </td>
+                                                <td className="small text-muted">{item.message || '-'}</td>
+                                              </tr>
+                                            );
+                                          })
+                                        )}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        ) : null}
+                        </Fragment>
                       );
                     })
                   )}
