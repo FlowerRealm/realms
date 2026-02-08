@@ -708,47 +708,16 @@ export function UsageAdminPage() {
                                           <div className="text-muted smaller">金额计算流程</div>
                                           <div className="font-monospace">
                                             <div>
-                                              输入(总/缓存/计费): {detailByEventID[e.id]?.pricing_breakdown?.input_tokens_total} / {detailByEventID[e.id]?.pricing_breakdown?.input_tokens_cached} / {detailByEventID[e.id]?.pricing_breakdown?.input_tokens_billable}
+                                              公式: ((输入总-缓存输入)×输入单价 + (输出总-缓存输出)×输出单价 + 缓存输入×缓存输入单价 + 缓存输出×缓存输出单价) × 生效倍率
                                             </div>
-                                            <div>
-                                              输出(总/缓存/计费): {detailByEventID[e.id]?.pricing_breakdown?.output_tokens_total} / {detailByEventID[e.id]?.pricing_breakdown?.output_tokens_cached} / {detailByEventID[e.id]?.pricing_breakdown?.output_tokens_billable}
-                                            </div>
-                                            <div>
-                                              输入(非缓存): {detailByEventID[e.id]?.pricing_breakdown?.input_tokens_billable} × {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.input_usd_per_1m || '0')}/1M = {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.input_cost_usd || '0')}
-                                            </div>
-                                            <div>
-                                              输出(非缓存): {detailByEventID[e.id]?.pricing_breakdown?.output_tokens_billable} × {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.output_usd_per_1m || '0')}/1M = {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.output_cost_usd || '0')}
-                                            </div>
-                                            <div>
-                                              缓存输入: {detailByEventID[e.id]?.pricing_breakdown?.input_tokens_cached} × {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.cache_input_usd_per_1m || '0')}/1M = {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.cache_input_cost_usd || '0')}
-                                            </div>
-                                            <div>
-                                              缓存输出: {detailByEventID[e.id]?.pricing_breakdown?.output_tokens_cached} × {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.cache_output_usd_per_1m || '0')}/1M = {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.cache_output_cost_usd || '0')}
-                                            </div>
-                                            <div className="mt-1">基础费用: {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.base_cost_usd || '0')}</div>
-                                            <div>
-                                              用户分组倍率: {(detailByEventID[e.id]?.pricing_breakdown?.user_group_factors || []).length > 0
-                                                ? (detailByEventID[e.id]?.pricing_breakdown?.user_group_factors || []).map((item) => `${item.group_name}×${formatDecimalPlain(item.multiplier)}`).join(' × ')
-                                                : 'default×1'}
-                                            </div>
-                                            <div>用户倍率合计: ×{formatDecimalPlain(detailByEventID[e.id]?.pricing_breakdown?.user_multiplier || '1')}</div>
-                                            {detailByEventID[e.id]?.pricing_breakdown?.subscription_group ? (
-                                              <div>
-                                                订阅分组: {detailByEventID[e.id]?.pricing_breakdown?.subscription_group}（仅用于套餐购买权限校验，不参与计费倍率）
-                                              </div>
-                                            ) : null}
-                                            <div>生效倍率: ×{formatDecimalPlain(detailByEventID[e.id]?.pricing_breakdown?.effective_multiplier || '1')}</div>
                                             <div className="mt-1">
-                                              最终费用: {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.base_cost_usd || '0')} × {formatDecimalPlain(detailByEventID[e.id]?.pricing_breakdown?.effective_multiplier || '1')} = {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.final_cost_usd || '0')}{' '}
+                                              实际: (({detailByEventID[e.id]?.pricing_breakdown?.input_tokens_total || 0}-{detailByEventID[e.id]?.pricing_breakdown?.input_tokens_cached || 0})×{formatUSD(detailByEventID[e.id]?.pricing_breakdown?.input_usd_per_1m || '0')}/1M + ({detailByEventID[e.id]?.pricing_breakdown?.output_tokens_total || 0}-{detailByEventID[e.id]?.pricing_breakdown?.output_tokens_cached || 0})×{formatUSD(detailByEventID[e.id]?.pricing_breakdown?.output_usd_per_1m || '0')}/1M + {detailByEventID[e.id]?.pricing_breakdown?.input_tokens_cached || 0}×{formatUSD(detailByEventID[e.id]?.pricing_breakdown?.cache_input_usd_per_1m || '0')}/1M + {detailByEventID[e.id]?.pricing_breakdown?.output_tokens_cached || 0}×{formatUSD(detailByEventID[e.id]?.pricing_breakdown?.cache_output_usd_per_1m || '0')}/1M) × {formatDecimalPlain(detailByEventID[e.id]?.pricing_breakdown?.effective_multiplier || '1')} = {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.final_cost_usd || '0')}{' '}
                                               <span className="text-muted smaller">
-                                                （{costSourceLabel(detailByEventID[e.id]?.pricing_breakdown?.cost_source || '')}费用: {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.cost_source_usd || '0')}）
+                                                （{costSourceLabel(detailByEventID[e.id]?.pricing_breakdown?.cost_source || '')}费用: {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.cost_source_usd || '0')}；倍率: {(detailByEventID[e.id]?.pricing_breakdown?.user_group_factors || []).length > 0
+                                                  ? (detailByEventID[e.id]?.pricing_breakdown?.user_group_factors || []).map((item) => `${item.group_name}×${formatDecimalPlain(item.multiplier)}`).join(' × ')
+                                                  : 'default×1'}）
                                               </span>
                                             </div>
-                                            {formatDecimalPlain(detailByEventID[e.id]?.pricing_breakdown?.diff_from_source_usd || '0') !== '0' ? (
-                                              <div className="text-muted smaller">
-                                                差值(事件费用-公式): {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.diff_from_source_usd || '0')}
-                                              </div>
-                                            ) : null}
                                           </div>
                                         </div>
                                       ) : null}

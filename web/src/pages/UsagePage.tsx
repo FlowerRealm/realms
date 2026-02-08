@@ -162,8 +162,7 @@ function microUSDToUSDWithDollar(micro: bigint): string {
 }
 
 function formatUSDPer1M(usdPer1M: string): string {
-  const micro = parseDecimalToMicroInt(usdPer1M);
-  return `${microUSDToUSDWithDollar(micro)}/1M`;
+  return `${formatUSD(usdPer1M)}/1M`;
 }
 
 function costMicroUSD(tokens: number, usdPer1MMicro: bigint): bigint {
@@ -1138,70 +1137,24 @@ function FragmentUsageRow({
                     {pricingBreakdown ? (
                       <div className="font-monospace">
                         <div>
-                          输入(总/缓存/计费): {pricingBreakdown.input_tokens_total} / {pricingBreakdown.input_tokens_cached} / {pricingBreakdown.input_tokens_billable}
-                        </div>
-                        <div>
-                          输出(总/缓存/计费): {pricingBreakdown.output_tokens_total} / {pricingBreakdown.output_tokens_cached} / {pricingBreakdown.output_tokens_billable}
-                        </div>
-                        <div>
-                          输入(非缓存): {pricingBreakdown.input_tokens_billable} × {formatUSDPer1M(pricingBreakdown.input_usd_per_1m)} = {formatUSD(pricingBreakdown.input_cost_usd)}
-                        </div>
-                        <div>
-                          输出(非缓存): {pricingBreakdown.output_tokens_billable} × {formatUSDPer1M(pricingBreakdown.output_usd_per_1m)} = {formatUSD(pricingBreakdown.output_cost_usd)}
-                        </div>
-                        <div>
-                          缓存输入: {pricingBreakdown.input_tokens_cached} × {formatUSDPer1M(pricingBreakdown.cache_input_usd_per_1m)} = {formatUSD(pricingBreakdown.cache_input_cost_usd)}
-                        </div>
-                        <div>
-                          缓存输出: {pricingBreakdown.output_tokens_cached} × {formatUSDPer1M(pricingBreakdown.cache_output_usd_per_1m)} = {formatUSD(pricingBreakdown.cache_output_cost_usd)}
+                          公式: ((输入总-缓存输入)×输入单价 + (输出总-缓存输出)×输出单价 + 缓存输入×缓存输入单价 + 缓存输出×缓存输出单价) × 生效倍率
                         </div>
                         <div className="mt-1">
-                          基础费用: {formatUSD(pricingBreakdown.base_cost_usd)}
-                        </div>
-                        <div>
-                          用户分组倍率: {pricingBreakdown.user_group_factors.length > 0
-                            ? pricingBreakdown.user_group_factors.map((item) => `${item.group_name}×${formatUSDPlain(item.multiplier)}`).join(' × ')
-                            : 'default×1'}
-                        </div>
-                        <div>
-                          用户倍率合计: ×{formatUSDPlain(pricingBreakdown.user_multiplier)}
-                        </div>
-                        {pricingBreakdown.subscription_group ? (
-                          <div>
-                            订阅分组: {pricingBreakdown.subscription_group}（仅用于套餐购买权限校验，不参与计费倍率）
-                          </div>
-                        ) : null}
-                        <div>
-                          生效倍率: ×{formatUSDPlain(pricingBreakdown.effective_multiplier)}
-                        </div>
-                        <div className="mt-1">
-                          最终费用: {formatUSD(pricingBreakdown.base_cost_usd)} × {formatUSDPlain(pricingBreakdown.effective_multiplier)} = {formatUSD(pricingBreakdown.final_cost_usd)}{' '}
+                          实际: (({pricingBreakdown.input_tokens_total}-{pricingBreakdown.input_tokens_cached})×{formatUSDPer1M(pricingBreakdown.input_usd_per_1m)} + ({pricingBreakdown.output_tokens_total}-{pricingBreakdown.output_tokens_cached})×{formatUSDPer1M(pricingBreakdown.output_usd_per_1m)} + {pricingBreakdown.input_tokens_cached}×{formatUSDPer1M(pricingBreakdown.cache_input_usd_per_1m)} + {pricingBreakdown.output_tokens_cached}×{formatUSDPer1M(pricingBreakdown.cache_output_usd_per_1m)}) × {formatUSDPlain(pricingBreakdown.effective_multiplier)} = {formatUSD(pricingBreakdown.final_cost_usd)}{' '}
                           <span className="text-muted smaller">
-                            （{costSourceLabel(pricingBreakdown.cost_source)}费用: {formatUSD(pricingBreakdown.cost_source_usd)}）
+                            （{costSourceLabel(pricingBreakdown.cost_source)}费用: {formatUSD(pricingBreakdown.cost_source_usd)}；倍率: {pricingBreakdown.user_group_factors.length > 0
+                              ? pricingBreakdown.user_group_factors.map((item) => `${item.group_name}×${formatUSDPlain(item.multiplier)}`).join(' × ')
+                              : 'default×1'}）
                           </span>
                         </div>
-                        {parseDecimalToMicroInt(pricingBreakdown.diff_from_source_usd) !== 0n ? (
-                          <div className="text-muted smaller">
-                            差值(事件费用-公式): {formatUSD(pricingBreakdown.diff_from_source_usd)}
-                          </div>
-                        ) : null}
                       </div>
                     ) : pricingAvailable ? (
                       <div className="font-monospace">
                         <div>
-                          输入(非缓存): {nonCachedInTok} × {formatUSDPer1M(inUSDPer1MStr)} = {microUSDToUSDWithDollar(inCostMicro)}
-                        </div>
-                        <div>
-                          输出(非缓存): {nonCachedOutTok} × {formatUSDPer1M(outUSDPer1MStr)} = {microUSDToUSDWithDollar(outCostMicro)}
-                        </div>
-                        <div>
-                          缓存输入: {cachedInTok} × {formatUSDPer1M(cacheInUSDPer1MStr)} = {microUSDToUSDWithDollar(cacheInCostMicro)}
-                        </div>
-                        <div>
-                          缓存输出: {cachedOutTok} × {formatUSDPer1M(cacheOutUSDPer1MStr)} = {microUSDToUSDWithDollar(cacheOutCostMicro)}
+                          公式: 输入计费×输入单价 + 输出计费×输出单价 + 缓存输入×缓存输入单价 + 缓存输出×缓存输出单价
                         </div>
                         <div className="mt-1">
-                          合计: {microUSDToUSDWithDollar(sumCostMicro)}{' '}
+                          实际: {nonCachedInTok}×{formatUSDPer1M(inUSDPer1MStr)} + {nonCachedOutTok}×{formatUSDPer1M(outUSDPer1MStr)} + {cachedInTok}×{formatUSDPer1M(cacheInUSDPer1MStr)} + {cachedOutTok}×{formatUSDPer1M(cacheOutUSDPer1MStr)} = {microUSDToUSDWithDollar(sumCostMicro)}{' '}
                           <span className="text-muted smaller">
                             （事件费用: {microUSDToUSDWithDollar(actualMicro)}）
                           </span>
