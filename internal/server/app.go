@@ -320,7 +320,6 @@ func (a *App) handleFaviconICO(w http.ResponseWriter, r *http.Request) {
 func (a *App) bootstrap() error {
 	go a.usageCleanupLoop()
 	go a.codexBalanceRefreshLoop()
-	go a.channelAutoProbeLoop()
 	if !a.cfg.SelfMode.Enable {
 		go a.ticketAttachmentsCleanupLoop()
 	}

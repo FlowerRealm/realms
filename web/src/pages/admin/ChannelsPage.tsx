@@ -72,6 +72,35 @@ function healthBadge(ch: Channel): { cls: string; label: string; hint?: string }
   return { cls: 'badge bg-danger bg-opacity-10 text-danger border border-danger-subtle', label: `异常 · ${latency}` };
 }
 
+function formatPinnedChannelLabel(channelID: number, fallback: string, channels: ChannelAdminItem[]): string {
+  const matched = channels.find((ch) => ch.id === channelID);
+  const matchedName = (matched?.name || '').trim();
+  if (matchedName) return `${matchedName} (#${channelID})`;
+  const raw = (fallback || '').trim();
+  if (raw) return raw;
+  if (channelID > 0) return `渠道 #${channelID}`;
+  return '';
+}
+
+function normalizePinnedInfo(info: PinnedChannelInfo | null, channels: ChannelAdminItem[]): PinnedChannelInfo | null {
+  if (!info || !info.available) return info;
+
+  const runtimePinned = channels.find((ch) => !!ch.runtime?.pinned_active);
+  let out = { ...info };
+
+  if ((!out.pinned_active || out.pinned_channel_id <= 0) && runtimePinned) {
+    out.pinned_active = true;
+    out.pinned_channel_id = runtimePinned.id;
+    out.pinned_channel = runtimePinned.name?.trim() ? `${runtimePinned.name.trim()} (#${runtimePinned.id})` : `渠道 #${runtimePinned.id}`;
+  }
+
+  if (out.pinned_active && out.pinned_channel_id > 0) {
+    out.pinned_channel = formatPinnedChannelLabel(out.pinned_channel_id, out.pinned_channel, channels);
+  }
+
+  return out;
+}
+
 type ChartInstance = {
   destroy?: () => void;
 };
@@ -353,16 +382,16 @@ export function ChannelsPage() {
           .filter((id) => typeof id === 'string' && id.trim() !== ''),
       );
 
+      if (!pageRes.success) throw new Error(pageRes.message || '加载渠道失败');
+      const pageChannels = pageRes.data?.channels || [];
       if (pinnedRes.success) {
-        setPinned(pinnedRes.data || null);
+        setPinned(normalizePinnedInfo(pinnedRes.data || null, pageChannels));
       } else {
         setPinned(null);
       }
-
-      if (!pageRes.success) throw new Error(pageRes.message || '加载渠道失败');
       setUsageStart(pageRes.data?.start || '');
       setUsageEnd(pageRes.data?.end || '');
-      setChannels(pageRes.data?.channels || []);
+      setChannels(pageChannels);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败');
     } finally {
@@ -1139,7 +1168,6 @@ export function ChannelsPage() {
                                 title="设为指针"
                                 disabled={loading || reordering || !(pinned?.available ?? false)}
                                 onClick={async () => {
-                                  if (!window.confirm('确认设为渠道指针？将清除该渠道封禁。')) return;
                                   setErr('');
                                   setNotice('');
                                   try {

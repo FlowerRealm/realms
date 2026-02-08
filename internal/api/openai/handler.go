@@ -407,7 +407,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			h.finalizeUsageEvent(r, usageID, &sel, http.StatusInternalServerError, "rewrite_body", "请求体处理失败", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
 			return
 		}
-		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), usageID, reqStart, reqBytes, 1) {
+		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), usageID, reqStart, reqBytes, 2) {
 			return
 		}
 	}
@@ -424,25 +424,46 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
 }
 
+type proxyAttemptDecision int
+
+const (
+	proxyAttemptDone proxyAttemptDecision = iota
+	proxyAttemptRetrySameSelection
+	proxyAttemptFailover
+)
+
 func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p auth.Principal, sel scheduler.Selection, body []byte, wantStream bool, model *string, usageID int64, reqStart time.Time, reqBytes int64, retries int) bool {
+	if retries <= 0 {
+		retries = 1
+	}
 	for i := 0; i < retries; i++ {
-		ok := h.proxyOnce(w, r, sel, body, wantStream, model, p, usageID, reqStart, reqBytes)
-		if ok {
+		decision := h.proxyOnce(w, r, sel, body, wantStream, model, p, usageID, reqStart, reqBytes)
+		switch decision {
+		case proxyAttemptDone:
 			return true
+		case proxyAttemptRetrySameSelection:
+			if i+1 < retries {
+				continue
+			}
+			return false
+		case proxyAttemptFailover:
+			return false
+		default:
+			return false
 		}
-		// 当下游已经开始写回（SSE/非流式）时，proxyOnce 会直接返回 true 并结束；这里仅处理“未写回的失败”。
+		// 当下游已经开始写回（SSE/非流式）时，proxyOnce 会返回 proxyAttemptDone；这里仅处理“未写回的失败”。
 	}
 	return false
 }
 
-func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel scheduler.Selection, body []byte, wantStream bool, model *string, p auth.Principal, usageID int64, reqStart time.Time, reqBytes int64) bool {
+func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel scheduler.Selection, body []byte, wantStream bool, model *string, p auth.Principal, usageID int64, reqStart time.Time, reqBytes int64) proxyAttemptDecision {
 	attemptStart := time.Now()
 
 	resp, err := h.exec.Do(r.Context(), sel, r, body)
 	if err != nil {
 		h.sched.Report(sel, scheduler.Result{Success: false, Retriable: true, ErrorClass: "network"})
 		h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, 0, "network", time.Since(attemptStart))
-		return false
+		return proxyAttemptRetrySameSelection
 	}
 	defer resp.Body.Close()
 
@@ -461,7 +482,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		if retriable {
 			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: true, StatusCode: resp.StatusCode, ErrorClass: errorClass})
 			h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, errorClass, time.Since(attemptStart))
-			return false
+			return proxyAttemptFailover
 		}
 		if h.sched != nil {
 			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: false, StatusCode: resp.StatusCode, ErrorClass: "upstream_status"})
@@ -486,7 +507,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			cancel()
 		}
 		h.finalizeUsageEventWithUpstreamBodies(r, usageID, &sel, resp.StatusCode, "upstream_status", failMsg, time.Since(reqStart), 0, wantStream || isSSE, reqBytes, respBytes, middleware.CachedBody(r.Context()), body, bodyBytes)
-		return true
+		return proxyAttemptDone
 	}
 
 	// SSE 分支：开始写回后禁止 failover。
@@ -610,7 +631,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, resp.StatusCode, pumpRes.ErrorClass, "", time.Since(attemptStart), true)
 		}
 		h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, pumpRes.ErrorClass, "", time.Since(reqStart), firstTokenLatencyMS, true, reqBytes, cw.bytes)
-		return true
+		return proxyAttemptDone
 	}
 
 	// 非流式：完整转发并尝试提取 usage。
@@ -618,7 +639,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 	if err != nil {
 		h.sched.Report(sel, scheduler.Result{Success: false, Retriable: true, ErrorClass: "read_upstream"})
 		h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, 0, "read_upstream", time.Since(attemptStart))
-		return false
+		return proxyAttemptRetrySameSelection
 	}
 	h.touchBindingFromPromptCacheKey(p.UserID, sel, extractPromptCacheKeyFromRawBody(bodyBytes))
 	copyResponseHeaders(w.Header(), resp.Header)
@@ -659,7 +680,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 	}
 	h.sched.Report(sel, scheduler.Result{Success: true})
 	h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "", "", time.Since(reqStart), 0, false, reqBytes, int64(respBytes))
-	return true
+	return proxyAttemptDone
 }
 
 type countingResponseWriter struct {

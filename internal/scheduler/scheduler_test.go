@@ -264,6 +264,23 @@ func TestState_IsChannelBanned_ExpiredMarksProbeDue(t *testing.T) {
 	}
 }
 
+func TestRuntimeChannelStats_ExpiredBanMarksProbeDue(t *testing.T) {
+	s := New(&fakeStore{})
+	now := time.Now()
+
+	s.state.mu.Lock()
+	s.state.channelBanUntil[1] = now.Add(-1 * time.Second)
+	s.state.mu.Unlock()
+
+	rt := s.RuntimeChannelStats(1)
+	if rt.BannedUntil != nil {
+		t.Fatalf("expected expired ban to be cleared from runtime view")
+	}
+	if !s.state.IsChannelProbeDue(1) {
+		t.Fatalf("expected runtime stats sweep to mark probe due")
+	}
+}
+
 func TestState_BanChannelClampedToTenMinutes(t *testing.T) {
 	st := NewState()
 	now := time.Now()
