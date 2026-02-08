@@ -72,6 +72,25 @@ func envOr(key string, fallback string) string {
 	return v
 }
 
+func envBool(key string) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return false
+	}
+	b, err := strconv.ParseBool(v)
+	return err == nil && b
+}
+
+func firstNonEmptyEnv(keys ...string) string {
+	for _, key := range keys {
+		v := strings.TrimSpace(os.Getenv(key))
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func ensureSQLiteQuery(path string) string {
 	if strings.Contains(path, "?") || path == ":memory:" || strings.HasPrefix(path, "file::memory:") {
 		return path
@@ -138,70 +157,112 @@ func main() {
 	st.SetDialect(dialect)
 	st.SetAppSettingsDefaults(cfg.AppSettingsDefaults)
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/responses" {
-			http.NotFound(w, r)
-			return
-		}
-		rawBody, _ := io.ReadAll(r.Body)
-		_ = r.Body.Close()
+	skipSeed := envBool("REALMS_E2E_SKIP_SEED")
+	seedModel := strings.TrimSpace(firstNonEmptyEnv("REALMS_E2E_BILLING_MODEL", "REALMS_CI_MODEL"))
+	if seedModel == "" {
+		seedModel = e2eModelPublicID
+	}
+	realUpstreamBaseURL := strings.TrimRight(strings.TrimSpace(firstNonEmptyEnv("REALMS_E2E_UPSTREAM_BASE_URL", "REALMS_CI_UPSTREAM_BASE_URL")), "/")
+	realUpstreamAPIKey := strings.TrimSpace(firstNonEmptyEnv("REALMS_E2E_UPSTREAM_API_KEY", "REALMS_CI_UPSTREAM_API_KEY"))
+	enforceRealUpstream := envBool("REALMS_E2E_ENFORCE_REAL_UPSTREAM")
 
-		var payload map[string]any
-		_ = json.Unmarshal(rawBody, &payload)
-		if input, ok := payload["input"].(string); ok && strings.TrimSpace(input) == "__pw_fail__" {
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"error": map[string]any{
-					"message": "bad request for e2e",
-				},
-				"upstream_channel": "pw-e2e-upstream",
-			})
-			return
-		}
-
-		resp := map[string]any{
-			"id":     "resp_pw_e2e_1",
-			"object": "response",
-			"model":  e2eModelPublicID,
-			"output": []any{
-				map[string]any{
-					"type": "message",
-					"role": "assistant",
-					"content": []any{
-						map[string]any{"type": "output_text", "text": "OK"},
-					},
-				},
-			},
-			"usage": map[string]any{
-				"input_tokens":  1000,
-				"output_tokens": 1,
-			},
-			"status": "completed",
-		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer upstream.Close()
-
-	upstreamBaseURL := strings.TrimRight(strings.TrimSpace(upstream.URL), "/") + "/v1"
-
-	seed, err := seedE2EData(context.Background(), st, cfg, upstreamBaseURL)
-	if err != nil {
-		slog.Error("seed 失败", "err", err)
+	useRealUpstream := realUpstreamBaseURL != "" || realUpstreamAPIKey != ""
+	if useRealUpstream && (realUpstreamBaseURL == "" || realUpstreamAPIKey == "") {
+		slog.Error("真实上游配置不完整", "base_url_set", realUpstreamBaseURL != "", "api_key_set", realUpstreamAPIKey != "")
 		os.Exit(1)
 	}
-	slog.Info("e2e seed 完成",
-		"user_id", seed.RootUserID,
-		"e2e_user_id", seed.E2EUserID,
-		"poor_user_id", seed.PoorUserID,
-		"announcement_id", seed.AnnouncementID,
-		"ticket_open_id", seed.TicketOpenID,
-		"ticket_closed_id", seed.TicketClosedID,
-		"oauth_app_id", seed.OAuthAppID,
-		"topup_order_id", seed.TopupOrderID,
-		"upstream_base_url", upstreamBaseURL,
-	)
+	if enforceRealUpstream && !useRealUpstream {
+		slog.Error("已强制要求真实上游，但未提供配置",
+			"required_env_any", "REALMS_E2E_UPSTREAM_BASE_URL/REALMS_CI_UPSTREAM_BASE_URL + REALMS_E2E_UPSTREAM_API_KEY/REALMS_CI_UPSTREAM_API_KEY",
+		)
+		os.Exit(1)
+	}
+
+	if !skipSeed {
+		seedCfg := e2eSeedConfig{
+			BillingModel: seedModel,
+		}
+
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost || r.URL.Path != "/v1/responses" {
+				http.NotFound(w, r)
+				return
+			}
+			rawBody, _ := io.ReadAll(r.Body)
+			_ = r.Body.Close()
+
+			var payload map[string]any
+			_ = json.Unmarshal(rawBody, &payload)
+			if input, ok := payload["input"].(string); ok && strings.TrimSpace(input) == "__pw_fail__" {
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"error": map[string]any{
+						"message": "bad request for e2e",
+					},
+					"upstream_channel": "pw-e2e-upstream",
+				})
+				return
+			}
+
+			resp := map[string]any{
+				"id":     "resp_pw_e2e_1",
+				"object": "response",
+				"model":  e2eModelPublicID,
+				"output": []any{
+					map[string]any{
+						"type": "message",
+						"role": "assistant",
+						"content": []any{
+							map[string]any{"type": "output_text", "text": "OK"},
+						},
+					},
+				},
+				"usage": map[string]any{
+					"input_tokens":  1000,
+					"output_tokens": 1,
+				},
+				"status": "completed",
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+		if useRealUpstream {
+			upstream.Close()
+			seedCfg.UpstreamBaseURL = realUpstreamBaseURL
+			seedCfg.UpstreamAPIKey = realUpstreamAPIKey
+			slog.Info("e2e seed 使用真实上游",
+				"upstream_base_url", seedCfg.UpstreamBaseURL,
+				"model", seedCfg.BillingModel,
+			)
+		} else {
+			defer upstream.Close()
+			seedCfg.UpstreamBaseURL = strings.TrimRight(strings.TrimSpace(upstream.URL), "/") + "/v1"
+			seedCfg.UpstreamAPIKey = e2eUpstreamAPIKeyPlain
+		}
+
+		seed, err := seedE2EData(context.Background(), st, cfg, seedCfg)
+		if err != nil {
+			slog.Error("seed 失败", "err", err)
+			os.Exit(1)
+		}
+		slog.Info("e2e seed 完成",
+			"user_id", seed.RootUserID,
+			"e2e_user_id", seed.E2EUserID,
+			"poor_user_id", seed.PoorUserID,
+			"announcement_id", seed.AnnouncementID,
+			"ticket_open_id", seed.TicketOpenID,
+			"ticket_closed_id", seed.TicketClosedID,
+			"oauth_app_id", seed.OAuthAppID,
+			"topup_order_id", seed.TopupOrderID,
+			"upstream_base_url", seedCfg.UpstreamBaseURL,
+			"billing_model", seedCfg.BillingModel,
+		)
+	} else {
+		slog.Info("e2e seed 已跳过，使用现有数据库与上游配置",
+			"sqlite_path", cfg.DB.SQLitePath,
+		)
+	}
 
 	app, err := server.NewApp(server.AppOptions{
 		Config:  cfg,
@@ -260,9 +321,27 @@ type e2eSeedResult struct {
 	TopupOrderID   int64
 }
 
-func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, upstreamBaseURL string) (e2eSeedResult, error) {
+type e2eSeedConfig struct {
+	UpstreamBaseURL string
+	UpstreamAPIKey  string
+	BillingModel    string
+}
+
+func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCfg e2eSeedConfig) (e2eSeedResult, error) {
 	if st == nil {
 		return e2eSeedResult{}, errors.New("store 为空")
+	}
+	upstreamBaseURL := strings.TrimRight(strings.TrimSpace(seedCfg.UpstreamBaseURL), "/")
+	if upstreamBaseURL == "" {
+		return e2eSeedResult{}, errors.New("upstream base_url 为空")
+	}
+	upstreamAPIKey := strings.TrimSpace(seedCfg.UpstreamAPIKey)
+	if upstreamAPIKey == "" {
+		return e2eSeedResult{}, errors.New("upstream api_key 为空")
+	}
+	billingModel := strings.TrimSpace(seedCfg.BillingModel)
+	if billingModel == "" {
+		billingModel = e2eModelPublicID
 	}
 
 	u, err := st.GetUserByUsername(ctx, e2eRootUsername)
@@ -286,16 +365,16 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, upstre
 	if err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 upstream_channel 失败: %w", err)
 	}
-	epID, err := st.CreateUpstreamEndpoint(ctx, channelID, strings.TrimRight(strings.TrimSpace(upstreamBaseURL), "/"), 0)
+	epID, err := st.CreateUpstreamEndpoint(ctx, channelID, upstreamBaseURL, 0)
 	if err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 upstream_endpoint 失败: %w", err)
 	}
-	if _, _, err := st.CreateOpenAICompatibleCredential(ctx, epID, strPtr("pw-e2e"), e2eUpstreamAPIKeyPlain); err != nil {
+	if _, _, err := st.CreateOpenAICompatibleCredential(ctx, epID, strPtr("pw-e2e"), upstreamAPIKey); err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 upstream_credential 失败: %w", err)
 	}
 
 	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
-		PublicID:            e2eModelPublicID,
+		PublicID:            billingModel,
 		OwnedBy:             strPtr("upstream"),
 		InputUSDPer1M:       decimal.RequireFromString("10"),
 		OutputUSDPer1M:      decimal.Zero,
@@ -307,8 +386,8 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, upstre
 	}
 	if _, err := st.CreateChannelModel(ctx, store.ChannelModelCreate{
 		ChannelID:     channelID,
-		PublicID:      e2eModelPublicID,
-		UpstreamModel: e2eModelPublicID,
+		PublicID:      billingModel,
+		UpstreamModel: billingModel,
 		Status:        1,
 	}); err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 channel_model 失败: %w", err)
@@ -384,7 +463,7 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, upstre
 		"root_password_len", strconv.Itoa(len(e2eRootPassword)),
 		"oauth_client_id", e2eOAuthClientID,
 		"oauth_redirect_uri", e2eOAuthRedirectURI,
-		"model_public_id", e2eModelPublicID,
+		"model_public_id", billingModel,
 		"e2e_user_username", e2eUserUsername,
 		"e2e_user_token_prefix", "sk_",
 		"poor_user_username", e2ePoorUserUsername,

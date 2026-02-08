@@ -164,9 +164,20 @@ func listChannelsHandler(opts Options) gin.HandlerFunc {
 }
 
 type channelUsageView struct {
-	CommittedUSD string `json:"committed_usd"`
-	Tokens       int64  `json:"tokens"`
-	CacheRatio   string `json:"cache_ratio"`
+	CommittedUSD          string `json:"committed_usd"`
+	Tokens                int64  `json:"tokens"`
+	CacheRatio            string `json:"cache_ratio"`
+	AvgFirstTokenLatency  string `json:"avg_first_token_latency"`
+	OutputTokensPerSecond string `json:"tokens_per_second"`
+}
+
+type channelUsageOverviewView struct {
+	Requests             int64  `json:"requests"`
+	Tokens               int64  `json:"tokens"`
+	CommittedUSD         string `json:"committed_usd"`
+	CacheRatio           string `json:"cache_ratio"`
+	AvgFirstTokenLatency string `json:"avg_first_token_latency"`
+	TokensPerSecond      string `json:"tokens_per_second"`
 }
 
 type channelAdminListItem struct {
@@ -176,10 +187,25 @@ type channelAdminListItem struct {
 }
 
 type channelsPageResponse struct {
-	AdminTimeZone string                 `json:"admin_time_zone"`
-	Start         string                 `json:"start"`
-	End           string                 `json:"end"`
-	Channels      []channelAdminListItem `json:"channels"`
+	AdminTimeZone string                   `json:"admin_time_zone"`
+	Start         string                   `json:"start"`
+	End           string                   `json:"end"`
+	Overview      channelUsageOverviewView `json:"overview"`
+	Channels      []channelAdminListItem   `json:"channels"`
+}
+
+func formatAvgFirstTokenLatency(ms float64, samples int64) string {
+	if samples <= 0 || ms <= 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.1f ms", ms)
+}
+
+func formatTokensPerSecond(v float64) string {
+	if v <= 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.2f", v)
 }
 
 func channelsPageHandler(opts Options) gin.HandlerFunc {
@@ -236,6 +262,11 @@ func channelsPageHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "渠道用量统计失败"})
 			return
 		}
+		overviewStats, err := opts.Store.GetGlobalUsageStatsRange(c.Request.Context(), since, until)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "渠道总览统计失败"})
+			return
+		}
 		usageByChannelID := make(map[int64]store.ChannelUsageStats, len(rawUsage))
 		for _, row := range rawUsage {
 			usageByChannelID[row.ChannelID] = row
@@ -286,9 +317,11 @@ func channelsPageHandler(opts Options) gin.HandlerFunc {
 
 			us := usageByChannelID[ch.ID]
 			usageView := channelUsageView{
-				CommittedUSD: formatUSDPlain(us.CommittedUSD),
-				Tokens:       us.Tokens,
-				CacheRatio:   fmt.Sprintf("%.1f%%", us.CacheRatio*100),
+				CommittedUSD:          formatUSDPlain(us.CommittedUSD),
+				Tokens:                us.Tokens,
+				CacheRatio:            fmt.Sprintf("%.1f%%", us.CacheRatio*100),
+				AvgFirstTokenLatency:  formatAvgFirstTokenLatency(us.AvgFirstTokenMS, us.FirstTokenSamples),
+				OutputTokensPerSecond: formatTokensPerSecond(us.OutputTokensPerSec),
 			}
 
 			runtime := channelRuntimeForAPI(c.Request.Context(), opts, ch.ID, loc)
@@ -307,7 +340,15 @@ func channelsPageHandler(opts Options) gin.HandlerFunc {
 				AdminTimeZone: tzName,
 				Start:         startStr,
 				End:           endStr,
-				Channels:      out,
+				Overview: channelUsageOverviewView{
+					Requests:             overviewStats.Requests,
+					Tokens:               overviewStats.Tokens,
+					CommittedUSD:         formatUSDPlain(overviewStats.CostUSD),
+					CacheRatio:           fmt.Sprintf("%.1f%%", overviewStats.CacheRatio*100),
+					AvgFirstTokenLatency: formatAvgFirstTokenLatency(overviewStats.AvgFirstTokenMS, overviewStats.FirstTokenSamples),
+					TokensPerSecond:      formatTokensPerSecond(overviewStats.OutputTokensPerSec),
+				},
+				Channels: out,
 			},
 		})
 	}

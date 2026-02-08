@@ -210,6 +210,7 @@ CREATE TABLE IF NOT EXISTS `usage_events` (
   `reserve_expires_at` DATETIME NOT NULL,
   `status_code` INTEGER NOT NULL DEFAULT 0,
   `latency_ms` INTEGER NOT NULL DEFAULT 0,
+  `first_token_latency_ms` INTEGER NOT NULL DEFAULT 0,
   `error_class` TEXT NULL,
   `error_message` TEXT NULL,
   `is_stream` INTEGER NOT NULL DEFAULT 0,

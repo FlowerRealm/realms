@@ -33,3 +33,40 @@ npm run build
 ## 环境变量（可选）
 
 - `VITE_API_BASE_URL`：API baseURL（默认空字符串，同源）
+
+## E2E（Playwright）
+
+默认（seed 模式，自动启动 `cmd/realms-e2e`，使用内置种子数据）：
+
+```bash
+npm run test:e2e
+```
+
+真实数据模式（连接你本地已运行的 Realms 服务/数据库，不启动内置 seed 服务）：
+
+```bash
+REALMS_E2E_PROFILE=real \
+REALMS_E2E_EXTERNAL_SERVER=1 \
+REALMS_E2E_BASE_URL=http://127.0.0.1:8080 \
+REALMS_E2E_USERNAME=<root用户名> \
+REALMS_E2E_PASSWORD=<root密码> \
+npm run test:e2e:ci
+```
+
+若你仍想使用 `cmd/realms-e2e` 启动器，但复用已有 SQLite 数据与上游配置（跳过自动 seed）：
+
+```bash
+REALMS_E2E_SKIP_SEED=1 \
+REALMS_E2E_DB_PATH=/path/to/your.sqlite \
+npm run test:e2e:ci
+```
+
+若你想继续使用 `cmd/realms-e2e` 的 seed 数据，但把请求转发到真实上游（CI 推荐）：
+
+```bash
+REALMS_E2E_UPSTREAM_BASE_URL=https://api.openai.com/v1 \
+REALMS_E2E_UPSTREAM_API_KEY=sk-*** \
+REALMS_E2E_BILLING_MODEL=gpt-5.2 \
+REALMS_E2E_ENFORCE_REAL_UPSTREAM=1 \
+npm run test:e2e:ci
+```

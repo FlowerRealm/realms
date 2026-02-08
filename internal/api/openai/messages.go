@@ -241,7 +241,7 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 		cw := &countingResponseWriter{ResponseWriter: w}
 		writeAnthropicError(cw, http.StatusBadGateway, "上游不可用")
 		h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream)
-		h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream, reqBytes, cw.bytes)
+		h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
 		return
 	}
 
@@ -261,7 +261,7 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 			}
 			cw := &countingResponseWriter{ResponseWriter: w}
 			writeAnthropicError(cw, http.StatusInternalServerError, "请求体处理失败")
-			h.finalizeUsageEvent(r, usageID, &sel, http.StatusInternalServerError, "rewrite_body", "请求体处理失败", time.Since(reqStart), stream, reqBytes, cw.bytes)
+			h.finalizeUsageEvent(r, usageID, &sel, http.StatusInternalServerError, "rewrite_body", "请求体处理失败", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
 			return
 		}
 		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), usageID, reqStart, reqBytes, 1) {
@@ -278,7 +278,7 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 	cw := &countingResponseWriter{ResponseWriter: w}
 	writeAnthropicError(cw, http.StatusBadGateway, "上游不可用")
 	h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream)
-	h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream, reqBytes, cw.bytes)
+	h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
 }
 
 func writeAnthropicError(w http.ResponseWriter, status int, message string) {

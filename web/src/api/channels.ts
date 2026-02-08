@@ -49,6 +49,17 @@ export type ChannelUsage = {
   committed_usd: string;
   tokens: number;
   cache_ratio: string;
+  avg_first_token_latency: string;
+  tokens_per_second: string;
+};
+
+export type ChannelUsageOverview = {
+  requests: number;
+  tokens: number;
+  committed_usd: string;
+  cache_ratio: string;
+  avg_first_token_latency: string;
+  tokens_per_second: string;
 };
 
 export type ChannelRuntime = {
@@ -70,6 +81,7 @@ export type ChannelsPageResponse = {
   admin_time_zone: string;
   start: string;
   end: string;
+  overview: ChannelUsageOverview;
   channels: ChannelAdminItem[];
 };
 

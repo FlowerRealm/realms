@@ -276,35 +276,36 @@ type ChannelModelBinding struct {
 }
 
 type UsageEvent struct {
-	ID                 int64
-	Time               time.Time
-	RequestID          string
-	Endpoint           *string
-	Method             *string
-	UserID             int64
-	SubscriptionID     *int64
-	TokenID            int64
-	UpstreamChannelID  *int64
-	UpstreamEndpointID *int64
-	UpstreamCredID     *int64
-	State              string
-	Model              *string
-	InputTokens        *int64
-	CachedInputTokens  *int64
-	OutputTokens       *int64
-	CachedOutputTokens *int64
-	ReservedUSD        decimal.Decimal
-	CommittedUSD       decimal.Decimal
-	ReserveExpiresAt   time.Time
-	StatusCode         int
-	LatencyMS          int
-	ErrorClass         *string
-	ErrorMessage       *string
-	IsStream           bool
-	RequestBytes       int64
-	ResponseBytes      int64
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID                  int64
+	Time                time.Time
+	RequestID           string
+	Endpoint            *string
+	Method              *string
+	UserID              int64
+	SubscriptionID      *int64
+	TokenID             int64
+	UpstreamChannelID   *int64
+	UpstreamEndpointID  *int64
+	UpstreamCredID      *int64
+	State               string
+	Model               *string
+	InputTokens         *int64
+	CachedInputTokens   *int64
+	OutputTokens        *int64
+	CachedOutputTokens  *int64
+	ReservedUSD         decimal.Decimal
+	CommittedUSD        decimal.Decimal
+	ReserveExpiresAt    time.Time
+	StatusCode          int
+	LatencyMS           int
+	FirstTokenLatencyMS int
+	ErrorClass          *string
+	ErrorMessage        *string
+	IsStream            bool
+	RequestBytes        int64
+	ResponseBytes       int64
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type SubscriptionPlan struct {

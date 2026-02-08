@@ -356,7 +356,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		cw := &countingResponseWriter{ResponseWriter: w}
 		http.Error(cw, "上游不可用", http.StatusBadGateway)
 		h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream)
-		h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream, reqBytes, cw.bytes)
+		h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
 		return
 	}
 
@@ -376,7 +376,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			}
 			cw := &countingResponseWriter{ResponseWriter: w}
 			http.Error(cw, "请求体处理失败", http.StatusInternalServerError)
-			h.finalizeUsageEvent(r, usageID, &sel, http.StatusInternalServerError, "rewrite_body", "请求体处理失败", time.Since(reqStart), stream, reqBytes, cw.bytes)
+			h.finalizeUsageEvent(r, usageID, &sel, http.StatusInternalServerError, "rewrite_body", "请求体处理失败", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
 			return
 		}
 		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), usageID, reqStart, reqBytes, 1) {
@@ -393,7 +393,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	cw := &countingResponseWriter{ResponseWriter: w}
 	http.Error(cw, "上游不可用", http.StatusBadGateway)
 	h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream)
-	h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream, reqBytes, cw.bytes)
+	h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
 }
 
 func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p auth.Principal, sel scheduler.Selection, body []byte, wantStream bool, model *string, usageID int64, reqStart time.Time, reqBytes int64, retries int) bool {
@@ -457,7 +457,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			_ = h.quota.Void(bookCtx, usageID)
 			cancel()
 		}
-		h.finalizeUsageEventWithUpstreamBodies(r, usageID, &sel, resp.StatusCode, "upstream_status", failMsg, time.Since(reqStart), wantStream || isSSE, reqBytes, respBytes, middleware.CachedBody(r.Context()), body, bodyBytes)
+		h.finalizeUsageEventWithUpstreamBodies(r, usageID, &sel, resp.StatusCode, "upstream_status", failMsg, time.Since(reqStart), 0, wantStream || isSSE, reqBytes, respBytes, middleware.CachedBody(r.Context()), body, bodyBytes)
 		return true
 	}
 
@@ -480,8 +480,15 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		}
 		cw.WriteHeader(resp.StatusCode)
 
+		firstTokenLatencyMS := 0
 		hooks := upstream.SSEPumpHooks{
 			OnData: func(data string) {
+				if firstTokenLatencyMS <= 0 {
+					firstTokenLatencyMS = int(time.Since(reqStart).Milliseconds())
+					if firstTokenLatencyMS < 0 {
+						firstTokenLatencyMS = 0
+					}
+				}
 				// 避免对每个 delta 事件反复 JSON 解析：仅在疑似包含 usage 时尝试。
 				if !strings.Contains(data, "usage") && !strings.Contains(data, "input_tokens") && !strings.Contains(data, "prompt_tokens") {
 					return
@@ -561,7 +568,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		if pumpRes.ErrorClass != "" && pumpRes.ErrorClass != "client_disconnect" && pumpRes.ErrorClass != "stream_max_duration" {
 			h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, resp.StatusCode, pumpRes.ErrorClass, "", time.Since(attemptStart), true)
 		}
-		h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, pumpRes.ErrorClass, "", time.Since(reqStart), true, reqBytes, cw.bytes)
+		h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, pumpRes.ErrorClass, "", time.Since(reqStart), firstTokenLatencyMS, true, reqBytes, cw.bytes)
 		return true
 	}
 
@@ -609,7 +616,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		}
 	}
 	h.sched.Report(sel, scheduler.Result{Success: true})
-	h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "", "", time.Since(reqStart), false, reqBytes, int64(respBytes))
+	h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "", "", time.Since(reqStart), 0, false, reqBytes, int64(respBytes))
 	return true
 }
 
@@ -682,7 +689,7 @@ func (h *Handler) maybeLogProxyFailure(ctx context.Context, r *http.Request, p a
 	h.proxyLog.WriteFailure(ctx, entry)
 }
 
-func (h *Handler) finalizeUsageEvent(r *http.Request, usageID int64, sel *scheduler.Selection, status int, class string, msg string, latency time.Duration, stream bool, reqBytes, respBytes int64) {
+func (h *Handler) finalizeUsageEvent(r *http.Request, usageID int64, sel *scheduler.Selection, status int, class string, msg string, latency time.Duration, firstTokenLatencyMS int, stream bool, reqBytes, respBytes int64) {
 	if usageID == 0 || h.usage == nil {
 		return
 	}
@@ -727,23 +734,24 @@ func (h *Handler) finalizeUsageEvent(r *http.Request, usageID int64, sel *schedu
 	}
 
 	_ = h.usage.FinalizeUsageEvent(bookCtx, store.FinalizeUsageEventInput{
-		UsageEventID:       usageID,
-		Endpoint:           ep,
-		Method:             method,
-		StatusCode:         status,
-		LatencyMS:          int(latency.Milliseconds()),
-		ErrorClass:         classPtr,
-		ErrorMessage:       msgPtr,
-		UpstreamChannelID:  upstreamChannelID,
-		UpstreamEndpointID: upstreamEndpointID,
-		UpstreamCredID:     upstreamCredID,
-		IsStream:           stream,
-		RequestBytes:       reqBytes,
-		ResponseBytes:      respBytes,
+		UsageEventID:        usageID,
+		Endpoint:            ep,
+		Method:              method,
+		StatusCode:          status,
+		LatencyMS:           int(latency.Milliseconds()),
+		FirstTokenLatencyMS: firstTokenLatencyMS,
+		ErrorClass:          classPtr,
+		ErrorMessage:        msgPtr,
+		UpstreamChannelID:   upstreamChannelID,
+		UpstreamEndpointID:  upstreamEndpointID,
+		UpstreamCredID:      upstreamCredID,
+		IsStream:            stream,
+		RequestBytes:        reqBytes,
+		ResponseBytes:       respBytes,
 	})
 }
 
-func (h *Handler) finalizeUsageEventWithUpstreamBodies(r *http.Request, usageID int64, sel *scheduler.Selection, status int, class string, msg string, latency time.Duration, stream bool, reqBytes, respBytes int64, downstreamReqBody []byte, upstreamReqBody []byte, upstreamRespBody []byte) {
+func (h *Handler) finalizeUsageEventWithUpstreamBodies(r *http.Request, usageID int64, sel *scheduler.Selection, status int, class string, msg string, latency time.Duration, firstTokenLatencyMS int, stream bool, reqBytes, respBytes int64, downstreamReqBody []byte, upstreamReqBody []byte, upstreamRespBody []byte) {
 	if usageID == 0 || h.usage == nil {
 		return
 	}
@@ -809,6 +817,7 @@ func (h *Handler) finalizeUsageEventWithUpstreamBodies(r *http.Request, usageID 
 		Method:                method,
 		StatusCode:            status,
 		LatencyMS:             int(latency.Milliseconds()),
+		FirstTokenLatencyMS:   firstTokenLatencyMS,
 		ErrorClass:            classPtr,
 		ErrorMessage:          msgPtr,
 		UpstreamChannelID:     upstreamChannelID,

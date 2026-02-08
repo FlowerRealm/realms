@@ -51,6 +51,11 @@ jobs:
   e2e-web:
     runs-on: ubuntu-latest
     needs: test
+    env:
+      REALMS_E2E_ENFORCE_REAL_UPSTREAM: "1"
+      REALMS_E2E_UPSTREAM_BASE_URL: ${{ secrets.REALMS_CI_UPSTREAM_BASE_URL }}
+      REALMS_E2E_UPSTREAM_API_KEY: ${{ secrets.REALMS_CI_UPSTREAM_API_KEY }}
+      REALMS_E2E_BILLING_MODEL: ${{ secrets.REALMS_CI_MODEL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -76,7 +81,7 @@ jobs:
       - name: Build web
         run: npm --prefix web run build
 
-      - name: E2E (Playwright -> Realms SPA)
+      - name: E2E (Playwright -> Realms SPA -> Real Upstream)
         run: npm --prefix web run test:e2e:ci
 
       - name: Upload Playwright report (on failure)

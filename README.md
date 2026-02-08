@@ -253,7 +253,8 @@ go test ./...
 
 本仓库包含一个会在每次 push 时触发的 CI（见 `.github/workflows/ci.yml`）：
 - 单测：`go test ./...`
-- E2E：Codex CLI → Realms → 上游（需要配置 GitHub Secrets），用于验证真实链路与用量统计落库
+- E2E（Codex CLI）：Codex CLI → Realms → 上游（需要配置 GitHub Secrets），用于验证真实链路与用量统计落库
+- E2E（Playwright Web）：Playwright → `cmd/realms-e2e`（seed 数据）→ 真实上游（同一套 Secrets）
 
 需要在仓库 Secrets 中配置（占位名，勿提交真实密钥到仓库）：
 - `REALMS_CI_UPSTREAM_BASE_URL`：上游 OpenAI 兼容 `base_url`（例如 `https://api.openai.com` 或 `https://api.openai.com/v1`）
@@ -261,6 +262,8 @@ go test ./...
 - `REALMS_CI_MODEL`：用于 E2E 的模型名（例如 `gpt-5.2`）
 
 > 说明：E2E 同时包含一个“fake upstream”的用例，用于更稳定地覆盖 `cached_tokens` 的解析与落库；真实上游用例也会执行两次请求并要求第二次命中缓存（`cached_input_tokens > 0`）。
+>
+> `e2e-web` 任务已启用 `REALMS_E2E_ENFORCE_REAL_UPSTREAM=1`，若未注入 `REALMS_CI_UPSTREAM_BASE_URL/REALMS_CI_UPSTREAM_API_KEY` 会直接失败，避免误用 mock upstream。
 
 在本地复现 E2E（可选）：
 

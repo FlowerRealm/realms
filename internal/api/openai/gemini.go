@@ -214,7 +214,7 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 		cw := &countingResponseWriter{ResponseWriter: w}
 		http.Error(cw, "上游不可用", http.StatusBadGateway)
 		h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), wantStream)
-		h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), wantStream, reqBytes, cw.bytes)
+		h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), 0, wantStream, reqBytes, cw.bytes)
 		return
 	}
 
@@ -268,7 +268,7 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 	cw := &countingResponseWriter{ResponseWriter: w}
 	http.Error(cw, "上游不可用", http.StatusBadGateway)
 	h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), wantStream)
-	h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), wantStream, reqBytes, cw.bytes)
+	h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), 0, wantStream, reqBytes, cw.bytes)
 }
 
 func extractGeminiMaxOutputTokens(body []byte) *int64 {

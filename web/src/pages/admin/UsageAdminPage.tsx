@@ -241,6 +241,20 @@ export function UsageAdminPage() {
                           <div className="text-muted smaller fw-medium">输入 + 输出</div>
                         </div>
                       </div>
+                      <div className="col-sm-6 col-md-3">
+                        <div className="metric-card p-3 rounded-3 border">
+                          <div className="text-muted smaller mb-1">平均首字延迟</div>
+                          <div className="h4 fw-bold mb-1">{window.avg_first_token_latency || '-'}</div>
+                          <div className="text-muted smaller fw-medium">基于有效首字样本</div>
+                        </div>
+                      </div>
+                      <div className="col-sm-6 col-md-3">
+                        <div className="metric-card p-3 rounded-3 border">
+                          <div className="text-muted smaller mb-1">平均 Tokens/s</div>
+                          <div className="h4 fw-bold mb-1">{window.tokens_per_second || '-'}</div>
+                          <div className="text-muted smaller fw-medium">输出 Token 解码速率</div>
+                        </div>
+                      </div>
                       <div className="col-12 mt-3">
                         <div className="bg-light p-3 rounded-3">
                           <div className="row text-center small">
@@ -369,7 +383,9 @@ export function UsageAdminPage() {
                         <th className="border-0">接口 / 模型</th>
                         <th className="text-center border-0">状态码</th>
                         <th className="text-end border-0">耗时</th>
+                        <th className="text-end border-0">首字延迟</th>
                         <th className="text-end border-0">Tokens (In/Out/Cache)</th>
+                        <th className="text-end border-0">Tokens/s</th>
                         <th className="text-end border-0">费用</th>
                         <th className="text-center border-0">状态</th>
                         <th className="text-center border-0">渠道</th>
@@ -408,6 +424,7 @@ export function UsageAdminPage() {
                               )}
                             </td>
                             <td className="text-end font-monospace text-muted">{e.latency_ms} ms</td>
+                            <td className="text-end font-monospace text-muted">{e.first_token_latency_ms === '-' ? '-' : `${e.first_token_latency_ms} ms`}</td>
                             <td className="text-end font-monospace">
                               <div>
                                 <span className="text-muted">In:</span> {e.input_tokens}
@@ -421,6 +438,7 @@ export function UsageAdminPage() {
                                 </div>
                               ) : null}
                             </td>
+                            <td className="text-end font-monospace text-muted">{e.tokens_per_second}</td>
                             <td className="text-end font-monospace fw-bold text-dark">{e.cost_usd}</td>
                             <td className="text-center text-nowrap">
                               <span className={badgeForState(e.state_badge_class)}>{e.state_label}</span>
@@ -440,7 +458,7 @@ export function UsageAdminPage() {
                           </tr>
                           {expandedID === e.id ? (
                             <tr key={`${e.id}-detail`}>
-                              <td colSpan={10} className="p-0 border-0">
+                              <td colSpan={12} className="p-0 border-0">
                                 <div className="bg-light border-top px-4 py-3">
                                   {detailLoadingID === e.id ? <div className="text-muted small">加载详情中…</div> : null}
                                   {detailByEventID[e.id] ? (
@@ -544,7 +562,7 @@ export function UsageAdminPage() {
                       ))}
                       {events.length === 0 ? (
                         <tr>
-                          <td colSpan={10} className="text-center py-5 text-muted small">
+                          <td colSpan={12} className="text-center py-5 text-muted small">
                             暂无请求记录
                           </td>
                         </tr>

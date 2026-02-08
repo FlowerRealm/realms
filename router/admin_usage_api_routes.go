@@ -16,20 +16,22 @@ import (
 )
 
 type adminUsageWindowView struct {
-	Window       string `json:"window"`
-	Since        string `json:"since"`
-	Until        string `json:"until"`
-	Requests     int64  `json:"requests"`
-	Tokens       int64  `json:"tokens"`
-	InputTokens  int64  `json:"input_tokens"`
-	OutputTokens int64  `json:"output_tokens"`
-	CachedTokens int64  `json:"cached_tokens"`
-	CacheRatio   string `json:"cache_ratio"`
-	RPM          string `json:"rpm"`
-	TPM          string `json:"tpm"`
-	CommittedUSD string `json:"committed_usd"`
-	ReservedUSD  string `json:"reserved_usd"`
-	TotalUSD     string `json:"total_usd"`
+	Window               string `json:"window"`
+	Since                string `json:"since"`
+	Until                string `json:"until"`
+	Requests             int64  `json:"requests"`
+	Tokens               int64  `json:"tokens"`
+	InputTokens          int64  `json:"input_tokens"`
+	OutputTokens         int64  `json:"output_tokens"`
+	CachedTokens         int64  `json:"cached_tokens"`
+	CacheRatio           string `json:"cache_ratio"`
+	RPM                  string `json:"rpm"`
+	TPM                  string `json:"tpm"`
+	AvgFirstTokenLatency string `json:"avg_first_token_latency"`
+	TokensPerSecond      string `json:"tokens_per_second"`
+	CommittedUSD         string `json:"committed_usd"`
+	ReservedUSD          string `json:"reserved_usd"`
+	TotalUSD             string `json:"total_usd"`
 }
 
 type adminUsageUserView struct {
@@ -51,6 +53,8 @@ type adminUsageEventView struct {
 	Model               string `json:"model"`
 	StatusCode          string `json:"status_code"`
 	LatencyMS           string `json:"latency_ms"`
+	FirstTokenLatencyMS string `json:"first_token_latency_ms"`
+	TokensPerSecond     string `json:"tokens_per_second"`
 	InputTokens         string `json:"input_tokens"`
 	OutputTokens        string `json:"output_tokens"`
 	CachedTokens        string `json:"cached_tokens"`
@@ -194,20 +198,22 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 		rpm := metrics.FormatRatePerMinute(recentStats.Requests, time.Minute)
 		tpm := metrics.FormatRatePerMinute(recentStats.Tokens, time.Minute)
 		window := adminUsageWindowView{
-			Window:       "统计区间",
-			Since:        sinceLocal.Format("2006-01-02 15:04"),
-			Until:        untilLocal.Format("2006-01-02 15:04"),
-			Requests:     stats.Requests,
-			Tokens:       stats.Tokens,
-			InputTokens:  stats.InputTokens,
-			OutputTokens: stats.OutputTokens,
-			CachedTokens: stats.CachedInputTokens + stats.CachedOutputTokens,
-			CacheRatio:   strconv.FormatFloat(stats.CacheRatio*100, 'f', 1, 64) + "%",
-			RPM:          rpm,
-			TPM:          tpm,
-			CommittedUSD: formatUSDPlain(committed),
-			ReservedUSD:  formatUSDPlain(reserved),
-			TotalUSD:     formatUSDPlain(committed.Add(reserved)),
+			Window:               "统计区间",
+			Since:                sinceLocal.Format("2006-01-02 15:04"),
+			Until:                untilLocal.Format("2006-01-02 15:04"),
+			Requests:             stats.Requests,
+			Tokens:               stats.Tokens,
+			InputTokens:          stats.InputTokens,
+			OutputTokens:         stats.OutputTokens,
+			CachedTokens:         stats.CachedInputTokens + stats.CachedOutputTokens,
+			CacheRatio:           strconv.FormatFloat(stats.CacheRatio*100, 'f', 1, 64) + "%",
+			RPM:                  rpm,
+			TPM:                  tpm,
+			AvgFirstTokenLatency: formatAvgFirstTokenLatency(stats.AvgFirstTokenMS, stats.FirstTokenSamples),
+			TokensPerSecond:      formatTokensPerSecond(stats.OutputTokensPerSec),
+			CommittedUSD:         formatUSDPlain(committed),
+			ReservedUSD:          formatUSDPlain(reserved),
+			TotalUSD:             formatUSDPlain(committed.Add(reserved)),
 		}
 
 		topUsers, err := opts.Store.ListUsageTopUsers(c.Request.Context(), store.UsageTopUsersInput{
@@ -292,6 +298,10 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 			if e.LatencyMS > 0 {
 				latencyMS = strconv.Itoa(e.LatencyMS)
 			}
+			firstTokenLatencyMS := "-"
+			if e.FirstTokenLatencyMS > 0 {
+				firstTokenLatencyMS = strconv.Itoa(e.FirstTokenLatencyMS)
+			}
 			inTok := "-"
 			if e.InputTokens != nil {
 				inTok = strconv.FormatInt(*e.InputTokens, 10)
@@ -299,6 +309,13 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 			outTok := "-"
 			if e.OutputTokens != nil {
 				outTok = strconv.FormatInt(*e.OutputTokens, 10)
+			}
+			tokensPerSecond := "-"
+			if e.OutputTokens != nil && *e.OutputTokens > 0 {
+				decodeLatencyMS := int64(e.LatencyMS - e.FirstTokenLatencyMS)
+				if decodeLatencyMS > 0 {
+					tokensPerSecond = formatTokensPerSecond(float64(*e.OutputTokens) * 1000 / float64(decodeLatencyMS))
+				}
 			}
 			var cached int64
 			if e.CachedInputTokens != nil {
@@ -382,6 +399,8 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 				Model:               model,
 				StatusCode:          statusCode,
 				LatencyMS:           latencyMS,
+				FirstTokenLatencyMS: firstTokenLatencyMS,
+				TokensPerSecond:     tokensPerSecond,
 				InputTokens:         inTok,
 				OutputTokens:        outTok,
 				CachedTokens:        cachedTok,

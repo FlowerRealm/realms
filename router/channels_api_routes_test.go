@@ -93,6 +93,15 @@ func TestChannels_PageAndReorder_RootFlow(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CommitUsage: %v", err)
 	}
+	if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
+		UsageEventID:        usageID,
+		StatusCode:          200,
+		LatencyMS:           1000,
+		FirstTokenLatencyMS: 200,
+		UpstreamChannelID:   &ch1ID,
+	}); err != nil {
+		t.Fatalf("FinalizeUsageEvent: %v", err)
+	}
 
 	engine := gin.New()
 	engine.Use(gin.Recovery())
@@ -153,12 +162,22 @@ func TestChannels_PageAndReorder_RootFlow(t *testing.T) {
 			AdminTimeZone string `json:"admin_time_zone"`
 			Start         string `json:"start"`
 			End           string `json:"end"`
-			Channels      []struct {
+			Overview      struct {
+				Requests             int64  `json:"requests"`
+				Tokens               int64  `json:"tokens"`
+				CommittedUSD         string `json:"committed_usd"`
+				CacheRatio           string `json:"cache_ratio"`
+				AvgFirstTokenLatency string `json:"avg_first_token_latency"`
+				TokensPerSecond      string `json:"tokens_per_second"`
+			} `json:"overview"`
+			Channels []struct {
 				ID    int64 `json:"id"`
 				Usage struct {
-					CommittedUSD string `json:"committed_usd"`
-					Tokens       int64  `json:"tokens"`
-					CacheRatio   string `json:"cache_ratio"`
+					CommittedUSD          string `json:"committed_usd"`
+					Tokens                int64  `json:"tokens"`
+					CacheRatio            string `json:"cache_ratio"`
+					AvgFirstTokenLatency  string `json:"avg_first_token_latency"`
+					OutputTokensPerSecond string `json:"tokens_per_second"`
 				} `json:"usage"`
 				Runtime struct {
 					Available bool `json:"available"`
@@ -175,6 +194,15 @@ func TestChannels_PageAndReorder_RootFlow(t *testing.T) {
 	if pageResp.Data.AdminTimeZone == "" || pageResp.Data.Start == "" || pageResp.Data.End == "" {
 		t.Fatalf("expected tz/start/end, got: %#v", pageResp.Data)
 	}
+	if pageResp.Data.Overview.Requests != 1 {
+		t.Fatalf("expected overview requests=1, got %d", pageResp.Data.Overview.Requests)
+	}
+	if pageResp.Data.Overview.AvgFirstTokenLatency != "200.0 ms" {
+		t.Fatalf("expected overview avg_first_token_latency=200.0 ms, got %q", pageResp.Data.Overview.AvgFirstTokenLatency)
+	}
+	if pageResp.Data.Overview.TokensPerSecond != "62.50" {
+		t.Fatalf("expected overview tokens_per_second=62.50, got %q", pageResp.Data.Overview.TokensPerSecond)
+	}
 	if len(pageResp.Data.Channels) < 2 {
 		t.Fatalf("expected >=2 channels, got %d", len(pageResp.Data.Channels))
 	}
@@ -190,6 +218,12 @@ func TestChannels_PageAndReorder_RootFlow(t *testing.T) {
 			}
 			if it.Usage.CacheRatio != "10.0%" {
 				t.Fatalf("expected ch1 cache_ratio=10.0%%, got %q", it.Usage.CacheRatio)
+			}
+			if it.Usage.AvgFirstTokenLatency != "200.0 ms" {
+				t.Fatalf("expected ch1 avg_first_token_latency=200.0 ms, got %q", it.Usage.AvgFirstTokenLatency)
+			}
+			if it.Usage.OutputTokensPerSecond != "62.50" {
+				t.Fatalf("expected ch1 tokens_per_second=62.50, got %q", it.Usage.OutputTokensPerSecond)
 			}
 			if it.Runtime.Available {
 				t.Fatalf("expected runtime.available=false when opts.Admin nil")

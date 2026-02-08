@@ -101,6 +101,7 @@ type FinalizeUsageEventInput struct {
 	Method                string
 	StatusCode            int
 	LatencyMS             int
+	FirstTokenLatencyMS   int
 	ErrorClass            *string
 	ErrorMessage          *string
 	UpstreamChannelID     *int64
@@ -145,6 +146,13 @@ func (s *Store) FinalizeUsageEvent(ctx context.Context, in FinalizeUsageEventInp
 	if latencyMS < 0 {
 		latencyMS = 0
 	}
+	firstTokenLatencyMS := in.FirstTokenLatencyMS
+	if firstTokenLatencyMS < 0 {
+		firstTokenLatencyMS = 0
+	}
+	if firstTokenLatencyMS > latencyMS {
+		firstTokenLatencyMS = latencyMS
+	}
 
 	var errClassPtr *string
 	if in.ErrorClass != nil {
@@ -182,11 +190,11 @@ func (s *Store) FinalizeUsageEvent(ctx context.Context, in FinalizeUsageEventInp
 
 	_, err := s.db.ExecContext(ctx, `
 UPDATE usage_events
-SET endpoint=?, method=?, status_code=?, latency_ms=?, error_class=?, error_message=?,
+SET endpoint=?, method=?, status_code=?, latency_ms=?, first_token_latency_ms=?, error_class=?, error_message=?,
     upstream_channel_id=?, upstream_endpoint_id=?, upstream_credential_id=?,
     is_stream=?, request_bytes=?, response_bytes=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
-`, endpointAny, methodAny, statusCode, latencyMS, errClassPtr, errMsgPtr,
+`, endpointAny, methodAny, statusCode, latencyMS, firstTokenLatencyMS, errClassPtr, errMsgPtr,
 		in.UpstreamChannelID, in.UpstreamEndpointID, in.UpstreamCredID,
 		stream, reqBytes, respBytes, in.UsageEventID)
 	if err != nil {
@@ -379,7 +387,7 @@ SELECT id, time, request_id, endpoint, method,
        state, model,
        input_tokens, cached_input_tokens, output_tokens, cached_output_tokens,
        reserved_usd, committed_usd, reserve_expires_at,
-       status_code, latency_ms, error_class, error_message,
+       status_code, latency_ms, first_token_latency_ms, error_class, error_message,
        is_stream, request_bytes, response_bytes,
        created_at, updated_at
 FROM usage_events
@@ -390,7 +398,7 @@ WHERE id=?
 		&e.State, &model,
 		&inputTokens, &cachedInputTokens, &outputTokens, &cachedOutputTokens,
 		&e.ReservedUSD, &e.CommittedUSD, &e.ReserveExpiresAt,
-		&e.StatusCode, &e.LatencyMS, &errClass, &errMsg,
+		&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &errClass, &errMsg,
 		&isStream, &e.RequestBytes, &e.ResponseBytes,
 		&e.CreatedAt, &e.UpdatedAt)
 	if err != nil {
@@ -456,7 +464,7 @@ SELECT id, time, request_id, endpoint, method,
        state, model,
        input_tokens, cached_input_tokens, output_tokens, cached_output_tokens,
        reserved_usd, committed_usd, reserve_expires_at,
-       status_code, latency_ms, error_class, error_message,
+       status_code, latency_ms, first_token_latency_ms, error_class, error_message,
        is_stream, request_bytes, response_bytes,
        created_at, updated_at
 FROM usage_events
@@ -498,7 +506,7 @@ WHERE user_id=? AND state<>?
 			&e.State, &model,
 			&inputTokens, &cachedInputTokens, &outputTokens, &cachedOutputTokens,
 			&e.ReservedUSD, &e.CommittedUSD, &e.ReserveExpiresAt,
-			&e.StatusCode, &e.LatencyMS, &errClass, &errMsg,
+			&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &errClass, &errMsg,
 			&isStream, &e.RequestBytes, &e.ResponseBytes,
 			&e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("扫描 usage_events 失败: %w", err)
@@ -568,7 +576,7 @@ SELECT id, time, request_id, endpoint, method,
        state, model,
        input_tokens, cached_input_tokens, output_tokens, cached_output_tokens,
        reserved_usd, committed_usd, reserve_expires_at,
-       status_code, latency_ms, error_class, error_message,
+       status_code, latency_ms, first_token_latency_ms, error_class, error_message,
        is_stream, request_bytes, response_bytes,
        created_at, updated_at
 FROM usage_events
@@ -616,7 +624,7 @@ WHERE user_id=? AND time >= ? AND time < ? AND state<>?
 			&e.State, &model,
 			&inputTokens, &cachedInputTokens, &outputTokens, &cachedOutputTokens,
 			&e.ReservedUSD, &e.CommittedUSD, &e.ReserveExpiresAt,
-			&e.StatusCode, &e.LatencyMS, &errClass, &errMsg,
+			&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &errClass, &errMsg,
 			&isStream, &e.RequestBytes, &e.ResponseBytes,
 			&e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("扫描 usage_events 失败: %w", err)
@@ -696,7 +704,7 @@ SELECT ue.id, ue.time, ue.request_id, ue.endpoint, ue.method,
        ue.state, ue.model,
        ue.input_tokens, ue.cached_input_tokens, ue.output_tokens, ue.cached_output_tokens,
        ue.reserved_usd, ue.committed_usd, ue.reserve_expires_at,
-       ue.status_code, ue.latency_ms, ue.error_class, ue.error_message,
+       ue.status_code, ue.latency_ms, ue.first_token_latency_ms, ue.error_class, ue.error_message,
        ue.is_stream, ue.request_bytes, ue.response_bytes,
        ue.created_at, ue.updated_at,
        u.email
@@ -747,7 +755,7 @@ WHERE ue.time >= ? AND ue.time < ? AND ue.state<>?
 			&e.State, &model,
 			&inputTokens, &cachedInputTokens, &outputTokens, &cachedOutputTokens,
 			&e.ReservedUSD, &e.CommittedUSD, &e.ReserveExpiresAt,
-			&e.StatusCode, &e.LatencyMS, &errClass, &errMsg,
+			&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &errClass, &errMsg,
 			&isStream, &e.RequestBytes, &e.ResponseBytes,
 			&e.CreatedAt, &e.UpdatedAt,
 			&email); err != nil {
@@ -929,6 +937,13 @@ LIMIT ?
 	return out, nil
 }
 
+func computeOutputTokensPerSecond(outputTokens int64, decodeLatencyMS int64) float64 {
+	if outputTokens <= 0 || decodeLatencyMS <= 0 {
+		return 0
+	}
+	return float64(outputTokens) * 1000 / float64(decodeLatencyMS)
+}
+
 type GlobalUsageStats struct {
 	Requests           int64
 	Tokens             int64
@@ -937,6 +952,9 @@ type GlobalUsageStats struct {
 	CachedInputTokens  int64
 	CachedOutputTokens int64
 	CacheRatio         float64
+	FirstTokenSamples  int64
+	AvgFirstTokenMS    float64
+	OutputTokensPerSec float64
 	CostUSD            decimal.Decimal
 }
 
@@ -947,6 +965,9 @@ func (s *Store) GetGlobalUsageStats(ctx context.Context, since time.Time) (Globa
 	var outputTokens sql.NullInt64
 	var cachedInputTokens sql.NullInt64
 	var cachedOutputTokens sql.NullInt64
+	var firstTokenLatencySum sql.NullInt64
+	var firstTokenSamples sql.NullInt64
+	var decodeLatencyMS sql.NullInt64
 
 	// 统计请求数
 	err := s.db.QueryRowContext(ctx, `
@@ -965,10 +986,13 @@ SELECT
   SUM(input_tokens),
   SUM(output_tokens),
   SUM(cached_input_tokens),
-  SUM(cached_output_tokens)
+  SUM(cached_output_tokens),
+  SUM(CASE WHEN first_token_latency_ms > 0 THEN first_token_latency_ms ELSE 0 END),
+  SUM(CASE WHEN first_token_latency_ms > 0 THEN 1 ELSE 0 END),
+  SUM(CASE WHEN latency_ms > first_token_latency_ms THEN latency_ms - first_token_latency_ms ELSE 0 END)
 FROM usage_events
 WHERE time >= ?
-`, UsageStateCommitted, since).Scan(&committedUSD, &inputTokens, &outputTokens, &cachedInputTokens, &cachedOutputTokens)
+`, UsageStateCommitted, since).Scan(&committedUSD, &inputTokens, &outputTokens, &cachedInputTokens, &cachedOutputTokens, &firstTokenLatencySum, &firstTokenSamples, &decodeLatencyMS)
 	if err != nil {
 		return GlobalUsageStats{}, fmt.Errorf("统计用量失败: %w", err)
 	}
@@ -988,9 +1012,18 @@ WHERE time >= ?
 	if cachedOutputTokens.Valid {
 		stats.CachedOutputTokens = cachedOutputTokens.Int64
 	}
+	if firstTokenSamples.Valid {
+		stats.FirstTokenSamples = firstTokenSamples.Int64
+	}
 	stats.Tokens = stats.InputTokens + stats.OutputTokens
 	if stats.Tokens > 0 {
 		stats.CacheRatio = float64(stats.CachedInputTokens+stats.CachedOutputTokens) / float64(stats.Tokens)
+	}
+	if firstTokenLatencySum.Valid && stats.FirstTokenSamples > 0 {
+		stats.AvgFirstTokenMS = float64(firstTokenLatencySum.Int64) / float64(stats.FirstTokenSamples)
+	}
+	if decodeLatencyMS.Valid {
+		stats.OutputTokensPerSec = computeOutputTokensPerSecond(stats.OutputTokens, decodeLatencyMS.Int64)
 	}
 
 	return stats, nil
@@ -1003,6 +1036,9 @@ func (s *Store) GetGlobalUsageStatsRange(ctx context.Context, since, until time.
 	var outputTokens sql.NullInt64
 	var cachedInputTokens sql.NullInt64
 	var cachedOutputTokens sql.NullInt64
+	var firstTokenLatencySum sql.NullInt64
+	var firstTokenSamples sql.NullInt64
+	var decodeLatencyMS sql.NullInt64
 
 	err := s.db.QueryRowContext(ctx, `
 SELECT COUNT(1)
@@ -1019,10 +1055,13 @@ SELECT
   SUM(input_tokens),
   SUM(output_tokens),
   SUM(cached_input_tokens),
-  SUM(cached_output_tokens)
+  SUM(cached_output_tokens),
+  SUM(CASE WHEN first_token_latency_ms > 0 THEN first_token_latency_ms ELSE 0 END),
+  SUM(CASE WHEN first_token_latency_ms > 0 THEN 1 ELSE 0 END),
+  SUM(CASE WHEN latency_ms > first_token_latency_ms THEN latency_ms - first_token_latency_ms ELSE 0 END)
 FROM usage_events
 WHERE time >= ? AND time < ?
-`, UsageStateCommitted, since, until).Scan(&committedUSD, &inputTokens, &outputTokens, &cachedInputTokens, &cachedOutputTokens)
+`, UsageStateCommitted, since, until).Scan(&committedUSD, &inputTokens, &outputTokens, &cachedInputTokens, &cachedOutputTokens, &firstTokenLatencySum, &firstTokenSamples, &decodeLatencyMS)
 	if err != nil {
 		return GlobalUsageStats{}, fmt.Errorf("统计用量失败: %w", err)
 	}
@@ -1042,9 +1081,18 @@ WHERE time >= ? AND time < ?
 	if cachedOutputTokens.Valid {
 		stats.CachedOutputTokens = cachedOutputTokens.Int64
 	}
+	if firstTokenSamples.Valid {
+		stats.FirstTokenSamples = firstTokenSamples.Int64
+	}
 	stats.Tokens = stats.InputTokens + stats.OutputTokens
 	if stats.Tokens > 0 {
 		stats.CacheRatio = float64(stats.CachedInputTokens+stats.CachedOutputTokens) / float64(stats.Tokens)
+	}
+	if firstTokenLatencySum.Valid && stats.FirstTokenSamples > 0 {
+		stats.AvgFirstTokenMS = float64(firstTokenLatencySum.Int64) / float64(stats.FirstTokenSamples)
+	}
+	if decodeLatencyMS.Valid {
+		stats.OutputTokensPerSec = computeOutputTokensPerSecond(stats.OutputTokens, decodeLatencyMS.Int64)
 	}
 
 	return stats, nil
@@ -1058,6 +1106,9 @@ type ChannelUsageStats struct {
 	CachedInputTokens  int64
 	CachedOutputTokens int64
 	CacheRatio         float64
+	FirstTokenSamples  int64
+	AvgFirstTokenMS    float64
+	OutputTokensPerSec float64
 	CommittedUSD       decimal.Decimal
 }
 
@@ -1079,7 +1130,10 @@ SELECT
   SUM(input_tokens),
   SUM(output_tokens),
   SUM(cached_input_tokens),
-  SUM(cached_output_tokens)
+  SUM(cached_output_tokens),
+  SUM(CASE WHEN first_token_latency_ms > 0 THEN first_token_latency_ms ELSE 0 END),
+  SUM(CASE WHEN first_token_latency_ms > 0 THEN 1 ELSE 0 END),
+  SUM(CASE WHEN latency_ms > first_token_latency_ms THEN latency_ms - first_token_latency_ms ELSE 0 END)
 FROM usage_events
 WHERE upstream_channel_id IS NOT NULL AND time >= ? AND time < ?
 GROUP BY upstream_channel_id
@@ -1097,7 +1151,10 @@ GROUP BY upstream_channel_id
 		var outputTokens sql.NullInt64
 		var cachedInputTokens sql.NullInt64
 		var cachedOutputTokens sql.NullInt64
-		if err := rows.Scan(&row.ChannelID, &committedUSD, &inputTokens, &outputTokens, &cachedInputTokens, &cachedOutputTokens); err != nil {
+		var firstTokenLatencySum sql.NullInt64
+		var firstTokenSamples sql.NullInt64
+		var decodeLatencyMS sql.NullInt64
+		if err := rows.Scan(&row.ChannelID, &committedUSD, &inputTokens, &outputTokens, &cachedInputTokens, &cachedOutputTokens, &firstTokenLatencySum, &firstTokenSamples, &decodeLatencyMS); err != nil {
 			return nil, fmt.Errorf("扫描渠道用量失败: %w", err)
 		}
 		if committedUSD.Valid {
@@ -1115,9 +1172,18 @@ GROUP BY upstream_channel_id
 		if cachedOutputTokens.Valid {
 			row.CachedOutputTokens = cachedOutputTokens.Int64
 		}
+		if firstTokenSamples.Valid {
+			row.FirstTokenSamples = firstTokenSamples.Int64
+		}
 		row.Tokens = row.InputTokens + row.OutputTokens
 		if row.Tokens > 0 {
 			row.CacheRatio = float64(row.CachedInputTokens+row.CachedOutputTokens) / float64(row.Tokens)
+		}
+		if firstTokenLatencySum.Valid && row.FirstTokenSamples > 0 {
+			row.AvgFirstTokenMS = float64(firstTokenLatencySum.Int64) / float64(row.FirstTokenSamples)
+		}
+		if decodeLatencyMS.Valid {
+			row.OutputTokensPerSec = computeOutputTokensPerSecond(row.OutputTokens, decodeLatencyMS.Int64)
 		}
 		out = append(out, row)
 	}

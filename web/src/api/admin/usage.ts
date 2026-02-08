@@ -13,6 +13,8 @@ export type AdminUsageWindow = {
   cache_ratio: string;
   rpm: string;
   tpm: string;
+  avg_first_token_latency: string;
+  tokens_per_second: string;
   committed_usd: string;
   reserved_usd: string;
   total_usd: string;
@@ -37,6 +39,8 @@ export type AdminUsageEvent = {
   model: string;
   status_code: string;
   latency_ms: string;
+  first_token_latency_ms: string;
+  tokens_per_second: string;
   input_tokens: string;
   output_tokens: string;
   cached_tokens: string;

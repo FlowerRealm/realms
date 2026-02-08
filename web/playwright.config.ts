@@ -18,14 +18,24 @@ const mergedNoProxy = noProxyParts.join(',');
 process.env.NO_PROXY = mergedNoProxy;
 process.env.no_proxy = mergedNoProxy;
 
+function envBool(key: string): boolean {
+  const v = (process.env[key] || '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
 const configDir = path.dirname(fileURLToPath(import.meta.url));
 const baseURL = process.env.REALMS_E2E_BASE_URL?.trim() || 'http://127.0.0.1:18181';
 const u = new URL(baseURL);
+const e2eProfile = (process.env.REALMS_E2E_PROFILE || 'seed').trim().toLowerCase();
+const isRealProfile = e2eProfile === 'real';
+const useExternalServer = envBool('REALMS_E2E_EXTERNAL_SERVER');
 
 const storageStatePath = path.join(configDir, 'playwright', '.auth', 'root.json');
 
 export default defineConfig({
   testDir: path.join(configDir, 'e2e'),
+  testMatch: isRealProfile ? ['**/*.real.spec.ts'] : ['**/*.spec.ts'],
+  testIgnore: isRealProfile ? [] : ['**/*.real.spec.ts'],
   fullyParallel: false,
   workers: 1,
   retries: process.env.CI ? 1 : 0,
@@ -50,16 +60,18 @@ export default defineConfig({
 
   globalSetup: path.join(configDir, 'e2e', 'global-setup.ts'),
 
-  webServer: {
-    command: 'go run ./cmd/realms-e2e',
-    cwd: path.resolve(configDir, '..'),
-    url: `${baseURL}/healthz`,
-    reuseExistingServer: false,
-    timeout: 120_000,
-    env: {
-      ...process.env,
-      REALMS_E2E_ADDR: u.host,
-      REALMS_E2E_FRONTEND_DIST_DIR: path.join(configDir, 'dist'),
-    },
-  },
+  webServer: useExternalServer
+    ? undefined
+    : {
+        command: 'go run ./cmd/realms-e2e',
+        cwd: path.resolve(configDir, '..'),
+        url: `${baseURL}/healthz`,
+        reuseExistingServer: false,
+        timeout: 120_000,
+        env: {
+          ...process.env,
+          REALMS_E2E_ADDR: u.host,
+          REALMS_E2E_FRONTEND_DIST_DIR: path.join(configDir, 'dist'),
+        },
+      },
 });

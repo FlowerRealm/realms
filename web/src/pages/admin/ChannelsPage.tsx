@@ -34,6 +34,7 @@ import {
   type Channel,
   type ChannelAdminItem,
   type ChannelCredential,
+  type ChannelUsageOverview,
   type CodexOAuthAccount,
   type PinnedChannelInfo,
 } from '../../api/channels';
@@ -80,6 +81,7 @@ export function ChannelsPage() {
   const [usageStart, setUsageStart] = useState('');
   const [usageEnd, setUsageEnd] = useState('');
   const [usageRangeDirty, setUsageRangeDirty] = useState(false);
+  const [usageOverview, setUsageOverview] = useState<ChannelUsageOverview | null>(null);
 
   const [draggingID, setDraggingID] = useState<number | null>(null);
   const [dropOverID, setDropOverID] = useState<number | null>(null);
@@ -233,6 +235,7 @@ export function ChannelsPage() {
       if (!pageRes.success) throw new Error(pageRes.message || '加载渠道失败');
       setUsageStart(pageRes.data?.start || '');
       setUsageEnd(pageRes.data?.end || '');
+      setUsageOverview(pageRes.data?.overview || null);
       setChannels(pageRes.data?.channels || []);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败');
@@ -573,6 +576,57 @@ export function ChannelsPage() {
         </div>
       </div>
 
+      {usageOverview ? (
+        <div className="card border-0 shadow-sm overflow-hidden mb-4">
+          <div className="bg-primary bg-opacity-10 py-3 px-4 d-flex justify-content-between align-items-center">
+            <span className="text-primary fw-bold text-uppercase small">请求统计总览</span>
+            <span className="text-primary text-opacity-75 small">
+              区间：{usageStart || '-'} ~ {usageEnd || '-'}
+            </span>
+          </div>
+          <div className="card-body py-3">
+            <div className="row g-3">
+              <div className="col-sm-6 col-xl-2">
+                <div className="metric-card p-3 rounded-3 border h-100">
+                  <div className="text-muted smaller mb-1">请求数</div>
+                  <div className="h5 fw-bold mb-0">{fmtNumber(usageOverview.requests || 0)}</div>
+                </div>
+              </div>
+              <div className="col-sm-6 col-xl-2">
+                <div className="metric-card p-3 rounded-3 border h-100">
+                  <div className="text-muted smaller mb-1">Token</div>
+                  <div className="h5 fw-bold mb-0">{fmtNumber(usageOverview.tokens || 0)}</div>
+                </div>
+              </div>
+              <div className="col-sm-6 col-xl-2">
+                <div className="metric-card p-3 rounded-3 border h-100">
+                  <div className="text-muted smaller mb-1">消耗</div>
+                  <div className="h5 fw-bold mb-0 font-monospace">{usageOverview.committed_usd || '0'}</div>
+                </div>
+              </div>
+              <div className="col-sm-6 col-xl-2">
+                <div className="metric-card p-3 rounded-3 border h-100">
+                  <div className="text-muted smaller mb-1">缓存率</div>
+                  <div className="h5 fw-bold mb-0">{usageOverview.cache_ratio || '0.0%'}</div>
+                </div>
+              </div>
+              <div className="col-sm-6 col-xl-2">
+                <div className="metric-card p-3 rounded-3 border h-100">
+                  <div className="text-muted smaller mb-1">平均首字延迟</div>
+                  <div className="h5 fw-bold mb-0">{usageOverview.avg_first_token_latency || '-'}</div>
+                </div>
+              </div>
+              <div className="col-sm-6 col-xl-2">
+                <div className="metric-card p-3 rounded-3 border h-100">
+                  <div className="text-muted smaller mb-1">平均 Tokens/s</div>
+                  <div className="h5 fw-bold mb-0">{usageOverview.tokens_per_second || '-'}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {notice ? (
         <div className="alert alert-success d-flex align-items-center mb-4" role="alert">
           <span className="me-2 material-symbols-rounded">check_circle</span>
@@ -752,6 +806,14 @@ export function ChannelsPage() {
                                 <div className="d-flex align-items-center">
                                   <span className="me-1">缓存:</span>
                                   <span className="fw-medium text-success">{usage?.cache_ratio ?? '0.0%'}</span>
+                                </div>
+                                <div className="d-flex align-items-center">
+                                  <span className="me-1">首字:</span>
+                                  <span className="fw-medium text-dark">{usage?.avg_first_token_latency ?? '-'}</span>
+                                </div>
+                                <div className="d-flex align-items-center">
+                                  <span className="me-1">Tokens/s:</span>
+                                  <span className="fw-medium text-dark">{usage?.tokens_per_second ?? '-'}</span>
                                 </div>
                               </div>
                             </div>
