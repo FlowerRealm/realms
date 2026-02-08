@@ -104,13 +104,21 @@ jobs:
           echo "models status=${models_code}"
           sed -n '1,8p' "${models_body}" || true
 
+          preflight_ok=0
+          resp_rc=0
+          resp_code=""
           resp_body="$(mktemp)"
-          resp_code="$(
-            curl -sS -m 45 -o "${resp_body}" -w '%{http_code}' \
-              -H "Authorization: Bearer ${REALMS_E2E_UPSTREAM_API_KEY}" \
-              -H "Content-Type: application/json" \
-              -X POST "${api_base}/responses" \
-              --data "$(cat <<JSON
+          for attempt in 1 2 3; do
+            resp_body="$(mktemp)"
+            set +e
+            resp_code="$(
+              curl -sS -m 90 --connect-timeout 10 \
+                --retry 2 --retry-all-errors --retry-delay 2 --retry-max-time 60 \
+                -o "${resp_body}" -w '%{http_code}' \
+                -H "Authorization: Bearer ${REALMS_E2E_UPSTREAM_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -X POST "${api_base}/responses" \
+                --data "$(cat <<JSON
           {
             "model": "${REALMS_E2E_BILLING_MODEL}",
             "input": [
@@ -121,13 +129,26 @@ jobs:
                 ]
               }
             ],
+            "max_output_tokens": 16,
             "stream": false
           }
           JSON
           )"
-          )"
-          echo "responses status=${resp_code}"
-          sed -n '1,20p' "${resp_body}" || true
+            )"
+            resp_rc=$?
+            set -e
+            echo "responses attempt=${attempt} rc=${resp_rc} status=${resp_code}"
+            sed -n '1,20p' "${resp_body}" || true
+            if [[ ${resp_rc} -eq 0 ]]; then
+              case "${resp_code}" in
+                2*|4*)
+                  preflight_ok=1
+                  break
+                  ;;
+              esac
+            fi
+            sleep $((attempt * 3))
+          done
 
           case "${models_code}" in
             2*|4*) ;;
@@ -136,13 +157,10 @@ jobs:
               exit 1
               ;;
           esac
-          case "${resp_code}" in
-            2*|4*) ;;
-            *)
-              echo "preflight failed: unexpected /responses status ${resp_code}"
-              exit 1
-              ;;
-          esac
+          if [[ "${preflight_ok}" != "1" ]]; then
+            echo "preflight failed: /responses unavailable after retries (last rc=${resp_rc}, status=${resp_code})"
+            exit 1
+          fi
 
       - name: E2E (Playwright -> Realms SPA -> Real Upstream)
         run: npm --prefix web run test:e2e:ci
