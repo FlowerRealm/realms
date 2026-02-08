@@ -68,7 +68,7 @@ func (p *UsageProvider) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 		reservedUSD = decimal.NewFromInt(1).Div(decimal.NewFromInt(1000)) // 0.001 USD
 	}
 	if in.Model != nil && ((in.InputTokens != nil && *in.InputTokens > 0) || (in.MaxOutputTokens != nil && *in.MaxOutputTokens > 0)) {
-		c, err := estimateCostUSD(ctx, p.st, in.Model, in.InputTokens, nil, nil, nil, in.MaxOutputTokens)
+		c, err := estimateCostUSD(ctx, p.st, in.Model, in.InputTokens, nil, in.MaxOutputTokens, nil)
 		if err != nil {
 			return ReserveResult{}, err
 		}
@@ -103,7 +103,7 @@ func (p *UsageProvider) Commit(ctx context.Context, in CommitInput) error {
 	if in.UsageEventID == 0 {
 		return nil
 	}
-	usd, err := estimateCostUSD(ctx, p.st, in.Model, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens, nil)
+	usd, err := estimateCostUSD(ctx, p.st, in.Model, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens)
 	if err != nil {
 		return err
 	}
@@ -156,11 +156,11 @@ func applyPriceMultiplierUSD(baseUSD decimal.Decimal, multiplier decimal.Decimal
 	return baseUSD.Mul(multiplier).Truncate(6), nil
 }
 
-func estimateCostUSD(ctx context.Context, st *store.Store, model *string, inputTokens, cachedInputTokens, outputTokens, cachedOutputTokens, maxOutputTokens *int64) (decimal.Decimal, error) {
+func estimateCostUSD(ctx context.Context, st *store.Store, model *string, inputTokens, cachedInputTokens, outputTokens, cachedOutputTokens *int64) (decimal.Decimal, error) {
 	if model == nil || *model == "" {
 		return decimal.Zero, nil
 	}
-	if inputTokens == nil && cachedInputTokens == nil && outputTokens == nil && cachedOutputTokens == nil && maxOutputTokens == nil {
+	if inputTokens == nil && cachedInputTokens == nil && outputTokens == nil && cachedOutputTokens == nil {
 		return decimal.Zero, nil
 	}
 
@@ -171,41 +171,39 @@ func estimateCostUSD(ctx context.Context, st *store.Store, model *string, inputT
 		}
 		return decimal.Zero, err
 	}
-	return estimateCostUSDWithPricing(mm.InputUSDPer1M, mm.OutputUSDPer1M, mm.CacheInputUSDPer1M, mm.CacheOutputUSDPer1M, inputTokens, cachedInputTokens, outputTokens, cachedOutputTokens, maxOutputTokens)
+	return estimateCostUSDWithPricing(mm.InputUSDPer1M, mm.OutputUSDPer1M, mm.CacheInputUSDPer1M, mm.CacheOutputUSDPer1M, inputTokens, cachedInputTokens, outputTokens, cachedOutputTokens)
 }
 
-func estimateCostUSDWithPricing(inUSDPer1M, outUSDPer1M, cacheInUSDPer1M, cacheOutUSDPer1M decimal.Decimal, inputTokens, cachedInputTokens, outputTokens, cachedOutputTokens, maxOutputTokens *int64) (decimal.Decimal, error) {
-	var inTok int64
+func estimateCostUSDWithPricing(inUSDPer1M, outUSDPer1M, cacheInUSDPer1M, cacheOutUSDPer1M decimal.Decimal, inputTokens, cachedInputTokens, outputTokens, cachedOutputTokens *int64) (decimal.Decimal, error) {
+	var totalInTok int64
 	var cachedInTok int64
-	var outTok int64
+	var totalOutTok int64
 	var cachedOutTok int64
 	if inputTokens != nil {
-		inTok = *inputTokens
+		totalInTok = *inputTokens
 	}
 	if cachedInputTokens != nil {
 		cachedInTok = *cachedInputTokens
 	}
 	if outputTokens != nil {
-		outTok = *outputTokens
-	} else if maxOutputTokens != nil {
-		outTok = *maxOutputTokens
+		totalOutTok = *outputTokens
 	}
 	if cachedOutputTokens != nil {
 		cachedOutTok = *cachedOutputTokens
 	}
 
-	if inTok < 0 || outTok < 0 || cachedInTok < 0 || cachedOutTok < 0 {
+	if totalInTok < 0 || totalOutTok < 0 || cachedInTok < 0 || cachedOutTok < 0 {
 		return decimal.Zero, errors.New("token 统计为负数")
 	}
-	if cachedInTok > inTok {
-		cachedInTok = inTok
+	if cachedInTok > totalInTok {
+		cachedInTok = totalInTok
 	}
-	if cachedOutTok > outTok {
-		cachedOutTok = outTok
+	if cachedOutTok > totalOutTok {
+		cachedOutTok = totalOutTok
 	}
 
-	nonCachedInTok := inTok - cachedInTok
-	nonCachedOutTok := outTok - cachedOutTok
+	nonCachedInTok := totalInTok - cachedInTok
+	nonCachedOutTok := totalOutTok - cachedOutTok
 
 	cost := func(tokens int64, usdPer1M decimal.Decimal) (decimal.Decimal, error) {
 		if tokens == 0 || usdPer1M.Equal(decimal.Zero) {

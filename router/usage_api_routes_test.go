@@ -332,13 +332,27 @@ func TestUsageEventDetail_UserResponse_IncludesPricingBreakdown(t *testing.T) {
 			EventID          int64 `json:"event_id"`
 			Available        bool  `json:"available"`
 			PricingBreakdown struct {
-				CostSource          string `json:"cost_source"`
-				CostSourceUSD       string `json:"cost_source_usd"`
-				ModelFound          bool   `json:"model_found"`
-				BaseCostUSD         string `json:"base_cost_usd"`
-				UserMultiplier      string `json:"user_multiplier"`
-				EffectiveMultiplier string `json:"effective_multiplier"`
-				FinalCostUSD        string `json:"final_cost_usd"`
+				CostSource           string `json:"cost_source"`
+				CostSourceUSD        string `json:"cost_source_usd"`
+				ModelFound           bool   `json:"model_found"`
+				InputTokensTotal     int64  `json:"input_tokens_total"`
+				InputTokensCached    int64  `json:"input_tokens_cached"`
+				InputTokensBillable  int64  `json:"input_tokens_billable"`
+				OutputTokensTotal    int64  `json:"output_tokens_total"`
+				OutputTokensCached   int64  `json:"output_tokens_cached"`
+				OutputTokensBillable int64  `json:"output_tokens_billable"`
+				InputUSDPer1M        string `json:"input_usd_per_1m"`
+				OutputUSDPer1M       string `json:"output_usd_per_1m"`
+				CacheInputUSDPer1M   string `json:"cache_input_usd_per_1m"`
+				CacheOutputUSDPer1M  string `json:"cache_output_usd_per_1m"`
+				InputCostUSD         string `json:"input_cost_usd"`
+				OutputCostUSD        string `json:"output_cost_usd"`
+				CacheInputCostUSD    string `json:"cache_input_cost_usd"`
+				CacheOutputCostUSD   string `json:"cache_output_cost_usd"`
+				BaseCostUSD          string `json:"base_cost_usd"`
+				UserMultiplier       string `json:"user_multiplier"`
+				EffectiveMultiplier  string `json:"effective_multiplier"`
+				FinalCostUSD         string `json:"final_cost_usd"`
 			} `json:"pricing_breakdown"`
 		} `json:"data"`
 	}
@@ -359,6 +373,48 @@ func TestUsageEventDetail_UserResponse_IncludesPricingBreakdown(t *testing.T) {
 	}
 	if !got.Data.PricingBreakdown.ModelFound {
 		t.Fatalf("expected model_found=true")
+	}
+	if got.Data.PricingBreakdown.InputTokensTotal != 1_000_000 {
+		t.Fatalf("input_tokens_total mismatch: got=%d want=%d", got.Data.PricingBreakdown.InputTokensTotal, 1_000_000)
+	}
+	if got.Data.PricingBreakdown.InputTokensCached != 400_000 {
+		t.Fatalf("input_tokens_cached mismatch: got=%d want=%d", got.Data.PricingBreakdown.InputTokensCached, 400_000)
+	}
+	if got.Data.PricingBreakdown.InputTokensBillable != 600_000 {
+		t.Fatalf("input_tokens_billable mismatch: got=%d want=%d", got.Data.PricingBreakdown.InputTokensBillable, 600_000)
+	}
+	if got.Data.PricingBreakdown.OutputTokensTotal != 500_000 {
+		t.Fatalf("output_tokens_total mismatch: got=%d want=%d", got.Data.PricingBreakdown.OutputTokensTotal, 500_000)
+	}
+	if got.Data.PricingBreakdown.OutputTokensCached != 100_000 {
+		t.Fatalf("output_tokens_cached mismatch: got=%d want=%d", got.Data.PricingBreakdown.OutputTokensCached, 100_000)
+	}
+	if got.Data.PricingBreakdown.OutputTokensBillable != 400_000 {
+		t.Fatalf("output_tokens_billable mismatch: got=%d want=%d", got.Data.PricingBreakdown.OutputTokensBillable, 400_000)
+	}
+	if got.Data.PricingBreakdown.InputUSDPer1M != "2" {
+		t.Fatalf("input_usd_per_1m mismatch: got=%q want=%q", got.Data.PricingBreakdown.InputUSDPer1M, "2")
+	}
+	if got.Data.PricingBreakdown.OutputUSDPer1M != "4" {
+		t.Fatalf("output_usd_per_1m mismatch: got=%q want=%q", got.Data.PricingBreakdown.OutputUSDPer1M, "4")
+	}
+	if got.Data.PricingBreakdown.CacheInputUSDPer1M != "0.5" {
+		t.Fatalf("cache_input_usd_per_1m mismatch: got=%q want=%q", got.Data.PricingBreakdown.CacheInputUSDPer1M, "0.5")
+	}
+	if got.Data.PricingBreakdown.CacheOutputUSDPer1M != "1" {
+		t.Fatalf("cache_output_usd_per_1m mismatch: got=%q want=%q", got.Data.PricingBreakdown.CacheOutputUSDPer1M, "1")
+	}
+	if got.Data.PricingBreakdown.InputCostUSD != "1.2" {
+		t.Fatalf("input_cost_usd mismatch: got=%q want=%q", got.Data.PricingBreakdown.InputCostUSD, "1.2")
+	}
+	if got.Data.PricingBreakdown.OutputCostUSD != "1.6" {
+		t.Fatalf("output_cost_usd mismatch: got=%q want=%q", got.Data.PricingBreakdown.OutputCostUSD, "1.6")
+	}
+	if got.Data.PricingBreakdown.CacheInputCostUSD != "0.2" {
+		t.Fatalf("cache_input_cost_usd mismatch: got=%q want=%q", got.Data.PricingBreakdown.CacheInputCostUSD, "0.2")
+	}
+	if got.Data.PricingBreakdown.CacheOutputCostUSD != "0.1" {
+		t.Fatalf("cache_output_cost_usd mismatch: got=%q want=%q", got.Data.PricingBreakdown.CacheOutputCostUSD, "0.1")
 	}
 	if got.Data.PricingBreakdown.BaseCostUSD != "3.1" {
 		t.Fatalf("base_cost_usd mismatch: got=%q want=%q", got.Data.PricingBreakdown.BaseCostUSD, "3.1")

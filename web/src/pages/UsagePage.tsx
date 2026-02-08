@@ -86,8 +86,8 @@ function tokenText(v: number | null | undefined): string {
 }
 
 function cachedTokens(ev: UsageEvent): string {
-  const inTok = ev.cached_input_tokens ?? 0;
-  const outTok = ev.cached_output_tokens ?? 0;
+  const inTok = clampCached(ev.input_tokens ?? 0, ev.cached_input_tokens ?? 0);
+  const outTok = clampCached(ev.output_tokens ?? 0, ev.cached_output_tokens ?? 0);
   const n = inTok + outTok;
   if (!Number.isFinite(n) || n <= 0) return '-';
   return String(n);

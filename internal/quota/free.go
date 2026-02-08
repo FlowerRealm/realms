@@ -57,7 +57,7 @@ func (p *FreeProvider) Commit(ctx context.Context, in CommitInput) error {
 		return errors.New("store 为空")
 	}
 
-	usd, err := estimateCostUSD(ctx, p.st, in.Model, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens, nil)
+	usd, err := estimateCostUSD(ctx, p.st, in.Model, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens)
 	if err != nil {
 		if errors.Is(err, ErrModelPricingMissing) {
 			usd = decimal.Zero

@@ -25,13 +25,12 @@ func TestEstimateCostUSDWithPricing_SplitCache(t *testing.T) {
 		ptrInt64(40),  // cached input
 		ptrInt64(50),  // output
 		ptrInt64(10),  // cached output
-		nil,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// 60*2 + 40*4 + 40*0.5 + 10*1 = 310 (USD/1M) => 0.000310 USD
+	// (100-40)*2 + (50-10)*4 + 40*0.5 + 10*1 = 310 (USD/1M) => 0.000310 USD
 	want := decimal.RequireFromString("0.00031")
 	if !got.Equal(want) {
 		t.Fatalf("unexpected result: got=%s want=%s", got, want)
@@ -55,7 +54,6 @@ func TestEstimateCostUSDWithPricing_SubsetClipCachedTokens(t *testing.T) {
 		ptrInt64(120), // cached input (clip -> 100)
 		ptrInt64(50),  // output
 		ptrInt64(70),  // cached output (clip -> 50)
-		nil,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -80,7 +78,6 @@ func TestEstimateCostUSDWithPricing_Truncate6Decimals(t *testing.T) {
 		ptrInt64(0),
 		ptrInt64(0),
 		ptrInt64(0),
-		nil,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -105,9 +102,29 @@ func TestEstimateCostUSDWithPricing_NegativeTokens(t *testing.T) {
 		ptrInt64(0),
 		ptrInt64(0),
 		ptrInt64(0),
-		nil,
 	)
 	if err == nil {
 		t.Fatalf("expected error, got nil")
+	}
+}
+
+func TestEstimateCostUSDWithPricing_OutputNilDoNotBillCachedOutput(t *testing.T) {
+	t.Parallel()
+
+	got, err := estimateCostUSDWithPricing(
+		decimal.Zero,
+		decimal.RequireFromString("4"),
+		decimal.Zero,
+		decimal.RequireFromString("1"),
+		ptrInt64(0),
+		ptrInt64(0),
+		nil,          // output total not provided
+		ptrInt64(10), // cached output should be clipped to 0
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.Equal(decimal.Zero) {
+		t.Fatalf("unexpected result: got=%s want=%s", got, decimal.Zero)
 	}
 }

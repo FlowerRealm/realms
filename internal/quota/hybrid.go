@@ -70,7 +70,7 @@ func (p *HybridProvider) Reserve(ctx context.Context, in ReserveInput) (ReserveR
 
 	reservedUSD := decimal.Zero
 	if in.Model != nil && ((in.InputTokens != nil && *in.InputTokens > 0) || (in.MaxOutputTokens != nil && *in.MaxOutputTokens > 0)) {
-		c, err := estimateCostUSD(ctx, p.st, in.Model, in.InputTokens, nil, nil, nil, in.MaxOutputTokens)
+		c, err := estimateCostUSD(ctx, p.st, in.Model, in.InputTokens, nil, in.MaxOutputTokens, nil)
 		if err != nil {
 			return ReserveResult{}, err
 		}
@@ -127,7 +127,7 @@ func (p *HybridProvider) Commit(ctx context.Context, in CommitInput) error {
 	if model == nil {
 		model = ev.Model
 	}
-	usd, err := estimateCostUSD(ctx, p.st, model, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens, nil)
+	usd, err := estimateCostUSD(ctx, p.st, model, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens)
 	if err != nil {
 		return err
 	}
