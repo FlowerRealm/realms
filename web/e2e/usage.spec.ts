@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 
 import { E2E_SEED } from './seed';
+import { postResponsesWithRetry } from './responses';
 
 type APIResponse<T> = {
   success: boolean;
@@ -28,9 +29,10 @@ test.describe('usage', () => {
 
   test('user usage detail hides upstream channel', async ({ page, request }) => {
     const marker = `pw-usage-ok-${Date.now()}`;
-    const resp = await request.post('/v1/responses', {
-      headers: { Authorization: `Bearer ${E2E_SEED.billing.user.token}` },
-      data: { model: E2E_SEED.billing.model, input: marker, stream: false },
+    const resp = await postResponsesWithRetry(request, {
+      token: E2E_SEED.billing.user.token,
+      model: E2E_SEED.billing.model,
+      input: marker,
     });
     expect(resp.status()).toBe(200);
 

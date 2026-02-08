@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 
 import { E2E_SEED } from './seed';
+import { isRealUpstreamEnabledForE2E, postResponsesWithRetry } from './responses';
 
 async function login(page: Page) {
   await page.locator('input[name="login"]').fill(E2E_SEED.root.username);
@@ -36,24 +37,31 @@ test.describe('billing balance', () => {
     const email = E2E_SEED.billing.user.email;
     const before = await getUserBalanceUSDFromUsersTable(page, email);
 
-    const resp = await request.post('/v1/responses', {
-      headers: { Authorization: `Bearer ${E2E_SEED.billing.user.token}` },
-      data: { model: E2E_SEED.billing.model, input: 'hi', stream: false },
+    const resp = await postResponsesWithRetry(request, {
+      token: E2E_SEED.billing.user.token,
+      model: E2E_SEED.billing.model,
+      input: `billing-balance-${Date.now()}`,
     });
     expect(resp.status()).toBe(200);
 
     await page.reload({ waitUntil: 'commit' });
 
-    const expectedDelta = 0.01; // seed: input_tokens=1000, input_usd_per_1m=10 => 0.01 USD
     await expect
-      .poll(async () => await getUserBalanceUSDFromUsersTable(page, email), { timeout: 10_000 })
-      .toBeCloseTo(before - expectedDelta, 6);
+      .poll(async () => await getUserBalanceUSDFromUsersTable(page, email), { timeout: 20_000 })
+      .toBeLessThan(before);
+
+    if (!isRealUpstreamEnabledForE2E()) {
+      const after = await getUserBalanceUSDFromUsersTable(page, email);
+      const expectedDelta = 0.01; // fake upstream seed: input_tokens=1000, input_usd_per_1m=10 => 0.01 USD
+      expect(after).toBeCloseTo(before - expectedDelta, 6);
+    }
   });
 
   test('insufficient balance: /v1/responses returns 402', async ({ page, request }) => {
-    const resp = await request.post('/v1/responses', {
-      headers: { Authorization: `Bearer ${E2E_SEED.billing.poorUser.token}` },
-      data: { model: E2E_SEED.billing.model, input: 'hi', stream: false },
+    const resp = await postResponsesWithRetry(request, {
+      token: E2E_SEED.billing.poorUser.token,
+      model: E2E_SEED.billing.model,
+      input: 'hi',
     });
     expect(resp.status()).toBe(402);
     await expect(resp.text()).resolves.toContain('余额不足');
@@ -65,4 +73,3 @@ test.describe('billing balance', () => {
     expect(bal).toBeCloseTo(0.0005, 6);
   });
 });
-
