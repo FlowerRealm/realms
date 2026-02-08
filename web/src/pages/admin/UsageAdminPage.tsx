@@ -1,6 +1,19 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 
-import { getAdminUsageEventDetail, getAdminUsagePage, type AdminUsagePage, type UsageEventDetail } from '../../api/admin/usage';
+import {
+  getAdminUsageEventDetail,
+  getAdminUsagePage,
+  getAdminUsageTimeSeries,
+  type AdminUsagePage,
+  type AdminUsageTimeSeriesPoint,
+  type UsageEventDetail,
+} from '../../api/admin/usage';
+
+type ChartInstance = {
+  destroy?: () => void;
+};
+
+type ChartConstructor = new (ctx: CanvasRenderingContext2D, config: unknown) => ChartInstance;
 
 function badgeForState(cls: string): string {
   const s = (cls || '').trim();
@@ -52,6 +65,30 @@ export function UsageAdminPage() {
   const [expandedID, setExpandedID] = useState<number | null>(null);
   const [detailByEventID, setDetailByEventID] = useState<Record<number, UsageEventDetail>>({});
   const [detailLoadingID, setDetailLoadingID] = useState<number | null>(null);
+  const detailTimeLineRef = useRef<HTMLCanvasElement | null>(null);
+  const detailTimeLineChartRef = useRef<ChartInstance | null>(null);
+  const [detailSeries, setDetailSeries] = useState<AdminUsageTimeSeriesPoint[]>([]);
+  const [detailSeriesLoading, setDetailSeriesLoading] = useState(false);
+  const [detailSeriesErr, setDetailSeriesErr] = useState('');
+  const [detailField, setDetailField] = useState<'committed_usd' | 'requests' | 'tokens' | 'cache_ratio' | 'avg_first_token_latency' | 'tokens_per_second'>(
+    'committed_usd',
+  );
+  const [detailGranularity, setDetailGranularity] = useState<'hour' | 'day'>('hour');
+  const fieldOptions: Array<{
+    value: 'committed_usd' | 'requests' | 'tokens' | 'cache_ratio' | 'avg_first_token_latency' | 'tokens_per_second';
+    label: string;
+  }> = [
+    { value: 'committed_usd', label: '消耗 (USD)' },
+    { value: 'requests', label: '请求数' },
+    { value: 'tokens', label: 'Token' },
+    { value: 'cache_ratio', label: '缓存率 (%)' },
+    { value: 'avg_first_token_latency', label: '首字延迟 (ms)' },
+    { value: 'tokens_per_second', label: 'Tokens/s' },
+  ];
+  const granularityOptions: Array<{ value: 'hour' | 'day'; label: string }> = [
+    { value: 'hour', label: '按小时' },
+    { value: 'day', label: '按天' },
+  ];
 
   async function refresh(opts?: { keepCursor?: boolean }) {
     setErr('');
@@ -87,9 +124,12 @@ export function UsageAdminPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const window = data?.window;
+  const windowStats = data?.window;
   const topUsers = data?.top_users || [];
   const events = data?.events || [];
+  const seriesStart = data?.start || '';
+  const seriesEnd = data?.end || '';
+  const hasSeriesSource = data !== null;
 
   const canPrev = useMemo(() => typeof data?.prev_after_id === 'number' && (data?.prev_after_id || 0) > 0, [data?.prev_after_id]);
   const canNext = useMemo(() => typeof data?.next_before_id === 'number' && (data?.next_before_id || 0) > 0, [data?.next_before_id]);
@@ -110,6 +150,138 @@ export function UsageAdminPage() {
       setDetailLoadingID(null);
     }
   }
+
+  useEffect(() => {
+    if (!hasSeriesSource) {
+      setDetailSeries([]);
+      setDetailSeriesErr('');
+      setDetailSeriesLoading(false);
+      return;
+    }
+    let active = true;
+    void (async () => {
+      setDetailSeriesErr('');
+      setDetailSeriesLoading(true);
+      try {
+        const res = await getAdminUsageTimeSeries({
+          start: seriesStart || undefined,
+          end: seriesEnd || undefined,
+          granularity: detailGranularity,
+        });
+        if (!res.success) throw new Error(res.message || '加载时间序列失败');
+        if (!active) return;
+        setDetailSeries(res.data?.points || []);
+      } catch (e) {
+        if (!active) return;
+        setDetailSeries([]);
+        setDetailSeriesErr(e instanceof Error ? e.message : '加载时间序列失败');
+      } finally {
+        if (active) setDetailSeriesLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [hasSeriesSource, seriesStart, seriesEnd, detailGranularity]);
+
+  useEffect(() => {
+    const ChartCtor = (globalThis.window as unknown as { Chart?: ChartConstructor })?.Chart;
+
+    const destroy = (ref: MutableRefObject<ChartInstance | null>) => {
+      try {
+        ref.current?.destroy?.();
+      } catch {
+        // ignore
+      }
+      ref.current = null;
+    };
+
+    destroy(detailTimeLineChartRef);
+
+    if (!ChartCtor) return;
+    const ctx = detailTimeLineRef.current?.getContext('2d');
+    if (!ctx) return;
+
+    const fieldMeta: Record<string, { label: string; color: string; read: (point: AdminUsageTimeSeriesPoint) => number }> = {
+      committed_usd: {
+        label: '消耗 (USD)',
+        color: 'rgba(99, 102, 241, 0.95)',
+        read: (point) => point.committed_usd,
+      },
+      requests: {
+        label: '请求数',
+        color: 'rgba(59, 130, 246, 0.95)',
+        read: (point) => point.requests,
+      },
+      tokens: {
+        label: 'Token',
+        color: 'rgba(16, 185, 129, 0.95)',
+        read: (point) => point.tokens,
+      },
+      cache_ratio: {
+        label: '缓存率 (%)',
+        color: 'rgba(245, 158, 11, 0.95)',
+        read: (point) => point.cache_ratio,
+      },
+      avg_first_token_latency: {
+        label: '首字延迟 (ms)',
+        color: 'rgba(239, 68, 68, 0.95)',
+        read: (point) => point.avg_first_token_latency,
+      },
+      tokens_per_second: {
+        label: 'Tokens/s',
+        color: 'rgba(14, 165, 233, 0.95)',
+        read: (point) => point.tokens_per_second,
+      },
+    };
+    const meta = fieldMeta[detailField];
+
+    detailTimeLineChartRef.current = new ChartCtor(ctx, {
+      type: 'line',
+      data: {
+        labels: detailSeries.map((point) => point.bucket),
+        datasets: [
+          {
+            label: meta.label,
+            data: detailSeries.map((point) => meta.read(point)),
+            borderColor: meta.color,
+            backgroundColor: meta.color.replace('0.95', '0.18'),
+            pointRadius: 2,
+            tension: 0.2,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'bottom' },
+          title: { display: true, text: '全站用量 · 时间序列' },
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: {
+              autoSkip: true,
+              maxTicksLimit: detailGranularity === 'hour' ? 10 : 14,
+              maxRotation: 0,
+              minRotation: 0,
+            },
+          },
+          y: {
+            beginAtZero: true,
+            suggestedMax: detailField === 'cache_ratio' ? 100 : undefined,
+            grid: { color: 'rgba(148, 163, 184, 0.18)' },
+          },
+        },
+      },
+    });
+
+    return () => {
+      destroy(detailTimeLineChartRef);
+    };
+  }, [detailSeries, detailField, detailGranularity]);
 
   return (
     <div className="fade-in-up">
@@ -175,15 +347,15 @@ export function UsageAdminPage() {
 
       {loading ? (
         <div className="text-muted">加载中…</div>
-      ) : data && window ? (
+      ) : data && windowStats ? (
         <div className="row g-4">
           <div className="col-12">
             <div className="card border-0 overflow-hidden">
               <div className="bg-primary bg-opacity-10 py-3 px-4 d-flex justify-content-between align-items-center">
                 <div>
-                  <span className="text-primary fw-bold text-uppercase small">{window.window}</span>
+                  <span className="text-primary fw-bold text-uppercase small">{windowStats.window}</span>
                   <span className="text-primary text-opacity-75 smaller ms-2">
-                    统计区间: {window.since} ~ {window.until}
+                    统计区间: {windowStats.since} ~ {windowStats.until}
                   </span>
                 </div>
                 <div className="text-primary text-opacity-75 smaller">
@@ -195,16 +367,16 @@ export function UsageAdminPage() {
                   <div className="col-lg-4 border-end">
                     <div className="mb-4">
                       <div className="text-muted smaller mb-1">总营收流水（USD）</div>
-                      <h1 className="display-6 fw-bold mb-0 text-dark">{window.total_usd}</h1>
+                      <h1 className="display-6 fw-bold mb-0 text-dark">{windowStats.total_usd}</h1>
                     </div>
                     <div className="row g-0 py-3 bg-light rounded-3 px-3">
                       <div className="col-6 border-end">
                         <div className="text-muted smaller">已结算</div>
-                        <div className="fw-bold h5 mb-0 text-success">{window.committed_usd}</div>
+                        <div className="fw-bold h5 mb-0 text-success">{windowStats.committed_usd}</div>
                       </div>
                       <div className="col-6 ps-3">
                         <div className="text-muted smaller">预留中</div>
-                        <div className="fw-bold h5 mb-0 text-warning">{window.reserved_usd}</div>
+                        <div className="fw-bold h5 mb-0 text-warning">{windowStats.reserved_usd}</div>
                       </div>
                     </div>
                     <div className="mt-3 smaller text-muted">
@@ -216,42 +388,42 @@ export function UsageAdminPage() {
                       <div className="col-sm-6 col-md-3">
                         <div className="metric-card p-3 rounded-3 border">
                           <div className="text-muted smaller mb-1">全局请求数</div>
-                          <div className="h4 fw-bold mb-1">{window.requests}</div>
-                          <div className="text-primary smaller fw-medium">{window.rpm} RPM</div>
+                          <div className="h4 fw-bold mb-1">{windowStats.requests}</div>
+                          <div className="text-primary smaller fw-medium">{windowStats.rpm} RPM</div>
                         </div>
                       </div>
                       <div className="col-sm-6 col-md-3">
                         <div className="metric-card p-3 rounded-3 border">
                           <div className="text-muted smaller mb-1">Token 吞吐</div>
-                          <div className="h4 fw-bold mb-1">{window.tokens}</div>
-                          <div className="text-primary smaller fw-medium">{window.tpm} TPM</div>
+                          <div className="h4 fw-bold mb-1">{windowStats.tokens}</div>
+                          <div className="text-primary smaller fw-medium">{windowStats.tpm} TPM</div>
                         </div>
                       </div>
                       <div className="col-sm-6 col-md-3">
                         <div className="metric-card p-3 rounded-3 border">
                           <div className="text-muted smaller mb-1">缓存率</div>
-                          <div className="h4 fw-bold mb-1">{window.cache_ratio}</div>
+                          <div className="h4 fw-bold mb-1">{windowStats.cache_ratio}</div>
                           <div className="text-muted smaller fw-medium">输入 + 输出</div>
                         </div>
                       </div>
                       <div className="col-sm-6 col-md-3">
                         <div className="metric-card p-3 rounded-3 border">
                           <div className="text-muted smaller mb-1">缓存 Token</div>
-                          <div className="h4 fw-bold mb-1">{window.cached_tokens}</div>
+                          <div className="h4 fw-bold mb-1">{windowStats.cached_tokens}</div>
                           <div className="text-muted smaller fw-medium">输入 + 输出</div>
                         </div>
                       </div>
                       <div className="col-sm-6 col-md-3">
                         <div className="metric-card p-3 rounded-3 border">
                           <div className="text-muted smaller mb-1">平均首字延迟</div>
-                          <div className="h4 fw-bold mb-1">{window.avg_first_token_latency || '-'}</div>
+                          <div className="h4 fw-bold mb-1">{windowStats.avg_first_token_latency || '-'}</div>
                           <div className="text-muted smaller fw-medium">基于有效首字样本</div>
                         </div>
                       </div>
                       <div className="col-sm-6 col-md-3">
                         <div className="metric-card p-3 rounded-3 border">
                           <div className="text-muted smaller mb-1">平均 Tokens/s</div>
-                          <div className="h4 fw-bold mb-1">{window.tokens_per_second || '-'}</div>
+                          <div className="h4 fw-bold mb-1">{windowStats.tokens_per_second || '-'}</div>
                           <div className="text-muted smaller fw-medium">输出 Token 解码速率</div>
                         </div>
                       </div>
@@ -260,11 +432,11 @@ export function UsageAdminPage() {
                           <div className="row text-center small">
                             <div className="col-6 border-end">
                               <div className="text-muted smaller">输入总计</div>
-                              <div className="fw-medium">{window.input_tokens}</div>
+                              <div className="fw-medium">{windowStats.input_tokens}</div>
                             </div>
                             <div className="col-6">
                               <div className="text-muted smaller">输出总计</div>
-                              <div className="fw-medium">{window.output_tokens}</div>
+                              <div className="fw-medium">{windowStats.output_tokens}</div>
                             </div>
                           </div>
                         </div>
@@ -272,6 +444,61 @@ export function UsageAdminPage() {
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="col-12">
+            <div className="card border-0 p-0 overflow-hidden">
+              <div className="card-header bg-white py-3 border-bottom px-4">
+                <h5 className="mb-0 fw-bold">
+                  <i className="ri-line-chart-line me-2"></i>全站时间序列
+                </h5>
+              </div>
+              <div className="card-body p-4">
+                <div className="d-flex flex-wrap align-items-center gap-3 mb-2">
+                  <div className="d-flex align-items-center gap-2 flex-grow-1">
+                    <div className="d-flex flex-wrap gap-1">
+                      {fieldOptions.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className={`btn btn-sm ${detailField === option.value ? 'btn-primary' : 'btn-outline-secondary'}`}
+                          onClick={() => setDetailField(option.value)}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="d-flex align-items-center gap-2 ms-auto">
+                    <div className="d-flex gap-1">
+                      {granularityOptions.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className={`btn btn-sm ${detailGranularity === option.value ? 'btn-primary' : 'btn-outline-secondary'}`}
+                          onClick={() => setDetailGranularity(option.value)}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="small text-muted mb-2">
+                  时间区间：{windowStats.since} ~ {windowStats.until}
+                </div>
+                {detailSeriesErr ? <div className="alert alert-danger py-2 mb-2">{detailSeriesErr}</div> : null}
+                {detailSeriesLoading ? (
+                  <div className="text-muted small py-4">时间序列加载中…</div>
+                ) : (
+                  <>
+                    <div style={{ height: 280 }}>
+                      <canvas ref={detailTimeLineRef}></canvas>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>

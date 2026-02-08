@@ -119,6 +119,17 @@ export function ChannelsPage() {
   const [detailSeriesErr, setDetailSeriesErr] = useState('');
   const [detailField, setDetailField] = useState<'committed_usd' | 'tokens' | 'cache_ratio' | 'avg_first_token_latency' | 'tokens_per_second'>('committed_usd');
   const [detailGranularity, setDetailGranularity] = useState<'hour' | 'day'>('hour');
+  const fieldOptions: Array<{ value: 'committed_usd' | 'tokens' | 'cache_ratio' | 'avg_first_token_latency' | 'tokens_per_second'; label: string }> = [
+    { value: 'committed_usd', label: '消耗 (USD)' },
+    { value: 'tokens', label: 'Token' },
+    { value: 'cache_ratio', label: '缓存率 (%)' },
+    { value: 'avg_first_token_latency', label: '首字延迟 (ms)' },
+    { value: 'tokens_per_second', label: 'Tokens/s' },
+  ];
+  const granularityOptions: Array<{ value: 'hour' | 'day'; label: string }> = [
+    { value: 'hour', label: '按小时' },
+    { value: 'day', label: '按天' },
+  ];
 
   const [draggingID, setDraggingID] = useState<number | null>(null);
   const [dropOverID, setDropOverID] = useState<number | null>(null);
@@ -247,23 +258,6 @@ export function ChannelsPage() {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return '-';
     return d.toLocaleString('zh-CN', { hour12: false });
-  }
-
-  function formatSeriesValue(field: 'committed_usd' | 'tokens' | 'cache_ratio' | 'avg_first_token_latency' | 'tokens_per_second', p: ChannelTimeSeriesPoint): string {
-    switch (field) {
-      case 'committed_usd':
-        return `${p.committed_usd.toFixed(4)} USD`;
-      case 'tokens':
-        return fmtNumber(p.tokens);
-      case 'cache_ratio':
-        return `${p.cache_ratio.toFixed(1)}%`;
-      case 'avg_first_token_latency':
-        return `${p.avg_first_token_latency.toFixed(1)} ms`;
-      case 'tokens_per_second':
-        return p.tokens_per_second.toFixed(2);
-      default:
-        return '-';
-    }
   }
 
   function upsertModelState(models: ChannelModelLiveState[], model: string, patch: Partial<ChannelModelLiveState>): ChannelModelLiveState[] {
@@ -711,7 +705,7 @@ export function ChannelsPage() {
 
     destroy(detailTimeLineChartRef);
 
-    if (!ChartCtor || !expandedChannelID || detailSeries.length === 0) return;
+    if (!ChartCtor || !expandedChannelID) return;
     const channel = channels.find((c) => c.id === expandedChannelID);
     if (!channel) return;
     const ctx = detailTimeLineRef.current?.getContext('2d');
@@ -1222,72 +1216,43 @@ export function ChannelsPage() {
                               </div>
                               <div className="border rounded-3 p-3 bg-white mt-3">
                                 <div className="d-flex flex-wrap align-items-center gap-3 mb-2">
-                                  <div className="d-flex align-items-center gap-2">
-                                    <label className="small text-muted mb-0">字段</label>
-                                    <select
-                                      className="form-select form-select-sm"
-                                      style={{ width: 170 }}
-                                      value={detailField}
-                                      onChange={(e) =>
-                                        setDetailField(
-                                          e.target.value as 'committed_usd' | 'tokens' | 'cache_ratio' | 'avg_first_token_latency' | 'tokens_per_second',
-                                        )
-                                      }
-                                    >
-                                      <option value="committed_usd">消耗 (USD)</option>
-                                      <option value="tokens">Token</option>
-                                      <option value="cache_ratio">缓存率 (%)</option>
-                                      <option value="avg_first_token_latency">首字延迟 (ms)</option>
-                                      <option value="tokens_per_second">Tokens/s</option>
-                                    </select>
+                                  <div className="d-flex align-items-center gap-2 flex-grow-1">
+                                    <div className="d-flex flex-wrap gap-1">
+                                      {fieldOptions.map((option) => (
+                                        <button
+                                          key={option.value}
+                                          type="button"
+                                          className={`btn btn-sm ${detailField === option.value ? 'btn-primary' : 'btn-outline-secondary'}`}
+                                          onClick={() => setDetailField(option.value)}
+                                        >
+                                          {option.label}
+                                        </button>
+                                      ))}
+                                    </div>
                                   </div>
-                                  <div className="d-flex align-items-center gap-2">
-                                    <label className="small text-muted mb-0">颗粒度</label>
-                                    <select
-                                      className="form-select form-select-sm"
-                                      style={{ width: 120 }}
-                                      value={detailGranularity}
-                                      onChange={(e) => setDetailGranularity(e.target.value as 'hour' | 'day')}
-                                    >
-                                      <option value="hour">按小时</option>
-                                      <option value="day">按天</option>
-                                    </select>
+                                  <div className="d-flex align-items-center gap-2 ms-auto">
+                                    <div className="d-flex gap-1">
+                                      {granularityOptions.map((option) => (
+                                        <button
+                                          key={option.value}
+                                          type="button"
+                                          className={`btn btn-sm ${detailGranularity === option.value ? 'btn-primary' : 'btn-outline-secondary'}`}
+                                          onClick={() => setDetailGranularity(option.value)}
+                                        >
+                                          {option.label}
+                                        </button>
+                                      ))}
+                                    </div>
                                   </div>
                                 </div>
                                 <div className="small text-muted mb-2">时间区间：{usageStart || '-'} ~ {usageEnd || '-'}</div>
                                 {detailSeriesErr ? <div className="alert alert-danger py-2 mb-2">{detailSeriesErr}</div> : null}
                                 {detailSeriesLoading ? (
                                   <div className="text-muted small py-4">时间序列加载中…</div>
-                                ) : detailSeries.length === 0 ? (
-                                  <div className="text-muted small py-4">当前区间暂无可绘制的时间序列数据。</div>
                                 ) : (
                                   <>
                                     <div style={{ height: 280 }}>
                                       <canvas ref={panelOpen ? detailTimeLineRef : undefined}></canvas>
-                                    </div>
-                                    <div className="mt-3 border-top pt-2">
-                                      <div className="d-flex justify-content-between align-items-center mb-2">
-                                        <div className="small text-muted">时间点明细</div>
-                                        <span className="badge bg-light text-secondary border">共 {detailSeries.length} 个时间点</span>
-                                      </div>
-                                      <div className="rlm-timeseries-table-wrap table-responsive">
-                                        <table className="table table-sm table-hover align-middle mb-0 rlm-timeseries-table">
-                                          <thead className="table-light">
-                                            <tr>
-                                              <th style={{ width: '45%' }}>时间点</th>
-                                              <th>值</th>
-                                            </tr>
-                                          </thead>
-                                          <tbody>
-                                            {detailSeries.map((point, idx) => (
-                                              <tr key={`${point.bucket}-${idx}`}>
-                                                <td className="font-monospace small text-muted">{point.bucket}</td>
-                                                <td className="small fw-semibold text-dark">{formatSeriesValue(detailField, point)}</td>
-                                              </tr>
-                                            ))}
-                                          </tbody>
-                                        </table>
-                                      </div>
                                     </div>
                                   </>
                                 )}

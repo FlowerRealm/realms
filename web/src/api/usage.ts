@@ -66,6 +66,23 @@ export type UsageEventsResponse = {
   next_before_id?: number | null;
 };
 
+export type UsageTimeSeriesPoint = {
+  bucket: string;
+  requests: number;
+  tokens: number;
+  committed_usd: number;
+  cache_ratio: number;
+  avg_first_token_latency: number;
+  tokens_per_second: number;
+};
+
+export type UsageTimeSeriesResponse = {
+  start: string;
+  end: string;
+  granularity: 'hour' | 'day';
+  points: UsageTimeSeriesPoint[];
+};
+
 export async function getUsageWindows(start?: string, end?: string) {
   const res = await api.get<APIResponse<UsageWindowsResponse>>('/api/usage/windows', {
     params: {
@@ -83,6 +100,17 @@ export async function getUsageEvents(limit = 100, beforeID?: number, start?: str
       before_id: beforeID || undefined,
       start: start || undefined,
       end: end || undefined,
+    },
+  });
+  return res.data;
+}
+
+export async function getUsageTimeSeries(start?: string, end?: string, granularity?: 'hour' | 'day') {
+  const res = await api.get<APIResponse<UsageTimeSeriesResponse>>('/api/usage/timeseries', {
+    params: {
+      start: start || undefined,
+      end: end || undefined,
+      granularity: granularity || undefined,
     },
   });
   return res.data;

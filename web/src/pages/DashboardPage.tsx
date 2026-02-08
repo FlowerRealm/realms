@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'rea
 import { Link } from 'react-router-dom';
 
 import { getDashboard, type DashboardData } from '../api/dashboard';
+import { getUsageTimeSeries, type UsageTimeSeriesPoint } from '../api/usage';
 
 type ChartInstance = {
   destroy?: () => void;
@@ -15,29 +16,41 @@ function subscriptionProgressBarClass(percent: number): string {
   return 'bg-success';
 }
 
-const fallbackModelIcon =
-  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2a10 10 0 1 0 10 10H12V2z'/%3E%3Cpath d='M12 12L2.5 12'/%3E%3Cpath d='M12 12l9.5 0'/%3E%3Cpath d='M12 12l-6.7 6.7'/%3E%3Cpath d='M12 12l6.7 6.7'/%3E%3C/svg%3E";
-
 export function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
 
   const apiBaseURL = useMemo(() => `${window.location.origin}/v1`, []);
 
-  const modelPieRef = useRef<HTMLCanvasElement | null>(null);
-  const tokenBarRef = useRef<HTMLCanvasElement | null>(null);
-  const billingBarRef = useRef<HTMLCanvasElement | null>(null);
-
-  const modelPieChartRef = useRef<ChartInstance | null>(null);
-  const tokenBarChartRef = useRef<ChartInstance | null>(null);
-  const billingBarChartRef = useRef<ChartInstance | null>(null);
+  const detailTimeLineRef = useRef<HTMLCanvasElement | null>(null);
+  const detailTimeLineChartRef = useRef<ChartInstance | null>(null);
+  const [detailSeries, setDetailSeries] = useState<UsageTimeSeriesPoint[]>([]);
+  const [detailSeriesLoading, setDetailSeriesLoading] = useState(false);
+  const [detailSeriesErr, setDetailSeriesErr] = useState('');
+  const [detailField, setDetailField] = useState<'requests' | 'tokens' | 'committed_usd' | 'cache_ratio' | 'avg_first_token_latency' | 'tokens_per_second'>(
+    'requests',
+  );
+  const [detailGranularity, setDetailGranularity] = useState<'hour' | 'day'>('hour');
+  const fieldOptions: Array<{
+    value: 'requests' | 'tokens' | 'committed_usd' | 'cache_ratio' | 'avg_first_token_latency' | 'tokens_per_second';
+    label: string;
+  }> = [
+    { value: 'requests', label: '请求数' },
+    { value: 'tokens', label: 'Token' },
+    { value: 'committed_usd', label: '消耗 (USD)' },
+    { value: 'cache_ratio', label: '缓存率 (%)' },
+    { value: 'avg_first_token_latency', label: '首字延迟 (ms)' },
+    { value: 'tokens_per_second', label: 'Tokens/s' },
+  ];
+  const granularityOptions: Array<{ value: 'hour' | 'day'; label: string }> = [
+    { value: 'hour', label: '按小时' },
+    { value: 'day', label: '按天' },
+  ];
 
   useEffect(() => {
     let mounted = true;
     (async () => {
       setErr('');
-      setLoading(true);
       try {
         const res = await getDashboard();
         if (!res.success) {
@@ -51,8 +64,6 @@ export function DashboardPage() {
           setErr(e instanceof Error ? e.message : '加载失败');
           setData(null);
         }
-      } finally {
-        if (mounted) setLoading(false);
       }
     })();
     return () => {
@@ -61,23 +72,30 @@ export function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    const onShown = () => {
-      window.dispatchEvent(new Event('resize'));
-    };
-
-    const btns = Array.from(document.querySelectorAll<HTMLButtonElement>('button[data-bs-toggle="tab"]'));
-    for (const btn of btns) {
-      btn.addEventListener('shown.bs.tab', onShown);
-    }
-    return () => {
-      for (const btn of btns) {
-        btn.removeEventListener('shown.bs.tab', onShown);
+    let active = true;
+    void (async () => {
+      setDetailSeriesErr('');
+      setDetailSeriesLoading(true);
+      try {
+        const res = await getUsageTimeSeries(undefined, undefined, detailGranularity);
+        if (!res.success) throw new Error(res.message || '时间序列加载失败');
+        if (!active) return;
+        setDetailSeries(res.data?.points || []);
+      } catch (e) {
+        if (!active) return;
+        setDetailSeries([]);
+        setDetailSeriesErr(e instanceof Error ? e.message : '时间序列加载失败');
+      } finally {
+        if (active) setDetailSeriesLoading(false);
       }
+    })();
+    return () => {
+      active = false;
     };
-  }, []);
+  }, [detailGranularity]);
 
   useEffect(() => {
-    const ChartCtor = (window as unknown as { Chart?: ChartConstructor }).Chart;
+    const ChartCtor = (globalThis.window as unknown as { Chart?: ChartConstructor })?.Chart;
 
     const destroy = (ref: MutableRefObject<ChartInstance | null>) => {
       try {
@@ -88,110 +106,91 @@ export function DashboardPage() {
       ref.current = null;
     };
 
-    destroy(modelPieChartRef);
-    destroy(tokenBarChartRef);
-    destroy(billingBarChartRef);
+    destroy(detailTimeLineChartRef);
+    if (!ChartCtor) return;
+    const ctx = detailTimeLineRef.current?.getContext('2d');
+    if (!ctx) return;
 
-    if (!ChartCtor || !data) return;
+    const fieldMeta: Record<string, { label: string; color: string; read: (point: UsageTimeSeriesPoint) => number }> = {
+      requests: {
+        label: '请求数',
+        color: 'rgba(59, 130, 246, 0.95)',
+        read: (point) => point.requests,
+      },
+      tokens: {
+        label: 'Token',
+        color: 'rgba(16, 185, 129, 0.95)',
+        read: (point) => point.tokens,
+      },
+      committed_usd: {
+        label: '消耗 (USD)',
+        color: 'rgba(99, 102, 241, 0.95)',
+        read: (point) => point.committed_usd,
+      },
+      cache_ratio: {
+        label: '缓存率 (%)',
+        color: 'rgba(245, 158, 11, 0.95)',
+        read: (point) => point.cache_ratio,
+      },
+      avg_first_token_latency: {
+        label: '首字延迟 (ms)',
+        color: 'rgba(239, 68, 68, 0.95)',
+        read: (point) => point.avg_first_token_latency,
+      },
+      tokens_per_second: {
+        label: 'Tokens/s',
+        color: 'rgba(14, 165, 233, 0.95)',
+        read: (point) => point.tokens_per_second,
+      },
+    };
+    const meta = fieldMeta[detailField];
 
-    const modelCtx = modelPieRef.current?.getContext('2d');
-    if (modelCtx) {
-      const modelLabels = (data.charts.model_stats || []).map((s) => s.model);
-      const modelCosts = (data.charts.model_stats || []).map((s) => {
-        const n = Number.parseFloat(String(s.committed_usd || '0'));
-        return Number.isFinite(n) ? n : 0;
-      });
-      const modelColors = (data.charts.model_stats || []).map((s) => s.color);
-
-      modelPieChartRef.current = new ChartCtor(modelCtx, {
-        type: 'doughnut',
-        data: {
-          labels: modelLabels,
-          datasets: [
-            {
-              data: modelCosts,
-              backgroundColor: modelColors,
-              borderWidth: 0,
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false },
+    detailTimeLineChartRef.current = new ChartCtor(ctx, {
+      type: 'line',
+      data: {
+        labels: detailSeries.map((point) => point.bucket),
+        datasets: [
+          {
+            label: meta.label,
+            data: detailSeries.map((point) => meta.read(point)),
+            borderColor: meta.color,
+            backgroundColor: meta.color.replace('0.95', '0.18'),
+            pointRadius: 2,
+            tension: 0.2,
           },
-          cutout: '70%',
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'bottom' },
+          title: { display: true, text: '用量时间序列' },
         },
-      });
-    }
-
-    const timeLabels = (data.charts.time_series_stats || []).map((s) => s.label);
-
-    const tokenCtx = tokenBarRef.current?.getContext('2d');
-    if (tokenCtx) {
-      tokenBarChartRef.current = new ChartCtor(tokenCtx, {
-        type: 'bar',
-        data: {
-          labels: timeLabels,
-          datasets: [
-            {
-              label: 'Tokens',
-              data: (data.charts.time_series_stats || []).map((s) => s.tokens),
-              backgroundColor: 'rgba(16, 185, 129, 0.6)',
-              borderRadius: 4,
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: {
+              autoSkip: true,
+              maxTicksLimit: detailGranularity === 'hour' ? 10 : 14,
+              maxRotation: 0,
+              minRotation: 0,
             },
-          ],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
-          scales: {
-            y: { beginAtZero: true, grid: { display: false } },
-            x: { grid: { display: false } },
           },
-        },
-      });
-    }
-
-    const billingCtx = billingBarRef.current?.getContext('2d');
-    if (billingCtx) {
-      billingBarChartRef.current = new ChartCtor(billingCtx, {
-        type: 'bar',
-        data: {
-          labels: timeLabels,
-          datasets: [
-            {
-              label: '费用 (USD)',
-              data: (data.charts.time_series_stats || []).map((s) => s.committed_usd),
-              backgroundColor: 'rgba(99, 102, 241, 0.6)',
-              borderRadius: 4,
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
-          scales: {
-            y: {
-              beginAtZero: true,
-              grid: { display: false },
-              ticks: { callback: (v: unknown) => `$${String(v)}` },
-            },
-            x: { grid: { display: false } },
+          y: {
+            beginAtZero: true,
+            suggestedMax: detailField === 'cache_ratio' ? 100 : undefined,
+            grid: { color: 'rgba(148, 163, 184, 0.18)' },
           },
         },
-      });
-    }
+      },
+    });
 
     return () => {
-      destroy(modelPieChartRef);
-      destroy(tokenBarChartRef);
-      destroy(billingBarChartRef);
+      destroy(detailTimeLineChartRef);
     };
-  }, [data]);
+  }, [detailSeries, detailField, detailGranularity]);
 
   const todayUsageUSD = data?.today_usage_usd || '-';
   const todayRequests = data ? String(data.today_requests) : '-';
@@ -346,122 +345,53 @@ export function DashboardPage() {
         </div>
 
         <div className="col-12">
-          <div className="card">
-            <div className="card-header">
-              <div className="d-flex justify-content-between align-items-center">
-                <h6 className="mb-0 fw-bold">
-                  <span className="text-primary me-2 material-symbols-rounded">pie_chart</span>用量分析 (今日)
-                </h6>
-                <ul className="nav nav-pills nav-pills-sm smaller" id="chartTabs" role="tablist">
-                  <li className="nav-item" role="presentation">
-                    <button
-                      className="nav-link active py-1 px-2"
-                      id="model-tab"
-                      data-bs-toggle="tab"
-                      data-bs-target="#model-pane"
-                      type="button"
-                      role="tab"
-                    >
-                      模型分布
-                    </button>
-                  </li>
-                  <li className="nav-item" role="presentation">
-                    <button className="nav-link py-1 px-2" id="token-tab" data-bs-toggle="tab" data-bs-target="#token-pane" type="button" role="tab">
-                      Token
-                    </button>
-                  </li>
-                  <li className="nav-item" role="presentation">
-                    <button
-                      className="nav-link py-1 px-2"
-                      id="billing-tab"
-                      data-bs-toggle="tab"
-                      data-bs-target="#billing-pane"
-                      type="button"
-                      role="tab"
-                    >
-                      费用
-                    </button>
-                  </li>
-                </ul>
-              </div>
+          <div className="card border-0 overflow-hidden">
+            <div className="card-header py-3 px-4">
+              <h5 className="mb-0 fw-bold">
+                <i className="ri-line-chart-line me-2"></i>用量时间序列
+              </h5>
             </div>
-
-            <div className="card-body px-3 pb-3 pt-0">
-              <div className="tab-content pt-2">
-                <div className="tab-pane fade show active" id="model-pane" role="tabpanel">
-                  <div className="row align-items-center g-3">
-                    <div className="col-lg-4 text-center">
-                      <div style={{ position: 'relative', height: 140, width: '100%', margin: '0 auto' }}>
-                        <canvas ref={modelPieRef} id="modelPieChart"></canvas>
-                      </div>
-                    </div>
-                    <div className="col-lg-8">
-                      <div className="table-responsive" style={{ maxHeight: 150 }}>
-                        <table className="table table-sm table-hover align-middle border-0 mb-0 smaller">
-                          <thead className="sticky-top bg-white" style={{ zIndex: 1 }}>
-                            <tr className="text-muted text-uppercase">
-                              <th className="border-0 ps-0 pb-1 fw-medium">模型</th>
-                              <th className="border-0 text-end pb-1 fw-medium">请求</th>
-                              <th className="border-0 text-end pb-1 fw-medium">Token</th>
-                              <th className="border-0 text-end pb-1 pe-1 fw-medium">USD</th>
-                            </tr>
-                          </thead>
-                          <tbody className="border-top-0">
-                            {data?.charts.model_stats?.length ? (
-                              data.charts.model_stats.map((s) => (
-                                <tr key={s.model}>
-                                  <td className="border-0 ps-0 py-1">
-                                    <div className="d-flex align-items-center">
-                                      <span
-                                        className="rounded-circle me-2"
-                                        style={{ width: 6, height: 6, backgroundColor: s.color }}
-                                      ></span>
-                                      <img
-                                        src={s.icon_url || fallbackModelIcon}
-                                        className="rlm-model-icon me-2"
-                                        style={{ width: 14, height: 14 }}
-                                        alt={s.model}
-                                        loading="lazy"
-                                        onError={(e) => {
-                                          e.currentTarget.src = fallbackModelIcon;
-                                        }}
-                                      />
-                                      <span className="text-dark text-truncate" style={{ maxWidth: 120 }}>
-                                        {s.model}
-                                      </span>
-                                    </div>
-                                  </td>
-                                  <td className="border-0 text-end text-secondary py-1">{s.requests}</td>
-                                  <td className="border-0 text-end text-secondary py-1">{s.tokens}</td>
-                                  <td className="border-0 text-end fw-bold text-dark py-1 pe-1">${s.committed_usd}</td>
-                                </tr>
-                              ))
-                            ) : (
-                              <tr>
-                                <td colSpan={4} className="text-center py-4 text-muted">
-                                  {loading ? '加载中…' : '无记录'}
-                                </td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
+            <div className="card-body p-4 border-top">
+              <div className="d-flex flex-wrap align-items-center gap-3 mb-2">
+                <div className="d-flex align-items-center gap-2 flex-grow-1">
+                  <div className="d-flex flex-wrap gap-1">
+                    {fieldOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`btn btn-sm ${detailField === option.value ? 'btn-primary' : 'btn-outline-secondary'}`}
+                        onClick={() => setDetailField(option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
-
-                <div className="tab-pane fade" id="token-pane" role="tabpanel">
-                  <div style={{ height: 150, width: '100%' }}>
-                    <canvas ref={tokenBarRef} id="tokenBarChart"></canvas>
-                  </div>
-                </div>
-
-                <div className="tab-pane fade" id="billing-pane" role="tabpanel">
-                  <div style={{ height: 150, width: '100%' }}>
-                    <canvas ref={billingBarRef} id="billingBarChart"></canvas>
+                <div className="d-flex align-items-center gap-2 ms-auto">
+                  <div className="d-flex gap-1">
+                    {granularityOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`btn btn-sm ${detailGranularity === option.value ? 'btn-primary' : 'btn-outline-secondary'}`}
+                        onClick={() => setDetailGranularity(option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
               </div>
+              {detailSeriesErr ? <div className="alert alert-danger py-2 mb-2">{detailSeriesErr}</div> : null}
+              {detailSeriesLoading ? (
+                <div className="text-muted small py-4">时间序列加载中…</div>
+              ) : (
+                <>
+                  <div style={{ height: 280 }}>
+                    <canvas ref={detailTimeLineRef}></canvas>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

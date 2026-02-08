@@ -187,4 +187,57 @@ func TestAdminUsagePage_EventIncludesFirstTokenLatencyAndTokensPerSecond(t *test
 	if ev.TokensPerSecond != "62.50" {
 		t.Fatalf("expected event tokens_per_second=62.50, got %q", ev.TokensPerSecond)
 	}
+
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage/timeseries?granularity=hour", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("admin usage timeseries status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var ts struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Granularity string `json:"granularity"`
+			Points      []struct {
+				Requests             int64   `json:"requests"`
+				Tokens               int64   `json:"tokens"`
+				CommittedUSD         float64 `json:"committed_usd"`
+				CacheRatio           float64 `json:"cache_ratio"`
+				AvgFirstTokenLatency float64 `json:"avg_first_token_latency"`
+				TokensPerSecond      float64 `json:"tokens_per_second"`
+			} `json:"points"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &ts); err != nil {
+		t.Fatalf("json.Unmarshal admin usage timeseries: %v", err)
+	}
+	if !ts.Success {
+		t.Fatalf("admin usage timeseries expected success, got message=%q", ts.Message)
+	}
+	if ts.Data.Granularity != "hour" {
+		t.Fatalf("expected granularity=hour, got %q", ts.Data.Granularity)
+	}
+	if len(ts.Data.Points) == 0 {
+		t.Fatalf("expected non-empty timeseries points")
+	}
+	point := ts.Data.Points[len(ts.Data.Points)-1]
+	if point.Requests != 1 {
+		t.Fatalf("expected point requests=1, got %d", point.Requests)
+	}
+	if point.Tokens != 150 {
+		t.Fatalf("expected point tokens=150, got %d", point.Tokens)
+	}
+	if point.CommittedUSD <= 0 {
+		t.Fatalf("expected point committed_usd > 0, got %f", point.CommittedUSD)
+	}
+	if point.AvgFirstTokenLatency != 200 {
+		t.Fatalf("expected point avg_first_token_latency=200, got %f", point.AvgFirstTokenLatency)
+	}
+	if point.TokensPerSecond != 62.5 {
+		t.Fatalf("expected point tokens_per_second=62.5, got %f", point.TokensPerSecond)
+	}
 }

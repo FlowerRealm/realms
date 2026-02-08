@@ -72,6 +72,24 @@ export type AdminUsagePage = {
   cursor_active: boolean;
 };
 
+export type AdminUsageTimeSeriesPoint = {
+  bucket: string;
+  requests: number;
+  tokens: number;
+  committed_usd: number;
+  cache_ratio: number;
+  avg_first_token_latency: number;
+  tokens_per_second: number;
+};
+
+export type AdminUsageTimeSeriesResponse = {
+  admin_time_zone: string;
+  start: string;
+  end: string;
+  granularity: 'hour' | 'day';
+  points: AdminUsageTimeSeriesPoint[];
+};
+
 export type UsageEventDetail = {
   event_id: number;
   available: boolean;
@@ -128,5 +146,10 @@ export async function getAdminUsagePage(params: { start?: string; end?: string; 
 
 export async function getAdminUsageEventDetail(eventID: number) {
   const res = await api.get<APIResponse<UsageEventDetail>>(`/api/admin/usage/events/${eventID}/detail`);
+  return res.data;
+}
+
+export async function getAdminUsageTimeSeries(params?: { start?: string; end?: string; granularity?: 'hour' | 'day' }) {
+  const res = await api.get<APIResponse<AdminUsageTimeSeriesResponse>>('/api/admin/usage/timeseries', { params });
   return res.data;
 }

@@ -51,12 +51,30 @@ type usageEventsAPIResponse struct {
 	NextBeforeID *int64          `json:"next_before_id,omitempty"`
 }
 
+type usageTimeSeriesPointAPI struct {
+	Bucket               string  `json:"bucket"`
+	Requests             int64   `json:"requests"`
+	Tokens               int64   `json:"tokens"`
+	CommittedUSD         float64 `json:"committed_usd"`
+	CacheRatio           float64 `json:"cache_ratio"`
+	AvgFirstTokenLatency float64 `json:"avg_first_token_latency"`
+	TokensPerSecond      float64 `json:"tokens_per_second"`
+}
+
+type usageTimeSeriesAPIResponse struct {
+	Start       string                    `json:"start"`
+	End         string                    `json:"end"`
+	Granularity string                    `json:"granularity"`
+	Points      []usageTimeSeriesPointAPI `json:"points"`
+}
+
 func setUsageAPIRoutes(r gin.IRoutes, opts Options) {
 	authn := requireUserSession(opts)
 
 	r.GET("/usage/windows", authn, usageWindowsHandler(opts))
 	r.GET("/usage/events", authn, usageEventsHandler(opts))
 	r.GET("/usage/events/:event_id/detail", authn, usageEventDetailHandler(opts))
+	r.GET("/usage/timeseries", authn, usageTimeSeriesHandler(opts))
 }
 
 type usageEventAPI struct {
@@ -353,6 +371,69 @@ func usageEventDetailHandler(opts Options) gin.HandlerFunc {
 			resp.DownstreamRequestBody = *detail.DownstreamRequestBody
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": resp})
+	}
+}
+
+func usageTimeSeriesHandler(opts Options) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if opts.Store == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			return
+		}
+		userID, ok := userIDFromContext(c)
+		if !ok {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "未登录"})
+			return
+		}
+
+		now := time.Now().UTC()
+		startStr := strings.TrimSpace(c.Query("start"))
+		endStr := strings.TrimSpace(c.Query("end"))
+		since, until, ok := parseDateRangeUTC(now, startStr, endStr)
+		if !ok {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "start/end 不合法（格式：YYYY-MM-DD）"})
+			return
+		}
+		startResp := since.Format("2006-01-02")
+		endResp := until.Add(-time.Second).Format("2006-01-02")
+
+		granularity := strings.TrimSpace(strings.ToLower(c.Query("granularity")))
+		if granularity == "" {
+			granularity = "hour"
+		}
+		if granularity != "hour" && granularity != "day" {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "granularity 仅支持 hour/day"})
+			return
+		}
+
+		rows, err := opts.Store.GetUserUsageTimeSeriesRange(c.Request.Context(), userID, since, until, granularity)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询用户时间序列失败"})
+			return
+		}
+		points := make([]usageTimeSeriesPointAPI, 0, len(rows))
+		for _, row := range rows {
+			points = append(points, usageTimeSeriesPointAPI{
+				Bucket:               row.Time.UTC().Format("2006-01-02 15:04"),
+				Requests:             row.Requests,
+				Tokens:               row.Tokens,
+				CommittedUSD:         row.CommittedUSD.InexactFloat64(),
+				CacheRatio:           row.CacheRatio * 100,
+				AvgFirstTokenLatency: row.AvgFirstTokenMS,
+				TokensPerSecond:      row.OutputTokensPerSec,
+			})
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data": usageTimeSeriesAPIResponse{
+				Start:       startResp,
+				End:         endResp,
+				Granularity: granularity,
+				Points:      points,
+			},
+		})
 	}
 }
 

@@ -1,8 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 
 import { listUserModelsDetail, type UserManagedModel } from '../api/models';
 import { listUserTokens, type UserToken } from '../api/tokens';
-import { getUsageEventDetail, getUsageEvents, getUsageWindows, type UsageEvent, type UsageEventDetail, type UsageWindow } from '../api/usage';
+import {
+  getUsageEventDetail,
+  getUsageEvents,
+  getUsageTimeSeries,
+  getUsageWindows,
+  type UsageEvent,
+  type UsageEventDetail,
+  type UsageTimeSeriesPoint,
+  type UsageWindow,
+} from '../api/usage';
 import { formatUSD, formatUSDPlain } from '../format/money';
 
 type UsageEventDetailState =
@@ -10,6 +19,12 @@ type UsageEventDetailState =
   | { status: 'loading' }
   | { status: 'loaded'; data: UsageEventDetail }
   | { status: 'error'; message: string };
+
+type ChartInstance = {
+  destroy?: () => void;
+};
+
+type ChartConstructor = new (ctx: CanvasRenderingContext2D, config: unknown) => ChartInstance;
 
 function todayLocal() {
   const now = new Date();
@@ -204,6 +219,30 @@ export function UsagePage() {
 
   const [openEventID, setOpenEventID] = useState<number | null>(null);
   const [detailByID, setDetailByID] = useState<Record<number, UsageEventDetailState>>({});
+  const detailTimeLineRef = useRef<HTMLCanvasElement | null>(null);
+  const detailTimeLineChartRef = useRef<ChartInstance | null>(null);
+  const [detailSeries, setDetailSeries] = useState<UsageTimeSeriesPoint[]>([]);
+  const [detailSeriesLoading, setDetailSeriesLoading] = useState(false);
+  const [detailSeriesErr, setDetailSeriesErr] = useState('');
+  const [detailField, setDetailField] = useState<'requests' | 'tokens' | 'committed_usd' | 'cache_ratio' | 'avg_first_token_latency' | 'tokens_per_second'>(
+    'requests',
+  );
+  const [detailGranularity, setDetailGranularity] = useState<'hour' | 'day'>('hour');
+  const fieldOptions: Array<{
+    value: 'requests' | 'tokens' | 'committed_usd' | 'cache_ratio' | 'avg_first_token_latency' | 'tokens_per_second';
+    label: string;
+  }> = [
+    { value: 'requests', label: '请求数' },
+    { value: 'tokens', label: 'Token' },
+    { value: 'committed_usd', label: '消耗 (USD)' },
+    { value: 'cache_ratio', label: '缓存率 (%)' },
+    { value: 'avg_first_token_latency', label: '首字延迟 (ms)' },
+    { value: 'tokens_per_second', label: 'Tokens/s' },
+  ];
+  const granularityOptions: Array<{ value: 'hour' | 'day'; label: string }> = [
+    { value: 'hour', label: '按小时' },
+    { value: 'day', label: '按天' },
+  ];
 
   const initRef = useRef(false);
 
@@ -345,6 +384,127 @@ export function UsagePage() {
     }, 60 * 1000);
     return () => window.clearInterval(timer);
   }, [beforeID, refresh]);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      setDetailSeriesErr('');
+      setDetailSeriesLoading(true);
+      try {
+        const res = await getUsageTimeSeries(start, end, detailGranularity);
+        if (!res.success) throw new Error(res.message || '时间序列加载失败');
+        if (!active) return;
+        setDetailSeries(res.data?.points || []);
+      } catch (e) {
+        if (!active) return;
+        setDetailSeries([]);
+        setDetailSeriesErr(e instanceof Error ? e.message : '时间序列加载失败');
+      } finally {
+        if (active) setDetailSeriesLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [start, end, detailGranularity]);
+
+  useEffect(() => {
+    const ChartCtor = (globalThis.window as unknown as { Chart?: ChartConstructor })?.Chart;
+    const destroy = (ref: MutableRefObject<ChartInstance | null>) => {
+      try {
+        ref.current?.destroy?.();
+      } catch {
+        // ignore
+      }
+      ref.current = null;
+    };
+
+    destroy(detailTimeLineChartRef);
+    if (!ChartCtor) return;
+
+    const ctx = detailTimeLineRef.current?.getContext('2d');
+    if (!ctx) return;
+
+    const fieldMeta: Record<string, { label: string; color: string; read: (point: UsageTimeSeriesPoint) => number }> = {
+      requests: {
+        label: '请求数',
+        color: 'rgba(59, 130, 246, 0.95)',
+        read: (point) => point.requests,
+      },
+      tokens: {
+        label: 'Token',
+        color: 'rgba(16, 185, 129, 0.95)',
+        read: (point) => point.tokens,
+      },
+      committed_usd: {
+        label: '消耗 (USD)',
+        color: 'rgba(99, 102, 241, 0.95)',
+        read: (point) => point.committed_usd,
+      },
+      cache_ratio: {
+        label: '缓存率 (%)',
+        color: 'rgba(245, 158, 11, 0.95)',
+        read: (point) => point.cache_ratio,
+      },
+      avg_first_token_latency: {
+        label: '首字延迟 (ms)',
+        color: 'rgba(239, 68, 68, 0.95)',
+        read: (point) => point.avg_first_token_latency,
+      },
+      tokens_per_second: {
+        label: 'Tokens/s',
+        color: 'rgba(14, 165, 233, 0.95)',
+        read: (point) => point.tokens_per_second,
+      },
+    };
+    const meta = fieldMeta[detailField];
+
+    detailTimeLineChartRef.current = new ChartCtor(ctx, {
+      type: 'line',
+      data: {
+        labels: detailSeries.map((point) => point.bucket),
+        datasets: [
+          {
+            label: meta.label,
+            data: detailSeries.map((point) => meta.read(point)),
+            borderColor: meta.color,
+            backgroundColor: meta.color.replace('0.95', '0.18'),
+            pointRadius: 2,
+            tension: 0.2,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'bottom' },
+          title: { display: true, text: '用量时间序列' },
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: {
+              autoSkip: true,
+              maxTicksLimit: detailGranularity === 'hour' ? 10 : 14,
+              maxRotation: 0,
+              minRotation: 0,
+            },
+          },
+          y: {
+            beginAtZero: true,
+            suggestedMax: detailField === 'cache_ratio' ? 100 : undefined,
+            grid: { color: 'rgba(148, 163, 184, 0.18)' },
+          },
+        },
+      },
+    });
+
+    return () => {
+      destroy(detailTimeLineChartRef);
+    };
+  }, [detailSeries, detailField, detailGranularity]);
 
   const rpm = window0 ? String(window0.rpm ?? 0) : '0';
   const tpm = window0 ? String(window0.tpm ?? 0) : '0';
@@ -586,6 +746,59 @@ export function UsagePage() {
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="col-12">
+            <div className="card border-0 overflow-hidden">
+              <div className="card-header py-3 px-4">
+                <h5 className="mb-0 fw-bold">
+                  <i className="ri-line-chart-line me-2"></i>用量时间序列
+                </h5>
+              </div>
+              <div className="card-body p-4 border-top">
+                <div className="d-flex flex-wrap align-items-center gap-3 mb-2">
+                  <div className="d-flex align-items-center gap-2 flex-grow-1">
+                    <div className="d-flex flex-wrap gap-1">
+                      {fieldOptions.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className={`btn btn-sm ${detailField === option.value ? 'btn-primary' : 'btn-outline-secondary'}`}
+                          onClick={() => setDetailField(option.value)}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="d-flex align-items-center gap-2 ms-auto">
+                    <div className="d-flex gap-1">
+                      {granularityOptions.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className={`btn btn-sm ${detailGranularity === option.value ? 'btn-primary' : 'btn-outline-secondary'}`}
+                          onClick={() => setDetailGranularity(option.value)}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="small text-muted mb-2">时间区间（UTC）：{start} ~ {end}</div>
+                {detailSeriesErr ? <div className="alert alert-danger py-2 mb-2">{detailSeriesErr}</div> : null}
+                {detailSeriesLoading ? (
+                  <div className="text-muted small py-4">时间序列加载中…</div>
+                ) : (
+                  <>
+                    <div style={{ height: 280 }}>
+                      <canvas ref={detailTimeLineRef}></canvas>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
