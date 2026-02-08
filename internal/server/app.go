@@ -61,6 +61,7 @@ func NewApp(opts AppOptions) (*App, error) {
 	st.SetAppSettingsDefaults(opts.Config.AppSettingsDefaults)
 
 	sched := scheduler.New(st)
+	sched.SetBindingStore(st)
 	exec := upstream.NewExecutor(st, opts.Config)
 
 	publicBaseURL := opts.Config.Server.PublicBaseURL

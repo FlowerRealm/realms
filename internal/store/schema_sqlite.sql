@@ -52,6 +52,17 @@ CREATE TABLE IF NOT EXISTS `user_sessions` (
 CREATE UNIQUE INDEX IF NOT EXISTS `uk_user_sessions_hash` ON `user_sessions` (`session_hash`);
 CREATE INDEX IF NOT EXISTS `idx_user_sessions_user_id` ON `user_sessions` (`user_id`);
 
+CREATE TABLE IF NOT EXISTS `session_bindings` (
+  `user_id` INTEGER NOT NULL,
+  `route_key_hash` TEXT NOT NULL,
+  `payload_json` TEXT NOT NULL,
+  `expires_at` DATETIME NOT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`user_id`, `route_key_hash`)
+);
+CREATE INDEX IF NOT EXISTS `idx_session_bindings_expires_at` ON `session_bindings` (`expires_at`);
+
 CREATE TABLE IF NOT EXISTS `email_verifications` (
   `id` INTEGER PRIMARY KEY AUTOINCREMENT,
   `user_id` INTEGER NULL,

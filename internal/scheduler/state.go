@@ -27,6 +27,7 @@ type State struct {
 
 	binding  map[string]bindingEntry
 	affinity map[string]affinityEntry
+	bStats   RuntimeBindingStats
 
 	rpm map[string][]time.Time
 
@@ -245,9 +246,29 @@ func (s *State) GetBinding(userID int64, routeKeyHash string) (Selection, bool) 
 	if time.Now().After(e.expiresAt) {
 		s.decCredentialSessionsLocked(e.sel.CredentialKey())
 		delete(s.binding, key)
+		s.bStats.Clears++
+		s.bStats.ClearExpired++
 		return Selection{}, false
 	}
 	return e.sel, true
+}
+
+func (s *State) HasBinding(userID int64, routeKeyHash string, now time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := s.bindingKey(userID, routeKeyHash)
+	e, ok := s.binding[key]
+	if !ok {
+		return false
+	}
+	if now.After(e.expiresAt) {
+		s.decCredentialSessionsLocked(e.sel.CredentialKey())
+		delete(s.binding, key)
+		s.bStats.Clears++
+		s.bStats.ClearExpired++
+		return false
+	}
+	return true
 }
 
 func (s *State) SetBinding(userID int64, routeKeyHash string, sel Selection, expiresAt time.Time) {
@@ -282,6 +303,81 @@ func (s *State) ClearBinding(userID int64, routeKeyHash string) {
 		s.decCredentialSessionsLocked(e.sel.CredentialKey())
 	}
 	delete(s.binding, key)
+}
+
+func (s *State) RecordBindingMemoryHit() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bStats.MemoryHits++
+}
+
+func (s *State) RecordBindingStoreHit() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bStats.StoreHits++
+}
+
+func (s *State) RecordBindingMiss() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bStats.Misses++
+}
+
+func (s *State) RecordBindingSet(source string, refreshed bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bStats.Sets++
+	switch source {
+	case "select":
+		s.bStats.SetBySelect++
+	case "touch":
+		s.bStats.SetByTouch++
+	case "store_restore":
+		s.bStats.SetByStoreRestore++
+	}
+	if refreshed {
+		s.bStats.Refreshes++
+	}
+}
+
+func (s *State) RecordBindingClear(reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bStats.Clears++
+	switch reason {
+	case "manual":
+		s.bStats.ClearManual++
+	case "ineligible":
+		s.bStats.ClearIneligible++
+	case "probe_pending":
+		s.bStats.ClearProbePending++
+	case "parse_error":
+		s.bStats.ClearParseError++
+	}
+}
+
+func (s *State) RecordBindingStoreReadError() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bStats.StoreReadErrors++
+}
+
+func (s *State) RecordBindingStoreWriteError() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bStats.StoreWriteErrors++
+}
+
+func (s *State) RecordBindingStoreDeleteError() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bStats.StoreDeleteErrors++
+}
+
+func (s *State) BindingStatsSnapshot() RuntimeBindingStats {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.bStats
 }
 
 func (s *State) SetAffinity(userID, channelID int64, expiresAt time.Time) {

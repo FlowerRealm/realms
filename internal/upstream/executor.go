@@ -564,6 +564,11 @@ func (e *Executor) buildRequest(ctx context.Context, sel scheduler.Selection, do
 	if err != nil {
 		return nil, err
 	}
+	if sel.CredentialType == scheduler.CredentialTypeAnthropic {
+		if rewritten, changed := applyAnthropicCacheTTLPreference(body, sel.CacheTTLPreference); changed {
+			body = rewritten
+		}
+	}
 
 	targetPath := downstream.URL.Path
 	switch sel.CredentialType {
@@ -645,6 +650,7 @@ func (e *Executor) buildRequest(ctx context.Context, sel scheduler.Selection, do
 		if strings.TrimSpace(req.Header.Get("anthropic-version")) == "" {
 			req.Header.Set("anthropic-version", "2023-06-01")
 		}
+		applyAnthropicBetaHeader(req.Header, sel.CacheTTLPreference)
 		req.Header.Set("x-api-key", sec.APIKey)
 	case scheduler.CredentialTypeCodex:
 		sec, err := e.st.GetCodexOAuthSecret(ctx, sel.CredentialID)
@@ -720,6 +726,110 @@ func normalizeUpstreamPath(base *url.URL, targetPath string) string {
 		return out
 	}
 	return targetPath
+}
+
+func normalizeCacheTTLPreference(pref string) string {
+	pref = strings.ToLower(strings.TrimSpace(pref))
+	switch pref {
+	case "5m", "1h":
+		return pref
+	default:
+		return ""
+	}
+}
+
+func applyAnthropicCacheTTLPreference(body []byte, pref string) ([]byte, bool) {
+	ttl := normalizeCacheTTLPreference(pref)
+	if ttl == "" || len(body) == 0 {
+		return body, false
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return body, false
+	}
+	messages, ok := payload["messages"].([]any)
+	if !ok {
+		return body, false
+	}
+
+	changed := false
+	for i := range messages {
+		msg, ok := messages[i].(map[string]any)
+		if !ok {
+			continue
+		}
+		content, ok := msg["content"].([]any)
+		if !ok {
+			continue
+		}
+		for j := range content {
+			block, ok := content[j].(map[string]any)
+			if !ok {
+				continue
+			}
+			cacheControl, ok := block["cache_control"].(map[string]any)
+			if !ok {
+				continue
+			}
+			if strings.TrimSpace(strings.ToLower(stringFromAny(cacheControl["type"]))) != "ephemeral" {
+				continue
+			}
+			if strings.TrimSpace(strings.ToLower(stringFromAny(cacheControl["ttl"]))) == ttl {
+				continue
+			}
+			cacheControl["ttl"] = ttl
+			content[j] = block
+			changed = true
+		}
+		msg["content"] = content
+		messages[i] = msg
+	}
+	if !changed {
+		return body, false
+	}
+	payload["messages"] = messages
+	rewritten, err := json.Marshal(payload)
+	if err != nil {
+		return body, false
+	}
+	return rewritten, true
+}
+
+func applyAnthropicBetaHeader(h http.Header, pref string) {
+	if normalizeCacheTTLPreference(pref) != "1h" {
+		return
+	}
+	const extendedTTLFlag = "extended-cache-ttl-2025-04-11"
+	existing := strings.TrimSpace(h.Get("anthropic-beta"))
+	if existing == "" {
+		h.Set("anthropic-beta", extendedTTLFlag)
+		return
+	}
+	parts := strings.Split(existing, ",")
+	set := make(map[string]struct{}, len(parts)+1)
+	out := make([]string, 0, len(parts)+1)
+	for _, part := range parts {
+		flag := strings.TrimSpace(part)
+		if flag == "" {
+			continue
+		}
+		lower := strings.ToLower(flag)
+		if _, ok := set[lower]; ok {
+			continue
+		}
+		set[lower] = struct{}{}
+		out = append(out, flag)
+	}
+	if _, ok := set[strings.ToLower(extendedTTLFlag)]; !ok {
+		out = append(out, extendedTTLFlag)
+	}
+	h.Set("anthropic-beta", strings.Join(out, ", "))
+}
+
+func stringFromAny(v any) string {
+	s, _ := v.(string)
+	return s
 }
 
 func applyCodexHeaders(h http.Header, accountID string) {

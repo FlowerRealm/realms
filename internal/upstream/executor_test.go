@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -180,6 +181,98 @@ func TestApplyCodexHeaders_ReusesSessionIDFromXSessionID(t *testing.T) {
 
 	if got := h.Get("Session_id"); got != "sess-from-x" {
 		t.Fatalf("expected Session_id from X-Session-Id, got %q", got)
+	}
+}
+
+func TestApplyAnthropicCacheTTLPreference_RewritesEphemeralBlocks(t *testing.T) {
+	body := []byte(`{
+	  "model":"claude-sonnet",
+	  "messages":[
+	    {"role":"user","content":[
+	      {"type":"text","text":"a","cache_control":{"type":"ephemeral"}},
+	      {"type":"text","text":"b","cache_control":{"type":"ephemeral","ttl":"5m"}},
+	      {"type":"text","text":"c","cache_control":{"type":"persistent"}}
+	    ]}
+	  ]
+	}`)
+
+	rewritten, changed := applyAnthropicCacheTTLPreference(body, "1h")
+	if !changed {
+		t.Fatalf("expected body to be rewritten")
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rewritten, &payload); err != nil {
+		t.Fatalf("unmarshal rewritten body: %v", err)
+	}
+	messages, ok := payload["messages"].([]any)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("unexpected messages: %#v", payload["messages"])
+	}
+	msg, _ := messages[0].(map[string]any)
+	content, _ := msg["content"].([]any)
+	if len(content) != 3 {
+		t.Fatalf("unexpected content: %#v", msg["content"])
+	}
+	for idx, expected := range []string{"1h", "1h", ""} {
+		block, _ := content[idx].(map[string]any)
+		cacheControl, _ := block["cache_control"].(map[string]any)
+		got := strings.TrimSpace(stringFromAny(cacheControl["ttl"]))
+		if expected != got {
+			t.Fatalf("block %d expected ttl=%q, got %q", idx, expected, got)
+		}
+	}
+}
+
+func TestExecutor_BuildRequest_AnthropicTTL1hAddsBetaHeaderAndBodyTTL(t *testing.T) {
+	exec := &Executor{
+		st: &fakeUpstreamStore{
+			anthropicSecret: store.AnthropicCredentialSecret{
+				APIKey: "sk-anthropic",
+			},
+		},
+		upstreamTimeout: 2 * time.Minute,
+	}
+
+	body := []byte(`{
+	  "model":"claude-sonnet",
+	  "messages":[{"role":"user","content":[{"type":"text","text":"warmup","cache_control":{"type":"ephemeral"}}]}]
+	}`)
+	r := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", bytes.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	req, err := exec.buildRequest(context.Background(), scheduler.Selection{
+		BaseURL:              "https://127.0.0.1/v1",
+		CredentialType:       scheduler.CredentialTypeAnthropic,
+		CredentialID:         1,
+		CacheTTLPreference:   "1h",
+		HeaderOverride:       `{"anthropic-beta":"context-1m-2025-08-07"}`,
+		StatusCodeMapping:    "",
+		ParamOverride:        "",
+		RequestBodyBlacklist: "",
+	}, r, body)
+	if err != nil {
+		t.Fatalf("buildRequest returned error: %v", err)
+	}
+	if got := req.Header.Get("anthropic-beta"); !strings.Contains(got, "extended-cache-ttl-2025-04-11") {
+		t.Fatalf("expected anthropic-beta to include extended ttl flag, got %q", got)
+	}
+
+	reqBody, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("read request body: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(reqBody, &payload); err != nil {
+		t.Fatalf("unmarshal request body: %v", err)
+	}
+	messages, _ := payload["messages"].([]any)
+	msg, _ := messages[0].(map[string]any)
+	content, _ := msg["content"].([]any)
+	block, _ := content[0].(map[string]any)
+	cacheControl, _ := block["cache_control"].(map[string]any)
+	if got := stringFromAny(cacheControl["ttl"]); got != "1h" {
+		t.Fatalf("expected cache_control.ttl=1h, got %q", got)
 	}
 }
 

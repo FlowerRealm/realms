@@ -2,7 +2,10 @@ package scheduler
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -15,6 +18,52 @@ type fakeStore struct {
 	creds          map[int64][]store.OpenAICompatibleCredential
 	anthropicCreds map[int64][]store.AnthropicCredential
 	accounts       map[int64][]store.CodexOAuthAccount
+}
+
+type fakeBindingStore struct {
+	payloads map[string]string
+}
+
+type errBindingStore struct{}
+
+func (e errBindingStore) GetSessionBindingPayload(_ context.Context, _ int64, _ string, _ time.Time) (string, bool, error) {
+	return "", false, errors.New("store unavailable")
+}
+
+func (e errBindingStore) UpsertSessionBindingPayload(_ context.Context, _ int64, _ string, _ string, _ time.Time) error {
+	return errors.New("store unavailable")
+}
+
+func (e errBindingStore) DeleteSessionBinding(_ context.Context, _ int64, _ string) error {
+	return errors.New("store unavailable")
+}
+
+func (f *fakeBindingStore) key(userID int64, routeKeyHash string) string {
+	return itoa64(userID) + ":" + routeKeyHash
+}
+
+func (f *fakeBindingStore) GetSessionBindingPayload(_ context.Context, userID int64, routeKeyHash string, _ time.Time) (string, bool, error) {
+	if f.payloads == nil {
+		return "", false, nil
+	}
+	v, ok := f.payloads[f.key(userID, routeKeyHash)]
+	return v, ok, nil
+}
+
+func (f *fakeBindingStore) UpsertSessionBindingPayload(_ context.Context, userID int64, routeKeyHash string, payload string, _ time.Time) error {
+	if f.payloads == nil {
+		f.payloads = make(map[string]string)
+	}
+	f.payloads[f.key(userID, routeKeyHash)] = payload
+	return nil
+}
+
+func (f *fakeBindingStore) DeleteSessionBinding(_ context.Context, userID int64, routeKeyHash string) error {
+	if f.payloads == nil {
+		return nil
+	}
+	delete(f.payloads, f.key(userID, routeKeyHash))
+	return nil
 }
 
 func (f *fakeStore) ListUpstreamChannels(_ context.Context) ([]store.UpstreamChannel, error) {
@@ -564,6 +613,217 @@ func TestSelectWithConstraints_ChannelID(t *testing.T) {
 	}
 	if sel.ChannelID != 1 || sel.CredentialID != 111 {
 		t.Fatalf("unexpected selection: %+v", sel)
+	}
+}
+
+func TestGetBinding_FallsBackToBindingStore(t *testing.T) {
+	fs := &fakeStore{}
+	s := New(fs)
+	bs := &fakeBindingStore{}
+	s.SetBindingStore(bs)
+
+	routeKeyHash := s.RouteKeyHash("from-db")
+	want := Selection{
+		ChannelID:      3,
+		ChannelType:    store.UpstreamTypeCodexOAuth,
+		EndpointID:     31,
+		BaseURL:        "https://codex.example",
+		CredentialType: CredentialTypeCodex,
+		CredentialID:   301,
+	}
+	s.TouchBinding(55, routeKeyHash, want)
+	s.state.ClearBinding(55, routeKeyHash)
+
+	got, ok := s.GetBinding(55, routeKeyHash)
+	if !ok {
+		t.Fatalf("expected binding hit from binding store")
+	}
+	if got.CredentialID != want.CredentialID || got.ChannelID != want.ChannelID {
+		t.Fatalf("unexpected selection: %+v", got)
+	}
+}
+
+func TestSelect_MultiInstanceStickyHitRateViaSQLiteBindingStore(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+				{ID: 2, EndpointID: 11, Status: 1},
+			},
+		},
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "sticky.sqlite")
+	db, err := store.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+	bs := store.New(db)
+	bs.SetDialect(store.DialectSQLite)
+
+	sA := New(fs)
+	sA.SetBindingStore(bs)
+	sB := New(fs)
+	sB.SetBindingStore(bs)
+
+	const requests = 120
+	match := 0
+	for i := 0; i < requests; i++ {
+		userID := int64(i + 1)
+		routeKeyHash := sA.RouteKeyHash(fmt.Sprintf("session-%d", i))
+		now := time.Now()
+		// 故意构造两个实例本地状态分歧：A 偏向 cred=1，B 偏向 cred=2。
+		sA.state.RecordRPM("openai_compatible:2", now)
+		sB.state.RecordRPM("openai_compatible:1", now)
+
+		selA, err := sA.Select(context.Background(), userID, routeKeyHash)
+		if err != nil {
+			t.Fatalf("Select A err: %v", err)
+		}
+		selB, err := sB.Select(context.Background(), userID, routeKeyHash)
+		if err != nil {
+			t.Fatalf("Select B err: %v", err)
+		}
+		if selA.CredentialID == selB.CredentialID {
+			match++
+		}
+	}
+
+	rate := float64(match) / float64(requests)
+	if rate < 0.95 {
+		t.Fatalf("expected sticky hit rate >= 0.95, got %.3f", rate)
+	}
+}
+
+func TestSelect_BindingStoreFailureFallsBackToInMemory(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+	s.SetBindingStore(errBindingStore{})
+
+	routeKeyHash := s.RouteKeyHash("db-down")
+	s.TouchBinding(99, routeKeyHash, Selection{
+		ChannelID:      1,
+		ChannelType:    store.UpstreamTypeOpenAICompatible,
+		EndpointID:     11,
+		BaseURL:        "https://a.example",
+		CredentialType: CredentialTypeOpenAI,
+		CredentialID:   1,
+	})
+
+	sel, err := s.Select(context.Background(), 99, routeKeyHash)
+	if err != nil {
+		t.Fatalf("Select err: %v", err)
+	}
+	if sel.CredentialID != 1 {
+		t.Fatalf("expected credential=1, got=%+v", sel)
+	}
+}
+
+func TestRuntimeBindingStats_BasicCounters(t *testing.T) {
+	s := New(&fakeStore{})
+	bs := &fakeBindingStore{}
+	s.SetBindingStore(bs)
+
+	userID := int64(77)
+	routeKeyHash := s.RouteKeyHash("stats-case")
+	sel := Selection{
+		ChannelID:      1,
+		ChannelType:    store.UpstreamTypeOpenAICompatible,
+		EndpointID:     11,
+		BaseURL:        "https://a.example",
+		CredentialType: CredentialTypeOpenAI,
+		CredentialID:   9,
+	}
+
+	s.TouchBinding(userID, routeKeyHash, sel)
+	if _, ok := s.GetBinding(userID, routeKeyHash); !ok {
+		t.Fatalf("expected memory binding hit")
+	}
+
+	// 清内存、保留持久层，验证 store fallback。
+	s.state.ClearBinding(userID, routeKeyHash)
+	if _, ok := s.GetBinding(userID, routeKeyHash); !ok {
+		t.Fatalf("expected store binding hit")
+	}
+	if _, ok := s.GetBinding(userID, s.RouteKeyHash("missing")); ok {
+		t.Fatalf("expected binding miss")
+	}
+	s.ClearBinding(userID, routeKeyHash)
+
+	st := s.RuntimeBindingStats()
+	if st.MemoryHits != 1 {
+		t.Fatalf("expected memory_hits=1, got=%d", st.MemoryHits)
+	}
+	if st.StoreHits != 1 {
+		t.Fatalf("expected store_hits=1, got=%d", st.StoreHits)
+	}
+	if st.Misses != 2 {
+		t.Fatalf("expected misses=2, got=%d", st.Misses)
+	}
+	if st.SetByTouch != 1 || st.SetByStoreRestore != 1 {
+		t.Fatalf("unexpected set counters: %+v", st)
+	}
+	if st.ClearManual != 1 {
+		t.Fatalf("expected clear_manual=1, got=%d", st.ClearManual)
+	}
+}
+
+func TestRuntimeBindingStats_StoreErrorsCounted(t *testing.T) {
+	s := New(&fakeStore{})
+	s.SetBindingStore(errBindingStore{})
+
+	userID := int64(88)
+	routeKeyHash := s.RouteKeyHash("store-error")
+	s.TouchBinding(userID, routeKeyHash, Selection{
+		ChannelID:      1,
+		ChannelType:    store.UpstreamTypeOpenAICompatible,
+		EndpointID:     11,
+		BaseURL:        "https://a.example",
+		CredentialType: CredentialTypeOpenAI,
+		CredentialID:   7,
+	})
+
+	s.state.ClearBinding(userID, routeKeyHash)
+	if _, ok := s.GetBinding(userID, routeKeyHash); ok {
+		t.Fatalf("expected miss when binding store read fails")
+	}
+	s.ClearBinding(userID, routeKeyHash)
+
+	st := s.RuntimeBindingStats()
+	if st.StoreWriteErrors == 0 {
+		t.Fatalf("expected store_write_errors > 0, got=%d", st.StoreWriteErrors)
+	}
+	if st.StoreReadErrors == 0 {
+		t.Fatalf("expected store_read_errors > 0, got=%d", st.StoreReadErrors)
+	}
+	if st.StoreDeleteErrors == 0 {
+		t.Fatalf("expected store_delete_errors > 0, got=%d", st.StoreDeleteErrors)
 	}
 }
 

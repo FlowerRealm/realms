@@ -172,12 +172,13 @@ type channelUsageView struct {
 }
 
 type channelUsageOverviewView struct {
-	Requests             int64  `json:"requests"`
-	Tokens               int64  `json:"tokens"`
-	CommittedUSD         string `json:"committed_usd"`
-	CacheRatio           string `json:"cache_ratio"`
-	AvgFirstTokenLatency string `json:"avg_first_token_latency"`
-	TokensPerSecond      string `json:"tokens_per_second"`
+	Requests             int64              `json:"requests"`
+	Tokens               int64              `json:"tokens"`
+	CommittedUSD         string             `json:"committed_usd"`
+	CacheRatio           string             `json:"cache_ratio"`
+	AvgFirstTokenLatency string             `json:"avg_first_token_latency"`
+	TokensPerSecond      string             `json:"tokens_per_second"`
+	BindingRuntime       bindingRuntimeInfo `json:"binding_runtime"`
 }
 
 type channelAdminListItem struct {
@@ -347,6 +348,7 @@ func channelsPageHandler(opts Options) gin.HandlerFunc {
 					CacheRatio:           fmt.Sprintf("%.1f%%", overviewStats.CacheRatio*100),
 					AvgFirstTokenLatency: formatAvgFirstTokenLatency(overviewStats.AvgFirstTokenMS, overviewStats.FirstTokenSamples),
 					TokensPerSecond:      formatTokensPerSecond(overviewStats.OutputTokensPerSec),
+					BindingRuntime:       bindingRuntimeForAPI(opts),
 				},
 				Channels: out,
 			},
@@ -1439,6 +1441,7 @@ func updateChannelSettingHandler(opts Options) gin.HandlerFunc {
 		PassThroughBodyEnabled *bool   `json:"pass_through_body_enabled,omitempty"`
 		SystemPrompt           *string `json:"system_prompt,omitempty"`
 		SystemPromptOverride   *bool   `json:"system_prompt_override,omitempty"`
+		CacheTTLPreference     *string `json:"cache_ttl_preference,omitempty"`
 	}
 	return func(c *gin.Context) {
 		if opts.Store == nil {
@@ -1484,6 +1487,16 @@ func updateChannelSettingHandler(opts Options) gin.HandlerFunc {
 		}
 		if req.SystemPromptOverride != nil {
 			next.SystemPromptOverride = *req.SystemPromptOverride
+		}
+		if req.CacheTTLPreference != nil {
+			pref := strings.ToLower(strings.TrimSpace(*req.CacheTTLPreference))
+			switch pref {
+			case "", "inherit", "5m", "1h":
+				next.CacheTTLPreference = pref
+			default:
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "cache_ttl_preference 仅支持 inherit/5m/1h"})
+				return
+			}
 		}
 
 		if err := opts.Store.UpdateUpstreamChannelNewAPISetting(c.Request.Context(), ch.ID, next); err != nil {

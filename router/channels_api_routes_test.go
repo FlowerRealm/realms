@@ -169,6 +169,9 @@ func TestChannels_PageAndReorder_RootFlow(t *testing.T) {
 				CacheRatio           string `json:"cache_ratio"`
 				AvgFirstTokenLatency string `json:"avg_first_token_latency"`
 				TokensPerSecond      string `json:"tokens_per_second"`
+				BindingRuntime       struct {
+					Available bool `json:"available"`
+				} `json:"binding_runtime"`
 			} `json:"overview"`
 			Channels []struct {
 				ID    int64 `json:"id"`
@@ -202,6 +205,9 @@ func TestChannels_PageAndReorder_RootFlow(t *testing.T) {
 	}
 	if pageResp.Data.Overview.TokensPerSecond != "62.50" {
 		t.Fatalf("expected overview tokens_per_second=62.50, got %q", pageResp.Data.Overview.TokensPerSecond)
+	}
+	if pageResp.Data.Overview.BindingRuntime.Available {
+		t.Fatalf("expected overview.binding_runtime.available=false when opts.Sched nil")
 	}
 	if len(pageResp.Data.Channels) < 2 {
 		t.Fatalf("expected >=2 channels, got %d", len(pageResp.Data.Channels))

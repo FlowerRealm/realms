@@ -16,6 +16,12 @@ func (s *Store) UpdateUpstreamChannelNewAPISetting(ctx context.Context, channelI
 	// 规范化：避免写入无意义空白
 	setting.Proxy = strings.TrimSpace(setting.Proxy)
 	setting.SystemPrompt = strings.TrimSpace(setting.SystemPrompt)
+	setting.CacheTTLPreference = strings.ToLower(strings.TrimSpace(setting.CacheTTLPreference))
+	switch setting.CacheTTLPreference {
+	case "", "inherit", "5m", "1h":
+	default:
+		setting.CacheTTLPreference = ""
+	}
 
 	b, err := json.Marshal(setting)
 	if err != nil {

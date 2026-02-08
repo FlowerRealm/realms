@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -39,6 +40,7 @@ type Selection struct {
 	Proxy                  string
 	SystemPrompt           string
 	SystemPromptOverride   bool
+	CacheTTLPreference     string
 	ParamOverride          string
 	HeaderOverride         string
 	StatusCodeMapping      string
@@ -68,6 +70,7 @@ type Scheduler struct {
 	st UpstreamStore
 
 	state         *State
+	bindingStore  BindingStore
 	affinityTTL   time.Duration
 	bindingTTL    time.Duration
 	rpmWindow     time.Duration
@@ -90,6 +93,23 @@ type UpstreamStore interface {
 	ListCodexOAuthAccountsByEndpoint(ctx context.Context, endpointID int64) ([]store.CodexOAuthAccount, error)
 }
 
+type BindingStore interface {
+	GetSessionBindingPayload(ctx context.Context, userID int64, routeKeyHash string, now time.Time) (string, bool, error)
+	UpsertSessionBindingPayload(ctx context.Context, userID int64, routeKeyHash string, payload string, expiresAt time.Time) error
+	DeleteSessionBinding(ctx context.Context, userID int64, routeKeyHash string) error
+}
+
+const (
+	bindingSetSourceSelect      = "select"
+	bindingSetSourceTouch       = "touch"
+	bindingSetSourceStoreWarmup = "store_restore"
+
+	bindingClearReasonManual       = "manual"
+	bindingClearReasonIneligible   = "ineligible"
+	bindingClearReasonProbePending = "probe_pending"
+	bindingClearReasonParseError   = "parse_error"
+)
+
 func New(st UpstreamStore) *Scheduler {
 	return &Scheduler{
 		st:            st,
@@ -100,6 +120,13 @@ func New(st UpstreamStore) *Scheduler {
 		cooldownBase:  30 * time.Second,
 		probeClaimTTL: 30 * time.Second,
 	}
+}
+
+func (s *Scheduler) SetBindingStore(bs BindingStore) {
+	if s == nil {
+		return
+	}
+	s.bindingStore = bs
 }
 
 func (s *Scheduler) PinChannel(channelID int64) {
@@ -207,18 +234,18 @@ func (s *Scheduler) RouteKeyHash(routeKey string) string {
 }
 
 func (s *Scheduler) GetBinding(userID int64, routeKeyHash string) (Selection, bool) {
-	return s.state.GetBinding(userID, routeKeyHash)
+	return s.getBinding(context.Background(), userID, routeKeyHash)
 }
 
 func (s *Scheduler) TouchBinding(userID int64, routeKeyHash string, sel Selection) {
 	if routeKeyHash == "" {
 		return
 	}
-	s.state.SetBinding(userID, routeKeyHash, sel, time.Now().Add(s.bindingTTL))
+	s.setBinding(context.Background(), userID, routeKeyHash, sel, bindingSetSourceTouch)
 }
 
 func (s *Scheduler) ClearBinding(userID int64, routeKeyHash string) {
-	s.state.ClearBinding(userID, routeKeyHash)
+	s.clearBinding(context.Background(), userID, routeKeyHash, bindingClearReasonManual)
 }
 
 func (s *Scheduler) Select(ctx context.Context, userID int64, routeKeyHash string) (Selection, error) {
@@ -234,7 +261,7 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 
 	// 1) 会话粘性：命中绑定则优先
 	if routeKeyHash != "" && !pointerRelevant {
-		if sel, ok := s.state.GetBinding(userID, routeKeyHash); ok {
+		if sel, ok := s.getBinding(ctx, userID, routeKeyHash); ok {
 			credKey := sel.CredentialKey()
 			if selectionMatchesConstraints(sel, cons) &&
 				!s.state.IsChannelBanned(sel.ChannelID, now) &&
@@ -243,16 +270,16 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 				// 若该 channel 处于“封禁到期待探测”，先抢占 probe，避免并发探测风暴。
 				if s.state.IsChannelProbeDue(sel.ChannelID) && !s.state.TryClaimChannelProbe(sel.ChannelID, now, s.probeClaimTTL) {
 					// 已绑定但不可用：清理绑定，避免 session 永久占用导致 limits 失真。
-					s.state.ClearBinding(userID, routeKeyHash)
+					s.clearBinding(ctx, userID, routeKeyHash, bindingClearReasonProbePending)
 				} else {
 					// 命中成功后 touch 续期（TTL）。
-					s.state.SetBinding(userID, routeKeyHash, sel, now.Add(s.bindingTTL))
+					s.setBinding(ctx, userID, routeKeyHash, sel, bindingSetSourceTouch)
 					s.state.RecordRPM(credKey, now)
 					return sel, nil
 				}
 			}
 			// 已绑定但不可用：清理绑定，避免 session 永久占用导致 limits 失真。
-			s.state.ClearBinding(userID, routeKeyHash)
+			s.clearBinding(ctx, userID, routeKeyHash, bindingClearReasonIneligible)
 		}
 	}
 
@@ -378,7 +405,7 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 			if ok {
 				s.state.RecordRPM(sel.CredentialKey(), now)
 				if routeKeyHash != "" {
-					s.state.SetBinding(userID, routeKeyHash, sel, now.Add(s.bindingTTL))
+					s.setBinding(ctx, userID, routeKeyHash, sel, bindingSetSourceSelect)
 				}
 				s.state.SetAffinity(userID, ch.ID, now.Add(s.affinityTTL))
 				return sel, nil
@@ -389,6 +416,74 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 		}
 	}
 	return Selection{}, errors.New("未找到可用上游 credential/account")
+}
+
+func (s *Scheduler) getBinding(ctx context.Context, userID int64, routeKeyHash string) (Selection, bool) {
+	if routeKeyHash == "" {
+		return Selection{}, false
+	}
+	if sel, ok := s.state.GetBinding(userID, routeKeyHash); ok {
+		s.state.RecordBindingMemoryHit()
+		return sel, true
+	}
+	s.state.RecordBindingMiss()
+	if s.bindingStore == nil {
+		return Selection{}, false
+	}
+	payload, ok, err := s.bindingStore.GetSessionBindingPayload(ctx, userID, routeKeyHash, time.Now())
+	if err != nil {
+		s.state.RecordBindingStoreReadError()
+		return Selection{}, false
+	}
+	if !ok {
+		return Selection{}, false
+	}
+	var sel Selection
+	if err := json.Unmarshal([]byte(payload), &sel); err != nil {
+		s.state.RecordBindingClear(bindingClearReasonParseError)
+		if err := s.bindingStore.DeleteSessionBinding(ctx, userID, routeKeyHash); err != nil {
+			s.state.RecordBindingStoreDeleteError()
+		}
+		return Selection{}, false
+	}
+	s.state.SetBinding(userID, routeKeyHash, sel, time.Now().Add(s.bindingTTL))
+	s.state.RecordBindingStoreHit()
+	s.state.RecordBindingSet(bindingSetSourceStoreWarmup, false)
+	return sel, true
+}
+
+func (s *Scheduler) setBinding(ctx context.Context, userID int64, routeKeyHash string, sel Selection, source string) {
+	if routeKeyHash == "" {
+		return
+	}
+	refreshed := s.state.HasBinding(userID, routeKeyHash, time.Now())
+	expiresAt := time.Now().Add(s.bindingTTL)
+	s.state.SetBinding(userID, routeKeyHash, sel, expiresAt)
+	s.state.RecordBindingSet(source, refreshed)
+	if s.bindingStore == nil {
+		return
+	}
+	raw, err := json.Marshal(sel)
+	if err != nil {
+		return
+	}
+	if err := s.bindingStore.UpsertSessionBindingPayload(ctx, userID, routeKeyHash, string(raw), expiresAt); err != nil {
+		s.state.RecordBindingStoreWriteError()
+	}
+}
+
+func (s *Scheduler) clearBinding(ctx context.Context, userID int64, routeKeyHash string, reason string) {
+	if routeKeyHash == "" {
+		return
+	}
+	s.state.ClearBinding(userID, routeKeyHash)
+	s.state.RecordBindingClear(reason)
+	if s.bindingStore == nil {
+		return
+	}
+	if err := s.bindingStore.DeleteSessionBinding(ctx, userID, routeKeyHash); err != nil {
+		s.state.RecordBindingStoreDeleteError()
+	}
 }
 
 func selectionMatchesConstraints(sel Selection, c Constraints) bool {
@@ -455,6 +550,7 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			Proxy:                  ch.Setting.Proxy,
 			SystemPrompt:           ch.Setting.SystemPrompt,
 			SystemPromptOverride:   ch.Setting.SystemPromptOverride,
+			CacheTTLPreference:     ch.Setting.CacheTTLPreference,
 			ParamOverride:          ch.ParamOverride,
 			HeaderOverride:         ch.HeaderOverride,
 			StatusCodeMapping:      ch.StatusCodeMapping,
@@ -510,6 +606,7 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			Proxy:                  ch.Setting.Proxy,
 			SystemPrompt:           ch.Setting.SystemPrompt,
 			SystemPromptOverride:   ch.Setting.SystemPromptOverride,
+			CacheTTLPreference:     ch.Setting.CacheTTLPreference,
 			ParamOverride:          ch.ParamOverride,
 			HeaderOverride:         ch.HeaderOverride,
 			StatusCodeMapping:      ch.StatusCodeMapping,
@@ -568,6 +665,7 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			Proxy:                  ch.Setting.Proxy,
 			SystemPrompt:           ch.Setting.SystemPrompt,
 			SystemPromptOverride:   ch.Setting.SystemPromptOverride,
+			CacheTTLPreference:     ch.Setting.CacheTTLPreference,
 			ParamOverride:          ch.ParamOverride,
 			HeaderOverride:         ch.HeaderOverride,
 			StatusCodeMapping:      ch.StatusCodeMapping,

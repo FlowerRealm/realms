@@ -154,6 +154,17 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	completionKey := ""
+	completionGenerated := false
+	if changed, completedKey, generated := completeCodexSessionIdentifiers(payload, r, p); changed {
+		normalizedBody, mErr := json.Marshal(payload)
+		if mErr == nil {
+			rawBody = normalizedBody
+			body = normalizedBody
+			completionKey = completedKey
+			completionGenerated = generated
+		}
+	}
 
 	stream := boolFromAny(payload["stream"])
 	publicModel := stringFromAny(payload["model"])
@@ -314,12 +325,29 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	}
 
 	routeKey := extractRouteKeyFromPayload(payload)
+	routeKeySource := "payload"
+	if routeKey == "" {
+		routeKeySource = "unknown"
+	}
 	if routeKey == "" {
 		routeKey = extractRouteKeyFromRawBody(rawBody)
+		if routeKey != "" {
+			routeKeySource = "raw_body"
+		}
 	}
 	if routeKey == "" {
 		routeKey = extractRouteKey(r)
+		if routeKey != "" {
+			routeKeySource = "header"
+		}
 	}
+	if routeKey != "" && completionGenerated && completionKey != "" && routeKey == completionKey {
+		routeKeySource = "generated"
+	}
+	if routeKey == "" {
+		routeKeySource = "missing"
+	}
+	w.Header().Set("X-Realms-Route-Key-Source", routeKeySource)
 	routeKeyHash := h.sched.RouteKeyHash(routeKey)
 	usageID := int64(0)
 	if h.quota != nil {
@@ -470,7 +498,10 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			cachedOut *int64
 			seen      bool
 		}
-		var acc usageAcc
+		var (
+			acc                    usageAcc
+			responsePromptCacheKey string
+		)
 
 		cw := &countingResponseWriter{ResponseWriter: w}
 		copyResponseHeaders(cw.Header(), resp.Header)
@@ -491,11 +522,20 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 				}
 				// 避免对每个 delta 事件反复 JSON 解析：仅在疑似包含 usage 时尝试。
 				if !strings.Contains(data, "usage") && !strings.Contains(data, "input_tokens") && !strings.Contains(data, "prompt_tokens") {
+					if responsePromptCacheKey == "" && strings.Contains(data, "prompt_cache_key") {
+						var evt any
+						if err := json.Unmarshal([]byte(data), &evt); err == nil {
+							responsePromptCacheKey = extractPromptCacheKey(evt)
+						}
+					}
 					return
 				}
 				var evt any
 				if err := json.Unmarshal([]byte(data), &evt); err != nil {
 					return
+				}
+				if responsePromptCacheKey == "" {
+					responsePromptCacheKey = extractPromptCacheKey(evt)
 				}
 				usage := findUsageMap(evt, 10)
 				if usage == nil {
@@ -525,6 +565,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		}
 
 		pumpRes, _ := upstream.PumpSSE(r.Context(), cw, resp.Body, h.sseOpts, hooks)
+		h.touchBindingFromPromptCacheKey(p.UserID, sel, responsePromptCacheKey)
 
 		if usageID != 0 && h.quota != nil {
 			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -579,6 +620,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, 0, "read_upstream", time.Since(attemptStart))
 		return false
 	}
+	h.touchBindingFromPromptCacheKey(p.UserID, sel, extractPromptCacheKeyFromRawBody(bodyBytes))
 	copyResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	respBytes, _ := w.Write(bodyBytes)
