@@ -31,14 +31,6 @@ function formatUTCDateTime(iso: string): string {
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
 }
 
-function formatRatePerMinute(count: number, sinceISO?: string, untilISO?: string): string {
-  const since = sinceISO ? Date.parse(sinceISO) : NaN;
-  const until = untilISO ? Date.parse(untilISO) : NaN;
-  const minutes = Number.isFinite(since) && Number.isFinite(until) ? Math.max(0, (until - since) / 1000 / 60) : 0;
-  if (minutes <= 0) return '0.0';
-  return (count / minutes).toFixed(1);
-}
-
 function cacheHitRate(ratio: number): string {
   if (!Number.isFinite(ratio)) return '0.0%';
   return `${(ratio * 100).toFixed(1)}%`;
@@ -354,10 +346,8 @@ export function UsagePage() {
     return () => window.clearInterval(timer);
   }, [beforeID, refresh]);
 
-  const windowSince = window0?.since;
-  const windowUntil = window0?.until;
-  const rpm = window0 ? formatRatePerMinute(window0.requests, windowSince, windowUntil) : '0.0';
-  const tpm = window0 ? formatRatePerMinute(window0.tokens, windowSince, windowUntil) : '0.0';
+  const rpm = window0 ? String(window0.rpm ?? 0) : '0';
+  const tpm = window0 ? String(window0.tpm ?? 0) : '0';
   const cachedTotal = window0 ? window0.cached_input_tokens + window0.cached_output_tokens : 0;
 
   const cursorActive = beforeStack.length > 0;

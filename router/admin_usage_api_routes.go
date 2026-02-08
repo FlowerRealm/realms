@@ -184,9 +184,15 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "统计失败"})
 			return
 		}
-		dur := until.Sub(since)
-		rpm := metrics.FormatRatePerMinute(stats.Requests, dur)
-		tpm := metrics.FormatRatePerMinute(stats.Tokens, dur)
+		// New API 口径：RPM/TPM 固定统计最近 60 秒，不随筛选区间变化。
+		recentSince := nowUTC.Add(-time.Minute)
+		recentStats, err := opts.Store.GetGlobalUsageStatsRange(c.Request.Context(), recentSince, nowUTC)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "实时速率统计失败"})
+			return
+		}
+		rpm := metrics.FormatRatePerMinute(recentStats.Requests, time.Minute)
+		tpm := metrics.FormatRatePerMinute(recentStats.Tokens, time.Minute)
 		window := adminUsageWindowView{
 			Window:       "统计区间",
 			Since:        sinceLocal.Format("2006-01-02 15:04"),

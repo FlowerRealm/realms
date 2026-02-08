@@ -7,6 +7,8 @@ export type UsageWindow = {
   until: string;
   requests: number;
   tokens: number;
+  rpm: number;
+  tpm: number;
   input_tokens: number;
   output_tokens: number;
   cached_input_tokens: number;

@@ -30,15 +30,21 @@ func TestRatePerMinute(t *testing.T) {
 }
 
 func TestFormatRatePerMinute(t *testing.T) {
-	t.Run("fractional_rounding", func(t *testing.T) {
-		if got := metrics.FormatRatePerMinute(1, 5*time.Minute); got != "0.2" {
-			t.Fatalf("expected %q, got=%q", "0.2", got)
+	t.Run("round_to_integer", func(t *testing.T) {
+		if got := metrics.FormatRatePerMinute(3, 2*time.Minute); got != "2" {
+			t.Fatalf("expected %q, got=%q", "2", got)
+		}
+	})
+
+	t.Run("fractional_below_half", func(t *testing.T) {
+		if got := metrics.FormatRatePerMinute(1, 5*time.Minute); got != "0" {
+			t.Fatalf("expected %q, got=%q", "0", got)
 		}
 	})
 
 	t.Run("zero", func(t *testing.T) {
-		if got := metrics.FormatRatePerMinute(0, time.Minute); got != "0.0" {
-			t.Fatalf("expected %q, got=%q", "0.0", got)
+		if got := metrics.FormatRatePerMinute(0, time.Minute); got != "0" {
+			t.Fatalf("expected %q, got=%q", "0", got)
 		}
 	})
 }

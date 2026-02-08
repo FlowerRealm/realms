@@ -19,6 +19,8 @@ type usageWindowAPI struct {
 	Until              time.Time       `json:"until"`
 	Requests           int64           `json:"requests"`
 	Tokens             int64           `json:"tokens"`
+	RPM                int64           `json:"rpm"`
+	TPM                int64           `json:"tpm"`
 	InputTokens        int64           `json:"input_tokens"`
 	OutputTokens       int64           `json:"output_tokens"`
 	CachedInputTokens  int64           `json:"cached_input_tokens"`
@@ -136,6 +138,12 @@ func usageWindowsHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "Token 统计失败"})
 			return
 		}
+		recentSince := now.Add(-time.Minute)
+		recentStats, err := opts.Store.GetUsageTokenStatsByUserRange(c.Request.Context(), userID, recentSince, now)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "实时速率统计失败"})
+			return
+		}
 
 		resp.Windows = append(resp.Windows, usageWindowAPI{
 			Window:             "range",
@@ -143,6 +151,8 @@ func usageWindowsHandler(opts Options) gin.HandlerFunc {
 			Until:              until,
 			Requests:           tokenStats.Requests,
 			Tokens:             tokenStats.Tokens,
+			RPM:                recentStats.Requests,
+			TPM:                recentStats.Tokens,
 			InputTokens:        tokenStats.InputTokens,
 			OutputTokens:       tokenStats.OutputTokens,
 			CachedInputTokens:  tokenStats.CachedInputTokens,
