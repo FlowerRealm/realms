@@ -312,9 +312,9 @@ export function DashboardPage() {
                       <span className="fs-4 material-symbols-rounded">event_available</span>
                     </div>
                     <h6 className="fw-bold small mb-1">暂无订阅</h6>
-                    <a href="/subscriptions" className="btn btn-outline-primary btn-sm px-3 py-1 smaller">
+                    <Link to="/subscription" className="btn btn-outline-primary btn-sm px-3 py-1 smaller">
                       浏览套餐
-                    </a>
+                    </Link>
                   </div>
                 </div>
               </div>
