@@ -73,7 +73,7 @@ test.describe('oauth routes', () => {
 
 test.describe('app routes', () => {
   test('GET /dashboard', async ({ page }) => {
-    await gotoAuthedAndExpectHeading(page, '/dashboard', /快速开始/);
+    await gotoAuthedAndExpectHeading(page, '/dashboard', /今日费用/);
   });
 
   test('GET /announcements', async ({ page }) => {
