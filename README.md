@@ -164,15 +164,32 @@ curl "http://localhost:8080/v1/responses" \
 
 目前支持：
 - `POST /v1/responses`
+- `GET /v1/responses/{response_id}`
+- `DELETE /v1/responses/{response_id}`（仅允许删除“当前用户通过 Realms 创建并登记”的对象）
+- `POST /v1/responses/{response_id}/cancel`（同上）
+- `GET /v1/responses/{response_id}/input_items`（同上）
+- `POST /v1/responses/compact`
+- `POST /v1/responses/input_tokens`
 - `POST /v1/chat/completions`
+- `GET /v1/chat/completions`（仅返回“当前用户通过 Realms 创建并登记”的 stored 对象）
+- `GET /v1/chat/completions/{completion_id}`（同上）
+- `POST /v1/chat/completions/{completion_id}`（仅更新 metadata；并强制保留归属 metadata）
+- `DELETE /v1/chat/completions/{completion_id}`（仅允许删除“当前用户通过 Realms 创建并登记”的对象）
+- `GET /v1/chat/completions/{completion_id}/messages`（同上）
 - `POST /v1/messages`
 - `GET /v1/models`
+- `GET /v1/models/{model}`
 - `GET /v1beta/models`
 - `GET /v1beta/openai/models`
 - `POST /v1beta/models/{path...}`
 
 认证方式：
 - `Authorization: Bearer <token>`（或 `x-api-key`）
+
+隔离策略（重要）：
+- 对所有带 `{id}` 的拓展操作，Realms 会先做“对象归属”校验：未登记或不属于当前用户时直接返回 404（避免共享上游凭据导致越权）。
+- 对 `GET /v1/chat/completions`，Realms 会在 `store=true` 的创建请求中自动注入归属标记 `metadata.realms_owner`，并在 list 请求中强制按当前用户过滤，同时用本地登记做二次过滤兜底（忽略用户自带的 metadata 过滤条件）。
+- 若 Response 由 `codex_oauth` 上游创建，上游当前不支持 `/v1/responses/{id}` 这类拓展端点；Realms 会返回 501（Not Implemented）。
 
 ### 客户端配置（OpenAI SDK / CLI）
 

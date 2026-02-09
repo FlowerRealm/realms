@@ -74,7 +74,7 @@ func TestMessages_Stream_ExtractsUsageFromSSE_AnthropicCacheTokens(t *testing.T)
 
 	sched := scheduler.New(fs)
 	q := &fakeQuota{}
-	h := NewHandler(fs, fs, sched, doer, nil, nil, false, q, fakeAudit{}, nil, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, q, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10})
 
 	reqBody := `{"model":"claude-3-5-sonnet-latest","messages":[{"role":"user","content":"hi"}],"max_tokens":123,"stream":true}`
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", bytes.NewReader([]byte(reqBody)))
@@ -175,7 +175,7 @@ func TestMessages_ChannelRequestPolicy_IsPerChannelAttempt(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10})
 
 	reqBody := `{"model":"m1","messages":[{"role":"user","content":"hi"}],"max_tokens":10,"service_tier":"default","store":true,"safety_identifier":"u123"}`
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", bytes.NewReader([]byte(reqBody)))
@@ -284,7 +284,7 @@ func TestMessages_ChannelParamOverride_IsPerChannelAttempt(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", bytes.NewReader([]byte(`{"model":"m1","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -369,7 +369,7 @@ func TestMessages_MaxOutputTokensAlias_NormalizesToMaxTokens(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
 	reqBody := `{"model":"m1","messages":[{"role":"user","content":"hi"}],"max_output_tokens":123}`
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", bytes.NewReader([]byte(reqBody)))
@@ -452,7 +452,7 @@ func TestMessages_ChannelBodyFilters_ArePerChannelAttempt(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
 	reqBody := `{"model":"m1","messages":[{"role":"user","content":"hi"}],"max_tokens":10,"metadata":{"trace":"t","keep":"k"},"extra":"x"}`
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", bytes.NewReader([]byte(reqBody)))

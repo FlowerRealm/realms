@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 
 	"realms/internal/auth"
 	"realms/internal/middleware"
@@ -48,6 +49,7 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 	}
 
 	stream := boolFromAny(payload["stream"])
+	wantStore := boolFromAny(payload["store"])
 	publicModel := strings.TrimSpace(stringFromAny(payload["model"]))
 	maxOut := intFromAny(payload["max_completion_tokens"])
 	if maxOut == nil {
@@ -73,6 +75,23 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 
 	var cons scheduler.Constraints
 	cons.RequireChannelType = store.UpstreamTypeOpenAICompatible
+
+	if wantStore {
+		ownerTag := realmsOwnerTagForUser(p.UserID)
+		if ownerTag != "" {
+			metaAny := payload["metadata"]
+			meta, _ := metaAny.(map[string]any)
+			if meta == nil {
+				meta = make(map[string]any, 2)
+				payload["metadata"] = meta
+			}
+			meta[realmsOwnerMetadataKey] = ownerTag
+
+			if patched, err := sjson.SetBytes(rawBody, "metadata."+realmsOwnerMetadataKey, ownerTag); err == nil {
+				rawBody = patched
+			}
+		}
+	}
 
 	var rewriteBody func(sel scheduler.Selection) ([]byte, error)
 	var upstreamByChannel map[int64]string

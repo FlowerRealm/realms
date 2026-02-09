@@ -82,7 +82,7 @@ func NewApp(opts AppOptions) (*App, error) {
 		Dir:    opts.Config.Debug.ProxyLog.Dir,
 	})
 	qp := quotaProvider(st, opts.Config)
-	openaiHandler := openaiapi.NewHandler(st, st, sched, exec, proxyLog, st, opts.Config.SelfMode.Enable, qp, st, st, upstream.SSEPumpOptions{
+	openaiHandler := openaiapi.NewHandler(st, st, sched, exec, proxyLog, st, opts.Config.SelfMode.Enable, qp, st, st, st, upstream.SSEPumpOptions{
 		InitialLineBytes: 64 << 10,
 	})
 

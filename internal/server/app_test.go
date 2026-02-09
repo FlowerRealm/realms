@@ -28,7 +28,7 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 
 	st := store.New(nil)
 
-	openaiHandler := openaiapi.NewHandler(nil, nil, nil, nil, nil, nil, false, nil, nil, nil, upstream.SSEPumpOptions{})
+	openaiHandler := openaiapi.NewHandler(nil, nil, nil, nil, nil, nil, false, nil, nil, nil, nil, upstream.SSEPumpOptions{})
 
 	app := &App{
 		cfg:    cfg,

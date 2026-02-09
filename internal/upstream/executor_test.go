@@ -44,6 +44,56 @@ func TestCopyHeaders_StripsSensitiveAndHopByHop(t *testing.T) {
 	}
 }
 
+func TestIsStreamRequest_ResponsesRetrieve_StreamQuery(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "http://example.com/v1/responses/resp_123?stream=true", nil)
+	if !isStreamRequest(r, nil) {
+		t.Fatalf("expected isStreamRequest to be true")
+	}
+}
+
+func TestIsStreamRequest_ResponsesRetrieve_AcceptEventStream(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "http://example.com/v1/responses/resp_123", nil)
+	r.Header.Set("Accept", "text/event-stream")
+	if !isStreamRequest(r, nil) {
+		t.Fatalf("expected isStreamRequest to be true")
+	}
+}
+
+func TestIsStreamRequest_ResponsesRetrieve_DefaultFalse(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "http://example.com/v1/responses/resp_123", nil)
+	if isStreamRequest(r, nil) {
+		t.Fatalf("expected isStreamRequest to be false")
+	}
+}
+
+func TestWrapTimeout_ResponsesRetrieve_StreamSkipsUpstreamTimeout(t *testing.T) {
+	exec := &Executor{upstreamTimeout: 10 * time.Second}
+	r := httptest.NewRequest(http.MethodGet, "http://example.com/v1/responses/resp_123?stream=true", nil)
+	ctx, cancel := exec.wrapTimeout(context.Background(), scheduler.Selection{CredentialType: scheduler.CredentialTypeOpenAI}, r, nil)
+	if cancel != nil {
+		defer cancel()
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		t.Fatalf("expected no deadline, got=%v", deadline)
+	}
+	if cancel != nil {
+		t.Fatalf("expected cancel to be nil for stream request")
+	}
+}
+
+func TestWrapTimeout_ResponsesRetrieve_NonStreamUsesUpstreamTimeout(t *testing.T) {
+	exec := &Executor{upstreamTimeout: 10 * time.Second}
+	r := httptest.NewRequest(http.MethodGet, "http://example.com/v1/responses/resp_123", nil)
+	ctx, cancel := exec.wrapTimeout(context.Background(), scheduler.Selection{CredentialType: scheduler.CredentialTypeOpenAI}, r, nil)
+	if cancel == nil {
+		t.Fatalf("expected cancel to be non-nil")
+	}
+	defer cancel()
+	if _, ok := ctx.Deadline(); !ok {
+		t.Fatalf("expected deadline to be set")
+	}
+}
+
 type fakeUpstreamStore struct {
 	codexSecret     store.CodexOAuthSecret
 	openaiSecret    store.OpenAICredentialSecret

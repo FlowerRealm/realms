@@ -525,13 +525,24 @@ func isStreamRequest(downstream *http.Request, body []byte) bool {
 	if downstream == nil {
 		return false
 	}
-	switch downstream.URL.Path {
-	case "/v1/responses", "/v1/messages":
+	path := downstream.URL.Path
+	switch {
+	case path == "/v1/responses", path == "/v1/messages":
+	case strings.HasPrefix(path, "/v1/responses/"):
 	default:
 		return false
 	}
 	if strings.Contains(strings.ToLower(downstream.Header.Get("Accept")), "text/event-stream") {
 		return true
+	}
+	if strings.HasPrefix(path, "/v1/responses/") {
+		q := downstream.URL.Query()
+		switch v := strings.TrimSpace(q.Get("stream")); strings.ToLower(v) {
+		case "1", "true":
+			return true
+		default:
+			return false
+		}
 	}
 	if len(body) == 0 {
 		return false

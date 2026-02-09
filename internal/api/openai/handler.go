@@ -48,6 +48,8 @@ type Handler struct {
 	audit AuditSink
 	usage UsageEventSink
 
+	refs OpenAIObjectRefStore
+
 	sseOpts upstream.SSEPumpOptions
 }
 
@@ -67,7 +69,14 @@ type UsageEventSink interface {
 	FinalizeUsageEvent(ctx context.Context, in store.FinalizeUsageEventInput) error
 }
 
-func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *scheduler.Scheduler, exec Doer, proxyLog *proxylog.Writer, features FeatureResolver, selfMode bool, qp quota.Provider, audit AuditSink, usage UsageEventSink, sseOpts upstream.SSEPumpOptions) *Handler {
+type OpenAIObjectRefStore interface {
+	UpsertOpenAIObjectRef(ctx context.Context, ref store.OpenAIObjectRef) error
+	GetOpenAIObjectRefForUser(ctx context.Context, userID int64, objectType string, objectID string) (store.OpenAIObjectRef, bool, error)
+	ListOpenAIObjectRefsByUser(ctx context.Context, userID int64, objectType string, limit int) ([]store.OpenAIObjectRef, error)
+	DeleteOpenAIObjectRef(ctx context.Context, objectType string, objectID string) error
+}
+
+func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *scheduler.Scheduler, exec Doer, proxyLog *proxylog.Writer, features FeatureResolver, selfMode bool, qp quota.Provider, audit AuditSink, usage UsageEventSink, refs OpenAIObjectRefStore, sseOpts upstream.SSEPumpOptions) *Handler {
 	return &Handler{
 		models:   models,
 		groups:   groups,
@@ -79,6 +88,7 @@ func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *
 		quota:    qp,
 		audit:    audit,
 		usage:    usage,
+		refs:     refs,
 		sseOpts:  sseOpts,
 	}
 }
@@ -197,6 +207,9 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var cons scheduler.Constraints
+	if r != nil && r.URL != nil && r.URL.Path != "/v1/responses" {
+		cons.RequireChannelType = store.UpstreamTypeOpenAICompatible
+	}
 	var rewriteBody func(sel scheduler.Selection) ([]byte, error)
 
 	var bindings []store.ChannelModelBinding
@@ -360,7 +373,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Realms-Route-Key-Source", routeKeySource)
 	routeKeyHash := h.sched.RouteKeyHash(routeKey)
 	usageID := int64(0)
-	if h.quota != nil {
+	if h.quota != nil && r != nil && r.URL != nil && r.URL.Path == "/v1/responses" {
 		res, err := h.quota.Reserve(r.Context(), quota.ReserveInput{
 			RequestID:       middleware.GetRequestID(r.Context()),
 			UserID:          p.UserID,
@@ -480,6 +493,21 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 	contentType := resp.Header.Get("Content-Type")
 	isSSE := strings.Contains(strings.ToLower(contentType), "text/event-stream")
 
+	recordCreatedObjectType := ""
+	recordCreatedObject := false
+	if r != nil && r.Method == http.MethodPost {
+		switch r.URL.Path {
+		case "/v1/responses":
+			recordCreatedObjectType = openAIObjectTypeResponse
+			recordCreatedObject = true
+		case "/v1/chat/completions":
+			if chatCompletionRequestStoresObject(body) {
+				recordCreatedObjectType = openAIObjectTypeChatCompletion
+				recordCreatedObject = true
+			}
+		}
+	}
+
 	// 失败分支：根据状态码决定是否 failover。
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := readLimited(resp.Body, 0)
@@ -542,6 +570,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		var (
 			acc              usageAcc
 			responseRouteKey string
+			createdObjectID  string
 		)
 
 		cw := &countingResponseWriter{ResponseWriter: w}
@@ -555,6 +584,21 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		firstTokenLatencyMS := 0
 		hooks := upstream.SSEPumpHooks{
 			OnData: func(data string) {
+				if recordCreatedObject && createdObjectID == "" {
+					switch recordCreatedObjectType {
+					case openAIObjectTypeResponse:
+						if id := extractResponseIDFromJSONBytes([]byte(data)); id != "" {
+							createdObjectID = id
+							h.recordOpenAIObjectRef(r.Context(), recordCreatedObjectType, createdObjectID, p, sel)
+						}
+					case openAIObjectTypeChatCompletion:
+						if id := extractChatCompletionIDFromJSONBytes([]byte(data)); id != "" {
+							createdObjectID = id
+							h.recordOpenAIObjectRef(r.Context(), recordCreatedObjectType, createdObjectID, p, sel)
+						}
+					default:
+					}
+				}
 				if firstTokenLatencyMS <= 0 {
 					firstTokenLatencyMS = int(time.Since(reqStart).Milliseconds())
 					if firstTokenLatencyMS < 0 {
@@ -660,6 +704,19 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		h.sched.Report(sel, scheduler.Result{Success: false, Retriable: true, ErrorClass: "read_upstream"})
 		h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, 0, "read_upstream", time.Since(attemptStart))
 		return proxyAttemptRetrySameSelection
+	}
+	if recordCreatedObject {
+		switch recordCreatedObjectType {
+		case openAIObjectTypeResponse:
+			if id := extractResponseIDFromJSONBytes(bodyBytes); id != "" {
+				h.recordOpenAIObjectRef(r.Context(), recordCreatedObjectType, id, p, sel)
+			}
+		case openAIObjectTypeChatCompletion:
+			if id := extractChatCompletionIDFromJSONBytes(bodyBytes); id != "" {
+				h.recordOpenAIObjectRef(r.Context(), recordCreatedObjectType, id, p, sel)
+			}
+		default:
+		}
 	}
 	h.touchBindingFromRouteKey(p.UserID, sel, extractRouteKeyFromRawBody(bodyBytes))
 	copyResponseHeaders(w.Header(), resp.Header)
