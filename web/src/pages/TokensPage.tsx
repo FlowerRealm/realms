@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   createUserToken,
@@ -21,9 +21,6 @@ export function TokensPage() {
   const [copiedID, setCopiedID] = useState<number | null>(null);
 
   const [name, setName] = useState('');
-
-  const baseURL = useMemo(() => window.location.origin, []);
-  const apiBaseURL = useMemo(() => `${baseURL}/v1`, [baseURL]);
 
   const openGeneratedTokenModalBtnRef = useRef<HTMLButtonElement | null>(null);
   const pendingGeneratedTokenRef = useRef<string | null>(null);
@@ -170,7 +167,7 @@ export function TokensPage() {
           </div>
         ) : null}
 
-        <div className="col-lg-8">
+        <div className="col-12">
           <div className="card h-100 overflow-hidden">
             <div className="card-body p-0">
               <div className="table-responsive">
@@ -364,59 +361,6 @@ export function TokensPage() {
           </div>
         </div>
 
-        <div className="col-lg-4">
-          <div className="card h-100 bg-primary bg-opacity-10 border-0">
-            <div className="card-body">
-              <h5 className="mb-3 fw-semibold text-primary">
-                <span className="me-2 material-symbols-rounded">terminal</span>使用方式
-              </h5>
-              <p className="text-muted small mb-3">
-                推荐：配置 <code>OPENAI_BASE_URL</code>/<code>OPENAI_API_KEY</code>，并在 Codex CLI 中将 <code>model_provider</code> 设置为{' '}
-                <code>realms</code>。
-              </p>
-
-                <div className="bg-dark rounded-3 p-3 mb-3 position-relative overflow-hidden">
-                  <div className="d-flex justify-content-between align-items-center mb-2">
-                  <small className="text-secondary text-uppercase fw-bold smaller">终端</small>
-                    <div className="d-flex gap-1">
-                      <div className="rounded-circle bg-danger" style={{ width: 8, height: 8 }}></div>
-                      <div className="rounded-circle bg-warning" style={{ width: 8, height: 8 }}></div>
-                      <div className="rounded-circle bg-success" style={{ width: 8, height: 8 }}></div>
-                    </div>
-                  </div>
-                <pre className="mb-0 text-light overflow-auto smaller font-monospace" style={{ whiteSpace: 'pre-wrap' }}>
-                  <code>
-                    {'# Linux/macOS（bash/zsh）\n'}
-                    {`export OPENAI_BASE_URL="${apiBaseURL}"\n`}
-                    {'export OPENAI_API_KEY="'}
-                    <span className="text-warning">sk_...</span>
-                    {'"\n\n'}
-                    {'# Windows（PowerShell）\n'}
-                    {`$env:OPENAI_BASE_URL = "${apiBaseURL}"\n`}
-                    {'$env:OPENAI_API_KEY = "'}
-                    <span className="text-warning">sk_...</span>
-                    {'"\n\n'}
-                    {'# ~/.codex/config.toml（Windows: %USERPROFILE%\\\\.codex\\\\config.toml）\n'}
-                    {'model_provider = "realms"\n\n'}
-                    {'[model_providers.realms]\n'}
-                    {'name = "Realms"\n'}
-                    {`base_url = "${apiBaseURL}"\n`}
-                    {'wire_api = "responses"\n'}
-                    {'requires_openai_auth = true'}
-                  </code>
-                </pre>
-              </div>
-
-              <div className="d-flex align-items-start small text-muted">
-                <span className="me-2 mt-1 text-primary material-symbols-rounded">info</span>
-                <div>
-                  API 基础地址：<br />
-                  <strong className="text-dark user-select-all">{apiBaseURL}</strong>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* programmatically open the generated-token modal */}

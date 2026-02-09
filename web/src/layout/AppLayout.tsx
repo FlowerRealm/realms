@@ -49,6 +49,11 @@ export function AppLayout() {
               <span className="material-symbols-rounded">dashboard</span> 控制台
             </NavLink>
           </li>
+          <li>
+            <NavLink to="/guide" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`} onClick={closeSidebar}>
+              <span className="material-symbols-rounded">menu_book</span> 使用教程
+            </NavLink>
+          </li>
           {features?.web_announcements_disabled ? null : (
             <li>
               <NavLink to="/announcements" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`} onClick={closeSidebar}>

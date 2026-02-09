@@ -23,6 +23,7 @@ import { TokensPage } from './pages/TokensPage';
 import { TopupPage } from './pages/TopupPage';
 import { UsagePage } from './pages/UsagePage';
 import { OAuthAuthorizePage } from './pages/OAuthAuthorizePage';
+import { UserGuidePage } from './pages/UserGuidePage';
 
 export function App() {
   return (
@@ -50,6 +51,7 @@ export function App() {
         }
       >
         <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/guide" element={<UserGuidePage />} />
         <Route path="/announcements" element={<AnnouncementsPage />} />
         <Route path="/announcements/:id" element={<AnnouncementDetailPage />} />
         <Route path="/tokens" element={<TokensPage />} />

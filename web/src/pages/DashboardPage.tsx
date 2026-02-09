@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { Link } from 'react-router-dom';
 
 import { getDashboard, type DashboardData } from '../api/dashboard';
@@ -19,8 +19,6 @@ function subscriptionProgressBarClass(percent: number): string {
 export function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [err, setErr] = useState('');
-
-  const apiBaseURL = useMemo(() => `${window.location.origin}/v1`, []);
 
   const detailTimeLineRef = useRef<HTMLCanvasElement | null>(null);
   const detailTimeLineChartRef = useRef<ChartInstance | null>(null);
@@ -396,51 +394,6 @@ export function DashboardPage() {
           </div>
         </div>
 
-        <div className="col-12">
-          <div className="card">
-            <div className="card-body">
-              <div className="d-flex align-items-center mb-4">
-                <span className="text-primary me-2 material-symbols-rounded">bolt</span>
-                <h5 className="mb-0 fw-bold">快速开始</h5>
-              </div>
-
-              <div className="row g-4">
-                <div className="col-12">
-                  <div className="bg-dark rounded-3 p-3 position-relative overflow-hidden mb-3">
-                    <div className="d-flex justify-content-between align-items-center mb-2">
-                      <small className="text-secondary text-uppercase fw-bold smaller">终端配置</small>
-                      <div className="d-flex gap-1">
-                        <div className="rounded-circle bg-danger" style={{ width: 8, height: 8 }}></div>
-                        <div className="rounded-circle bg-warning" style={{ width: 8, height: 8 }}></div>
-                        <div className="rounded-circle bg-success" style={{ width: 8, height: 8 }}></div>
-                      </div>
-                    </div>
-                    <pre className="mb-0 text-light overflow-auto smaller font-monospace" style={{ whiteSpace: 'pre-wrap' }}>
-                      <code>{`# Linux/macOS
-export OPENAI_BASE_URL="${apiBaseURL}"
-export OPENAI_API_KEY="sk_..."
-
-# ~/.codex/config.toml
-model_provider = "realms"
-
-[model_providers.realms]
-name = "Realms"
-base_url = "${apiBaseURL}"
-wire_api = "responses"
-requires_openai_auth = true`}</code>
-                    </pre>
-                  </div>
-                  <div className="alert alert-light border-0 bg-light small d-flex align-items-start mb-0">
-                    <span className="me-2 mt-1 text-primary material-symbols-rounded">info</span>
-                    <div>
-                      API 基础地址：<strong className="user-select-all ms-1">{apiBaseURL}</strong>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );
