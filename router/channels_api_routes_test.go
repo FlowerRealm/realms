@@ -602,6 +602,7 @@ func TestChannels_SettingsAndCredentials_RootFlow(t *testing.T) {
 		Message string `json:"message"`
 		Data    struct {
 			ID        int64   `json:"id"`
+			Status    int     `json:"status"`
 			TestModel *string `json:"test_model"`
 			Weight    int     `json:"weight"`
 			AutoBan   bool    `json:"auto_ban"`
@@ -621,6 +622,47 @@ func TestChannels_SettingsAndCredentials_RootFlow(t *testing.T) {
 	}
 	if detailResp.Data.AutoBan {
 		t.Fatalf("expected auto_ban=false, got true")
+	}
+
+	// manual disable channel
+	updateBody, _ := json.Marshal(map[string]any{
+		"id":     chID,
+		"status": 0,
+	})
+	req = httptest.NewRequest(http.MethodPut, "http://example.com/api/channel", bytes.NewReader(updateBody))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("update channel status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var updateResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &updateResp); err != nil {
+		t.Fatalf("json.Unmarshal update channel: %v", err)
+	}
+	if !updateResp.Success {
+		t.Fatalf("expected update channel success, got message=%q", updateResp.Message)
+	}
+
+	// verify disabled status persisted
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/channel/"+strconv.FormatInt(chID, 10), nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("get channel after disable status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &detailResp); err != nil {
+		t.Fatalf("json.Unmarshal get channel after disable: %v", err)
+	}
+	if !detailResp.Success || detailResp.Data.Status != 0 {
+		t.Fatalf("expected channel status=0 after disable, got %#v", detailResp)
 	}
 }
 

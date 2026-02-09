@@ -101,6 +101,22 @@ function normalizePinnedInfo(info: PinnedChannelInfo | null, channels: ChannelAd
   return out;
 }
 
+function compactProbeMessage(raw: string): string {
+  let msg = raw.trim();
+  if (!msg) return '';
+  msg = msg.replace(/\s+/g, ' ');
+  msg = msg.replace(/Post "[^"]+": context deadline exceeded \(Client\.Timeout exceeded while awaiting headers\)/g, '请求超时');
+  msg = msg.replace(/context deadline exceeded \(Client\.Timeout exceeded while awaiting headers\)/g, '请求超时');
+  if (msg.includes('；失败示例：')) {
+    const idx = msg.indexOf('；失败示例：');
+    msg = `${msg.slice(0, idx)}；失败详情见下方模型结果`;
+  }
+  if (msg.length > 140) {
+    msg = `${msg.slice(0, 140)}…`;
+  }
+  return msg;
+}
+
 type ChartInstance = {
   destroy?: () => void;
 };
@@ -136,7 +152,7 @@ export function ChannelsPage() {
   const [notice, setNotice] = useState('');
   const [testingChannelID, setTestingChannelID] = useState<number | null>(null);
   const [expandedChannelID, setExpandedChannelID] = useState<number | null>(null);
-  const [, setTestPanels] = useState<Record<number, ChannelTestPanelState>>({});
+  const [testPanels, setTestPanels] = useState<Record<number, ChannelTestPanelState>>({});
 
   const [usageStart, setUsageStart] = useState('');
   const [usageEnd, setUsageEnd] = useState('');
@@ -231,6 +247,8 @@ export function ChannelsPage() {
   const oauthQueryHandled = useRef(false);
 
   const enabledCount = useMemo(() => channels.filter((c) => c.status === 1).length, [channels]);
+  const disabledCount = useMemo(() => channels.length - enabledCount, [channels.length, enabledCount]);
+  const firstDisabledIndex = useMemo(() => channels.findIndex((c) => c.status !== 1), [channels]);
   const selectableModelIDs = useMemo(() => {
     const uniq = new Set<string>();
     for (const id of managedModelIDs) {
@@ -270,6 +288,12 @@ export function ChannelsPage() {
     return next;
   }
 
+  function normalizeChannelSections(list: ChannelAdminItem[]): ChannelAdminItem[] {
+    const enabled = list.filter((ch) => ch.status === 1);
+    const disabled = list.filter((ch) => ch.status !== 1);
+    return [...enabled, ...disabled];
+  }
+
   function fmtNumber(n: number): string {
     if (!Number.isFinite(n)) return '-';
     return new Intl.NumberFormat('zh-CN').format(n);
@@ -297,6 +321,32 @@ export function ChannelsPage() {
     const next = [...models];
     next[idx] = { ...next[idx], ...patch };
     return next;
+  }
+
+  function clearTestPanel(channelID: number) {
+    setTestPanels((prev) => {
+      const current = prev[channelID];
+      if (!current) return prev;
+      const next = { ...prev };
+      delete next[channelID];
+      return next;
+    });
+  }
+
+  function openChannelPanel(channelID: number) {
+    if (expandedChannelID !== null && expandedChannelID !== channelID) {
+      clearTestPanel(expandedChannelID);
+    }
+    setExpandedChannelID(channelID);
+  }
+
+  function toggleChannelPanel(channelID: number) {
+    if (expandedChannelID === channelID) {
+      clearTestPanel(channelID);
+      setExpandedChannelID(null);
+      return;
+    }
+    openChannelPanel(channelID);
   }
 
   function applyTestProgress(channelID: number, evt: ChannelTestProgressEvent) {
@@ -357,7 +407,7 @@ export function ChannelsPage() {
             models: model
               ? upsertModelState(current.models, model, {
                   status: result?.ok ? 'success' : 'failed',
-                  message: result?.message || '',
+                  message: compactProbeMessage(result?.message || ''),
                   result,
                 })
               : current.models,
@@ -391,7 +441,7 @@ export function ChannelsPage() {
       }
       setUsageStart(pageRes.data?.start || '');
       setUsageEnd(pageRes.data?.end || '');
-      setChannels(pageChannels);
+      setChannels(normalizeChannelSections(pageChannels));
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败');
     } finally {
@@ -823,7 +873,7 @@ export function ChannelsPage() {
         <div>
           <h2 className="h4 fw-bold mb-1">上游渠道管理</h2>
           <p className="text-muted small mb-0">
-            管理模型转发渠道。支持拖拽排序调整优先级（越靠前优先级越高）。当前 {enabledCount} 启用 / {channels.length} 总计。
+            管理模型转发渠道。支持拖拽排序调整优先级（越靠前优先级越高）。当前 {enabledCount} 启用 / {disabledCount} 禁用 / {channels.length} 总计。
           </p>
         </div>
         <button type="button" className="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createChannelModal">
@@ -925,27 +975,42 @@ export function ChannelsPage() {
                       </td>
                     </tr>
                   ) : (
-                    channels.map((ch) => {
+                    channels.map((ch, idx) => {
                       const st = statusBadge(ch.status);
                       const hb = healthBadge(ch);
+                      const channelDisabled = ch.status !== 1;
                       const isPinned = !!pinned?.pinned_active && pinned.pinned_channel_id === ch.id;
                       const runtime = ch.runtime;
                       const usage = ch.usage;
+                      const testPanel = testPanels[ch.id];
                       const checkedAt = fmtHHMM(ch.last_test_at);
                       const panelOpen = expandedChannelID === ch.id;
                       const testRunning = testingChannelID === ch.id;
                       const anyTesting = testingChannelID !== null;
+                      const activeTestPanel = testPanel && (testPanel.running || testPanel.summary != null || testPanel.summaryMessage.trim() !== '' || testPanel.models.length > 0) ? testPanel : null;
+                      const rowClassName = [dropOverID === ch.id ? 'table-primary' : '', channelDisabled ? 'table-secondary opacity-75' : '']
+                        .filter((v) => v)
+                        .join(' ');
                       return (
                         <Fragment key={ch.id}>
+                        {idx === firstDisabledIndex ? (
+                          <tr className="table-light">
+                            <td colSpan={5} className="px-4 py-2">
+                              <span className="text-muted small">
+                                <i className="ri-forbid-2-line me-1"></i>已禁用渠道（{disabledCount}）已固定在底部分区
+                              </span>
+                            </td>
+                          </tr>
+                        ) : null}
                         <tr
-                          className={dropOverID === ch.id ? 'table-primary' : undefined}
+                          className={rowClassName || undefined}
                           onClick={(e) => {
                             const target = e.target as HTMLElement;
                             if (target.closest('button, a, input, textarea, select, label')) return;
-                            setExpandedChannelID((prev) => (prev === ch.id ? null : ch.id));
+                            toggleChannelPanel(ch.id);
                           }}
                           onDragOver={(e) => {
-                            if (loading || reordering) return;
+                            if (loading || reordering || channelDisabled) return;
                             e.preventDefault();
                             setDropOverID(ch.id);
                           }}
@@ -954,10 +1019,12 @@ export function ChannelsPage() {
                           }}
                           onDrop={async (e) => {
                             e.preventDefault();
-                            if (loading || reordering) return;
+                            if (loading || reordering || channelDisabled) return;
                             const moving = draggingID;
                             if (!moving || moving === ch.id) return;
                             const prev = channels;
+                            const movingChannel = prev.find((item) => item.id === moving);
+                            if (!movingChannel || movingChannel.status !== 1) return;
                             const next = moveChannelBefore(prev, moving, ch.id);
                             if (next === prev) return;
                             setChannels(next);
@@ -979,13 +1046,17 @@ export function ChannelsPage() {
                             }
                           }}
                         >
-                          <td className="text-center text-muted" style={{ cursor: reordering ? 'not-allowed' : 'grab' }} title="拖动排序">
+                          <td
+                            className="text-center text-muted"
+                            style={{ cursor: reordering || channelDisabled ? 'not-allowed' : 'grab' }}
+                            title={channelDisabled ? '禁用渠道固定在底部' : '拖动排序'}
+                          >
                             <span
                               className="d-inline-flex align-items-center justify-content-center"
                               style={{ width: 48 }}
-                              draggable={!loading && !reordering}
+                              draggable={!loading && !reordering && !channelDisabled}
                               onDragStart={(e) => {
-                                if (loading || reordering) return;
+                                if (loading || reordering || channelDisabled) return;
                                 setDraggingID(ch.id);
                                 setDropOverID(ch.id);
                                 e.dataTransfer.effectAllowed = 'move';
@@ -1071,21 +1142,13 @@ export function ChannelsPage() {
                           <td className="text-end pe-4 text-nowrap">
                             <div className="d-flex gap-1 justify-content-end">
                               <button
-                                className={`btn btn-sm ${panelOpen ? 'btn-primary' : 'btn-light border text-primary'}`}
-                                type="button"
-                                title={panelOpen ? '收起详情' : '展示详情'}
-                                onClick={() => setExpandedChannelID((prev) => (prev === ch.id ? null : ch.id))}
-                              >
-                                <i className={`me-1 ${panelOpen ? 'ri-eye-off-line' : 'ri-eye-line'}`}></i>
-                                {panelOpen ? '收起详情' : '展示详情'}
-                              </button>
-                              <button
                                 className="btn btn-sm btn-light border text-primary"
                                 type="button"
                                 title="测试连接"
                                 disabled={loading || reordering || ch.type === 'codex_oauth' || anyTesting}
                                 onClick={async () => {
                                   if (ch.type === 'codex_oauth') return;
+                                  openChannelPanel(ch.id);
                                   setErr('');
                                   setNotice('');
                                   setTestingChannelID(ch.id);
@@ -1113,7 +1176,7 @@ export function ChannelsPage() {
                                           ? probe.results.map((item) => ({
                                               model: item.model,
                                               status: item.ok ? ('success' as const) : ('failed' as const),
-                                              message: item.message || '',
+                                              message: compactProbeMessage(item.message || ''),
                                               result: item,
                                             }))
                                           : current.models;
@@ -1128,7 +1191,7 @@ export function ChannelsPage() {
                                           currentModel: '',
                                           models: finalModels,
                                           summary: probe,
-                                          summaryMessage: res.message || probe?.message || '',
+                                          summaryMessage: compactProbeMessage(res.message || probe?.message || ''),
                                         },
                                       };
                                     });
@@ -1136,7 +1199,22 @@ export function ChannelsPage() {
                                     setNotice(res.message || '测试成功');
                                     await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
                                   } catch (e) {
-                                    setErr(e instanceof Error ? e.message : '测试失败');
+                                    const msg = e instanceof Error ? e.message : '测试失败';
+                                    const compactMsg = compactProbeMessage(msg);
+                                    setErr('');
+                                    setTestPanels((prev) => {
+                                      const current = prev[ch.id];
+                                      if (!current) return prev;
+                                      return {
+                                        ...prev,
+                                        [ch.id]: {
+                                          ...current,
+                                          running: false,
+                                          currentModel: '',
+                                          summaryMessage: compactMsg || msg,
+                                        },
+                                      };
+                                    });
                                   } finally {
                                     setTestingChannelID((prev) => (prev === ch.id ? null : prev));
                                     setTestPanels((prev) => {
@@ -1184,6 +1262,32 @@ export function ChannelsPage() {
                               </button>
 
                               <button
+                                className={`btn btn-sm ${ch.status === 1 ? 'btn-light border text-warning' : 'btn-light border text-success'}`}
+                                type="button"
+                                title={ch.status === 1 ? '禁用渠道' : '启用渠道'}
+                                disabled={loading || reordering}
+                                onClick={async () => {
+                                  const targetStatus = ch.status === 1 ? 0 : 1;
+                                  setErr('');
+                                  setNotice('');
+                                  try {
+                                    const res = await updateChannel({ id: ch.id, status: targetStatus });
+                                    if (!res.success) throw new Error(res.message || '更新状态失败');
+                                    if (settingsChannelID === ch.id) {
+                                      setEditStatus(targetStatus);
+                                    }
+                                    setNotice(targetStatus === 1 ? '渠道已启用' : '渠道已禁用');
+                                    await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                                  } catch (e) {
+                                    setErr(e instanceof Error ? e.message : '更新状态失败');
+                                  }
+                                }}
+                              >
+                                <i className={`me-1 ${ch.status === 1 ? 'ri-pause-circle-line' : 'ri-play-circle-line'}`}></i>
+                                {ch.status === 1 ? '禁用' : '启用'}
+                              </button>
+
+                              <button
                                 className="btn btn-sm btn-primary"
                                 type="button"
                                 title="设置"
@@ -1218,73 +1322,122 @@ export function ChannelsPage() {
                           </td>
                         </tr>
                         {panelOpen ? (
-                          <tr className="bg-light-subtle rlm-channel-detail-row">
+                          <tr className={`${channelDisabled ? 'table-secondary opacity-75' : 'bg-light-subtle'} rlm-channel-detail-row`}>
                             <td colSpan={5} className="px-4 py-3">
-                              <div className="d-flex flex-wrap align-items-center gap-3 small text-muted">
-                                <div className="d-flex align-items-center">
-                                  <span className="me-1">消耗:</span>
-                                  <span className="font-monospace fw-bold text-dark">{usage?.committed_usd ?? '0'}</span>
-                                </div>
-                                <div className="d-flex align-items-center">
-                                  <span className="me-1">Token:</span>
-                                  <span className="fw-medium text-dark">{fmtNumber(usage?.tokens ?? 0)}</span>
-                                </div>
-                                <div className="d-flex align-items-center">
-                                  <span className="me-1">缓存:</span>
-                                  <span className="fw-medium text-success">{usage?.cache_ratio ?? '0.0%'}</span>
-                                </div>
-                                <div className="d-flex align-items-center">
-                                  <span className="me-1">首字:</span>
-                                  <span className="fw-medium text-dark">{usage?.avg_first_token_latency ?? '-'}</span>
-                                </div>
-                                <div className="d-flex align-items-center">
-                                  <span className="me-1">Tokens/s:</span>
-                                  <span className="fw-medium text-dark">{usage?.tokens_per_second ?? '-'}</span>
-                                </div>
-                              </div>
-                              <div className="border rounded-3 p-3 bg-white mt-3">
-                                <div className="d-flex flex-wrap align-items-center gap-3 mb-2">
-                                  <div className="d-flex align-items-center gap-2 flex-grow-1">
-                                    <div className="d-flex flex-wrap gap-1">
-                                      {fieldOptions.map((option) => (
-                                        <button
-                                          key={option.value}
-                                          type="button"
-                                          className={`btn btn-sm ${detailField === option.value ? 'btn-primary' : 'btn-outline-secondary'}`}
-                                          onClick={() => setDetailField(option.value)}
-                                        >
-                                          {option.label}
-                                        </button>
+                              {activeTestPanel ? (
+                                <div className="border rounded-3 p-3 bg-white">
+                                  <div className="d-flex flex-wrap align-items-center gap-2">
+                                    <span className="fw-semibold text-dark">测试详情</span>
+                                    {activeTestPanel.running ? (
+                                      <span className="badge bg-primary bg-opacity-10 text-primary border border-primary-subtle">
+                                        测试中 {activeTestPanel.done}/{activeTestPanel.total || '-'}
+                                      </span>
+                                    ) : (
+                                      <span
+                                        className={`badge ${
+                                          activeTestPanel.summary?.ok
+                                            ? 'bg-success bg-opacity-10 text-success border border-success-subtle'
+                                            : 'bg-secondary bg-opacity-10 text-secondary border'
+                                        }`}
+                                      >
+                                        {activeTestPanel.summary?.ok ? '测试通过' : '测试完成'}
+                                      </span>
+                                    )}
+                                    {activeTestPanel.currentModel ? <span className="badge bg-light text-dark border">当前模型：{activeTestPanel.currentModel}</span> : null}
+                                  </div>
+                                  {activeTestPanel.models.length > 0 ? (
+                                    <div className="d-flex flex-column gap-1 mt-2">
+                                      {activeTestPanel.models.map((item) => (
+                                        <div key={item.model} className="d-flex flex-wrap align-items-center gap-2 small">
+                                          <span
+                                            className={`badge ${
+                                              item.status === 'success'
+                                                ? 'bg-success bg-opacity-10 text-success border border-success-subtle'
+                                                : item.status === 'failed'
+                                                  ? 'bg-danger bg-opacity-10 text-danger border border-danger-subtle'
+                                                  : item.status === 'running'
+                                                    ? 'bg-primary bg-opacity-10 text-primary border border-primary-subtle'
+                                                    : 'bg-light text-secondary border'
+                                            }`}
+                                          >
+                                            {item.status === 'success' ? '通过' : item.status === 'failed' ? '失败' : item.status === 'running' ? '测试中' : '待测试'}
+                                          </span>
+                                          <span className="font-monospace text-dark">{item.model}</span>
+                                          {item.message ? <span className="text-muted">{item.message}</span> : null}
+                                        </div>
                                       ))}
                                     </div>
-                                  </div>
-                                  <div className="d-flex align-items-center gap-2 ms-auto">
-                                    <div className="d-flex gap-1">
-                                      {granularityOptions.map((option) => (
-                                        <button
-                                          key={option.value}
-                                          type="button"
-                                          className={`btn btn-sm ${detailGranularity === option.value ? 'btn-primary' : 'btn-outline-secondary'}`}
-                                          onClick={() => setDetailGranularity(option.value)}
-                                        >
-                                          {option.label}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </div>
+                                  ) : null}
                                 </div>
-                                <div className="small text-muted mb-2">时间区间：{usageStart || '-'} ~ {usageEnd || '-'}</div>
-                                {detailSeriesErr ? <div className="alert alert-danger py-2 mb-2">{detailSeriesErr}</div> : null}
-                                {detailSeriesLoading ? (
-                                  <div className="text-muted small py-4">时间序列加载中…</div>
-                                ) : (
-                                  <>
-                                    <div style={{ height: 280 }}>
-                                      <canvas ref={panelOpen ? detailTimeLineRef : undefined}></canvas>
+                              ) : (
+                                <>
+                                  <div className="d-flex flex-wrap align-items-center gap-3 small text-muted">
+                                    <div className="d-flex align-items-center">
+                                      <span className="me-1">消耗:</span>
+                                      <span className="font-monospace fw-bold text-dark">{usage?.committed_usd ?? '0'}</span>
                                     </div>
-                                  </>
-                                )}
-                              </div>
+                                    <div className="d-flex align-items-center">
+                                      <span className="me-1">Token:</span>
+                                      <span className="fw-medium text-dark">{fmtNumber(usage?.tokens ?? 0)}</span>
+                                    </div>
+                                    <div className="d-flex align-items-center">
+                                      <span className="me-1">缓存:</span>
+                                      <span className="fw-medium text-success">{usage?.cache_ratio ?? '0.0%'}</span>
+                                    </div>
+                                    <div className="d-flex align-items-center">
+                                      <span className="me-1">首字:</span>
+                                      <span className="fw-medium text-dark">{usage?.avg_first_token_latency ?? '-'}</span>
+                                    </div>
+                                    <div className="d-flex align-items-center">
+                                      <span className="me-1">Tokens/s:</span>
+                                      <span className="fw-medium text-dark">{usage?.tokens_per_second ?? '-'}</span>
+                                    </div>
+                                  </div>
+                                  <div className="border rounded-3 p-3 bg-white mt-3">
+                                    <div className="d-flex flex-wrap align-items-center gap-3 mb-2">
+                                      <div className="d-flex align-items-center gap-2 flex-grow-1">
+                                        <div className="d-flex flex-wrap gap-1">
+                                          {fieldOptions.map((option) => (
+                                            <button
+                                              key={option.value}
+                                              type="button"
+                                              className={`btn btn-sm ${detailField === option.value ? 'btn-primary' : 'btn-outline-secondary'}`}
+                                              onClick={() => setDetailField(option.value)}
+                                            >
+                                              {option.label}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                      <div className="d-flex align-items-center gap-2 ms-auto">
+                                        <div className="d-flex gap-1">
+                                          {granularityOptions.map((option) => (
+                                            <button
+                                              key={option.value}
+                                              type="button"
+                                              className={`btn btn-sm ${detailGranularity === option.value ? 'btn-primary' : 'btn-outline-secondary'}`}
+                                              onClick={() => setDetailGranularity(option.value)}
+                                            >
+                                              {option.label}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="small text-muted mb-2">时间区间：{usageStart || '-'} ~ {usageEnd || '-'}</div>
+                                    {detailSeriesErr ? <div className="alert alert-danger py-2 mb-2">{detailSeriesErr}</div> : null}
+                                    {detailSeriesLoading ? (
+                                      <div className="text-muted small py-4">时间序列加载中…</div>
+                                    ) : (
+                                      <>
+                                        <div style={{ height: 280 }}>
+                                          <canvas ref={panelOpen ? detailTimeLineRef : undefined}></canvas>
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                </>
+                              )}
                             </td>
                           </tr>
                         ) : null}
