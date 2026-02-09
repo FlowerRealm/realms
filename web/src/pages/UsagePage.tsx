@@ -971,37 +971,6 @@ function FragmentUsageRow({
 
   const errText = (ev.error_class || ev.error_message || '').toString().trim();
 
-  let detailTextDown = '（展开后自动加载）';
-  let detailTextUpReq = '（展开后自动加载）';
-  let detailTextUpResp = '（展开后自动加载）';
-  if (detailState.status === 'loading') {
-    detailTextDown = '加载中...';
-    detailTextUpReq = '加载中...';
-    detailTextUpResp = '加载中...';
-  }
-	  if (detailState.status === 'loaded') {
-	    if (!detailState.data.available) {
-	      detailTextDown = '（无明细：仅对失败请求保存，或该条记录未启用存储）';
-	      detailTextUpReq = '（无明细：仅对失败请求保存，或该条记录未启用存储）';
-	      detailTextUpResp = '-';
-	    } else {
-	      detailTextDown = detailState.data.downstream_request_body || '-';
-	      const upstreamHidden = detailState.data.upstream_request_body === undefined && detailState.data.upstream_response_body === undefined;
-	      if (upstreamHidden) {
-	        detailTextUpReq = '（仅管理员可查看）';
-	        detailTextUpResp = '（仅管理员可查看）';
-	      } else {
-	        detailTextUpReq = detailState.data.upstream_request_body || '-';
-	        detailTextUpResp = detailState.data.upstream_response_body || '-';
-	      }
-	    }
-	  }
-	  if (detailState.status === 'error') {
-	    detailTextDown = `加载失败：${detailState.message}`;
-	    detailTextUpReq = `加载失败：${detailState.message}`;
-	    detailTextUpResp = '-';
-	  }
-
     const inTokTotal = ev.input_tokens ?? 0;
     const outTokTotal = ev.output_tokens ?? 0;
     const cachedInTok = clampCached(inTokTotal, ev.cached_input_tokens ?? 0);
@@ -1194,23 +1163,6 @@ function FragmentUsageRow({
                   )}
                 </div>
 
-                <div className="col-12">
-                  <hr className="my-2" />
-                  <div className="text-muted smaller">
-                    原始请求体（客户端）<span className="ms-2">· 仅失败请求会保存</span>
-                  </div>
-                  <pre className="mb-0 font-monospace rlm-prewrap rlm-usage-detail-pre">{detailTextDown}</pre>
-                </div>
-                <div className="col-12">
-                  <div className="text-muted smaller">
-                    转发请求体（最终）<span className="ms-2">· 仅失败请求会保存</span>
-                  </div>
-                  <pre className="mb-0 font-monospace rlm-prewrap rlm-usage-detail-pre">{detailTextUpReq}</pre>
-                </div>
-                <div className="col-12">
-                  <div className="text-muted smaller">上游响应体</div>
-                  <pre className="mb-0 font-monospace rlm-prewrap rlm-usage-detail-pre">{detailTextUpResp}</pre>
-                </div>
               </div>
             </div>
           </td>

@@ -526,7 +526,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			_ = h.quota.Void(bookCtx, usageID)
 			cancel()
 		}
-		h.finalizeUsageEventWithUpstreamBodies(r, usageID, &sel, resp.StatusCode, "upstream_status", failMsg, time.Since(reqStart), 0, wantStream || isSSE, reqBytes, respBytes, middleware.CachedBody(r.Context()), body, bodyBytes)
+		h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "upstream_status", failMsg, time.Since(reqStart), 0, wantStream || isSSE, reqBytes, respBytes)
 		return proxyAttemptDone
 	}
 
@@ -831,87 +831,6 @@ func (h *Handler) finalizeUsageEvent(r *http.Request, usageID int64, sel *schedu
 		IsStream:            stream,
 		RequestBytes:        reqBytes,
 		ResponseBytes:       respBytes,
-	})
-}
-
-func (h *Handler) finalizeUsageEventWithUpstreamBodies(r *http.Request, usageID int64, sel *scheduler.Selection, status int, class string, msg string, latency time.Duration, firstTokenLatencyMS int, stream bool, reqBytes, respBytes int64, downstreamReqBody []byte, upstreamReqBody []byte, upstreamRespBody []byte) {
-	if usageID == 0 || h.usage == nil {
-		return
-	}
-
-	bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	ep := r.URL.Path
-	method := r.Method
-
-	var upstreamChannelID *int64
-	var upstreamEndpointID *int64
-	var upstreamCredID *int64
-	if sel != nil {
-		if sel.ChannelID > 0 {
-			id := sel.ChannelID
-			upstreamChannelID = &id
-		}
-		if sel.EndpointID > 0 {
-			id := sel.EndpointID
-			upstreamEndpointID = &id
-		}
-		if sel.CredentialID > 0 {
-			id := sel.CredentialID
-			upstreamCredID = &id
-		}
-	}
-
-	var classPtr *string
-	if strings.TrimSpace(class) != "" {
-		c := class
-		classPtr = &c
-	}
-
-	if strings.TrimSpace(msg) == "" && status > 0 && (status < 200 || status >= 300) {
-		msg = http.StatusText(status)
-	}
-	var msgPtr *string
-	if strings.TrimSpace(msg) != "" {
-		m := msg
-		msgPtr = &m
-	}
-
-	var downPtr *string
-	if len(downstreamReqBody) > 0 {
-		s := string(downstreamReqBody)
-		downPtr = &s
-	}
-	var reqPtr *string
-	if len(upstreamReqBody) > 0 {
-		s := string(upstreamReqBody)
-		reqPtr = &s
-	}
-	var respPtr *string
-	if len(upstreamRespBody) > 0 {
-		s := string(upstreamRespBody)
-		respPtr = &s
-	}
-
-	_ = h.usage.FinalizeUsageEvent(bookCtx, store.FinalizeUsageEventInput{
-		UsageEventID:          usageID,
-		Endpoint:              ep,
-		Method:                method,
-		StatusCode:            status,
-		LatencyMS:             int(latency.Milliseconds()),
-		FirstTokenLatencyMS:   firstTokenLatencyMS,
-		ErrorClass:            classPtr,
-		ErrorMessage:          msgPtr,
-		UpstreamChannelID:     upstreamChannelID,
-		UpstreamEndpointID:    upstreamEndpointID,
-		UpstreamCredID:        upstreamCredID,
-		IsStream:              stream,
-		RequestBytes:          reqBytes,
-		ResponseBytes:         respBytes,
-		DownstreamRequestBody: downPtr,
-		UpstreamRequestBody:   reqPtr,
-		UpstreamResponseBody:  respPtr,
 	})
 }
 

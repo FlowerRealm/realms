@@ -1297,30 +1297,6 @@ func TestResponses_UsageEvent_RecordsUpstreamErrorMessage(t *testing.T) {
 	if call.ErrorMessage == nil || *call.ErrorMessage != "Unsupported parameter: max_tokens" {
 		t.Fatalf("unexpected usage error_message: %v", call.ErrorMessage)
 	}
-
-	if call.DownstreamRequestBody == nil || strings.TrimSpace(*call.DownstreamRequestBody) == "" {
-		t.Fatalf("expected downstream_request_body to be recorded")
-	}
-	if strings.TrimSpace(*call.DownstreamRequestBody) != `{"model":"m1","input":"hi","max_tokens":123}` {
-		t.Fatalf("unexpected downstream_request_body: %q", *call.DownstreamRequestBody)
-	}
-
-	if call.UpstreamRequestBody == nil || strings.TrimSpace(*call.UpstreamRequestBody) == "" {
-		t.Fatalf("expected upstream_request_body to be recorded")
-	}
-	var forwarded map[string]any
-	if err := json.Unmarshal([]byte(*call.UpstreamRequestBody), &forwarded); err != nil {
-		t.Fatalf("unmarshal upstream_request_body: %v body=%q", err, *call.UpstreamRequestBody)
-	}
-	if v, ok := forwarded["max_tokens"].(float64); !ok || int64(v) != 123 {
-		t.Fatalf("expected max_tokens=123 in upstream_request_body, got=%v", forwarded["max_tokens"])
-	}
-	if _, ok := forwarded["max_output_tokens"]; ok {
-		t.Fatalf("expected max_output_tokens to be absent in upstream_request_body, got=%v", forwarded["max_output_tokens"])
-	}
-	if call.UpstreamResponseBody == nil || !strings.Contains(*call.UpstreamResponseBody, "Unsupported parameter: max_tokens") {
-		t.Fatalf("expected upstream_response_body to be recorded, got=%v", call.UpstreamResponseBody)
-	}
 }
 
 func TestResponses_FailoverCredentialOn402PaymentRequired(t *testing.T) {

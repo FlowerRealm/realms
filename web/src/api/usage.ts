@@ -133,10 +133,6 @@ export async function getUsageTimeSeries(start?: string, end?: string, granulari
 
 export type UsageEventDetail = {
   event_id: number;
-  available: boolean;
-  downstream_request_body?: string;
-  upstream_request_body?: string;
-  upstream_response_body?: string;
   pricing_breakdown?: UsageEventPricingBreakdown;
 };
 

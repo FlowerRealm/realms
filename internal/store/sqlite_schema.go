@@ -29,7 +29,7 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 		if err := ensureSQLiteUpstreamChannelBodyFilterColumns(db); err != nil {
 			return err
 		}
-		if err := ensureSQLiteUsageEventDetailsTable(db); err != nil {
+		if err := ensureSQLiteUsageEventDetailsRemoved(db); err != nil {
 			return err
 		}
 		if err := ensureSQLiteUsageEventsFirstTokenLatencyColumn(db); err != nil {

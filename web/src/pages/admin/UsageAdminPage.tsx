@@ -722,33 +722,9 @@ export function UsageAdminPage() {
                                         </div>
                                       ) : null}
 
-                                      {detailByEventID[e.id]?.available ? (
-                                        <>
-                                          <div className="col-12">
-                                            <div className="text-muted smaller">Downstream Request Body</div>
-                                            <pre className="bg-white border rounded p-2 small mb-0">
-                                              <code>{detailByEventID[e.id]?.downstream_request_body || '(empty)'}</code>
-                                            </pre>
-                                          </div>
-                                          <div className="col-12">
-                                            <div className="text-muted smaller">Upstream Request Body</div>
-                                            <pre className="bg-white border rounded p-2 small mb-0">
-                                              <code>{detailByEventID[e.id]?.upstream_request_body || '(empty)'}</code>
-                                            </pre>
-                                          </div>
-                                          <div className="col-12">
-                                            <div className="text-muted smaller">Upstream Response Body</div>
-                                            <pre className="bg-white border rounded p-2 small mb-0">
-                                              <code>{detailByEventID[e.id]?.upstream_response_body || '(empty)'}</code>
-                                            </pre>
-                                          </div>
-                                        </>
-                                      ) : (
-                                        <div className="col-12 text-muted small">该事件不包含可用的 body 详情。</div>
-                                      )}
                                     </div>
                                   ) : (
-                                    <div className="text-muted small">该事件不包含可用的 body 详情。</div>
+                                    <div className="text-muted small">（展开后自动加载费用计算明细）</div>
                                   )}
                                 </div>
                               </td>

@@ -242,16 +242,6 @@ CREATE INDEX IF NOT EXISTS `idx_usage_events_state_time_upstream_channel` ON `us
 CREATE INDEX IF NOT EXISTS `idx_usage_events_user_id_id` ON `usage_events` (`user_id`, `id`);
 CREATE INDEX IF NOT EXISTS `idx_usage_events_time_id` ON `usage_events` (`time`, `id`);
 
-CREATE TABLE IF NOT EXISTS `usage_event_details` (
-  `usage_event_id` INTEGER PRIMARY KEY,
-  `downstream_request_body` TEXT NULL,
-  `upstream_request_body` TEXT NULL,
-  `upstream_response_body` TEXT NULL,
-  `created_at` DATETIME NOT NULL,
-  `updated_at` DATETIME NOT NULL
-);
-CREATE INDEX IF NOT EXISTS `idx_usage_event_details_updated_at` ON `usage_event_details` (`updated_at`);
-
 CREATE TABLE IF NOT EXISTS `subscription_plans` (
   `id` INTEGER PRIMARY KEY AUTOINCREMENT,
   `code` TEXT NOT NULL,

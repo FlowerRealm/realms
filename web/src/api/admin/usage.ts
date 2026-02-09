@@ -93,10 +93,6 @@ export type AdminUsageTimeSeriesResponse = {
 
 export type UsageEventDetail = {
   event_id: number;
-  available: boolean;
-  downstream_request_body?: string;
-  upstream_request_body?: string;
-  upstream_response_body?: string;
   pricing_breakdown?: UsageEventPricingBreakdown;
 };
 

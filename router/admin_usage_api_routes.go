@@ -529,35 +529,10 @@ func adminUsageEventDetailHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
-		detail, err := opts.Store.GetUsageEventDetail(c.Request.Context(), id)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": usageEventDetailAPIResponse{
-					EventID:          id,
-					Available:        false,
-					PricingBreakdown: &pricingBreakdown,
-				}})
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
-			return
-		}
-
-		resp := usageEventDetailAPIResponse{
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": usageEventDetailAPIResponse{
 			EventID:          id,
-			Available:        true,
 			PricingBreakdown: &pricingBreakdown,
-		}
-		if detail.DownstreamRequestBody != nil {
-			resp.DownstreamRequestBody = *detail.DownstreamRequestBody
-		}
-		if detail.UpstreamRequestBody != nil {
-			resp.UpstreamRequestBody = *detail.UpstreamRequestBody
-		}
-		if detail.UpstreamResponseBody != nil {
-			resp.UpstreamResponseBody = *detail.UpstreamResponseBody
-		}
-		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": resp})
+		}})
 	}
 }
 
