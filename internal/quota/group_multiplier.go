@@ -49,8 +49,7 @@ func loadUserGroupMultiplierSnapshot(ctx context.Context, st *store.Store, userI
 }
 
 func stackedMultiplierForGroups(groupNames []string, byGroup map[string]decimal.Decimal) decimal.Decimal {
-	seen := make(map[string]struct{}, len(groupNames)+1)
-	seen[store.DefaultGroupName] = struct{}{}
+	seen := make(map[string]struct{}, len(groupNames))
 
 	mult := store.DefaultGroupPriceMultiplier
 	for _, raw := range groupNames {

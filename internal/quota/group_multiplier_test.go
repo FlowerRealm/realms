@@ -125,6 +125,80 @@ func TestSubscriptionProviderReserveCommit_UsesOnlyUserGroupMultiplier(t *testin
 	}
 }
 
+func TestHybridProviderReserveCommit_AppliesDefaultGroupMultiplier(t *testing.T) {
+	st := newQuotaTestStore(t)
+	ctx := context.Background()
+
+	userID, tokenID := createQuotaTestUser(t, st, ctx, "carol@example.com", "carol")
+	if _, err := st.AddUserBalanceUSD(ctx, userID, decimal.RequireFromString("10")); err != nil {
+		t.Fatalf("AddUserBalanceUSD: %v", err)
+	}
+
+	defaultGroup, err := st.GetChannelGroupByName(ctx, store.DefaultGroupName)
+	if err != nil {
+		t.Fatalf("GetChannelGroupByName(default): %v", err)
+	}
+	if err := st.UpdateChannelGroup(
+		ctx,
+		defaultGroup.ID,
+		defaultGroup.Description,
+		defaultGroup.Status,
+		decimal.RequireFromString("1.5"),
+		defaultGroup.MaxAttempts,
+	); err != nil {
+		t.Fatalf("UpdateChannelGroup(default): %v", err)
+	}
+
+	modelID := "m-default-mult"
+	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
+		PublicID:            modelID,
+		GroupName:           store.DefaultGroupName,
+		InputUSDPer1M:       decimal.RequireFromString("1"),
+		OutputUSDPer1M:      decimal.Zero,
+		CacheInputUSDPer1M:  decimal.Zero,
+		CacheOutputUSDPer1M: decimal.Zero,
+		Status:              1,
+	}); err != nil {
+		t.Fatalf("CreateManagedModel: %v", err)
+	}
+
+	inTokens := int64(1_000_000)
+	provider := NewHybridProvider(st, time.Minute, true)
+	res, err := provider.Reserve(ctx, ReserveInput{
+		RequestID:   "req_default_mul_1",
+		UserID:      userID,
+		TokenID:     tokenID,
+		Model:       &modelID,
+		InputTokens: &inTokens,
+	})
+	if err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
+	if err := provider.Commit(ctx, CommitInput{
+		UsageEventID: res.UsageEventID,
+		Model:        &modelID,
+		InputTokens:  &inTokens,
+	}); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	ev, err := st.GetUsageEvent(ctx, res.UsageEventID)
+	if err != nil {
+		t.Fatalf("GetUsageEvent: %v", err)
+	}
+	if got, want := ev.CommittedUSD.StringFixed(6), "1.500000"; got != want {
+		t.Fatalf("committed_usd mismatch: got=%s want=%s", got, want)
+	}
+
+	bal, err := st.GetUserBalanceUSD(ctx, userID)
+	if err != nil {
+		t.Fatalf("GetUserBalanceUSD: %v", err)
+	}
+	if got, want := bal.StringFixed(6), "8.500000"; got != want {
+		t.Fatalf("balance mismatch: got=%s want=%s", got, want)
+	}
+}
+
 func newQuotaTestStore(t *testing.T) *store.Store {
 	t.Helper()
 
