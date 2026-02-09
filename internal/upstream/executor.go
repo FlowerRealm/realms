@@ -175,6 +175,13 @@ func (e *Executor) Do(ctx context.Context, sel scheduler.Selection, downstream *
 	return resp, nil
 }
 
+func (e *Executor) SetCodexOAuthAccountCooldown(ctx context.Context, accountID int64, until time.Time) error {
+	if e == nil || e.st == nil || accountID <= 0 || until.IsZero() {
+		return nil
+	}
+	return e.st.SetCodexOAuthAccountCooldown(ctx, accountID, until)
+}
+
 func defaultTransportWithProxy(proxyFn func(*http.Request) (*url.URL, error), dialContext func(ctx context.Context, network, addr string) (net.Conn, error)) *http.Transport {
 	return &http.Transport{
 		Proxy:               proxyFn,

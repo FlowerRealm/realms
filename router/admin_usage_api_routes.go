@@ -51,6 +51,7 @@ type adminUsageEventView struct {
 	Endpoint            string `json:"endpoint"`
 	Method              string `json:"method"`
 	Model               string `json:"model"`
+	Account             string `json:"account"`
 	StatusCode          string `json:"status_code"`
 	LatencyMS           string `json:"latency_ms"`
 	FirstTokenLatencyMS string `json:"first_token_latency_ms"`
@@ -287,13 +288,17 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 		}
 
 		channelNameByID := map[int64]string{}
+		channelTypeByID := map[int64]string{}
 		if channels, err := opts.Store.ListUpstreamChannels(c.Request.Context()); err == nil {
 			channelNameByID = make(map[int64]string, len(channels))
+			channelTypeByID = make(map[int64]string, len(channels))
 			for _, ch := range channels {
 				channelNameByID[ch.ID] = ch.Name
+				channelTypeByID[ch.ID] = ch.Type
 			}
 		}
 
+		codexAccountByCredentialID := make(map[int64]string)
 		eventViews := make([]adminUsageEventView, 0, len(events))
 		for _, row := range events {
 			e := row.Event
@@ -378,10 +383,32 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 			}
 			upstreamChannelID := "-"
 			upstreamChannelName := ""
+			upstreamChannelType := ""
 			if e.UpstreamChannelID != nil && *e.UpstreamChannelID > 0 {
 				upstreamChannelID = strconv.FormatInt(*e.UpstreamChannelID, 10)
 				if name := strings.TrimSpace(channelNameByID[*e.UpstreamChannelID]); name != "" {
 					upstreamChannelName = name
+				}
+				upstreamChannelType = strings.TrimSpace(channelTypeByID[*e.UpstreamChannelID])
+			}
+			account := "-"
+			if upstreamChannelType == store.UpstreamTypeCodexOAuth && e.UpstreamCredID != nil && *e.UpstreamCredID > 0 {
+				credID := *e.UpstreamCredID
+				if v, ok := codexAccountByCredentialID[credID]; ok {
+					account = v
+				} else {
+					resolved := "-"
+					acc, err := opts.Store.GetCodexOAuthAccountByID(c.Request.Context(), credID)
+					if err == nil {
+						if id := strings.TrimSpace(acc.AccountID); id != "" {
+							resolved = id
+						}
+					}
+					codexAccountByCredentialID[credID] = resolved
+					account = resolved
+				}
+				if account != "-" {
+					model = account
 				}
 			}
 			errClass := ""
@@ -416,6 +443,7 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 				Endpoint:            endpoint,
 				Method:              method,
 				Model:               model,
+				Account:             account,
 				StatusCode:          statusCode,
 				LatencyMS:           latencyMS,
 				FirstTokenLatencyMS: firstTokenLatencyMS,

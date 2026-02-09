@@ -15,6 +15,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	openaiapi "realms/internal/api/openai"
+	"realms/internal/codexoauth"
 	"realms/internal/config"
 	"realms/internal/quota"
 	"realms/internal/store"
@@ -399,6 +400,32 @@ func TestQuotaProviderForConfig(t *testing.T) {
 		}
 		if ev.ReservedUSD.String() != "0" {
 			t.Fatalf("reserved_usd mismatch: got %s want %s", ev.ReservedUSD.String(), "0")
+		}
+	})
+}
+
+func TestCodexOAuthRedirectURI(t *testing.T) {
+	t.Run("default_uses_codex_cli_redirect", func(t *testing.T) {
+		got := codexOAuthRedirectURI(":8080")
+		if got != codexoauth.DefaultRedirectURI {
+			t.Fatalf("codexOAuthRedirectURI = %q, want %q", got, codexoauth.DefaultRedirectURI)
+		}
+	})
+
+	t.Run("prefer_realms_env_override", func(t *testing.T) {
+		t.Setenv("REALMS_CODEX_OAUTH_REDIRECT_URI", "https://example.com/auth/callback")
+		got := codexOAuthRedirectURI(":8080")
+		if got != "https://example.com/auth/callback" {
+			t.Fatalf("codexOAuthRedirectURI = %q, want %q", got, "https://example.com/auth/callback")
+		}
+	})
+
+	t.Run("fallback_legacy_env_override", func(t *testing.T) {
+		t.Setenv("REALMS_CODEX_OAUTH_REDIRECT_URI", "")
+		t.Setenv("CODEX_OAUTH_REDIRECT_URI", "http://localhost:8080/auth/callback")
+		got := codexOAuthRedirectURI(":8080")
+		if got != "http://localhost:8080/auth/callback" {
+			t.Fatalf("codexOAuthRedirectURI = %q, want %q", got, "http://localhost:8080/auth/callback")
 		}
 	})
 }

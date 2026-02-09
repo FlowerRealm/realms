@@ -64,6 +64,9 @@ type Result struct {
 	Retriable  bool
 	StatusCode int
 	ErrorClass string
+	// CooldownUntil 用于上层传入精确的冷却截止时间（例如上游返回 resets_at）。
+	// 为空时按调度器默认策略计算。
+	CooldownUntil *time.Time
 }
 
 type Scheduler struct {
@@ -115,7 +118,7 @@ func New(st UpstreamStore) *Scheduler {
 		st:            st,
 		state:         NewState(),
 		affinityTTL:   30 * time.Minute,
-		bindingTTL:    30 * time.Minute,
+		bindingTTL:    1 * time.Hour,
 		rpmWindow:     60 * time.Second,
 		cooldownBase:  30 * time.Second,
 		probeClaimTTL: 30 * time.Second,
@@ -623,7 +626,7 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 		if err != nil {
 			return Selection{}, false, err
 		}
-		var ids []int64
+		var eligible []store.CodexOAuthAccount
 		for _, a := range accs {
 			if a.Status != 1 {
 				continue
@@ -635,20 +638,28 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			if s.state.IsCredentialCooling(key, now) {
 				continue
 			}
-			ids = append(ids, a.ID)
+			eligible = append(eligible, a)
 		}
-		if len(ids) == 0 {
+		if len(eligible) == 0 {
 			return Selection{}, false, nil
 		}
-		sort.SliceStable(ids, func(i, j int) bool {
-			ki := fmt.Sprintf("%s:%d", CredentialTypeCodex, ids[i])
-			kj := fmt.Sprintf("%s:%d", CredentialTypeCodex, ids[j])
+		sort.SliceStable(eligible, func(i, j int) bool {
+			ai := eligible[i]
+			aj := eligible[j]
+			if codexLastUsedBefore(ai.LastUsedAt, aj.LastUsedAt) {
+				return true
+			}
+			if codexLastUsedBefore(aj.LastUsedAt, ai.LastUsedAt) {
+				return false
+			}
+			ki := fmt.Sprintf("%s:%d", CredentialTypeCodex, ai.ID)
+			kj := fmt.Sprintf("%s:%d", CredentialTypeCodex, aj.ID)
 			ri := s.state.RPM(ki, now, s.rpmWindow)
 			rj := s.state.RPM(kj, now, s.rpmWindow)
 			if ri != rj {
 				return ri < rj
 			}
-			return ids[i] > ids[j]
+			return ai.ID > aj.ID
 		})
 		return Selection{
 			ChannelID:              ch.ID,
@@ -675,7 +686,7 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			EndpointID:             ep.ID,
 			BaseURL:                ep.BaseURL,
 			CredentialType:         CredentialTypeCodex,
-			CredentialID:           ids[0],
+			CredentialID:           eligible[0].ID,
 		}, true, nil
 	default:
 		return Selection{}, false, nil
@@ -713,6 +724,7 @@ func (s *Scheduler) Report(sel Selection, res Result) {
 		s.state.RecordCredentialResult(sel.CredentialKey(), true)
 		s.state.ClearChannelBan(sel.ChannelID)
 		s.state.ResetChannelFailScore(sel.ChannelID)
+		s.touchCredentialLastUsed(sel)
 		return
 	}
 	s.state.RecordChannelResult(sel.ChannelID, false)
@@ -722,8 +734,13 @@ func (s *Scheduler) Report(sel Selection, res Result) {
 		if res.StatusCode == http.StatusTooManyRequests {
 			cooldown = s.cooldownBase * 2
 		}
-		s.state.SetCredentialCooling(sel.CredentialKey(), now.Add(cooldown))
-		if sel.AutoBan {
+		cooldownUntil := now.Add(cooldown)
+		if res.CooldownUntil != nil && res.CooldownUntil.After(cooldownUntil) {
+			cooldownUntil = *res.CooldownUntil
+		}
+		s.state.SetCredentialCooling(sel.CredentialKey(), cooldownUntil)
+		// usage_limit_reached 属于账号级耗尽，不应牵连整个 channel。
+		if sel.AutoBan && res.ErrorClass != "upstream_exhausted" {
 			if shouldBanChannelImmediately(res) {
 				s.state.BanChannelImmediate(sel.ChannelID, now, cooldown)
 			} else {
@@ -731,6 +748,35 @@ func (s *Scheduler) Report(sel Selection, res Result) {
 			}
 		}
 	}
+}
+
+func codexLastUsedBefore(a, b *time.Time) bool {
+	if a == nil && b != nil {
+		return true
+	}
+	if a != nil && b == nil {
+		return false
+	}
+	if a == nil && b == nil {
+		return false
+	}
+	return a.Before(*b)
+}
+
+func (s *Scheduler) touchCredentialLastUsed(sel Selection) {
+	if s == nil || s.st == nil || sel.CredentialID <= 0 {
+		return
+	}
+	if sel.CredentialType != CredentialTypeCodex {
+		return
+	}
+	toucher, ok := s.st.(interface {
+		TouchCodexOAuthAccount(ctx context.Context, accountID int64)
+	})
+	if !ok {
+		return
+	}
+	toucher.TouchCodexOAuthAccount(context.Background(), sel.CredentialID)
 }
 
 func shouldBanChannelImmediately(res Result) bool {

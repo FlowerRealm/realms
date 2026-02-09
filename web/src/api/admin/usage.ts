@@ -37,6 +37,7 @@ export type AdminUsageEvent = {
   endpoint: string;
   method: string;
   model: string;
+  account: string;
   status_code: string;
   latency_ms: string;
   first_token_latency_ms: string;

@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"realms/internal/auth"
 	"realms/internal/middleware"
@@ -175,6 +176,34 @@ func (d statusDoer) Do(_ context.Context, _ scheduler.Selection, _ *http.Request
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(bytes.NewReader([]byte(d.body))),
 	}, nil
+}
+
+type codexCooldownDoer struct {
+	calls      []scheduler.Selection
+	cooldowns  []int64
+	cooldownAt []time.Time
+}
+
+func (d *codexCooldownDoer) Do(_ context.Context, sel scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+	d.calls = append(d.calls, sel)
+	if sel.CredentialID == 1002 {
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"The usage limit has been reached","type":"usage_limit_reached","code":"usage_limit_reached","resets_at":2000000000}}`)),
+		}, nil
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"ok-from-openai","usage":{"input_tokens":1,"output_tokens":2}}`)),
+	}, nil
+}
+
+func (d *codexCooldownDoer) SetCodexOAuthAccountCooldown(_ context.Context, accountID int64, until time.Time) error {
+	d.cooldowns = append(d.cooldowns, accountID)
+	d.cooldownAt = append(d.cooldownAt, until)
+	return nil
 }
 
 type fakeStore struct {
@@ -1926,6 +1955,58 @@ func TestResponses_CodexOAuth_UsageLimitFailoverToNextAccount(t *testing.T) {
 	}
 }
 
+func TestResponses_CodexOAuth_UsageLimitSetsPersistentCooldown(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeCodexOAuth, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example/backend-api/codex", Status: 1},
+			},
+		},
+		accounts: map[int64][]store.CodexOAuthAccount{
+			11: {
+				{ID: 1002, EndpointID: 11, Status: 1},
+				{ID: 1001, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeCodexOAuth, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+	sched := scheduler.New(fs)
+	doer := &codexCooldownDoer{}
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, upstream.SSEPumpOptions{})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(doer.cooldowns) != 1 {
+		t.Fatalf("expected one cooldown update, got=%d", len(doer.cooldowns))
+	}
+	if doer.cooldowns[0] != 1002 {
+		t.Fatalf("expected exhausted account 1002 cooldown update, got=%d", doer.cooldowns[0])
+	}
+	wantUnix := int64(2000000000)
+	if got := doer.cooldownAt[0].Unix(); got != wantUnix {
+		t.Fatalf("expected cooldown until unix=%d, got=%d", wantUnix, got)
+	}
+}
+
 func TestResponses_CodexOAuth_UsageLimitNoFallbackReturnsUpstreamUnavailable(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
@@ -2390,5 +2471,75 @@ func TestModels_ReturnsManagedModels(t *testing.T) {
 	}
 	if resp.Object != "list" || len(resp.Data) != 1 || resp.Data[0].ID != "m1" {
 		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestCodexUsageLimitCooldownUntil(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	tests := []struct {
+		name string
+		body string
+		want time.Time
+	}{
+		{
+			name: "resets_at 优先",
+			body: `{"error":{"type":"usage_limit_reached","resets_at":2000000000}}`,
+			want: time.Unix(2_000_000_000, 0),
+		},
+		{
+			name: "resets_in_seconds 回退",
+			body: `{"error":{"type":"usage_limit_reached","resets_in_seconds":120}}`,
+			want: now.Add(120 * time.Second),
+		},
+		{
+			name: "无重置信息使用默认5分钟",
+			body: `{"error":{"type":"usage_limit_reached"}}`,
+			want: now.Add(5 * time.Minute),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := codexUsageLimitCooldownUntil(now, []byte(tc.body))
+			if got.Unix() != tc.want.Unix() {
+				t.Fatalf("unexpected cooldown until: got=%v want=%v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestExtractRouteKeyFromPayload_MetadataSessionUserID(t *testing.T) {
+	payload := map[string]any{
+		"metadata": map[string]any{
+			"user_id": "user_x_account_y_session_550e8400-e29b-41d4-a716-446655440000",
+		},
+	}
+	got := extractRouteKeyFromPayload(payload)
+	want := "550e8400-e29b-41d4-a716-446655440000"
+	if got != want {
+		t.Fatalf("unexpected route key: got=%q want=%q", got, want)
+	}
+}
+
+func TestDeriveRouteKeyFromConversationPayload_FallbackHash(t *testing.T) {
+	payload := map[string]any{
+		"messages": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{"type": "text", "text": "hello"},
+				},
+			},
+		},
+	}
+	got := normalizeRouteKey(deriveRouteKeyFromConversationPayload(payload))
+	if got == "" {
+		t.Fatalf("expected non-empty fallback route key")
+	}
+	if len(got) != 32 {
+		t.Fatalf("expected 32 hex fallback hash, got=%q", got)
+	}
+	again := normalizeRouteKey(deriveRouteKeyFromConversationPayload(payload))
+	if got != again {
+		t.Fatalf("expected stable fallback hash, first=%q second=%q", got, again)
 	}
 }

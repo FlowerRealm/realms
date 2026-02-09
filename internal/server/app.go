@@ -261,7 +261,14 @@ func localhostBaseURLFromAddr(addr string) string {
 }
 
 func codexOAuthRedirectURI(addr string) string {
-	return localhostBaseURLFromAddr(addr) + "/auth/callback"
+	if v := strings.TrimSpace(os.Getenv("REALMS_CODEX_OAUTH_REDIRECT_URI")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("CODEX_OAUTH_REDIRECT_URI")); v != "" {
+		return v
+	}
+	_ = addr
+	return codexoauth.DefaultRedirectURI
 }
 
 func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {

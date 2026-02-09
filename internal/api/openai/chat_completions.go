@@ -217,6 +217,9 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 	if routeKey == "" {
 		routeKey = extractRouteKey(r)
 	}
+	if routeKey == "" {
+		routeKey = normalizeRouteKey(deriveRouteKeyFromConversationPayload(payload))
+	}
 	routeKeyHash := h.sched.RouteKeyHash(routeKey)
 
 	usageID := int64(0)

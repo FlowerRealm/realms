@@ -15,8 +15,9 @@ const (
 	DefaultClientID     = "app_EMoamEEZ73f0CkXaXp7hrann"
 	DefaultAuthorizeURL = "https://auth.openai.com/oauth/authorize"
 	DefaultTokenURL     = "https://auth.openai.com/oauth/token"
+	DefaultRedirectURI  = "http://localhost:1455/auth/callback"
 	DefaultScope        = "openid email profile offline_access"
-	DefaultPrompt       = "login"
+	DefaultPrompt       = ""
 )
 
 func DefaultConfig(redirectURI string) Config {

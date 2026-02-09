@@ -27,6 +27,7 @@ const (
 
 	ErrIDTokenParseFailed ErrorCode = "id_token_parse_failed"
 	ErrMissingAccountID   ErrorCode = "missing_account_id"
+	ErrPlusRequired       ErrorCode = "plus_required"
 	ErrStoreFailed        ErrorCode = "store_failed"
 
 	ErrCallbackServerPortInUse   ErrorCode = "callback_server_port_in_use"
@@ -138,6 +139,8 @@ func UserMessage(err error) string {
 		return "刷新 token 失败，请稍后重试"
 	case ErrIDTokenParseFailed, ErrMissingAccountID:
 		return "OAuth 回调失败：解析账号信息失败，请重试"
+	case ErrPlusRequired:
+		return "OAuth 回调失败：该账号不是 Plus/Pro 或订阅已失效"
 	case ErrStoreFailed:
 		return "OAuth 回调失败：保存失败，请重试"
 	case ErrCallbackServerPortInUse:

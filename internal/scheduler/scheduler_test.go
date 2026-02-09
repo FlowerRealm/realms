@@ -18,6 +18,7 @@ type fakeStore struct {
 	creds          map[int64][]store.OpenAICompatibleCredential
 	anthropicCreds map[int64][]store.AnthropicCredential
 	accounts       map[int64][]store.CodexOAuthAccount
+	touchedCodex   []int64
 }
 
 type fakeBindingStore struct {
@@ -87,6 +88,10 @@ func (f *fakeStore) ListAnthropicCredentialsByEndpoint(_ context.Context, endpoi
 
 func (f *fakeStore) ListCodexOAuthAccountsByEndpoint(_ context.Context, endpointID int64) ([]store.CodexOAuthAccount, error) {
 	return f.accounts[endpointID], nil
+}
+
+func (f *fakeStore) TouchCodexOAuthAccount(_ context.Context, accountID int64) {
+	f.touchedCodex = append(f.touchedCodex, accountID)
 }
 
 func TestSelect_PromotionBeatsPriority(t *testing.T) {
@@ -565,6 +570,40 @@ func TestReport_Cooldown429LongerThanDefault(t *testing.T) {
 	}
 }
 
+func TestReport_UpstreamExhaustedUsesOverrideAndSkipsChannelBan(t *testing.T) {
+	s := New(&fakeStore{})
+	s.cooldownBase = 200 * time.Millisecond
+
+	sel := Selection{
+		ChannelID:      7,
+		CredentialType: CredentialTypeCodex,
+		CredentialID:   99,
+		AutoBan:        true,
+	}
+	overrideUntil := time.Now().Add(3 * time.Minute)
+	s.Report(sel, Result{
+		Success:       false,
+		Retriable:     true,
+		StatusCode:    http.StatusTooManyRequests,
+		ErrorClass:    "upstream_exhausted",
+		CooldownUntil: &overrideUntil,
+	})
+
+	s.state.mu.Lock()
+	cooldownUntil, ok := s.state.credentialCooldown[sel.CredentialKey()]
+	_, banned := s.state.channelBanUntil[sel.ChannelID]
+	s.state.mu.Unlock()
+	if !ok {
+		t.Fatalf("expected credential cooldown to be set")
+	}
+	if cooldownUntil.Before(overrideUntil.Add(-50 * time.Millisecond)) {
+		t.Fatalf("expected cooldown override >= %v, got=%v", overrideUntil, cooldownUntil)
+	}
+	if banned {
+		t.Fatalf("expected channel ban to be skipped for upstream_exhausted")
+	}
+}
+
 func TestSelectWithConstraints_ChannelType(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
@@ -597,6 +636,39 @@ func TestSelectWithConstraints_ChannelType(t *testing.T) {
 	}
 	if sel.ChannelType != store.UpstreamTypeCodexOAuth || sel.ChannelID != 2 || sel.CredentialType != CredentialTypeCodex {
 		t.Fatalf("unexpected selection: %+v", sel)
+	}
+}
+
+func TestSelectWithConstraints_CodexPrefersLeastRecentlyUsed(t *testing.T) {
+	recent := time.Now().Add(-1 * time.Minute)
+	older := time.Now().Add(-1 * time.Hour)
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 2, Type: store.UpstreamTypeCodexOAuth, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			2: {
+				{ID: 21, ChannelID: 2, BaseURL: "https://b.example", Status: 1},
+			},
+		},
+		accounts: map[int64][]store.CodexOAuthAccount{
+			21: {
+				{ID: 211, EndpointID: 21, Status: 1, LastUsedAt: &recent},
+				{ID: 212, EndpointID: 21, Status: 1, LastUsedAt: &older},
+				{ID: 213, EndpointID: 21, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+	sel, err := s.SelectWithConstraints(context.Background(), 10, "", Constraints{RequireChannelType: store.UpstreamTypeCodexOAuth})
+	if err != nil {
+		t.Fatalf("SelectWithConstraints err: %v", err)
+	}
+	if sel.CredentialType != CredentialTypeCodex {
+		t.Fatalf("expected codex credential type, got=%+v", sel)
+	}
+	if sel.CredentialID != 213 {
+		t.Fatalf("expected never-used codex account first, got=%d", sel.CredentialID)
 	}
 }
 
@@ -886,6 +958,21 @@ func TestSelectWithConstraints_BindingMismatchIgnored(t *testing.T) {
 	}
 	if sel.ChannelType != store.UpstreamTypeCodexOAuth {
 		t.Fatalf("expected codex selection, got=%+v", sel)
+	}
+}
+
+func TestReport_CodexSuccessTouchesLastUsed(t *testing.T) {
+	fs := &fakeStore{}
+	s := New(fs)
+	sel := Selection{
+		ChannelID:      2,
+		ChannelType:    store.UpstreamTypeCodexOAuth,
+		CredentialType: CredentialTypeCodex,
+		CredentialID:   211,
+	}
+	s.Report(sel, Result{Success: true})
+	if len(fs.touchedCodex) != 1 || fs.touchedCodex[0] != 211 {
+		t.Fatalf("expected touched codex account 211, got=%v", fs.touchedCodex)
 	}
 }
 

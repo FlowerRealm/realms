@@ -4,9 +4,9 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,6 +32,8 @@ var codexAutoSessionCache = struct {
 }{
 	data: make(map[string]codexAutoSessionEntry),
 }
+
+var metadataSessionIDRegex = regexp.MustCompile(`(?i)session_([a-f0-9-]{36})`)
 
 func completeCodexSessionIdentifiers(payload map[string]any, r *http.Request, p auth.Principal) (bool, string, bool) {
 	if payload == nil || r == nil || !isCodexResponsesPayload(payload) {
@@ -69,54 +71,223 @@ func completeCodexSessionIdentifiers(payload map[string]any, r *http.Request, p 
 	return changed, sessionID, generated
 }
 
-func (h *Handler) touchBindingFromPromptCacheKey(userID int64, sel scheduler.Selection, promptCacheKey string) {
+func (h *Handler) touchBindingFromRouteKey(userID int64, sel scheduler.Selection, routeKey string) {
 	if h == nil || h.sched == nil || userID <= 0 {
 		return
 	}
-	normalized := normalizeCodexSessionID(promptCacheKey)
+	normalized := normalizeCodexSessionID(routeKey)
 	if normalized == "" {
 		return
 	}
 	h.sched.TouchBinding(userID, h.sched.RouteKeyHash(normalized), sel)
 }
 
+func (h *Handler) touchBindingFromPromptCacheKey(userID int64, sel scheduler.Selection, promptCacheKey string) {
+	h.touchBindingFromRouteKey(userID, sel, promptCacheKey)
+}
+
 func extractPromptCacheKeyFromRawBody(body []byte) string {
-	if len(body) == 0 {
-		return ""
-	}
-	var payload any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return ""
-	}
-	return extractPromptCacheKey(payload)
+	return extractRouteKeyFromRawBody(body)
+}
+
+func extractRouteKeyFromStructuredData(v any) string {
+	return extractRouteKeyFromStructuredDataDepth(v, 8)
 }
 
 func extractPromptCacheKey(v any) string {
-	return extractPromptCacheKeyDepth(v, 8)
+	return extractRouteKeyFromStructuredData(v)
 }
 
-func extractPromptCacheKeyDepth(v any, depth int) string {
+func extractRouteKeyFromStructuredDataDepth(v any, depth int) string {
 	if depth <= 0 || v == nil {
 		return ""
 	}
 	switch vv := v.(type) {
 	case map[string]any:
-		if s := normalizeCodexSessionID(stringFromAny(vv["prompt_cache_key"])); s != "" {
-			return s
+		for _, key := range []string{"prompt_cache_key", "session_id", "conversation_id", "previous_response_id"} {
+			if s := normalizeCodexSessionID(stringFromAny(vv[key])); s != "" {
+				return s
+			}
 		}
 		for _, child := range vv {
-			if s := extractPromptCacheKeyDepth(child, depth-1); s != "" {
+			if s := extractRouteKeyFromStructuredDataDepth(child, depth-1); s != "" {
 				return s
 			}
 		}
 	case []any:
 		for _, child := range vv {
-			if s := extractPromptCacheKeyDepth(child, depth-1); s != "" {
+			if s := extractRouteKeyFromStructuredDataDepth(child, depth-1); s != "" {
 				return s
 			}
 		}
 	}
 	return ""
+}
+
+func extractSessionIDFromMetadataUserID(payload map[string]any) string {
+	if payload == nil {
+		return ""
+	}
+	metaAny, ok := payload["metadata"]
+	if !ok {
+		return ""
+	}
+	meta, ok := metaAny.(map[string]any)
+	if !ok {
+		return ""
+	}
+	userID := strings.TrimSpace(stringFromAny(meta["user_id"]))
+	if userID == "" {
+		return ""
+	}
+	if match := metadataSessionIDRegex.FindStringSubmatch(userID); len(match) > 1 {
+		return strings.ToLower(strings.TrimSpace(match[1]))
+	}
+	return ""
+}
+
+func deriveRouteKeyFromConversationPayload(payload map[string]any) string {
+	if payload == nil {
+		return ""
+	}
+	if cacheable := extractCacheableConversationText(payload); cacheable != "" {
+		return routeKeyHashFromText(cacheable)
+	}
+
+	var combined strings.Builder
+	if systemText := extractSystemText(payload["system"]); systemText != "" {
+		_, _ = combined.WriteString(systemText)
+	}
+	if messages, ok := payload["messages"].([]any); ok {
+		for _, message := range messages {
+			if msg, ok := message.(map[string]any); ok {
+				if text := extractTextContent(msg["content"]); text != "" {
+					_, _ = combined.WriteString(text)
+				}
+			}
+		}
+	}
+	if inputs, ok := payload["input"].([]any); ok {
+		for _, item := range inputs {
+			if msg, ok := item.(map[string]any); ok {
+				if text := extractTextContent(msg["content"]); text != "" {
+					_, _ = combined.WriteString(text)
+				}
+			}
+		}
+	}
+	if combined.Len() == 0 {
+		return ""
+	}
+	return routeKeyHashFromText(combined.String())
+}
+
+func extractCacheableConversationText(payload map[string]any) string {
+	if payload == nil {
+		return ""
+	}
+	var systemCacheable strings.Builder
+	if parts, ok := payload["system"].([]any); ok {
+		for _, part := range parts {
+			partMap, ok := part.(map[string]any)
+			if !ok {
+				continue
+			}
+			cc, ok := partMap["cache_control"].(map[string]any)
+			if !ok || !strings.EqualFold(stringFromAny(cc["type"]), "ephemeral") {
+				continue
+			}
+			if text := strings.TrimSpace(stringFromAny(partMap["text"])); text != "" {
+				_, _ = systemCacheable.WriteString(text)
+			}
+		}
+	}
+
+	for _, field := range []string{"messages", "input"} {
+		items, ok := payload[field].([]any)
+		if !ok {
+			continue
+		}
+		for _, item := range items {
+			msg, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			content, ok := msg["content"].([]any)
+			if !ok {
+				continue
+			}
+			for _, part := range content {
+				partMap, ok := part.(map[string]any)
+				if !ok {
+					continue
+				}
+				cc, ok := partMap["cache_control"].(map[string]any)
+				if !ok || !strings.EqualFold(stringFromAny(cc["type"]), "ephemeral") {
+					continue
+				}
+				return extractTextContent(msg["content"])
+			}
+		}
+	}
+
+	return systemCacheable.String()
+}
+
+func extractSystemText(system any) string {
+	switch value := system.(type) {
+	case string:
+		return strings.TrimSpace(value)
+	case []any:
+		var parts []string
+		for _, item := range value {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if text := strings.TrimSpace(stringFromAny(m["text"])); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, "")
+	default:
+		return ""
+	}
+}
+
+func extractTextContent(content any) string {
+	switch value := content.(type) {
+	case string:
+		return strings.TrimSpace(value)
+	case []any:
+		var parts []string
+		for _, item := range value {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			contentType := strings.ToLower(strings.TrimSpace(stringFromAny(m["type"])))
+			if contentType != "" && contentType != "text" && contentType != "input_text" {
+				continue
+			}
+			if text := strings.TrimSpace(stringFromAny(m["text"])); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, "")
+	default:
+		return ""
+	}
+}
+
+func routeKeyHashFromText(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(content))
+	// 对齐 sub2api：使用前 16 字节（32 hex）作为会话键。
+	return hex.EncodeToString(sum[:16])
 }
 
 func isCodexResponsesPayload(payload map[string]any) bool {

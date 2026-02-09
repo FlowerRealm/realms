@@ -71,7 +71,7 @@ func TestClientBuildAuthorizeURL(t *testing.T) {
 
 func TestParseIDTokenClaims(t *testing.T) {
 	t.Run("nested_openai_auth", func(t *testing.T) {
-		payload := `{"email":"user@example.com","https://api.openai.com/auth":{"chatgpt_account_id":"user-123","chatgpt_plan_type":"plus","chatgpt_subscription_active_start":1700000000,"chatgpt_subscription_active_until":1700000100}}`
+		payload := `{"email":"user@example.com","https://api.openai.com/auth":{"chatgpt_account_id":"user-123","chatgpt_user_id":"chatgpt-user-1","user_id":"uid-1","chatgpt_plan_type":"plus","chatgpt_subscription_active_start":1700000000,"chatgpt_subscription_active_until":4102444800,"organizations":[{"id":"org_default","is_default":true},{"id":"org_other","is_default":false}]}}`
 		token := "e30." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".sig"
 
 		claims, err := ParseIDTokenClaims(token)
@@ -87,16 +87,25 @@ func TestParseIDTokenClaims(t *testing.T) {
 		if claims.PlanType != "plus" {
 			t.Fatalf("PlanType = %q, want %q", claims.PlanType, "plus")
 		}
+		if claims.ChatgptUserID != "chatgpt-user-1" {
+			t.Fatalf("ChatgptUserID = %q, want %q", claims.ChatgptUserID, "chatgpt-user-1")
+		}
+		if claims.UserID != "uid-1" {
+			t.Fatalf("UserID = %q, want %q", claims.UserID, "uid-1")
+		}
+		if claims.OrganizationID != "org_default" {
+			t.Fatalf("OrganizationID = %q, want %q", claims.OrganizationID, "org_default")
+		}
 		if got, ok := claims.SubscriptionActiveStart.(float64); !ok || got != 1700000000 {
 			t.Fatalf("SubscriptionActiveStart = (%T)%v, want float64(%v)", claims.SubscriptionActiveStart, claims.SubscriptionActiveStart, 1700000000)
 		}
-		if got, ok := claims.SubscriptionActiveUntil.(float64); !ok || got != 1700000100 {
-			t.Fatalf("SubscriptionActiveUntil = (%T)%v, want float64(%v)", claims.SubscriptionActiveUntil, claims.SubscriptionActiveUntil, 1700000100)
+		if got, ok := claims.SubscriptionActiveUntil.(float64); !ok || got != 4102444800 {
+			t.Fatalf("SubscriptionActiveUntil = (%T)%v, want float64(%v)", claims.SubscriptionActiveUntil, claims.SubscriptionActiveUntil, 4102444800)
 		}
 	})
 
 	t.Run("fallback_top_level", func(t *testing.T) {
-		payload := `{"email":"u@x.com","chatgpt_account_id":"user-abc","plan_type":"pro"}`
+		payload := `{"email":"u@x.com","chatgpt_account_id":"user-abc","chatgpt_user_id":"chat-user-top","user_id":"uid-top","plan_type":"pro","organizations":[{"id":"org_1","is_default":false},{"id":"org_2","is_default":false}],"chatgpt_subscription_active_until":"4102444800"}`
 		token := "e30." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".sig"
 
 		claims, err := ParseIDTokenClaims(token)
@@ -111,6 +120,69 @@ func TestParseIDTokenClaims(t *testing.T) {
 		}
 		if claims.PlanType != "pro" {
 			t.Fatalf("PlanType = %q, want %q", claims.PlanType, "pro")
+		}
+		if claims.ChatgptUserID != "chat-user-top" {
+			t.Fatalf("ChatgptUserID = %q, want %q", claims.ChatgptUserID, "chat-user-top")
+		}
+		if claims.UserID != "uid-top" {
+			t.Fatalf("UserID = %q, want %q", claims.UserID, "uid-top")
+		}
+		if claims.OrganizationID != "org_1" {
+			t.Fatalf("OrganizationID = %q, want %q", claims.OrganizationID, "org_1")
+		}
+	})
+}
+
+func TestIDTokenClaimsHasActivePlusSubscription(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+
+	t.Run("plus_active", func(t *testing.T) {
+		claims := &IDTokenClaims{
+			PlanType:                "plus",
+			SubscriptionActiveUntil: float64(4102444800),
+		}
+		if !claims.HasActivePlusSubscription(now) {
+			t.Fatalf("expected plus account to be active")
+		}
+	})
+
+	t.Run("pro_active", func(t *testing.T) {
+		claims := &IDTokenClaims{
+			PlanType:                "pro",
+			SubscriptionActiveUntil: "4102444800",
+		}
+		if !claims.HasActivePlusSubscription(now) {
+			t.Fatalf("expected pro account to be active")
+		}
+	})
+
+	t.Run("free_plan", func(t *testing.T) {
+		claims := &IDTokenClaims{
+			PlanType:                "free",
+			SubscriptionActiveUntil: float64(4102444800),
+		}
+		if !claims.HasActivePlusSubscription(now) {
+			t.Fatalf("expected free plan to be accepted")
+		}
+	})
+
+	t.Run("team_plan", func(t *testing.T) {
+		claims := &IDTokenClaims{
+			PlanType:                "team",
+			SubscriptionActiveUntil: float64(4102444800),
+		}
+		if !claims.HasActivePlusSubscription(now) {
+			t.Fatalf("expected team plan to be accepted")
+		}
+	})
+
+	t.Run("expired_subscription", func(t *testing.T) {
+		claims := &IDTokenClaims{
+			PlanType:                "plus",
+			SubscriptionActiveUntil: float64(1600000000),
+		}
+		if claims.HasActivePlusSubscription(now) {
+			t.Fatalf("expected expired subscription to be rejected")
 		}
 	})
 }

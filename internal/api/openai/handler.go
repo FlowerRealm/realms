@@ -55,6 +55,10 @@ type Doer interface {
 	Do(ctx context.Context, sel scheduler.Selection, downstream *http.Request, body []byte) (*http.Response, error)
 }
 
+type CodexCooldownSetter interface {
+	SetCodexOAuthAccountCooldown(ctx context.Context, accountID int64, until time.Time) error
+}
+
 type AuditSink interface {
 	InsertAuditEvent(ctx context.Context, in store.AuditEventInput) error
 }
@@ -345,6 +349,12 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		routeKeySource = "generated"
 	}
 	if routeKey == "" {
+		routeKey = normalizeRouteKey(deriveRouteKeyFromConversationPayload(payload))
+		if routeKey != "" {
+			routeKeySource = "derived"
+		}
+	}
+	if routeKey == "" {
 		routeKeySource = "missing"
 	}
 	w.Header().Set("X-Realms-Route-Key-Source", routeKeySource)
@@ -476,11 +486,21 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		retriableByCodexExhausted := isCodexUsageLimitReached(sel, resp.StatusCode, bodyBytes)
 		retriable := isRetriableStatus(resp.StatusCode) || retriableByCodexExhausted
 		errorClass := "upstream_status"
+		var cooldownUntil *time.Time
 		if retriableByCodexExhausted {
 			errorClass = "upstream_exhausted"
+			until := codexUsageLimitCooldownUntil(time.Now(), bodyBytes)
+			cooldownUntil = &until
+			h.setCodexCredentialCooldown(r.Context(), sel, until)
 		}
 		if retriable {
-			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: true, StatusCode: resp.StatusCode, ErrorClass: errorClass})
+			h.sched.Report(sel, scheduler.Result{
+				Success:       false,
+				Retriable:     true,
+				StatusCode:    resp.StatusCode,
+				ErrorClass:    errorClass,
+				CooldownUntil: cooldownUntil,
+			})
 			h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, errorClass, time.Since(attemptStart))
 			return proxyAttemptFailover
 		}
@@ -520,8 +540,8 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			seen      bool
 		}
 		var (
-			acc                    usageAcc
-			responsePromptCacheKey string
+			acc              usageAcc
+			responseRouteKey string
 		)
 
 		cw := &countingResponseWriter{ResponseWriter: w}
@@ -543,10 +563,10 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 				}
 				// 避免对每个 delta 事件反复 JSON 解析：仅在疑似包含 usage 时尝试。
 				if !strings.Contains(data, "usage") && !strings.Contains(data, "input_tokens") && !strings.Contains(data, "prompt_tokens") {
-					if responsePromptCacheKey == "" && strings.Contains(data, "prompt_cache_key") {
+					if responseRouteKey == "" {
 						var evt any
 						if err := json.Unmarshal([]byte(data), &evt); err == nil {
-							responsePromptCacheKey = extractPromptCacheKey(evt)
+							responseRouteKey = extractRouteKeyFromStructuredData(evt)
 						}
 					}
 					return
@@ -555,8 +575,8 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 				if err := json.Unmarshal([]byte(data), &evt); err != nil {
 					return
 				}
-				if responsePromptCacheKey == "" {
-					responsePromptCacheKey = extractPromptCacheKey(evt)
+				if responseRouteKey == "" {
+					responseRouteKey = extractRouteKeyFromStructuredData(evt)
 				}
 				usage := findUsageMap(evt, 10)
 				if usage == nil {
@@ -586,7 +606,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		}
 
 		pumpRes, _ := upstream.PumpSSE(r.Context(), cw, resp.Body, h.sseOpts, hooks)
-		h.touchBindingFromPromptCacheKey(p.UserID, sel, responsePromptCacheKey)
+		h.touchBindingFromRouteKey(p.UserID, sel, responseRouteKey)
 
 		if usageID != 0 && h.quota != nil {
 			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -641,7 +661,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, 0, "read_upstream", time.Since(attemptStart))
 		return proxyAttemptRetrySameSelection
 	}
-	h.touchBindingFromPromptCacheKey(p.UserID, sel, extractPromptCacheKeyFromRawBody(bodyBytes))
+	h.touchBindingFromRouteKey(p.UserID, sel, extractRouteKeyFromRawBody(bodyBytes))
 	copyResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	respBytes, _ := w.Write(bodyBytes)
@@ -941,6 +961,77 @@ func isCodexUsageLimitReached(sel scheduler.Selection, statusCode int, body []by
 	return strings.EqualFold(strings.TrimSpace(code), "usage_limit_reached")
 }
 
+func codexUsageLimitCooldownUntil(now time.Time, body []byte) time.Time {
+	if resetAt := parseCodexUsageLimitResetAt(now, body); resetAt != nil && resetAt.After(now) {
+		return *resetAt
+	}
+	return now.Add(5 * time.Minute)
+}
+
+func parseCodexUsageLimitResetAt(now time.Time, body []byte) *time.Time {
+	if len(body) == 0 {
+		return nil
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil
+	}
+	errObj, ok := parsed["error"].(map[string]any)
+	if !ok || errObj == nil {
+		return nil
+	}
+	typ := strings.TrimSpace(stringFromAny(errObj["type"]))
+	code := strings.TrimSpace(stringFromAny(errObj["code"]))
+	if !strings.EqualFold(typ, "usage_limit_reached") &&
+		!strings.EqualFold(code, "usage_limit_reached") &&
+		!strings.EqualFold(typ, "rate_limit_exceeded") &&
+		!strings.EqualFold(code, "rate_limit_exceeded") {
+		return nil
+	}
+	if ts, ok := int64FromJSONScalar(errObj["resets_at"]); ok && ts > 0 {
+		t := time.Unix(ts, 0)
+		return &t
+	}
+	if sec, ok := int64FromJSONScalar(errObj["resets_in_seconds"]); ok && sec > 0 {
+		t := now.Add(time.Duration(sec) * time.Second)
+		return &t
+	}
+	return nil
+}
+
+func int64FromJSONScalar(v any) (int64, bool) {
+	switch x := v.(type) {
+	case float64:
+		return int64(x), true
+	case int64:
+		return x, true
+	case int:
+		return int64(x), true
+	case json.Number:
+		n, err := x.Int64()
+		return n, err == nil
+	case string:
+		n, err := strconv.ParseInt(strings.TrimSpace(x), 10, 64)
+		return n, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func (h *Handler) setCodexCredentialCooldown(ctx context.Context, sel scheduler.Selection, until time.Time) {
+	if h == nil || h.exec == nil {
+		return
+	}
+	if sel.CredentialType != scheduler.CredentialTypeCodex || sel.CredentialID <= 0 || until.IsZero() {
+		return
+	}
+	setter, ok := h.exec.(CodexCooldownSetter)
+	if !ok {
+		return
+	}
+	_ = setter.SetCodexOAuthAccountCooldown(ctx, sel.CredentialID, until)
+}
+
 func extractUpstreamErrorCodeAndType(body []byte) (string, string) {
 	if len(body) == 0 {
 		return "", ""
@@ -1085,6 +1176,9 @@ func extractRouteKeyFromPayload(payload map[string]any) string {
 	if payload == nil {
 		return ""
 	}
+	if sessionID := extractSessionIDFromMetadataUserID(payload); sessionID != "" {
+		return sessionID
+	}
 	for _, key := range []string{
 		"prompt_cache_key",
 		"session_id",
@@ -1097,20 +1191,18 @@ func extractRouteKeyFromPayload(payload map[string]any) string {
 	}
 
 	metaAny, ok := payload["metadata"]
-	if !ok {
-		return ""
-	}
-	meta, ok := metaAny.(map[string]any)
-	if !ok {
-		return ""
-	}
-	for _, key := range []string{
-		"prompt_cache_key",
-		"session_id",
-		"conversation_id",
-	} {
-		if s := normalizeRouteKey(meta[key]); s != "" {
-			return s
+	if ok {
+		meta, ok := metaAny.(map[string]any)
+		if ok {
+			for _, key := range []string{
+				"prompt_cache_key",
+				"session_id",
+				"conversation_id",
+			} {
+				if s := normalizeRouteKey(meta[key]); s != "" {
+					return s
+				}
+			}
 		}
 	}
 	return ""

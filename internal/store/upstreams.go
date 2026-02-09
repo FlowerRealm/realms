@@ -936,6 +936,10 @@ func (s *Store) TouchOpenAICompatibleCredential(ctx context.Context, credentialI
 	_, _ = s.db.ExecContext(ctx, `UPDATE openai_compatible_credentials SET last_used_at=CURRENT_TIMESTAMP, updated_at=updated_at WHERE id=?`, credentialID)
 }
 
+func (s *Store) TouchCodexOAuthAccount(ctx context.Context, accountID int64) {
+	_, _ = s.db.ExecContext(ctx, `UPDATE codex_oauth_accounts SET last_used_at=CURRENT_TIMESTAMP, updated_at=updated_at WHERE id=?`, accountID)
+}
+
 func (s *Store) CreateCodexOAuthPending(ctx context.Context, state string, endpointID, actorUserID int64, codeVerifier string, createdAt time.Time) error {
 	if strings.TrimSpace(state) == "" {
 		return fmt.Errorf("state 不能为空")
