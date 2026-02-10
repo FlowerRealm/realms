@@ -22,6 +22,7 @@ export function SubscriptionEditPage() {
 
   const [name, setName] = useState('');
   const [groupName, setGroupName] = useState('default');
+  const [priceMultiplier, setPriceMultiplier] = useState('1');
   const [priceCNY, setPriceCNY] = useState('');
   const [durationDays, setDurationDays] = useState('30');
   const [status, setStatus] = useState(1);
@@ -45,6 +46,7 @@ export function SubscriptionEditPage() {
       if (p) {
         setName(p.name || '');
         setGroupName(p.group_name || 'default');
+        setPriceMultiplier(p.price_multiplier || '1');
         setPriceCNY(p.price_cny || '');
         setDurationDays(String(p.duration_days || 30));
         setStatus(p.status || 0);
@@ -106,6 +108,7 @@ export function SubscriptionEditPage() {
                   const res = await updateAdminSubscriptionPlan(plan.id, {
                     name: name.trim(),
                     group_name: groupName,
+                    price_multiplier: priceMultiplier.trim() || undefined,
                     price_cny: priceCNY.trim(),
                     duration_days: Number.parseInt(durationDays, 10) || 30,
                     status,
@@ -137,7 +140,7 @@ export function SubscriptionEditPage() {
                   </select>
                 </div>
 
-                <div className="col-md-6">
+                <div className="col-md-4">
                   <label className="form-label">组</label>
                   <select className="form-select" value={groupName} onChange={(e) => setGroupName(e.target.value)}>
                     {groups.map((g) => (
@@ -148,7 +151,15 @@ export function SubscriptionEditPage() {
                     ))}
                   </select>
                 </div>
-                <div className="col-md-6">
+                <div className="col-md-4">
+                  <label className="form-label">订阅倍率</label>
+                  <div className="input-group">
+                    <span className="input-group-text">×</span>
+                    <input className="form-control" value={priceMultiplier} onChange={(e) => setPriceMultiplier(e.target.value)} inputMode="decimal" placeholder="1" />
+                  </div>
+                  <div className="form-text small text-muted">最终计费倍率 = 订阅倍率 × 最终成功分组倍率。</div>
+                </div>
+                <div className="col-md-4">
                   <label className="form-label">价格（CNY）</label>
                   <div className="input-group">
                     <span className="input-group-text">¥</span>

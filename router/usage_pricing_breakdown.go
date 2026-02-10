@@ -11,11 +11,6 @@ import (
 	"realms/internal/store"
 )
 
-type usageEventGroupMultiplierAPI struct {
-	GroupName  string          `json:"group_name"`
-	Multiplier decimal.Decimal `json:"multiplier"`
-}
-
 type usageEventPricingBreakdownAPI struct {
 	CostSource    string          `json:"cost_source"`
 	CostSourceUSD decimal.Decimal `json:"cost_source_usd"`
@@ -42,11 +37,10 @@ type usageEventPricingBreakdownAPI struct {
 	CacheOutputCostUSD decimal.Decimal `json:"cache_output_cost_usd"`
 	BaseCostUSD        decimal.Decimal `json:"base_cost_usd"`
 
-	UserGroups          []string                       `json:"user_groups"`
-	UserGroupFactors    []usageEventGroupMultiplierAPI `json:"user_group_factors"`
-	UserMultiplier      decimal.Decimal                `json:"user_multiplier"`
-	SubscriptionGroup   string                         `json:"subscription_group,omitempty"`
-	EffectiveMultiplier decimal.Decimal                `json:"effective_multiplier"`
+	PaymentMultiplier   decimal.Decimal `json:"payment_multiplier"`
+	GroupName           string          `json:"group_name"`
+	GroupMultiplier     decimal.Decimal `json:"group_multiplier"`
+	EffectiveMultiplier decimal.Decimal `json:"effective_multiplier"`
 
 	FinalCostUSD      decimal.Decimal `json:"final_cost_usd"`
 	DiffFromSourceUSD decimal.Decimal `json:"diff_from_source_usd"`
@@ -57,9 +51,9 @@ func buildUsageEventPricingBreakdown(ctx context.Context, st *store.Store, ev st
 		CostSource:          usageEventCostSource(ev),
 		CostSourceUSD:       usageEventCostSourceAmount(ev),
 		ModelFound:          false,
-		UserGroups:          []string{},
-		UserGroupFactors:    []usageEventGroupMultiplierAPI{},
-		UserMultiplier:      store.DefaultGroupPriceMultiplier,
+		PaymentMultiplier:   store.DefaultGroupPriceMultiplier,
+		GroupName:           store.DefaultGroupName,
+		GroupMultiplier:     store.DefaultGroupPriceMultiplier,
 		EffectiveMultiplier: store.DefaultGroupPriceMultiplier,
 	}
 	if ev.Model != nil {
@@ -101,49 +95,28 @@ func buildUsageEventPricingBreakdown(ctx context.Context, st *store.Store, ev st
 	out.CacheOutputCostUSD = usageCostUSD(out.OutputTokensCached, out.CacheOutputUSDPer1M)
 	out.BaseCostUSD = out.InputCostUSD.Add(out.OutputCostUSD).Add(out.CacheInputCostUSD).Add(out.CacheOutputCostUSD).Truncate(store.USDScale)
 
-	groupMultiplierByName, err := usageListGroupMultiplierMap(ctx, st)
-	if err != nil {
-		return usageEventPricingBreakdownAPI{}, err
+	paymentMult := ev.PriceMultiplierPayment
+	if paymentMult.IsNegative() || paymentMult.LessThanOrEqual(decimal.Zero) {
+		paymentMult = store.DefaultGroupPriceMultiplier
 	}
+	out.PaymentMultiplier = paymentMult.Truncate(store.PriceMultiplierScale)
 
-	userGroups, err := st.ListUserGroups(ctx, ev.UserID)
-	if err != nil {
-		return usageEventPricingBreakdownAPI{}, err
+	groupName := store.DefaultGroupName
+	if ev.PriceMultiplierGroupName != nil {
+		groupName = usageNormalizeGroupName(*ev.PriceMultiplierGroupName)
 	}
-	userSeen := make(map[string]struct{}, len(userGroups)+1)
-	userMultiplier := store.DefaultGroupPriceMultiplier
-	for _, raw := range userGroups {
-		groupName := usageNormalizeGroupName(raw)
-		if groupName == "" {
-			continue
-		}
-		if _, ok := userSeen[groupName]; ok {
-			continue
-		}
-		userSeen[groupName] = struct{}{}
-		factor := usageGroupMultiplierByName(groupName, groupMultiplierByName)
-		out.UserGroups = append(out.UserGroups, groupName)
-		out.UserGroupFactors = append(out.UserGroupFactors, usageEventGroupMultiplierAPI{
-			GroupName:  groupName,
-			Multiplier: factor,
-		})
-		userMultiplier = userMultiplier.Mul(factor)
-	}
-	out.UserMultiplier = userMultiplier.Truncate(store.PriceMultiplierScale)
+	out.GroupName = groupName
 
-	effectiveMultiplier := out.UserMultiplier
-	if ev.SubscriptionID != nil && *ev.SubscriptionID > 0 {
-		sub, err := st.GetSubscriptionWithPlanByID(ctx, *ev.SubscriptionID)
-		if err != nil {
-			if !errors.Is(err, sql.ErrNoRows) {
-				return usageEventPricingBreakdownAPI{}, err
-			}
-		} else {
-			groupName := usageNormalizeGroupName(sub.Plan.GroupName)
-			out.SubscriptionGroup = groupName
-		}
+	groupMult := ev.PriceMultiplierGroup
+	if groupMult.IsNegative() || groupMult.LessThanOrEqual(decimal.Zero) {
+		groupMult = store.DefaultGroupPriceMultiplier
 	}
+	out.GroupMultiplier = groupMult.Truncate(store.PriceMultiplierScale)
 
+	effectiveMultiplier := ev.PriceMultiplier
+	if effectiveMultiplier.IsNegative() || effectiveMultiplier.LessThanOrEqual(decimal.Zero) {
+		effectiveMultiplier = out.PaymentMultiplier.Mul(out.GroupMultiplier)
+	}
 	out.EffectiveMultiplier = effectiveMultiplier.Truncate(store.PriceMultiplierScale)
 	out.FinalCostUSD = usageApplyMultiplier(out.BaseCostUSD, out.EffectiveMultiplier)
 	out.DiffFromSourceUSD = out.CostSourceUSD.Sub(out.FinalCostUSD).Truncate(store.USDScale)
@@ -203,43 +176,10 @@ func usageApplyMultiplier(baseUSD decimal.Decimal, multiplier decimal.Decimal) d
 	return baseUSD.Mul(multiplier).Truncate(store.USDScale)
 }
 
-func usageListGroupMultiplierMap(ctx context.Context, st *store.Store) (map[string]decimal.Decimal, error) {
-	groupMultiplierByName := map[string]decimal.Decimal{
-		store.DefaultGroupName: store.DefaultGroupPriceMultiplier,
-	}
-	groups, err := st.ListChannelGroups(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, group := range groups {
-		groupName := usageNormalizeGroupName(group.Name)
-		if groupName == "" {
-			continue
-		}
-		multiplier := group.PriceMultiplier
-		if multiplier.IsNegative() {
-			multiplier = store.DefaultGroupPriceMultiplier
-		}
-		groupMultiplierByName[groupName] = multiplier
-	}
-	return groupMultiplierByName, nil
-}
-
 func usageNormalizeGroupName(raw string) string {
 	groupName := strings.TrimSpace(raw)
 	if groupName == "" {
 		return store.DefaultGroupName
 	}
 	return groupName
-}
-
-func usageGroupMultiplierByName(groupName string, multiplierByName map[string]decimal.Decimal) decimal.Decimal {
-	if multiplierByName == nil {
-		return store.DefaultGroupPriceMultiplier
-	}
-	multiplier, ok := multiplierByName[groupName]
-	if !ok || multiplier.IsNegative() {
-		return store.DefaultGroupPriceMultiplier
-	}
-	return multiplier
 }

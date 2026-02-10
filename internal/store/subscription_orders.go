@@ -118,7 +118,7 @@ func (s *Store) CreateSubscriptionOrderByPlanID(ctx context.Context, userID int6
 	if group == "" {
 		group = DefaultGroupName
 	}
-	ok, err := s.UserHasGroup(ctx, userID, group)
+	ok, err := s.UserMainGroupAllowsSubgroup(ctx, userID, group)
 	if err != nil {
 		return SubscriptionOrder{}, SubscriptionPlan{}, err
 	}

@@ -49,9 +49,10 @@ const (
 )
 
 const (
-	SettingBillingEnablePayAsYouGo = "billing_enable_pay_as_you_go"
-	SettingBillingMinTopupCNY      = "billing_min_topup_cny"
-	SettingBillingCreditUSDPerCNY  = "billing_credit_usd_per_cny"
+	SettingBillingEnablePayAsYouGo          = "billing_enable_pay_as_you_go"
+	SettingBillingMinTopupCNY               = "billing_min_topup_cny"
+	SettingBillingCreditUSDPerCNY           = "billing_credit_usd_per_cny"
+	SettingBillingPayAsYouGoPriceMultiplier = "billing_paygo_price_multiplier"
 )
 
 func (s *Store) GetAppSetting(ctx context.Context, key string) (string, bool, error) {

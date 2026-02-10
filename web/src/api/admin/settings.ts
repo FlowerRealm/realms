@@ -55,6 +55,8 @@ export type AdminSettings = {
   billing_min_topup_cny_override: boolean;
   billing_credit_usd_per_cny: string;
   billing_credit_usd_per_cny_override: boolean;
+  billing_paygo_price_multiplier: string;
+  billing_paygo_price_multiplier_override: boolean;
 };
 
 export type UpdateAdminSettingsRequest = {
@@ -73,6 +75,7 @@ export type UpdateAdminSettingsRequest = {
   billing_enable_pay_as_you_go: boolean;
   billing_min_topup_cny: string;
   billing_credit_usd_per_cny: string;
+  billing_paygo_price_multiplier: string;
 
   feature_enabled: Record<string, boolean>;
 };

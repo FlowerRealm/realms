@@ -7,6 +7,7 @@ import { ChannelsPage } from './admin/ChannelsPage';
 import { ChannelGroupDetailPage } from './admin/ChannelGroupDetailPage';
 import { ChannelGroupsPage } from './admin/ChannelGroupsPage';
 import { ModelsAdminPage } from './admin/ModelsAdminPage';
+import { MainGroupsPage } from './admin/MainGroupsPage';
 import { OAuthAppDetailPage } from './admin/OAuthAppDetailPage';
 import { OAuthAppsAdminPage } from './admin/OAuthAppsAdminPage';
 import { OrdersPage } from './admin/OrdersPage';
@@ -38,6 +39,7 @@ export function AdminPage() {
       <Route path="channels" element={<ChannelsPage />} />
       <Route path="channel-groups" element={<ChannelGroupsPage />} />
       <Route path="channel-groups/:id" element={<ChannelGroupDetailPage />} />
+      <Route path="main-groups" element={<MainGroupsPage />} />
       <Route path="models" element={<ModelsAdminPage />} />
       <Route path="users" element={<UsersPage />} />
       <Route path="submissions" element={<Navigate to="/admin/subscriptions" replace />} />

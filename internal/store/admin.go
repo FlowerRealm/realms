@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -10,7 +11,7 @@ import (
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT
-  id, email, username, password_hash, role, status, created_at, updated_at
+  id, email, username, password_hash, role, main_group, status, created_at, updated_at
 FROM users
 ORDER BY id DESC
 `)
@@ -20,63 +21,15 @@ ORDER BY id DESC
 	defer rows.Close()
 
 	var out []User
-	var userIDs []int64
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.Role, &u.MainGroup, &u.Status, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("扫描 users 失败: %w", err)
 		}
 		out = append(out, u)
-		userIDs = append(userIDs, u.ID)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("遍历 users 失败: %w", err)
-	}
-
-	if len(out) == 0 {
-		return out, nil
-	}
-
-	var b strings.Builder
-	b.WriteString("SELECT user_id, group_name FROM user_groups WHERE user_id IN (")
-	for i := range userIDs {
-		if i > 0 {
-			b.WriteString(",")
-		}
-		b.WriteString("?")
-	}
-	b.WriteString(") ORDER BY user_id ASC, group_name ASC")
-	args := make([]any, 0, len(userIDs))
-	for _, id := range userIDs {
-		args = append(args, id)
-	}
-	gRows, err := s.db.QueryContext(ctx, b.String(), args...)
-	if err != nil {
-		return nil, fmt.Errorf("查询 user_groups 失败: %w", err)
-	}
-	defer gRows.Close()
-
-	groupsByUserID := make(map[int64][]string, len(out))
-	for gRows.Next() {
-		var userID int64
-		var groupName string
-		if err := gRows.Scan(&userID, &groupName); err != nil {
-			return nil, fmt.Errorf("扫描 user_groups 失败: %w", err)
-		}
-		groupsByUserID[userID] = append(groupsByUserID[userID], groupName)
-	}
-	if err := gRows.Err(); err != nil {
-		return nil, fmt.Errorf("遍历 user_groups 失败: %w", err)
-	}
-
-	for i := range out {
-		groups := groupsByUserID[out[i].ID]
-		norm, err := normalizeUserGroups(groups)
-		if err != nil {
-			out[i].Groups = []string{DefaultGroupName}
-			continue
-		}
-		out[i].Groups = norm
 	}
 
 	return out, nil
@@ -102,6 +55,39 @@ WHERE id=?
 `, status, userID)
 	if err != nil {
 		return fmt.Errorf("更新用户状态失败: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) SetUserMainGroup(ctx context.Context, userID int64, mainGroup string) error {
+	if userID <= 0 {
+		return errors.New("userID 不能为空")
+	}
+	mainGroup = strings.TrimSpace(mainGroup)
+	if mainGroup == "" {
+		mainGroup = DefaultGroupName
+	}
+	name, err := normalizeGroupName(mainGroup)
+	if err != nil {
+		return err
+	}
+	g, err := s.GetMainGroupByName(ctx, name)
+	if err != nil {
+		return err
+	}
+	if g.Status != 1 {
+		return errors.New("用户分组已禁用")
+	}
+	res, err := s.db.ExecContext(ctx, `
+UPDATE users
+SET main_group=?, updated_at=CURRENT_TIMESTAMP
+WHERE id=?
+`, name, userID)
+	if err != nil {
+		return fmt.Errorf("更新 users.main_group 失败: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
 	}
 	return nil
 }
@@ -148,9 +134,6 @@ WHERE user_id=?
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM user_tokens WHERE user_id=?`, userID); err != nil {
 		return fmt.Errorf("删除 user_tokens 失败: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM user_groups WHERE user_id=?`, userID); err != nil {
-		return fmt.Errorf("删除 user_groups 失败: %w", err)
 	}
 
 	res, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id=?`, userID)

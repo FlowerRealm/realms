@@ -246,7 +246,6 @@ func removeGroupFromCSV(groupsCSV string, group string) (string, bool) {
 }
 
 // ForceDeleteChannelGroup 删除分组字典项，并级联清理引用：
-// - user_groups: 移除所有 user_id 对该 group 的绑定
 // - upstream_channels.groups: 移除渠道 CSV 中的该 group；若移除后为空则禁用该渠道并回退到 default
 func (s *Store) ForceDeleteChannelGroup(ctx context.Context, id int64) (ChannelGroupDeleteSummary, error) {
 	if id == 0 {
@@ -274,9 +273,6 @@ func (s *Store) ForceDeleteChannelGroup(ctx context.Context, id int64) (ChannelG
 	defer func() { _ = tx.Rollback() }()
 
 	var sum ChannelGroupDeleteSummary
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(DISTINCT user_id) FROM user_groups WHERE group_name=?`, group).Scan(&sum.UsersUnbound); err != nil {
-		return ChannelGroupDeleteSummary{}, fmt.Errorf("统计 user_groups 失败: %w", err)
-	}
 
 	groupIDByName := make(map[string]int64)
 	{
@@ -332,10 +328,6 @@ func (s *Store) ForceDeleteChannelGroup(ctx context.Context, id int64) (ChannelG
 	}
 	_ = rows.Close()
 	sum.ChannelsUpdated = int64(len(chans))
-
-	if _, err := tx.ExecContext(ctx, `DELETE FROM user_groups WHERE group_name=?`, group); err != nil {
-		return ChannelGroupDeleteSummary{}, fmt.Errorf("清理 user_groups 失败: %w", err)
-	}
 
 	for _, ch := range chans {
 		newCSV, _ := removeGroupFromCSV(ch.groupsCSV, group)
@@ -404,18 +396,6 @@ VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		return ChannelGroupDeleteSummary{}, fmt.Errorf("提交事务失败: %w", err)
 	}
 	return sum, nil
-}
-
-func (s *Store) CountUsersByChannelGroup(ctx context.Context, group string) (int64, error) {
-	group = strings.TrimSpace(group)
-	if group == "" {
-		return 0, errors.New("group 不能为空")
-	}
-	var n int64
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(DISTINCT user_id) FROM user_groups WHERE group_name=?`, group).Scan(&n); err != nil {
-		return 0, fmt.Errorf("统计 user_groups 失败: %w", err)
-	}
-	return n, nil
 }
 
 func (s *Store) CountUpstreamChannelsByGroup(ctx context.Context, group string) (int64, error) {

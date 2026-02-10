@@ -79,11 +79,13 @@ func (p *HybridProvider) Reserve(ctx context.Context, in ReserveInput) (ReserveR
 	if reservedUSD.LessThanOrEqual(decimal.Zero) {
 		reservedUSD = p.defaultReserveUSD
 	}
-	multSnap, err := loadUserGroupMultiplierSnapshot(ctx, p.st, in.UserID)
+	groupMultSnap, err := loadTokenGroupMultiplierSnapshot(ctx, p.st, in.TokenID)
 	if err != nil {
 		return ReserveResult{}, err
 	}
-	reservedUSD, err = applyPriceMultiplierUSD(reservedUSD, multSnap.userMultiplier)
+	paymentMult := paygoPriceMultiplier(ctx, p.st)
+	reserveMult := normalizeMultiplier(paymentMult.Mul(groupMultSnap.maxGroupMultiplier))
+	reservedUSD, err = applyPriceMultiplierUSD(reservedUSD, reserveMult)
 	if err != nil {
 		return ReserveResult{}, err
 	}
@@ -131,11 +133,12 @@ func (p *HybridProvider) Commit(ctx context.Context, in CommitInput) error {
 	if err != nil {
 		return err
 	}
-	multSnap, err := loadUserGroupMultiplierSnapshot(ctx, p.st, ev.UserID)
-	if err != nil {
-		return err
-	}
-	usd, err = applyPriceMultiplierUSD(usd, multSnap.userMultiplier)
+	paymentMult := paygoPriceMultiplier(ctx, p.st)
+	paymentMult = normalizeMultiplier(paymentMult)
+
+	groupMult, groupName := groupMultiplierForRouteGroup(ctx, p.st, in.RouteGroup)
+	totalMult := normalizeMultiplier(paymentMult.Mul(groupMult))
+	usd, err = applyPriceMultiplierUSD(usd, totalMult)
 	if err != nil {
 		return err
 	}
@@ -145,24 +148,32 @@ func (p *HybridProvider) Commit(ctx context.Context, in CommitInput) error {
 
 	if ev.SubscriptionID == nil {
 		return p.st.CommitUsageAndRefundBalance(ctx, store.CommitUsageInput{
-			UsageEventID:       in.UsageEventID,
-			UpstreamChannelID:  in.UpstreamChannelID,
-			InputTokens:        in.InputTokens,
-			CachedInputTokens:  in.CachedInputTokens,
-			OutputTokens:       in.OutputTokens,
-			CachedOutputTokens: in.CachedOutputTokens,
-			CommittedUSD:       usd,
+			UsageEventID:             in.UsageEventID,
+			UpstreamChannelID:        in.UpstreamChannelID,
+			InputTokens:              in.InputTokens,
+			CachedInputTokens:        in.CachedInputTokens,
+			OutputTokens:             in.OutputTokens,
+			CachedOutputTokens:       in.CachedOutputTokens,
+			CommittedUSD:             usd,
+			PriceMultiplier:          totalMult,
+			PriceMultiplierGroup:     groupMult,
+			PriceMultiplierPayment:   paymentMult,
+			PriceMultiplierGroupName: groupName,
 		})
 	}
 
 	return p.st.CommitUsage(ctx, store.CommitUsageInput{
-		UsageEventID:       in.UsageEventID,
-		UpstreamChannelID:  in.UpstreamChannelID,
-		InputTokens:        in.InputTokens,
-		CachedInputTokens:  in.CachedInputTokens,
-		OutputTokens:       in.OutputTokens,
-		CachedOutputTokens: in.CachedOutputTokens,
-		CommittedUSD:       usd,
+		UsageEventID:             in.UsageEventID,
+		UpstreamChannelID:        in.UpstreamChannelID,
+		InputTokens:              in.InputTokens,
+		CachedInputTokens:        in.CachedInputTokens,
+		OutputTokens:             in.OutputTokens,
+		CachedOutputTokens:       in.CachedOutputTokens,
+		CommittedUSD:             usd,
+		PriceMultiplier:          totalMult,
+		PriceMultiplierGroup:     groupMult,
+		PriceMultiplierPayment:   paymentMult,
+		PriceMultiplierGroupName: groupName,
 	})
 }
 

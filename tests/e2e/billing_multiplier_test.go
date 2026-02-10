@@ -29,7 +29,17 @@ func TestBilling_GroupMultiplierStacking_Payg_E2E(t *testing.T) {
 	st, db, dbPath := newMultiplierSQLiteStore(t)
 	ctx := context.Background()
 
-	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ci-upstream", store.DefaultGroupName, 0, false, false, false, false)
+	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, decimal.RequireFromString("1.5"), 5); err != nil {
+		t.Fatalf("CreateChannelGroup(vip): %v", err)
+	}
+	if _, err := st.CreateChannelGroup(ctx, "staff", nil, 1, decimal.RequireFromString("2"), 5); err != nil {
+		t.Fatalf("CreateChannelGroup(staff): %v", err)
+	}
+	if err := st.ReplaceMainGroupSubgroups(ctx, store.DefaultGroupName, []string{"vip", "staff"}); err != nil {
+		t.Fatalf("ReplaceMainGroupSubgroups: %v", err)
+	}
+
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ci-upstream", "staff", 0, false, false, false, false)
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel: %v", err)
 	}
@@ -62,19 +72,13 @@ func TestBilling_GroupMultiplierStacking_Payg_E2E(t *testing.T) {
 		t.Fatalf("CreateChannelModel: %v", err)
 	}
 
-	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, decimal.RequireFromString("1.5"), 5); err != nil {
-		t.Fatalf("CreateChannelGroup(vip): %v", err)
-	}
-	if _, err := st.CreateChannelGroup(ctx, "staff", nil, 1, decimal.RequireFromString("2"), 5); err != nil {
-		t.Fatalf("CreateChannelGroup(staff): %v", err)
+	if err := st.UpsertDecimalAppSetting(ctx, store.SettingBillingPayAsYouGoPriceMultiplier, decimal.RequireFromString("1.5")); err != nil {
+		t.Fatalf("UpsertDecimalAppSetting(paygo multiplier): %v", err)
 	}
 
 	userID, err := st.CreateUser(ctx, "mul-payg@example.com", "mulpayg", []byte("x"), store.UserRoleUser)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
-	}
-	if err := st.ReplaceUserGroups(ctx, userID, []string{"vip", "staff"}); err != nil {
-		t.Fatalf("ReplaceUserGroups: %v", err)
 	}
 	if _, err := st.AddUserBalanceUSD(ctx, userID, decimal.RequireFromString("10")); err != nil {
 		t.Fatalf("AddUserBalanceUSD: %v", err)
@@ -83,8 +87,12 @@ func TestBilling_GroupMultiplierStacking_Payg_E2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRandomToken: %v", err)
 	}
-	if _, _, err := st.CreateUserToken(ctx, userID, strPtr("ci-token"), rawToken); err != nil {
+	tokenID, _, err := st.CreateUserToken(ctx, userID, strPtr("ci-token"), rawToken)
+	if err != nil {
 		t.Fatalf("CreateUserToken: %v", err)
+	}
+	if err := st.ReplaceTokenGroups(ctx, tokenID, []string{"staff"}); err != nil {
+		t.Fatalf("ReplaceTokenGroups: %v", err)
 	}
 
 	ts := newMultiplierAppServer(t, db, dbPath, true, false)
@@ -117,7 +125,17 @@ func TestBilling_GroupMultiplierStacking_Subscription_E2E(t *testing.T) {
 	st, db, dbPath := newMultiplierSQLiteStore(t)
 	ctx := context.Background()
 
-	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ci-upstream", store.DefaultGroupName, 0, false, false, false, false)
+	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, decimal.RequireFromString("1.5"), 5); err != nil {
+		t.Fatalf("CreateChannelGroup(vip): %v", err)
+	}
+	if _, err := st.CreateChannelGroup(ctx, "staff", nil, 1, decimal.RequireFromString("2"), 5); err != nil {
+		t.Fatalf("CreateChannelGroup(staff): %v", err)
+	}
+	if err := st.ReplaceMainGroupSubgroups(ctx, store.DefaultGroupName, []string{"vip", "staff"}); err != nil {
+		t.Fatalf("ReplaceMainGroupSubgroups: %v", err)
+	}
+
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ci-upstream", "staff", 0, false, false, false, false)
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel: %v", err)
 	}
@@ -150,21 +168,11 @@ func TestBilling_GroupMultiplierStacking_Subscription_E2E(t *testing.T) {
 		t.Fatalf("CreateChannelModel: %v", err)
 	}
 
-	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, decimal.RequireFromString("1.5"), 5); err != nil {
-		t.Fatalf("CreateChannelGroup(vip): %v", err)
-	}
-	if _, err := st.CreateChannelGroup(ctx, "staff", nil, 1, decimal.RequireFromString("2"), 5); err != nil {
-		t.Fatalf("CreateChannelGroup(staff): %v", err)
-	}
-
 	userID, err := st.CreateUser(ctx, "mul-sub@example.com", "mulsub", []byte("x"), store.UserRoleUser)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	// 先具备 vip 组以允许购买套餐，然后移除 vip，验证订阅分组不参与计费倍率。
-	if err := st.ReplaceUserGroups(ctx, userID, []string{"vip", "staff"}); err != nil {
-		t.Fatalf("ReplaceUserGroups(before purchase): %v", err)
-	}
+	// 套餐的 group_name 只用于“可购买范围”，计费倍率取订阅倍率 × 请求最终成功分组倍率（不叠加其他分组）。
 
 	planID, err := st.CreateSubscriptionPlan(ctx, store.SubscriptionPlanCreate{
 		Code:         "ci-vip-plan",
@@ -185,16 +193,17 @@ func TestBilling_GroupMultiplierStacking_Subscription_E2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PurchaseSubscriptionByPlanID: %v", err)
 	}
-	if err := st.ReplaceUserGroups(ctx, userID, []string{"staff"}); err != nil {
-		t.Fatalf("ReplaceUserGroups(after purchase): %v", err)
-	}
 
 	rawToken, err := auth.NewRandomToken("sk_", 32)
 	if err != nil {
 		t.Fatalf("NewRandomToken: %v", err)
 	}
-	if _, _, err := st.CreateUserToken(ctx, userID, strPtr("ci-token"), rawToken); err != nil {
+	tokenID, _, err := st.CreateUserToken(ctx, userID, strPtr("ci-token"), rawToken)
+	if err != nil {
 		t.Fatalf("CreateUserToken: %v", err)
+	}
+	if err := st.ReplaceTokenGroups(ctx, tokenID, []string{"staff"}); err != nil {
+		t.Fatalf("ReplaceTokenGroups: %v", err)
 	}
 
 	ts := newMultiplierAppServer(t, db, dbPath, false, false)

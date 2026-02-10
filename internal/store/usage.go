@@ -63,13 +63,17 @@ INSERT INTO usage_events(
 }
 
 type CommitUsageInput struct {
-	UsageEventID       int64
-	UpstreamChannelID  *int64
-	InputTokens        *int64
-	CachedInputTokens  *int64
-	OutputTokens       *int64
-	CachedOutputTokens *int64
-	CommittedUSD       decimal.Decimal
+	UsageEventID             int64
+	UpstreamChannelID        *int64
+	InputTokens              *int64
+	CachedInputTokens        *int64
+	OutputTokens             *int64
+	CachedOutputTokens       *int64
+	CommittedUSD             decimal.Decimal
+	PriceMultiplier          decimal.Decimal
+	PriceMultiplierGroup     decimal.Decimal
+	PriceMultiplierPayment   decimal.Decimal
+	PriceMultiplierGroupName *string
 }
 
 func (s *Store) CommitUsage(ctx context.Context, in CommitUsageInput) error {
@@ -80,11 +84,30 @@ func (s *Store) CommitUsage(ctx context.Context, in CommitUsageInput) error {
 		return errors.New("committed_usd 不合法")
 	}
 	committedUSD := in.CommittedUSD.Truncate(USDScale)
+	priceMultiplier := in.PriceMultiplier
+	if priceMultiplier.IsNegative() || priceMultiplier.LessThanOrEqual(decimal.Zero) {
+		priceMultiplier = DefaultGroupPriceMultiplier
+	}
+	priceMultiplier = priceMultiplier.Truncate(PriceMultiplierScale)
+	priceMultiplierGroup := in.PriceMultiplierGroup
+	if priceMultiplierGroup.IsNegative() || priceMultiplierGroup.LessThanOrEqual(decimal.Zero) {
+		priceMultiplierGroup = DefaultGroupPriceMultiplier
+	}
+	priceMultiplierGroup = priceMultiplierGroup.Truncate(PriceMultiplierScale)
+	priceMultiplierPayment := in.PriceMultiplierPayment
+	if priceMultiplierPayment.IsNegative() || priceMultiplierPayment.LessThanOrEqual(decimal.Zero) {
+		priceMultiplierPayment = DefaultGroupPriceMultiplier
+	}
+	priceMultiplierPayment = priceMultiplierPayment.Truncate(PriceMultiplierScale)
 	res, err := s.db.ExecContext(ctx, `
 UPDATE usage_events
-SET state=?, upstream_channel_id=?, input_tokens=?, cached_input_tokens=?, output_tokens=?, cached_output_tokens=?, committed_usd=?, updated_at=CURRENT_TIMESTAMP
+SET state=?, upstream_channel_id=?, input_tokens=?, cached_input_tokens=?, output_tokens=?, cached_output_tokens=?, committed_usd=?,
+    price_multiplier=?, price_multiplier_group=?, price_multiplier_payment=?, price_multiplier_group_name=?,
+    updated_at=CURRENT_TIMESTAMP
 WHERE id=? AND state=?
-`, UsageStateCommitted, in.UpstreamChannelID, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens, committedUSD, in.UsageEventID, UsageStateReserved)
+`, UsageStateCommitted, in.UpstreamChannelID, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens, committedUSD,
+		priceMultiplier, priceMultiplierGroup, priceMultiplierPayment, in.PriceMultiplierGroupName,
+		in.UsageEventID, UsageStateReserved)
 	if err != nil {
 		return fmt.Errorf("结算 usage_event 失败: %w", err)
 	}
@@ -366,6 +389,7 @@ func (s *Store) GetUsageEvent(ctx context.Context, id int64) (UsageEvent, error)
 	var upstreamCredID sql.NullInt64
 	var errClass sql.NullString
 	var errMsg sql.NullString
+	var multGroupName sql.NullString
 	var isStream int
 	err := s.db.QueryRowContext(ctx, `
 SELECT id, time, request_id, endpoint, method,
@@ -373,7 +397,7 @@ SELECT id, time, request_id, endpoint, method,
        upstream_channel_id, upstream_endpoint_id, upstream_credential_id,
        state, model,
        input_tokens, cached_input_tokens, output_tokens, cached_output_tokens,
-       reserved_usd, committed_usd, reserve_expires_at,
+       reserved_usd, committed_usd, price_multiplier, price_multiplier_group, price_multiplier_payment, price_multiplier_group_name, reserve_expires_at,
        status_code, latency_ms, first_token_latency_ms, error_class, error_message,
        is_stream, request_bytes, response_bytes,
        created_at, updated_at
@@ -384,7 +408,7 @@ WHERE id=?
 		&upstreamChannelID, &upstreamEndpointID, &upstreamCredID,
 		&e.State, &model,
 		&inputTokens, &cachedInputTokens, &outputTokens, &cachedOutputTokens,
-		&e.ReservedUSD, &e.CommittedUSD, &e.ReserveExpiresAt,
+		&e.ReservedUSD, &e.CommittedUSD, &e.PriceMultiplier, &e.PriceMultiplierGroup, &e.PriceMultiplierPayment, &multGroupName, &e.ReserveExpiresAt,
 		&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &errClass, &errMsg,
 		&isStream, &e.RequestBytes, &e.ResponseBytes,
 		&e.CreatedAt, &e.UpdatedAt)
@@ -396,6 +420,15 @@ WHERE id=?
 	}
 	e.ReservedUSD = e.ReservedUSD.Truncate(USDScale)
 	e.CommittedUSD = e.CommittedUSD.Truncate(USDScale)
+	e.PriceMultiplier = e.PriceMultiplier.Truncate(PriceMultiplierScale)
+	e.PriceMultiplierGroup = e.PriceMultiplierGroup.Truncate(PriceMultiplierScale)
+	e.PriceMultiplierPayment = e.PriceMultiplierPayment.Truncate(PriceMultiplierScale)
+	if multGroupName.Valid {
+		v := strings.TrimSpace(multGroupName.String)
+		if v != "" {
+			e.PriceMultiplierGroupName = &v
+		}
+	}
 	if endpoint.Valid {
 		e.Endpoint = &endpoint.String
 	}
@@ -450,7 +483,7 @@ SELECT id, time, request_id, endpoint, method,
        upstream_channel_id, upstream_endpoint_id, upstream_credential_id,
        state, model,
        input_tokens, cached_input_tokens, output_tokens, cached_output_tokens,
-       reserved_usd, committed_usd, reserve_expires_at,
+       reserved_usd, committed_usd, price_multiplier, price_multiplier_group, price_multiplier_payment, price_multiplier_group_name, reserve_expires_at,
        status_code, latency_ms, first_token_latency_ms, error_class, error_message,
        is_stream, request_bytes, response_bytes,
        created_at, updated_at
@@ -486,13 +519,14 @@ WHERE user_id=? AND state<>?
 		var upstreamCredID sql.NullInt64
 		var errClass sql.NullString
 		var errMsg sql.NullString
+		var multGroupName sql.NullString
 		var isStream int
 		if err := rows.Scan(&e.ID, &e.Time, &e.RequestID, &endpoint, &method,
 			&e.UserID, &subscriptionID, &e.TokenID,
 			&upstreamChannelID, &upstreamEndpointID, &upstreamCredID,
 			&e.State, &model,
 			&inputTokens, &cachedInputTokens, &outputTokens, &cachedOutputTokens,
-			&e.ReservedUSD, &e.CommittedUSD, &e.ReserveExpiresAt,
+			&e.ReservedUSD, &e.CommittedUSD, &e.PriceMultiplier, &e.PriceMultiplierGroup, &e.PriceMultiplierPayment, &multGroupName, &e.ReserveExpiresAt,
 			&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &errClass, &errMsg,
 			&isStream, &e.RequestBytes, &e.ResponseBytes,
 			&e.CreatedAt, &e.UpdatedAt); err != nil {
@@ -500,6 +534,15 @@ WHERE user_id=? AND state<>?
 		}
 		e.ReservedUSD = e.ReservedUSD.Truncate(USDScale)
 		e.CommittedUSD = e.CommittedUSD.Truncate(USDScale)
+		e.PriceMultiplier = e.PriceMultiplier.Truncate(PriceMultiplierScale)
+		e.PriceMultiplierGroup = e.PriceMultiplierGroup.Truncate(PriceMultiplierScale)
+		e.PriceMultiplierPayment = e.PriceMultiplierPayment.Truncate(PriceMultiplierScale)
+		if multGroupName.Valid {
+			v := strings.TrimSpace(multGroupName.String)
+			if v != "" {
+				e.PriceMultiplierGroupName = &v
+			}
+		}
 		if endpoint.Valid {
 			e.Endpoint = &endpoint.String
 		}
@@ -562,7 +605,7 @@ SELECT id, time, request_id, endpoint, method,
        upstream_channel_id, upstream_endpoint_id, upstream_credential_id,
        state, model,
        input_tokens, cached_input_tokens, output_tokens, cached_output_tokens,
-       reserved_usd, committed_usd, reserve_expires_at,
+       reserved_usd, committed_usd, price_multiplier, price_multiplier_group, price_multiplier_payment, price_multiplier_group_name, reserve_expires_at,
        status_code, latency_ms, first_token_latency_ms, error_class, error_message,
        is_stream, request_bytes, response_bytes,
        created_at, updated_at
@@ -604,13 +647,14 @@ WHERE user_id=? AND time >= ? AND time < ? AND state<>?
 		var upstreamCredID sql.NullInt64
 		var errClass sql.NullString
 		var errMsg sql.NullString
+		var multGroupName sql.NullString
 		var isStream int
 		if err := rows.Scan(&e.ID, &e.Time, &e.RequestID, &endpoint, &method,
 			&e.UserID, &subscriptionID, &e.TokenID,
 			&upstreamChannelID, &upstreamEndpointID, &upstreamCredID,
 			&e.State, &model,
 			&inputTokens, &cachedInputTokens, &outputTokens, &cachedOutputTokens,
-			&e.ReservedUSD, &e.CommittedUSD, &e.ReserveExpiresAt,
+			&e.ReservedUSD, &e.CommittedUSD, &e.PriceMultiplier, &e.PriceMultiplierGroup, &e.PriceMultiplierPayment, &multGroupName, &e.ReserveExpiresAt,
 			&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &errClass, &errMsg,
 			&isStream, &e.RequestBytes, &e.ResponseBytes,
 			&e.CreatedAt, &e.UpdatedAt); err != nil {
@@ -618,6 +662,15 @@ WHERE user_id=? AND time >= ? AND time < ? AND state<>?
 		}
 		e.ReservedUSD = e.ReservedUSD.Truncate(USDScale)
 		e.CommittedUSD = e.CommittedUSD.Truncate(USDScale)
+		e.PriceMultiplier = e.PriceMultiplier.Truncate(PriceMultiplierScale)
+		e.PriceMultiplierGroup = e.PriceMultiplierGroup.Truncate(PriceMultiplierScale)
+		e.PriceMultiplierPayment = e.PriceMultiplierPayment.Truncate(PriceMultiplierScale)
+		if multGroupName.Valid {
+			v := strings.TrimSpace(multGroupName.String)
+			if v != "" {
+				e.PriceMultiplierGroupName = &v
+			}
+		}
 		if endpoint.Valid {
 			e.Endpoint = &endpoint.String
 		}

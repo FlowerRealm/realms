@@ -85,6 +85,17 @@ func (r *GroupRouter) Next(ctx context.Context) (Selection, error) {
 			}
 			return Selection{}, err
 		}
+		return r.annotateRouteGroup(sel), nil
+	}
+
+	if len(r.cons.AllowGroupOrder) > 0 {
+		sel, err := r.nextFromOrderedGroups(ctx)
+		if err != nil {
+			if errors.Is(err, errGroupExhausted) {
+				return Selection{}, errors.New("上游不可用")
+			}
+			return Selection{}, err
+		}
 		return sel, nil
 	}
 
@@ -96,6 +107,70 @@ func (r *GroupRouter) Next(ctx context.Context) (Selection, error) {
 		return Selection{}, err
 	}
 	return sel, nil
+}
+
+func (r *GroupRouter) annotateRouteGroup(sel Selection) Selection {
+	if strings.TrimSpace(sel.RouteGroup) != "" {
+		return sel
+	}
+	if len(r.cons.AllowGroupOrder) == 0 {
+		return sel
+	}
+	groupsCSV := strings.TrimSpace(sel.ChannelGroups)
+	if groupsCSV == "" {
+		groupsCSV = store.DefaultGroupName
+	}
+	groups := make(map[string]struct{})
+	for _, raw := range strings.Split(groupsCSV, ",") {
+		g := strings.TrimSpace(raw)
+		if g == "" {
+			continue
+		}
+		groups[g] = struct{}{}
+	}
+	for _, raw := range r.cons.AllowGroupOrder {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		if _, ok := groups[name]; ok {
+			sel.RouteGroup = name
+			return sel
+		}
+	}
+	return sel
+}
+
+func (r *GroupRouter) nextFromOrderedGroups(ctx context.Context) (Selection, error) {
+	if r.st == nil {
+		return Selection{}, errGroupExhausted
+	}
+	for _, raw := range r.cons.AllowGroupOrder {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		g, err := r.st.GetChannelGroupByName(ctx, name)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			return Selection{}, err
+		}
+		if g.Status != 1 {
+			continue
+		}
+		sel, err := r.nextFromGroup(ctx, g.ID)
+		if err != nil {
+			if errors.Is(err, errGroupExhausted) {
+				continue
+			}
+			return Selection{}, err
+		}
+		sel.RouteGroup = name
+		return sel, nil
+	}
+	return Selection{}, errGroupExhausted
 }
 
 func (r *GroupRouter) nextFromPinnedRing(ctx context.Context) (Selection, error) {

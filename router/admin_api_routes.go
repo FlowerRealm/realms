@@ -8,6 +8,7 @@ func setAdminAPIRoutes(r gin.IRoutes, opts Options) {
 
 	setAdminHomeAPIRoutes(admin, opts)
 	setAdminChannelGroupAPIRoutes(admin, opts)
+	setAdminMainGroupAPIRoutes(admin, opts)
 	setAdminUserAPIRoutes(admin, opts)
 	setAdminAnnouncementAPIRoutes(admin, opts)
 	setAdminBillingAPIRoutes(admin, opts)

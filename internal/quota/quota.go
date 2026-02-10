@@ -37,6 +37,7 @@ type CommitInput struct {
 	UsageEventID       int64
 	Model              *string
 	UpstreamChannelID  *int64
+	RouteGroup         *string
 	InputTokens        *int64
 	CachedInputTokens  *int64
 	OutputTokens       *int64
@@ -76,11 +77,13 @@ func (p *UsageProvider) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 			reservedUSD = c
 		}
 	}
-	multSnap, err := loadUserGroupMultiplierSnapshot(ctx, p.st, in.UserID)
+	multSnap, err := loadTokenGroupMultiplierSnapshot(ctx, p.st, in.TokenID)
 	if err != nil {
 		return ReserveResult{}, err
 	}
-	reservedUSD, err = applyPriceMultiplierUSD(reservedUSD, multSnap.userMultiplier)
+	paymentMult := paygoPriceMultiplier(ctx, p.st)
+	reserveMult := normalizeMultiplier(paymentMult.Mul(multSnap.maxGroupMultiplier))
+	reservedUSD, err = applyPriceMultiplierUSD(reservedUSD, reserveMult)
 	if err != nil {
 		return ReserveResult{}, err
 	}
@@ -111,11 +114,20 @@ func (p *UsageProvider) Commit(ctx context.Context, in CommitInput) error {
 	if err != nil {
 		return err
 	}
-	multSnap, err := loadUserGroupMultiplierSnapshot(ctx, p.st, ev.UserID)
-	if err != nil {
-		return err
+	paymentMult := store.DefaultGroupPriceMultiplier
+	if ev.SubscriptionID != nil && *ev.SubscriptionID > 0 {
+		sub, err := p.st.GetSubscriptionWithPlanByID(ctx, *ev.SubscriptionID)
+		if err == nil {
+			paymentMult = sub.Plan.PriceMultiplier
+		}
+	} else {
+		paymentMult = paygoPriceMultiplier(ctx, p.st)
 	}
-	usd, err = applyPriceMultiplierUSD(usd, multSnap.userMultiplier)
+	paymentMult = normalizeMultiplier(paymentMult)
+
+	groupMult, groupName := groupMultiplierForRouteGroup(ctx, p.st, in.RouteGroup)
+	totalMult := normalizeMultiplier(paymentMult.Mul(groupMult))
+	usd, err = applyPriceMultiplierUSD(usd, totalMult)
 	if err != nil {
 		return err
 	}
@@ -123,13 +135,17 @@ func (p *UsageProvider) Commit(ctx context.Context, in CommitInput) error {
 		usd = ev.ReservedUSD
 	}
 	return p.st.CommitUsage(ctx, store.CommitUsageInput{
-		UsageEventID:       in.UsageEventID,
-		UpstreamChannelID:  in.UpstreamChannelID,
-		InputTokens:        in.InputTokens,
-		CachedInputTokens:  in.CachedInputTokens,
-		OutputTokens:       in.OutputTokens,
-		CachedOutputTokens: in.CachedOutputTokens,
-		CommittedUSD:       usd,
+		UsageEventID:             in.UsageEventID,
+		UpstreamChannelID:        in.UpstreamChannelID,
+		InputTokens:              in.InputTokens,
+		CachedInputTokens:        in.CachedInputTokens,
+		OutputTokens:             in.OutputTokens,
+		CachedOutputTokens:       in.CachedOutputTokens,
+		CommittedUSD:             usd,
+		PriceMultiplier:          totalMult,
+		PriceMultiplierGroup:     groupMult,
+		PriceMultiplierPayment:   paymentMult,
+		PriceMultiplierGroupName: groupName,
 	})
 }
 

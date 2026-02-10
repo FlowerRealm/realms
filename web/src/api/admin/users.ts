@@ -5,7 +5,7 @@ export type AdminUser = {
   id: number;
   email: string;
   username: string;
-  groups: string;
+  user_group: string;
   role: string;
   status: number;
   balance_usd: string;
@@ -22,7 +22,7 @@ export type CreateAdminUserRequest = {
   username: string;
   password: string;
   role?: string;
-  groups?: string[];
+  user_group?: string;
 };
 
 export async function createAdminUser(req: CreateAdminUserRequest) {
@@ -34,7 +34,7 @@ export type UpdateAdminUserRequest = {
   email?: string;
   status?: number;
   role?: string;
-  groups?: string[];
+  user_group?: string;
 };
 
 export async function updateAdminUser(userID: number, req: UpdateAdminUserRequest) {

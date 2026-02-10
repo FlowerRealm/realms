@@ -19,7 +19,7 @@ import (
 	"realms/internal/store"
 )
 
-func TestUserModelsDetail_AppliesUserGroupMultiplierToPricing(t *testing.T) {
+func TestUserModelsDetail_UsesMainGroupSubgroupsAndBasePricing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	dir := t.TempDir()
@@ -48,17 +48,17 @@ func TestUserModelsDetail_AppliesUserGroupMultiplierToPricing(t *testing.T) {
 	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, decimal.RequireFromString("1.5"), 5); err != nil {
 		t.Fatalf("CreateChannelGroup(vip): %v", err)
 	}
-	if err := st.ReplaceUserGroups(ctx, userID, []string{"vip"}); err != nil {
-		t.Fatalf("ReplaceUserGroups: %v", err)
+	if err := st.ReplaceMainGroupSubgroups(ctx, store.DefaultGroupName, []string{"vip"}); err != nil {
+		t.Fatalf("ReplaceMainGroupSubgroups: %v", err)
 	}
 
-	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch-model", store.DefaultGroupName, 0, false, false, false, false)
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch-model", "vip", 0, false, false, false, false)
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel: %v", err)
 	}
 	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
 		PublicID:            "gpt-5.2",
-		GroupName:           store.DefaultGroupName,
+		GroupName:           "vip",
 		OwnedBy:             nil,
 		InputUSDPer1M:       decimal.RequireFromString("1"),
 		OutputUSDPer1M:      decimal.RequireFromString("2"),
@@ -150,16 +150,16 @@ func TestUserModelsDetail_AppliesUserGroupMultiplierToPricing(t *testing.T) {
 	if model.PublicID != "gpt-5.2" {
 		t.Fatalf("public_id mismatch: got=%q want=%q", model.PublicID, "gpt-5.2")
 	}
-	if model.InputUSDPer1M != "1.5" {
-		t.Fatalf("input_usd_per_1m mismatch: got=%q want=%q", model.InputUSDPer1M, "1.5")
+	if model.InputUSDPer1M != "1" {
+		t.Fatalf("input_usd_per_1m mismatch: got=%q want=%q", model.InputUSDPer1M, "1")
 	}
-	if model.OutputUSDPer1M != "3" {
-		t.Fatalf("output_usd_per_1m mismatch: got=%q want=%q", model.OutputUSDPer1M, "3")
+	if model.OutputUSDPer1M != "2" {
+		t.Fatalf("output_usd_per_1m mismatch: got=%q want=%q", model.OutputUSDPer1M, "2")
 	}
-	if model.CacheInputUSDPer1M != "0.75" {
-		t.Fatalf("cache_input_usd_per_1m mismatch: got=%q want=%q", model.CacheInputUSDPer1M, "0.75")
+	if model.CacheInputUSDPer1M != "0.5" {
+		t.Fatalf("cache_input_usd_per_1m mismatch: got=%q want=%q", model.CacheInputUSDPer1M, "0.5")
 	}
-	if model.CacheOutputUSDPer1M != "0.375" {
-		t.Fatalf("cache_output_usd_per_1m mismatch: got=%q want=%q", model.CacheOutputUSDPer1M, "0.375")
+	if model.CacheOutputUSDPer1M != "0.25" {
+		t.Fatalf("cache_output_usd_per_1m mismatch: got=%q want=%q", model.CacheOutputUSDPer1M, "0.25")
 	}
 }

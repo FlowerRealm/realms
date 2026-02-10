@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { useAuth } from '../../auth/AuthContext';
-import { listAdminChannelGroups, type AdminChannelGroup } from '../../api/admin/channelGroups';
+import { listAdminMainGroups, type AdminMainGroup } from '../../api/admin/mainGroups';
 import {
   addAdminUserBalance,
   createAdminUser,
@@ -24,23 +24,12 @@ function statusBadge(status: number): { cls: string; label: string } {
   return { cls: 'badge rounded-pill bg-secondary bg-opacity-10 text-secondary px-2', label: '禁用' };
 }
 
-function isDefaultGroup(name: string): boolean {
-  return name.trim().toLowerCase() === 'default';
-}
-
-function parseGroups(csv: string): string[] {
-  return csv
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s);
-}
-
 export function UsersPage() {
   const { user: self } = useAuth();
   const selfID = self?.id || 0;
 
   const [users, setUsers] = useState<AdminUser[]>([]);
-  const [groups, setGroups] = useState<AdminChannelGroup[]>([]);
+  const [mainGroups, setMainGroups] = useState<AdminMainGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const [notice, setNotice] = useState('');
@@ -49,13 +38,13 @@ export function UsersPage() {
   const [createUsername, setCreateUsername] = useState('');
   const [createPassword, setCreatePassword] = useState('');
   const [createRole, setCreateRole] = useState<'user' | 'root'>('user');
-  const [createGroups, setCreateGroups] = useState<string[]>(['default']);
+  const [createMainGroup, setCreateMainGroup] = useState<string>('default');
 
   const [editing, setEditing] = useState<AdminUser | null>(null);
   const [editEmail, setEditEmail] = useState('');
   const [editRole, setEditRole] = useState<'user' | 'root'>('user');
   const [editStatus, setEditStatus] = useState(1);
-  const [editGroups, setEditGroups] = useState<string[]>(['default']);
+  const [editMainGroup, setEditMainGroup] = useState<string>('default');
 
   const [balanceAmount, setBalanceAmount] = useState('');
   const [balanceNote, setBalanceNote] = useState('');
@@ -69,15 +58,15 @@ export function UsersPage() {
     setNotice('');
     setLoading(true);
     try {
-      const [usersRes, groupsRes] = await Promise.all([listAdminUsers(), listAdminChannelGroups()]);
-      if (!groupsRes.success) throw new Error(groupsRes.message || '加载分组失败');
-      setGroups(groupsRes.data || []);
+      const [usersRes, mainGroupsRes] = await Promise.all([listAdminUsers(), listAdminMainGroups()]);
+      if (!mainGroupsRes.success) throw new Error(mainGroupsRes.message || '加载用户分组失败');
+      setMainGroups(mainGroupsRes.data || []);
       if (!usersRes.success) throw new Error(usersRes.message || '加载用户失败');
       setUsers(usersRes.data || []);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败');
       setUsers([]);
-      setGroups([]);
+      setMainGroups([]);
     } finally {
       setLoading(false);
     }
@@ -92,28 +81,11 @@ export function UsersPage() {
     setEditEmail(editing.email || '');
     setEditRole((editing.role || 'user') as 'user' | 'root');
     setEditStatus(editing.status || 0);
-    setEditGroups(parseGroups(editing.groups || 'default'));
+    setEditMainGroup((editing.user_group || 'default').trim() || 'default');
     setBalanceAmount('');
     setBalanceNote('');
     setNewPassword('');
   }, [editing]);
-
-  function groupDisabled(name: string, selected: string[]): boolean {
-    if (isDefaultGroup(name)) return true;
-    const g = groups.find((x) => x.name === name);
-    if (!g) return false;
-    if (g.status === 1) return false;
-    return !selected.includes(name);
-  }
-
-  function toggleGroup(name: string, selected: string[], setSelected: (next: string[]) => void) {
-    if (isDefaultGroup(name)) return;
-    if (selected.includes(name)) {
-      setSelected(selected.filter((x) => x !== name));
-      return;
-    }
-    setSelected([...selected, name]);
-  }
 
   return (
     <div className="fade-in-up">
@@ -176,7 +148,7 @@ export function UsersPage() {
                     <tr>
                       <th className="ps-4">邮箱</th>
                       <th>账号名</th>
-                      <th>组</th>
+                      <th>用户分组</th>
                       <th>角色</th>
                       <th>状态</th>
                       <th>余额(USD)</th>
@@ -194,7 +166,7 @@ export function UsersPage() {
                           </td>
                           <td>{u.username ? <span className="text-dark fw-medium user-select-all">{u.username}</span> : <span className="text-muted small fst-italic">未设置</span>}</td>
                           <td>
-                            <span className="badge bg-light text-secondary border fw-normal">{u.groups || 'default'}</span>
+                            <span className="badge bg-light text-secondary border fw-normal font-monospace">{(u.user_group || 'default').trim() || 'default'}</span>
                           </td>
                           <td>
                             <span className={roleBadge(u.role)}>{u.role}</span>
@@ -281,7 +253,7 @@ export function UsersPage() {
           setCreateUsername('');
           setCreatePassword('');
           setCreateRole('user');
-          setCreateGroups(['default']);
+          setCreateMainGroup('default');
         }}
       >
         <form
@@ -296,7 +268,7 @@ export function UsersPage() {
                 username: createUsername.trim(),
                 password: createPassword,
                 role: createRole,
-                groups: createGroups,
+                user_group: createMainGroup,
               });
               if (!res.success) throw new Error(res.message || '创建失败');
               setNotice('已创建');
@@ -328,34 +300,16 @@ export function UsersPage() {
             </select>
           </div>
           <div className="col-12">
-            <label className="form-label">组</label>
-            <div className="card p-2" style={{ maxHeight: 240, overflowY: 'auto' }}>
-              {groups.map((g) => {
-                const checked = createGroups.includes(g.name) || isDefaultGroup(g.name);
-                const disabled = groupDisabled(g.name, createGroups);
-                return (
-                  <div key={g.id} className="form-check">
-                    <input
-                      className="form-check-input"
-                      type="checkbox"
-                      id={`create-group-${g.name}`}
-                      checked={checked}
-                      disabled={disabled}
-                      onChange={() => toggleGroup(g.name, createGroups, setCreateGroups)}
-                    />
-                      <label className="form-check-label w-100" htmlFor={`create-group-${g.name}`}>
-                        {g.name}
-                        {g.status !== 1 ? (
-                        <span className="badge bg-secondary ms-1">
-                          禁用
-                        </span>
-                        ) : null}
-                      </label>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="form-text small text-muted">用户可属于多个组（并集生效），且必须包含 default。</div>
+            <label className="form-label">用户分组</label>
+            <select className="form-select font-monospace" value={createMainGroup} onChange={(e) => setCreateMainGroup(e.target.value)}>
+              {(mainGroups.length > 0 ? mainGroups : [{ name: 'default', status: 1, created_at: '', updated_at: '' }]).map((g) => (
+                <option key={g.name} value={g.name} disabled={g.status !== 1}>
+                  {g.name}
+                  {g.status !== 1 ? '（已禁用）' : ''}
+                </option>
+              ))}
+            </select>
+            <div className="form-text small text-muted">用户只能属于一个用户分组；用户分组决定可绑定的子组范围。</div>
           </div>
           <div className="modal-footer border-top-0 px-0 pb-0">
             <button type="button" className="btn btn-light" data-bs-dismiss="modal">
@@ -391,7 +345,7 @@ export function UsersPage() {
                   email: editEmail.trim(),
                   role: editRole,
                   status: editStatus,
-                  groups: editGroups,
+                  user_group: editMainGroup,
                 });
                 if (!res.success) throw new Error(res.message || '保存失败');
                 setNotice('已保存');
@@ -428,34 +382,20 @@ export function UsersPage() {
               {editing.id === selfID ? <div className="form-text small text-muted">不能修改当前登录用户的状态或角色。</div> : null}
             </div>
             <div className="col-12">
-              <label className="form-label">组</label>
-              <div className="card p-2" style={{ maxHeight: 240, overflowY: 'auto' }}>
-                {groups.map((g) => {
-                  const checked = editGroups.includes(g.name) || isDefaultGroup(g.name);
-                  const disabled = groupDisabled(g.name, editGroups);
-                  return (
-                    <div key={g.id} className="form-check">
-                      <input
-                        className="form-check-input"
-                        type="checkbox"
-                        id={`edit-group-${editing.id}-${g.name}`}
-                        checked={checked}
-                        disabled={disabled}
-                        onChange={() => toggleGroup(g.name, editGroups, setEditGroups)}
-                      />
-                      <label className="form-check-label w-100" htmlFor={`edit-group-${editing.id}-${g.name}`}>
-                        {g.name}
-                        {g.status !== 1 ? (
-                          <span className="badge bg-secondary ms-1">
-                            禁用
-                          </span>
-                        ) : null}
-                      </label>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="form-text small text-muted">用户可属于多个组（并集生效），且必须包含 default。</div>
+              <label className="form-label">用户分组</label>
+              <select
+                className="form-select font-monospace"
+                value={editMainGroup}
+                onChange={(e) => setEditMainGroup(e.target.value)}
+              >
+                {(mainGroups.length > 0 ? mainGroups : [{ name: 'default', status: 1, created_at: '', updated_at: '' }]).map((g) => (
+                  <option key={g.name} value={g.name} disabled={g.status !== 1}>
+                    {g.name}
+                    {g.status !== 1 ? '（已禁用）' : ''}
+                  </option>
+                ))}
+              </select>
+              <div className="form-text small text-muted">修改用户分组会影响该用户 Token 的可绑定范围；不在范围内的旧绑定会被自动忽略。</div>
             </div>
             <div className="modal-footer border-top-0 px-0 pb-0">
               <button type="button" className="btn btn-light" data-bs-dismiss="modal">

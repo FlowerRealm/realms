@@ -6,6 +6,7 @@ export type AdminSubscriptionPlan = {
   code: string;
   name: string;
   group_name: string;
+  price_multiplier: string;
   price_cny: string;
   duration_days: number;
   status: number;
@@ -23,6 +24,7 @@ export type CreateAdminSubscriptionPlanRequest = {
   code?: string;
   name: string;
   group_name?: string;
+  price_multiplier?: string;
   price_cny: string;
   duration_days: number;
   status?: number;
@@ -86,4 +88,3 @@ export async function rejectAdminSubscriptionOrder(orderID: number) {
   const res = await api.post<APIResponse<void>>(`/api/admin/orders/${orderID}/reject`);
   return res.data;
 }
-

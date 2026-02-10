@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"strings"
 
 	"realms/internal/store"
 )
@@ -45,7 +46,11 @@ func TestSQLiteBootstrap_CreateUserRoundTrip(t *testing.T) {
 	if u.CreatedAt.IsZero() || u.UpdatedAt.IsZero() {
 		t.Fatalf("expected created_at/updated_at to be parsed, got created_at=%v updated_at=%v", u.CreatedAt, u.UpdatedAt)
 	}
-	if len(u.Groups) == 0 {
-		t.Fatalf("expected default group, got none")
+	mainGroup := strings.TrimSpace(u.MainGroup)
+	if mainGroup == "" {
+		mainGroup = store.DefaultGroupName
+	}
+	if mainGroup != store.DefaultGroupName {
+		t.Fatalf("expected default main_group, got %q", mainGroup)
 	}
 }

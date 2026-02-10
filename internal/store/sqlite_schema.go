@@ -17,6 +17,15 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 	var v int
 	err := db.QueryRow(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='users' LIMIT 1`).Scan(&v)
 	if err == nil && v == 1 {
+		if err := ensureSQLiteUsersMainGroupColumn(db); err != nil {
+			return err
+		}
+		if err := ensureSQLiteMainGroupsTables(db); err != nil {
+			return err
+		}
+		if err := ensureSQLiteTokenGroupsTable(db); err != nil {
+			return err
+		}
 		if err := ensureSQLiteUpstreamChannelRequestPolicyColumns(db); err != nil {
 			return err
 		}
@@ -33,6 +42,12 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 			return err
 		}
 		if err := ensureSQLiteUsageEventsFirstTokenLatencyColumn(db); err != nil {
+			return err
+		}
+		if err := ensureSQLiteUsageEventsPriceMultiplierColumns(db); err != nil {
+			return err
+		}
+		if err := ensureSQLiteSubscriptionPlansPriceMultiplierColumn(db); err != nil {
 			return err
 		}
 		if err := ensureSQLiteUserTokensPlainColumn(db); err != nil {
@@ -79,7 +94,22 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 	if err := ensureSQLiteUsersUsernameRules(db); err != nil {
 		return err
 	}
+	if err := ensureSQLiteUsersMainGroupColumn(db); err != nil {
+		return err
+	}
+	if err := ensureSQLiteMainGroupsTables(db); err != nil {
+		return err
+	}
+	if err := ensureSQLiteTokenGroupsTable(db); err != nil {
+		return err
+	}
 	if err := ensureSQLiteManagedModelGroupNameColumn(db); err != nil {
+		return err
+	}
+	if err := ensureSQLiteUsageEventsPriceMultiplierColumns(db); err != nil {
+		return err
+	}
+	if err := ensureSQLiteSubscriptionPlansPriceMultiplierColumn(db); err != nil {
 		return err
 	}
 	if err := ensureSQLiteSessionBindingsTable(db); err != nil {

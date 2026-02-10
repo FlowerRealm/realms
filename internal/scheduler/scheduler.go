@@ -28,6 +28,7 @@ type Selection struct {
 	ChannelID     int64
 	ChannelType   string
 	ChannelGroups string
+	RouteGroup    string
 
 	AllowServiceTier       bool
 	DisableStore           bool
@@ -85,6 +86,7 @@ type Constraints struct {
 	RequireChannelType string
 	RequireChannelID   int64
 	AllowGroups        map[string]struct{}
+	AllowGroupOrder    []string
 	AllowChannelIDs    map[int64]struct{}
 }
 

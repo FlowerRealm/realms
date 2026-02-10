@@ -90,7 +90,6 @@ func userLoginHandler(opts Options) gin.HandlerFunc {
 				"username": u.Username,
 				"role":     u.Role,
 				"status":   u.Status,
-				"groups":   u.Groups,
 			},
 		})
 	}
@@ -245,7 +244,6 @@ func userSelfHandler(opts Options) gin.HandlerFunc {
 				"username":                   u.Username,
 				"role":                       u.Role,
 				"status":                     u.Status,
-				"groups":                     u.Groups,
 				"self_mode":                  opts.SelfMode,
 				"email_verification_enabled": emailVerifEnabled,
 				"features": gin.H{

@@ -33,6 +33,7 @@ function initForm(s: AdminSettings): UpdateAdminSettingsRequest {
     billing_enable_pay_as_you_go: !!s.billing_enable_pay_as_you_go,
     billing_min_topup_cny: s.billing_min_topup_cny || '',
     billing_credit_usd_per_cny: s.billing_credit_usd_per_cny || '',
+    billing_paygo_price_multiplier: s.billing_paygo_price_multiplier || '1',
 
     feature_enabled: featureEnabled,
   };
@@ -469,6 +470,23 @@ export function SettingsAdminPage() {
                             onChange={(e) => setForm({ ...form, billing_credit_usd_per_cny: e.target.value })}
                             placeholder="0.15"
                           />
+                        </div>
+                        <div className="col-md-6">
+                          <label className="form-label fw-medium d-flex justify-content-between">
+                            <span>按量计费倍率</span>
+                            {settings.billing_paygo_price_multiplier_override ? <span className="badge bg-light text-dark border">界面覆盖</span> : null}
+                          </label>
+                          <div className="input-group">
+                            <span className="input-group-text">×</span>
+                            <input
+                              className="form-control"
+                              value={form.billing_paygo_price_multiplier}
+                              onChange={(e) => setForm({ ...form, billing_paygo_price_multiplier: e.target.value })}
+                              placeholder="1"
+                              inputMode="decimal"
+                            />
+                          </div>
+                          <div className="form-text small text-muted">留空表示恢复默认（×1）。最终计费倍率 = PayGO 倍率 × 最终成功分组倍率。</div>
                         </div>
                       </div>
                     </div>

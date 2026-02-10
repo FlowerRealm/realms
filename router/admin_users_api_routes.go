@@ -1,9 +1,7 @@
 package router
 
 import (
-	"context"
 	"database/sql"
-	"errors"
 	"net/http"
 	"net/mail"
 	"strconv"
@@ -21,7 +19,7 @@ type adminUserView struct {
 	ID         int64  `json:"id"`
 	Email      string `json:"email"`
 	Username   string `json:"username"`
-	Groups     string `json:"groups"`
+	UserGroup  string `json:"user_group"`
 	Role       string `json:"role"`
 	Status     int    `json:"status"`
 	BalanceUSD string `json:"balance_usd"`
@@ -75,11 +73,15 @@ func adminListUsersHandler(opts Options) gin.HandlerFunc {
 
 		out := make([]adminUserView, 0, len(users))
 		for _, u := range users {
+			mainGroup := strings.TrimSpace(u.MainGroup)
+			if mainGroup == "" {
+				mainGroup = store.DefaultGroupName
+			}
 			out = append(out, adminUserView{
 				ID:         u.ID,
 				Email:      u.Email,
 				Username:   u.Username,
-				Groups:     strings.Join(u.Groups, ","),
+				UserGroup:  mainGroup,
 				Role:       u.Role,
 				Status:     u.Status,
 				BalanceUSD: formatUSDPlain(balances[u.ID]),
@@ -93,11 +95,11 @@ func adminListUsersHandler(opts Options) gin.HandlerFunc {
 
 func adminCreateUserHandler(opts Options) gin.HandlerFunc {
 	type reqBody struct {
-		Email    string   `json:"email"`
-		Username string   `json:"username"`
-		Password string   `json:"password"`
-		Role     string   `json:"role"`
-		Groups   []string `json:"groups"`
+		Email     string `json:"email"`
+		Username  string `json:"username"`
+		Password  string `json:"password"`
+		Role      string `json:"role"`
+		UserGroup string `json:"user_group"`
 	}
 
 	return func(c *gin.Context) {
@@ -160,20 +162,9 @@ func adminCreateUserHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
-		groups, err := normalizeUserGroups(req.Groups)
-		if err != nil {
+		if err := opts.Store.SetUserMainGroup(c.Request.Context(), userID, req.UserGroup); err != nil {
 			_ = opts.Store.DeleteUser(c.Request.Context(), userID)
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
-			return
-		}
-		if err := validateUserGroupsSelectable(c.Request.Context(), opts.Store, groups); err != nil {
-			_ = opts.Store.DeleteUser(c.Request.Context(), userID)
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
-			return
-		}
-		if err := opts.Store.ReplaceUserGroups(c.Request.Context(), userID, groups); err != nil {
-			_ = opts.Store.DeleteUser(c.Request.Context(), userID)
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "设置用户分组失败"})
 			return
 		}
 
@@ -183,11 +174,11 @@ func adminCreateUserHandler(opts Options) gin.HandlerFunc {
 
 func adminUpdateUserHandler(opts Options) gin.HandlerFunc {
 	type reqBody struct {
-		Email    *string  `json:"email,omitempty"`
-		Username *string  `json:"username,omitempty"`
-		Status   *int     `json:"status,omitempty"`
-		Role     *string  `json:"role,omitempty"`
-		Groups   []string `json:"groups"`
+		Email     *string `json:"email,omitempty"`
+		Username  *string `json:"username,omitempty"`
+		Status    *int    `json:"status,omitempty"`
+		Role      *string `json:"role,omitempty"`
+		UserGroup *string `json:"user_group,omitempty"`
 	}
 
 	return func(c *gin.Context) {
@@ -293,22 +284,18 @@ func adminUpdateUserHandler(opts Options) gin.HandlerFunc {
 			}
 		}
 
-		// groups: if provided (even empty), treat as replacement.
-		if req.Groups != nil {
-			groups, err := normalizeUserGroups(req.Groups)
-			if err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
-				return
+		if req.UserGroup != nil {
+			mainGroup := strings.TrimSpace(*req.UserGroup)
+			if mainGroup == "" {
+				mainGroup = store.DefaultGroupName
 			}
-			if err := validateUserGroupsSelectable(c.Request.Context(), opts.Store, groups); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
-				return
+			if mainGroup != strings.TrimSpace(target.MainGroup) {
+				if err := opts.Store.SetUserMainGroup(c.Request.Context(), target.ID, mainGroup); err != nil {
+					c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+					return
+				}
+				changed = true
 			}
-			if err := opts.Store.ReplaceUserGroups(c.Request.Context(), target.ID, groups); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
-				return
-			}
-			changed = true
 		}
 
 		msg := "已保存"
@@ -446,95 +433,4 @@ func adminDeleteUserHandler(opts Options) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已删除"})
 	}
-}
-
-func normalizeUserGroups(rawValues []string) ([]string, error) {
-	if len(rawValues) == 0 {
-		return []string{store.DefaultGroupName}, nil
-	}
-
-	var parts []string
-	for _, raw := range rawValues {
-		raw = strings.TrimSpace(raw)
-		if raw == "" {
-			continue
-		}
-		parts = append(parts, strings.Split(raw, ",")...)
-	}
-	if len(parts) == 0 {
-		return []string{store.DefaultGroupName}, nil
-	}
-
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		g := strings.TrimSpace(p)
-		if g == "" {
-			continue
-		}
-		if len(g) > 64 {
-			return nil, errFieldTooLong("groups", 64)
-		}
-		for _, r := range g {
-			if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-' {
-				continue
-			}
-			return nil, errFieldInvalid("groups", "仅允许字母/数字/下划线/连字符")
-		}
-		if _, ok := seen[g]; ok {
-			continue
-		}
-		seen[g] = struct{}{}
-		out = append(out, g)
-	}
-	if len(out) == 0 {
-		out = append(out, store.DefaultGroupName)
-	}
-	hasDefault := false
-	for _, g := range out {
-		if g == store.DefaultGroupName {
-			hasDefault = true
-			break
-		}
-	}
-	if !hasDefault {
-		out = append(out, store.DefaultGroupName)
-	}
-	if len(out) > 20 {
-		return nil, errFieldInvalid("groups", "分组数量过多（最多 20 个）")
-	}
-	return out, nil
-}
-
-func validateUserGroupsSelectable(ctx context.Context, st *store.Store, groups []string) error {
-	// accept all when store missing (tests).
-	if st == nil {
-		return nil
-	}
-
-	groupRows, err := st.ListChannelGroups(ctx)
-	if err != nil {
-		return err
-	}
-	statusByName := map[string]int{}
-	for _, g := range groupRows {
-		statusByName[strings.TrimSpace(g.Name)] = g.Status
-	}
-	for _, g := range groups {
-		name := strings.TrimSpace(g)
-		if name == "" {
-			continue
-		}
-		if name == store.DefaultGroupName {
-			continue
-		}
-		sts, ok := statusByName[name]
-		if !ok {
-			return errors.New("组不存在: " + name)
-		}
-		if sts != 1 {
-			return errors.New("组已禁用: " + name)
-		}
-	}
-	return nil
 }

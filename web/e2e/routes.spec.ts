@@ -2,6 +2,8 @@ import { test, expect, type Page } from '@playwright/test';
 
 import { E2E_SEED } from './seed';
 
+const includeChannelTests = (process.env.REALMS_E2E_INCLUDE_CHANNEL_TESTS || '').trim() === '1';
+
 async function login(page: Page) {
   await page.locator('input[name="login"]').fill(E2E_SEED.root.username);
   await page.locator('input[name="password"]').fill(E2E_SEED.root.password);
@@ -149,11 +151,17 @@ test.describe('admin routes', () => {
   });
 
   test('GET /admin/channels', async ({ page }) => {
+    test.skip(!includeChannelTests, '默认 E2E 不覆盖渠道管理页面');
     await gotoAuthedAndExpectHeading(page, '/admin/channels', /上游渠道管理/);
   });
 
   test('GET /admin/channel-groups', async ({ page }) => {
+    test.skip(!includeChannelTests, '默认 E2E 不覆盖渠道分组页面');
     await gotoAuthedAndExpectHeading(page, '/admin/channel-groups', /分组/);
+  });
+
+  test('GET /admin/main-groups', async ({ page }) => {
+    await gotoAuthedAndExpectHeading(page, '/admin/main-groups', /用户分组管理/);
   });
 
   test('GET /admin/subscriptions', async ({ page }) => {
@@ -169,6 +177,7 @@ test.describe('admin routes', () => {
   });
 
   test('GET /admin/payment-channels', async ({ page }) => {
+    test.skip(!includeChannelTests, '默认 E2E 不覆盖渠道相关页面');
     await gotoAuthedAndExpectHeading(page, '/admin/payment-channels', /支付渠道/);
   });
 

@@ -66,13 +66,13 @@ func (p *SubscriptionProvider) Reserve(ctx context.Context, in ReserveInput) (Re
 	var chosen *store.SubscriptionWithPlan
 	var chosenReservedUSD decimal.Decimal
 
-	multSnap := userGroupMultiplierSnapshot{}
+	groupMultSnap := tokenGroupMultiplierSnapshot{}
 	if baseReservedUSD.GreaterThan(decimal.Zero) {
-		snap, err := loadUserGroupMultiplierSnapshot(ctx, p.st, in.UserID)
+		snap, err := loadTokenGroupMultiplierSnapshot(ctx, p.st, in.TokenID)
 		if err != nil {
 			return ReserveResult{}, err
 		}
-		multSnap = snap
+		groupMultSnap = snap
 	}
 
 	for i := range subs {
@@ -80,7 +80,8 @@ func (p *SubscriptionProvider) Reserve(ctx context.Context, in ReserveInput) (Re
 		ok := true
 		reservedUSD := baseReservedUSD
 		if baseReservedUSD.GreaterThan(decimal.Zero) {
-			usd, err := applyPriceMultiplierUSD(baseReservedUSD, multSnap.userMultiplier)
+			mult := normalizeMultiplier(row.Plan.PriceMultiplier.Mul(groupMultSnap.maxGroupMultiplier))
+			usd, err := applyPriceMultiplierUSD(baseReservedUSD, mult)
 			if err != nil {
 				return ReserveResult{}, err
 			}
@@ -147,17 +148,23 @@ func (p *SubscriptionProvider) Commit(ctx context.Context, in CommitInput) error
 		model = ev.Model
 	}
 
-	multSnap, err := loadUserGroupMultiplierSnapshot(ctx, p.st, ev.UserID)
-	if err != nil {
-		return err
+	paymentMult := store.DefaultGroupPriceMultiplier
+	if ev.SubscriptionID != nil && *ev.SubscriptionID > 0 {
+		sub, err := p.st.GetSubscriptionWithPlanByID(ctx, *ev.SubscriptionID)
+		if err == nil {
+			paymentMult = sub.Plan.PriceMultiplier
+		}
 	}
-	mult := multSnap.userMultiplier
+	paymentMult = normalizeMultiplier(paymentMult)
+
+	groupMult, groupName := groupMultiplierForRouteGroup(ctx, p.st, in.RouteGroup)
+	totalMult := normalizeMultiplier(paymentMult.Mul(groupMult))
 
 	usd, err := estimateCostUSD(ctx, p.st, model, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens)
 	if err != nil {
 		return err
 	}
-	usd, err = applyPriceMultiplierUSD(usd, mult)
+	usd, err = applyPriceMultiplierUSD(usd, totalMult)
 	if err != nil {
 		return err
 	}
@@ -166,13 +173,17 @@ func (p *SubscriptionProvider) Commit(ctx context.Context, in CommitInput) error
 	}
 
 	return p.st.CommitUsage(ctx, store.CommitUsageInput{
-		UsageEventID:       in.UsageEventID,
-		UpstreamChannelID:  in.UpstreamChannelID,
-		InputTokens:        in.InputTokens,
-		CachedInputTokens:  in.CachedInputTokens,
-		OutputTokens:       in.OutputTokens,
-		CachedOutputTokens: in.CachedOutputTokens,
-		CommittedUSD:       usd,
+		UsageEventID:             in.UsageEventID,
+		UpstreamChannelID:        in.UpstreamChannelID,
+		InputTokens:              in.InputTokens,
+		CachedInputTokens:        in.CachedInputTokens,
+		OutputTokens:             in.OutputTokens,
+		CachedOutputTokens:       in.CachedOutputTokens,
+		CommittedUSD:             usd,
+		PriceMultiplier:          totalMult,
+		PriceMultiplierGroup:     groupMult,
+		PriceMultiplierPayment:   paymentMult,
+		PriceMultiplierGroupName: groupName,
 	})
 }
 

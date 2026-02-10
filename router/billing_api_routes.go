@@ -265,13 +265,10 @@ func billingSubscriptionPageHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "套餐查询失败"})
 			return
 		}
-		allowedGroups := make(map[string]struct{}, len(u.Groups))
-		for _, g := range u.Groups {
-			g = strings.TrimSpace(g)
-			if g == "" {
-				continue
-			}
-			allowedGroups[g] = struct{}{}
+		ags, err := allowedSubgroupsForMainGroup(c.Request.Context(), opts.Store, u.MainGroup)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询用户分组失败"})
+			return
 		}
 		planViews := make([]billingPlanView, 0, len(plans))
 		for _, p := range plans {
@@ -279,7 +276,7 @@ func billingSubscriptionPageHandler(opts Options) gin.HandlerFunc {
 			if g == "" {
 				g = store.DefaultGroupName
 			}
-			if _, ok := allowedGroups[g]; !ok {
+			if _, ok := ags.Set[g]; !ok {
 				continue
 			}
 			planViews = append(planViews, billingPlanView{

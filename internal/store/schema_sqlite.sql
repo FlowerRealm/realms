@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `username` TEXT NOT NULL CHECK (`username` <> '' AND `username` NOT GLOB '*[^A-Za-z0-9]*'),
   `password_hash` BLOB NOT NULL,
   `role` TEXT NOT NULL DEFAULT 'user',
+  `main_group` TEXT NOT NULL DEFAULT 'default',
   `status` INTEGER NOT NULL DEFAULT 1,
   `created_at` DATETIME NOT NULL,
   `updated_at` DATETIME NOT NULL
@@ -16,14 +17,25 @@ CREATE TABLE IF NOT EXISTS `users` (
 CREATE UNIQUE INDEX IF NOT EXISTS `uk_users_email` ON `users` (`email`);
 CREATE UNIQUE INDEX IF NOT EXISTS `uk_users_username` ON `users` (`username` COLLATE BINARY);
 
-CREATE TABLE IF NOT EXISTS `user_groups` (
-  `user_id` INTEGER NOT NULL,
-  `group_name` TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS `main_groups` (
+  `name` TEXT PRIMARY KEY,
+  `description` TEXT NULL,
+  `status` INTEGER NOT NULL DEFAULT 1,
   `created_at` DATETIME NOT NULL,
-  PRIMARY KEY (`user_id`, `group_name`)
+  `updated_at` DATETIME NOT NULL
 );
-CREATE INDEX IF NOT EXISTS `idx_user_groups_group_name` ON `user_groups` (`group_name`);
-CREATE INDEX IF NOT EXISTS `idx_user_groups_user_id` ON `user_groups` (`user_id`);
+CREATE INDEX IF NOT EXISTS `idx_main_groups_status` ON `main_groups` (`status`);
+
+CREATE TABLE IF NOT EXISTS `main_group_subgroups` (
+  `main_group` TEXT NOT NULL,
+  `subgroup` TEXT NOT NULL,
+  `priority` INTEGER NOT NULL DEFAULT 0,
+  `created_at` DATETIME NOT NULL,
+  `updated_at` DATETIME NOT NULL,
+  PRIMARY KEY (`main_group`, `subgroup`)
+);
+CREATE INDEX IF NOT EXISTS `idx_main_group_subgroups_main_group` ON `main_group_subgroups` (`main_group`);
+CREATE INDEX IF NOT EXISTS `idx_main_group_subgroups_subgroup` ON `main_group_subgroups` (`subgroup`);
 
 CREATE TABLE IF NOT EXISTS `user_tokens` (
   `id` INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,6 +51,16 @@ CREATE TABLE IF NOT EXISTS `user_tokens` (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS `uk_user_tokens_hash` ON `user_tokens` (`token_hash`);
 CREATE INDEX IF NOT EXISTS `idx_user_tokens_user_id` ON `user_tokens` (`user_id`);
+
+CREATE TABLE IF NOT EXISTS `token_groups` (
+  `token_id` INTEGER NOT NULL,
+  `group_name` TEXT NOT NULL,
+  `priority` INTEGER NOT NULL DEFAULT 0,
+  `created_at` DATETIME NOT NULL,
+  `updated_at` DATETIME NOT NULL,
+  PRIMARY KEY (`token_id`, `group_name`)
+);
+CREATE INDEX IF NOT EXISTS `idx_token_groups_token_id` ON `token_groups` (`token_id`);
 
 CREATE TABLE IF NOT EXISTS `user_sessions` (
   `id` INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -231,6 +253,10 @@ CREATE TABLE IF NOT EXISTS `usage_events` (
   `cached_output_tokens` INTEGER NULL,
   `reserved_usd` DECIMAL(20,6) NOT NULL DEFAULT 0,
   `committed_usd` DECIMAL(20,6) NOT NULL DEFAULT 0,
+  `price_multiplier` DECIMAL(20,6) NOT NULL DEFAULT 1.000000,
+  `price_multiplier_group` DECIMAL(20,6) NOT NULL DEFAULT 1.000000,
+  `price_multiplier_payment` DECIMAL(20,6) NOT NULL DEFAULT 1.000000,
+  `price_multiplier_group_name` TEXT NULL,
   `reserve_expires_at` DATETIME NOT NULL,
   `status_code` INTEGER NOT NULL DEFAULT 0,
   `latency_ms` INTEGER NOT NULL DEFAULT 0,
@@ -260,6 +286,7 @@ CREATE TABLE IF NOT EXISTS `subscription_plans` (
   `code` TEXT NOT NULL,
   `name` TEXT NOT NULL,
   `group_name` TEXT NOT NULL DEFAULT 'default',
+  `price_multiplier` DECIMAL(20,6) NOT NULL DEFAULT 1.000000,
   `price_cny` DECIMAL(20,2) NOT NULL,
   `limit_5h_usd` DECIMAL(20,6) NOT NULL,
   `limit_1d_usd` DECIMAL(20,6) NOT NULL DEFAULT 0,
@@ -538,6 +565,16 @@ INSERT INTO channel_groups(name, description, price_multiplier, status, max_atte
 SELECT 'default', '默认分组', 1.000000, 1, 5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM channel_groups WHERE name='default' LIMIT 1);
 
+-- Seed: main_groups 默认用户分组
+INSERT INTO main_groups(name, description, status, created_at, updated_at)
+SELECT 'default', '默认用户分组', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+WHERE NOT EXISTS (SELECT 1 FROM main_groups WHERE name='default' LIMIT 1);
+
+-- Seed: main_group_subgroups 默认映射（default → default）
+INSERT INTO main_group_subgroups(main_group, subgroup, priority, created_at, updated_at)
+SELECT 'default', 'default', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+WHERE NOT EXISTS (SELECT 1 FROM main_group_subgroups WHERE main_group='default' AND subgroup='default' LIMIT 1);
+
 -- Seed: 内置 Codex OAuth 渠道
 INSERT INTO upstream_channels(type, name, `groups`, status, priority, promotion, last_test_at, last_test_latency_ms, last_test_ok, created_at, updated_at)
 SELECT 'codex_oauth', 'Codex OAuth', 'default', 1, 0, 0, NULL, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
@@ -552,12 +589,12 @@ WHERE c.type='codex_oauth'
 
 -- Seed: 默认订阅套餐（保持与历史迁移一致；limit_1d_usd=0 为后续字段默认）
 INSERT INTO subscription_plans(
-  code, name, group_name, price_cny,
+  code, name, group_name, price_multiplier, price_cny,
   limit_5h_usd, limit_1d_usd, limit_7d_usd, limit_30d_usd,
   duration_days, status, created_at, updated_at
 )
 SELECT
-  'basic_12', '基础订阅', 'default', 12.00,
+  'basic_12', '基础订阅', 'default', 1.000000, 12.00,
   6.000000, 0.000000, 20.000000, 80.000000,
   30, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM subscription_plans WHERE code='basic_12' LIMIT 1);

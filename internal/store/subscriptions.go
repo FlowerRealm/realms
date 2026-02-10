@@ -24,6 +24,10 @@ type SubscriptionWithPlan struct {
 
 func truncateSubscriptionPlanMoney(p *SubscriptionPlan) {
 	p.PriceCNY = p.PriceCNY.Truncate(CNYScale)
+	if p.PriceMultiplier.IsNegative() || p.PriceMultiplier.LessThanOrEqual(decimal.Zero) {
+		p.PriceMultiplier = DefaultGroupPriceMultiplier
+	}
+	p.PriceMultiplier = p.PriceMultiplier.Truncate(PriceMultiplierScale)
 	p.Limit5HUSD = p.Limit5HUSD.Truncate(USDScale)
 	p.Limit1DUSD = p.Limit1DUSD.Truncate(USDScale)
 	p.Limit7DUSD = p.Limit7DUSD.Truncate(USDScale)
@@ -38,14 +42,14 @@ func (s *Store) GetSubscriptionWithPlanByID(ctx context.Context, subscriptionID 
 	err := s.db.QueryRowContext(ctx, `
 SELECT
   us.id, us.user_id, us.plan_id, us.start_at, us.end_at, us.status, us.created_at, us.updated_at,
-  sp.id, sp.code, sp.name, sp.group_name, sp.price_cny, sp.limit_5h_usd, sp.limit_1d_usd, sp.limit_7d_usd, sp.limit_30d_usd, sp.duration_days, sp.status, sp.created_at, sp.updated_at
+  sp.id, sp.code, sp.name, sp.group_name, sp.price_multiplier, sp.price_cny, sp.limit_5h_usd, sp.limit_1d_usd, sp.limit_7d_usd, sp.limit_30d_usd, sp.duration_days, sp.status, sp.created_at, sp.updated_at
 FROM user_subscriptions us
 JOIN subscription_plans sp ON sp.id=us.plan_id
 WHERE us.id=?
 LIMIT 1
 `, subscriptionID).Scan(
 		&row.Subscription.ID, &row.Subscription.UserID, &row.Subscription.PlanID, &row.Subscription.StartAt, &row.Subscription.EndAt, &row.Subscription.Status, &row.Subscription.CreatedAt, &row.Subscription.UpdatedAt,
-		&row.Plan.ID, &row.Plan.Code, &row.Plan.Name, &row.Plan.GroupName, &row.Plan.PriceCNY, &row.Plan.Limit5HUSD, &row.Plan.Limit1DUSD, &row.Plan.Limit7DUSD, &row.Plan.Limit30DUSD, &row.Plan.DurationDays, &row.Plan.Status, &row.Plan.CreatedAt, &row.Plan.UpdatedAt,
+		&row.Plan.ID, &row.Plan.Code, &row.Plan.Name, &row.Plan.GroupName, &row.Plan.PriceMultiplier, &row.Plan.PriceCNY, &row.Plan.Limit5HUSD, &row.Plan.Limit1DUSD, &row.Plan.Limit7DUSD, &row.Plan.Limit30DUSD, &row.Plan.DurationDays, &row.Plan.Status, &row.Plan.CreatedAt, &row.Plan.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -59,7 +63,7 @@ LIMIT 1
 
 func (s *Store) ListSubscriptionPlans(ctx context.Context) ([]SubscriptionPlan, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, code, name, group_name, price_cny, limit_5h_usd, limit_1d_usd, limit_7d_usd, limit_30d_usd, duration_days, status, created_at, updated_at
+SELECT id, code, name, group_name, price_multiplier, price_cny, limit_5h_usd, limit_1d_usd, limit_7d_usd, limit_30d_usd, duration_days, status, created_at, updated_at
 FROM subscription_plans
 WHERE status=1
 ORDER BY id DESC
@@ -72,7 +76,7 @@ ORDER BY id DESC
 	var out []SubscriptionPlan
 	for rows.Next() {
 		var p SubscriptionPlan
-		if err := rows.Scan(&p.ID, &p.Code, &p.Name, &p.GroupName, &p.PriceCNY, &p.Limit5HUSD, &p.Limit1DUSD, &p.Limit7DUSD, &p.Limit30DUSD, &p.DurationDays, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Code, &p.Name, &p.GroupName, &p.PriceMultiplier, &p.PriceCNY, &p.Limit5HUSD, &p.Limit1DUSD, &p.Limit7DUSD, &p.Limit30DUSD, &p.DurationDays, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("扫描 subscription_plans 失败: %w", err)
 		}
 		truncateSubscriptionPlanMoney(&p)
@@ -90,7 +94,7 @@ func (s *Store) GetActiveSubscriptionWithPlan(ctx context.Context, userID int64,
 	err := s.db.QueryRowContext(ctx, `
 SELECT
   us.id, us.user_id, us.plan_id, us.start_at, us.end_at, us.status, us.created_at, us.updated_at,
-  sp.id, sp.code, sp.name, sp.group_name, sp.price_cny, sp.limit_5h_usd, sp.limit_1d_usd, sp.limit_7d_usd, sp.limit_30d_usd, sp.duration_days, sp.status, sp.created_at, sp.updated_at
+  sp.id, sp.code, sp.name, sp.group_name, sp.price_multiplier, sp.price_cny, sp.limit_5h_usd, sp.limit_1d_usd, sp.limit_7d_usd, sp.limit_30d_usd, sp.duration_days, sp.status, sp.created_at, sp.updated_at
 FROM user_subscriptions us
 JOIN subscription_plans sp ON sp.id=us.plan_id
 WHERE us.user_id=? AND us.status=1 AND us.start_at <= ? AND us.end_at > ? AND sp.status=1
@@ -98,7 +102,7 @@ ORDER BY us.end_at ASC, us.id ASC
 LIMIT 1
 `, userID, now, now).Scan(
 		&us.ID, &us.UserID, &us.PlanID, &us.StartAt, &us.EndAt, &us.Status, &us.CreatedAt, &us.UpdatedAt,
-		&p.ID, &p.Code, &p.Name, &p.GroupName, &p.PriceCNY, &p.Limit5HUSD, &p.Limit1DUSD, &p.Limit7DUSD, &p.Limit30DUSD, &p.DurationDays, &p.Status, &p.CreatedAt, &p.UpdatedAt,
+		&p.ID, &p.Code, &p.Name, &p.GroupName, &p.PriceMultiplier, &p.PriceCNY, &p.Limit5HUSD, &p.Limit1DUSD, &p.Limit7DUSD, &p.Limit30DUSD, &p.DurationDays, &p.Status, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -114,7 +118,7 @@ func (s *Store) ListActiveSubscriptionsWithPlans(ctx context.Context, userID int
 	rows, err := s.db.QueryContext(ctx, `
 SELECT
   us.id, us.user_id, us.plan_id, us.start_at, us.end_at, us.status, us.created_at, us.updated_at,
-  sp.id, sp.code, sp.name, sp.group_name, sp.price_cny, sp.limit_5h_usd, sp.limit_1d_usd, sp.limit_7d_usd, sp.limit_30d_usd, sp.duration_days, sp.status, sp.created_at, sp.updated_at
+  sp.id, sp.code, sp.name, sp.group_name, sp.price_multiplier, sp.price_cny, sp.limit_5h_usd, sp.limit_1d_usd, sp.limit_7d_usd, sp.limit_30d_usd, sp.duration_days, sp.status, sp.created_at, sp.updated_at
 FROM user_subscriptions us
 JOIN subscription_plans sp ON sp.id=us.plan_id
 WHERE us.user_id=? AND us.status=1 AND us.start_at <= ? AND us.end_at > ? AND sp.status=1
@@ -130,7 +134,7 @@ ORDER BY us.end_at ASC, us.id ASC
 		var row SubscriptionWithPlan
 		if err := rows.Scan(
 			&row.Subscription.ID, &row.Subscription.UserID, &row.Subscription.PlanID, &row.Subscription.StartAt, &row.Subscription.EndAt, &row.Subscription.Status, &row.Subscription.CreatedAt, &row.Subscription.UpdatedAt,
-			&row.Plan.ID, &row.Plan.Code, &row.Plan.Name, &row.Plan.GroupName, &row.Plan.PriceCNY, &row.Plan.Limit5HUSD, &row.Plan.Limit1DUSD, &row.Plan.Limit7DUSD, &row.Plan.Limit30DUSD, &row.Plan.DurationDays, &row.Plan.Status, &row.Plan.CreatedAt, &row.Plan.UpdatedAt,
+			&row.Plan.ID, &row.Plan.Code, &row.Plan.Name, &row.Plan.GroupName, &row.Plan.PriceMultiplier, &row.Plan.PriceCNY, &row.Plan.Limit5HUSD, &row.Plan.Limit1DUSD, &row.Plan.Limit7DUSD, &row.Plan.Limit30DUSD, &row.Plan.DurationDays, &row.Plan.Status, &row.Plan.CreatedAt, &row.Plan.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("扫描 user_subscriptions 失败: %w", err)
 		}
@@ -147,7 +151,7 @@ func (s *Store) ListNonExpiredSubscriptionsWithPlans(ctx context.Context, userID
 	rows, err := s.db.QueryContext(ctx, `
 SELECT
   us.id, us.user_id, us.plan_id, us.start_at, us.end_at, us.status, us.created_at, us.updated_at,
-  sp.id, sp.code, sp.name, sp.group_name, sp.price_cny, sp.limit_5h_usd, sp.limit_1d_usd, sp.limit_7d_usd, sp.limit_30d_usd, sp.duration_days, sp.status, sp.created_at, sp.updated_at
+  sp.id, sp.code, sp.name, sp.group_name, sp.price_multiplier, sp.price_cny, sp.limit_5h_usd, sp.limit_1d_usd, sp.limit_7d_usd, sp.limit_30d_usd, sp.duration_days, sp.status, sp.created_at, sp.updated_at
 FROM user_subscriptions us
 JOIN subscription_plans sp ON sp.id=us.plan_id
 WHERE us.user_id=? AND us.status=1 AND us.end_at > ? AND sp.status=1
@@ -163,7 +167,7 @@ ORDER BY us.start_at ASC, us.end_at ASC, us.id ASC
 		var row SubscriptionWithPlan
 		if err := rows.Scan(
 			&row.Subscription.ID, &row.Subscription.UserID, &row.Subscription.PlanID, &row.Subscription.StartAt, &row.Subscription.EndAt, &row.Subscription.Status, &row.Subscription.CreatedAt, &row.Subscription.UpdatedAt,
-			&row.Plan.ID, &row.Plan.Code, &row.Plan.Name, &row.Plan.GroupName, &row.Plan.PriceCNY, &row.Plan.Limit5HUSD, &row.Plan.Limit1DUSD, &row.Plan.Limit7DUSD, &row.Plan.Limit30DUSD, &row.Plan.DurationDays, &row.Plan.Status, &row.Plan.CreatedAt, &row.Plan.UpdatedAt,
+			&row.Plan.ID, &row.Plan.Code, &row.Plan.Name, &row.Plan.GroupName, &row.Plan.PriceMultiplier, &row.Plan.PriceCNY, &row.Plan.Limit5HUSD, &row.Plan.Limit1DUSD, &row.Plan.Limit7DUSD, &row.Plan.Limit30DUSD, &row.Plan.DurationDays, &row.Plan.Status, &row.Plan.CreatedAt, &row.Plan.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("扫描 user_subscriptions 失败: %w", err)
 		}
@@ -191,7 +195,7 @@ func (s *Store) PurchaseSubscriptionByPlanID(ctx context.Context, userID int64, 
 	if group == "" {
 		group = DefaultGroupName
 	}
-	ok, err := s.UserHasGroup(ctx, userID, group)
+	ok, err := s.UserMainGroupAllowsSubgroup(ctx, userID, group)
 	if err != nil {
 		return UserSubscription{}, SubscriptionPlan{}, err
 	}
@@ -226,35 +230,37 @@ VALUES(?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 }
 
 type SubscriptionPlanCreate struct {
-	Code         string
-	Name         string
-	GroupName    string
-	PriceCNY     decimal.Decimal
-	Limit5HUSD   decimal.Decimal
-	Limit1DUSD   decimal.Decimal
-	Limit7DUSD   decimal.Decimal
-	Limit30DUSD  decimal.Decimal
-	DurationDays int
-	Status       int
+	Code            string
+	Name            string
+	GroupName       string
+	PriceMultiplier decimal.Decimal
+	PriceCNY        decimal.Decimal
+	Limit5HUSD      decimal.Decimal
+	Limit1DUSD      decimal.Decimal
+	Limit7DUSD      decimal.Decimal
+	Limit30DUSD     decimal.Decimal
+	DurationDays    int
+	Status          int
 }
 
 type SubscriptionPlanUpdate struct {
-	ID           int64
-	Code         string
-	Name         string
-	GroupName    string
-	PriceCNY     decimal.Decimal
-	Limit5HUSD   decimal.Decimal
-	Limit1DUSD   decimal.Decimal
-	Limit7DUSD   decimal.Decimal
-	Limit30DUSD  decimal.Decimal
-	DurationDays int
-	Status       int
+	ID              int64
+	Code            string
+	Name            string
+	GroupName       string
+	PriceMultiplier decimal.Decimal
+	PriceCNY        decimal.Decimal
+	Limit5HUSD      decimal.Decimal
+	Limit1DUSD      decimal.Decimal
+	Limit7DUSD      decimal.Decimal
+	Limit30DUSD     decimal.Decimal
+	DurationDays    int
+	Status          int
 }
 
 func (s *Store) ListAllSubscriptionPlans(ctx context.Context) ([]SubscriptionPlan, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, code, name, group_name, price_cny, limit_5h_usd, limit_1d_usd, limit_7d_usd, limit_30d_usd, duration_days, status, created_at, updated_at
+SELECT id, code, name, group_name, price_multiplier, price_cny, limit_5h_usd, limit_1d_usd, limit_7d_usd, limit_30d_usd, duration_days, status, created_at, updated_at
 FROM subscription_plans
 ORDER BY status DESC, id DESC
 `)
@@ -266,7 +272,7 @@ ORDER BY status DESC, id DESC
 	var out []SubscriptionPlan
 	for rows.Next() {
 		var p SubscriptionPlan
-		if err := rows.Scan(&p.ID, &p.Code, &p.Name, &p.GroupName, &p.PriceCNY, &p.Limit5HUSD, &p.Limit1DUSD, &p.Limit7DUSD, &p.Limit30DUSD, &p.DurationDays, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Code, &p.Name, &p.GroupName, &p.PriceMultiplier, &p.PriceCNY, &p.Limit5HUSD, &p.Limit1DUSD, &p.Limit7DUSD, &p.Limit30DUSD, &p.DurationDays, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("扫描 subscription_plans 失败: %w", err)
 		}
 		truncateSubscriptionPlanMoney(&p)
@@ -281,10 +287,10 @@ ORDER BY status DESC, id DESC
 func (s *Store) GetSubscriptionPlanByID(ctx context.Context, id int64) (SubscriptionPlan, error) {
 	var p SubscriptionPlan
 	err := s.db.QueryRowContext(ctx, `
-SELECT id, code, name, group_name, price_cny, limit_5h_usd, limit_1d_usd, limit_7d_usd, limit_30d_usd, duration_days, status, created_at, updated_at
+SELECT id, code, name, group_name, price_multiplier, price_cny, limit_5h_usd, limit_1d_usd, limit_7d_usd, limit_30d_usd, duration_days, status, created_at, updated_at
 FROM subscription_plans
 WHERE id=?
-`, id).Scan(&p.ID, &p.Code, &p.Name, &p.GroupName, &p.PriceCNY, &p.Limit5HUSD, &p.Limit1DUSD, &p.Limit7DUSD, &p.Limit30DUSD, &p.DurationDays, &p.Status, &p.CreatedAt, &p.UpdatedAt)
+`, id).Scan(&p.ID, &p.Code, &p.Name, &p.GroupName, &p.PriceMultiplier, &p.PriceCNY, &p.Limit5HUSD, &p.Limit1DUSD, &p.Limit7DUSD, &p.Limit30DUSD, &p.DurationDays, &p.Status, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return SubscriptionPlan{}, sql.ErrNoRows
@@ -306,6 +312,12 @@ func (s *Store) CreateSubscriptionPlan(ctx context.Context, in SubscriptionPlanC
 		in.GroupName = DefaultGroupName
 	}
 
+	priceMultiplier := in.PriceMultiplier
+	if priceMultiplier.IsNegative() || priceMultiplier.LessThanOrEqual(decimal.Zero) {
+		priceMultiplier = DefaultGroupPriceMultiplier
+	}
+	priceMultiplier = priceMultiplier.Truncate(PriceMultiplierScale)
+
 	priceCNY := in.PriceCNY.Truncate(CNYScale)
 	limit5HUSD := in.Limit5HUSD.Truncate(USDScale)
 	limit1DUSD := in.Limit1DUSD.Truncate(USDScale)
@@ -317,15 +329,15 @@ func (s *Store) CreateSubscriptionPlan(ctx context.Context, in SubscriptionPlanC
 
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO subscription_plans(
-  code, name, group_name, price_cny,
+  code, name, group_name, price_multiplier, price_cny,
   limit_5h_usd, limit_1d_usd, limit_7d_usd, limit_30d_usd,
   duration_days, status, created_at, updated_at
 ) VALUES(
-  ?, ?, ?, ?,
+  ?, ?, ?, ?, ?,
   ?, ?, ?, ?,
   ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 )
-`, in.Code, in.Name, strings.TrimSpace(in.GroupName), priceCNY, limit5HUSD, limit1DUSD, limit7DUSD, limit30DUSD, in.DurationDays, in.Status)
+`, in.Code, in.Name, strings.TrimSpace(in.GroupName), priceMultiplier, priceCNY, limit5HUSD, limit1DUSD, limit7DUSD, limit30DUSD, in.DurationDays, in.Status)
 	if err != nil {
 		return 0, fmt.Errorf("创建 subscription_plan 失败: %w", err)
 	}
@@ -350,6 +362,12 @@ func (s *Store) UpdateSubscriptionPlan(ctx context.Context, in SubscriptionPlanU
 		in.GroupName = DefaultGroupName
 	}
 
+	priceMultiplier := in.PriceMultiplier
+	if priceMultiplier.IsNegative() || priceMultiplier.LessThanOrEqual(decimal.Zero) {
+		priceMultiplier = DefaultGroupPriceMultiplier
+	}
+	priceMultiplier = priceMultiplier.Truncate(PriceMultiplierScale)
+
 	priceCNY := in.PriceCNY.Truncate(CNYScale)
 	limit5HUSD := in.Limit5HUSD.Truncate(USDScale)
 	limit1DUSD := in.Limit1DUSD.Truncate(USDScale)
@@ -361,11 +379,11 @@ func (s *Store) UpdateSubscriptionPlan(ctx context.Context, in SubscriptionPlanU
 
 	_, err := s.db.ExecContext(ctx, `
 UPDATE subscription_plans
-SET code=?, name=?, group_name=?, price_cny=?,
+SET code=?, name=?, group_name=?, price_multiplier=?, price_cny=?,
     limit_5h_usd=?, limit_1d_usd=?, limit_7d_usd=?, limit_30d_usd=?,
     duration_days=?, status=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
-`, in.Code, in.Name, strings.TrimSpace(in.GroupName), priceCNY, limit5HUSD, limit1DUSD, limit7DUSD, limit30DUSD, in.DurationDays, in.Status, in.ID)
+`, in.Code, in.Name, strings.TrimSpace(in.GroupName), priceMultiplier, priceCNY, limit5HUSD, limit1DUSD, limit7DUSD, limit30DUSD, in.DurationDays, in.Status, in.ID)
 	if err != nil {
 		return fmt.Errorf("更新 subscription_plan 失败: %w", err)
 	}

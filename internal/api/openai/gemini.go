@@ -41,9 +41,15 @@ func (h *Handler) GeminiModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ags := allowGroupsFromPrincipal(p)
+	allowSet := ags.Set
+
 	items := make([]geminiModelItem, 0, len(ms))
 	for _, m := range ms {
 		if strings.TrimSpace(m.PublicID) == "" {
+			continue
+		}
+		if _, ok := allowSet[managedModelGroupName(m)]; !ok {
 			continue
 		}
 		items = append(items, geminiModelItem{
@@ -114,16 +120,24 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 
 	var cons scheduler.Constraints
 	cons.RequireChannelType = store.UpstreamTypeOpenAICompatible
+	ags := allowGroupsFromPrincipal(p)
+	allowSet := ags.Set
+	cons.AllowGroups = allowSet
+	cons.AllowGroupOrder = ags.Order
 
 	var upstreamByChannel map[int64]string
 	if !modelPassthrough {
-		_, err := h.models.GetEnabledManagedModelByPublicID(r.Context(), publicModel)
+		mm, err := h.models.GetEnabledManagedModelByPublicID(r.Context(), publicModel)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				http.Error(w, "模型未启用", http.StatusBadRequest)
 				return
 			}
 			http.Error(w, "查询模型失败", http.StatusBadGateway)
+			return
+		}
+		if _, ok := allowSet[managedModelGroupName(mm)]; !ok {
+			http.Error(w, "无权限使用该模型", http.StatusBadRequest)
 			return
 		}
 		bindings, err := h.models.ListEnabledChannelModelBindingsByPublicID(r.Context(), publicModel)
@@ -149,7 +163,8 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// 非 free_mode 下仍要求模型定价存在（用于配额预留与计费口径），但不要求“启用”。
 		if !freeMode {
-			if _, err := h.models.GetManagedModelByPublicID(r.Context(), publicModel); err != nil {
+			mm, err := h.models.GetManagedModelByPublicID(r.Context(), publicModel)
+			if err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					http.Error(w, "模型不存在", http.StatusBadRequest)
 					return
@@ -157,20 +172,11 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "查询模型失败", http.StatusBadGateway)
 				return
 			}
+			if _, ok := allowSet[managedModelGroupName(mm)]; !ok {
+				http.Error(w, "无权限使用该模型", http.StatusBadRequest)
+				return
+			}
 		}
-	}
-
-	allowGroups := p.Groups
-	if len(allowGroups) == 0 {
-		allowGroups = []string{"default"}
-	}
-	cons.AllowGroups = make(map[string]struct{}, len(allowGroups))
-	for _, g := range allowGroups {
-		g = strings.TrimSpace(g)
-		if g == "" {
-			continue
-		}
-		cons.AllowGroups[g] = struct{}{}
 	}
 
 	routeKey := extractRouteKeyFromRawBody(body)

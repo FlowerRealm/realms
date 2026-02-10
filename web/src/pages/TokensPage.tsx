@@ -3,10 +3,14 @@ import { useEffect, useRef, useState } from 'react';
 import {
   createUserToken,
   deleteUserToken,
+  getUserTokenGroups,
   listUserTokens,
+  replaceUserTokenGroups,
   revealUserToken,
   revokeUserToken,
   rotateUserToken,
+  type TokenGroupOption,
+  type UserTokenGroups,
   type UserToken,
 } from '../api/tokens';
 import { BootstrapModal } from '../components/BootstrapModal';
@@ -26,6 +30,16 @@ export function TokensPage() {
   const pendingGeneratedTokenRef = useRef<string | null>(null);
   const [generatedToken, setGeneratedToken] = useState('');
   const [generatedCopied, setGeneratedCopied] = useState(false);
+
+  const openTokenGroupsModalBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [tokenGroupsToken, setTokenGroupsToken] = useState<UserToken | null>(null);
+  const [tokenGroupsData, setTokenGroupsData] = useState<UserTokenGroups | null>(null);
+  const [tokenGroupsLoading, setTokenGroupsLoading] = useState(false);
+  const [tokenGroupsSaving, setTokenGroupsSaving] = useState(false);
+  const [tokenGroupsErr, setTokenGroupsErr] = useState('');
+  const [tokenGroupsNotice, setTokenGroupsNotice] = useState('');
+  const [selectedGroups, setSelectedGroups] = useState<string[]>(['default']);
+  const [addGroup, setAddGroup] = useState('');
 
   useEffect(() => {
     if (copiedID == null) return;
@@ -126,6 +140,78 @@ export function TokensPage() {
       return tok;
     } finally {
       setRevealLoading((prev) => ({ ...prev, [tokenID]: false }));
+    }
+  }
+
+  function normalizeGroupOrder(inGroups: string[]): string[] {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of inGroups || []) {
+      const name = (raw || '').trim();
+      if (!name) continue;
+      if (name === 'default') continue;
+      if (seen.has(name)) continue;
+      seen.add(name);
+      out.push(name);
+    }
+    out.push('default');
+    return out;
+  }
+
+  function addSelectedGroup(name: string) {
+    const v = (name || '').trim();
+    if (!v) return;
+    setSelectedGroups((prev) => normalizeGroupOrder([...prev, v]));
+  }
+
+  function removeSelectedGroup(name: string) {
+    const v = (name || '').trim();
+    if (!v || v === 'default') return;
+    setSelectedGroups((prev) => normalizeGroupOrder(prev.filter((x) => x !== v)));
+  }
+
+  function moveSelectedGroup(name: string, dir: -1 | 1) {
+    const v = (name || '').trim();
+    if (!v || v === 'default') return;
+    setSelectedGroups((prev) => {
+      const next = prev.slice();
+      const idx = next.findIndex((x) => x === v);
+      if (idx < 0) return prev;
+      const swap = idx + dir;
+      if (swap < 0) return prev;
+      if (swap >= next.length) return prev;
+      if (next[swap] === 'default') return prev;
+      const tmp = next[idx];
+      next[idx] = next[swap];
+      next[swap] = tmp;
+      return next;
+    });
+  }
+
+  async function openTokenGroupsModal(t: UserToken) {
+    setErr('');
+    setTokenGroupsErr('');
+    setTokenGroupsNotice('');
+    setTokenGroupsToken(t);
+    setTokenGroupsData(null);
+    setTokenGroupsLoading(true);
+    setTokenGroupsSaving(false);
+    setAddGroup('');
+    setSelectedGroups(['default']);
+    try {
+      const res = await getUserTokenGroups(t.id);
+      if (!res.success) throw new Error(res.message || '加载失败');
+      const d = res.data || null;
+      setTokenGroupsData(d);
+      const order = (d?.bindings || []).map((x) => (x.group_name || '').trim()).filter((x) => x);
+      setSelectedGroups(normalizeGroupOrder(order));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '加载失败';
+      setTokenGroupsErr(msg);
+      setSelectedGroups(['default']);
+    } finally {
+      setTokenGroupsLoading(false);
+      window.setTimeout(() => openTokenGroupsModalBtnRef.current?.click(), 0);
     }
   }
 
@@ -277,6 +363,17 @@ export function TokensPage() {
                                 </button>
 
                                 <span className="text-muted small mx-2">|</span>
+
+                                <button
+                                  className="btn btn-link text-secondary p-0 text-decoration-none small"
+                                  type="button"
+                                  disabled={loading}
+                                  onClick={() => void openTokenGroupsModal(t)}
+                                >
+                                  路由分组
+                                </button>
+
+                                <span className="text-muted small mx-2">|</span>
                               </>
                             ) : null}
 
@@ -366,6 +463,9 @@ export function TokensPage() {
       {/* programmatically open the generated-token modal */}
       <button ref={openGeneratedTokenModalBtnRef} type="button" className="d-none" data-bs-toggle="modal" data-bs-target="#generatedTokenModal"></button>
 
+      {/* programmatically open the token-groups modal */}
+      <button ref={openTokenGroupsModalBtnRef} type="button" className="d-none" data-bs-toggle="modal" data-bs-target="#tokenGroupsModal"></button>
+
       <BootstrapModal
         id="generatedTokenModal"
         title="令牌已生成"
@@ -426,6 +526,170 @@ export function TokensPage() {
             关闭
           </button>
         </div>
+      </BootstrapModal>
+
+      <BootstrapModal
+        id="tokenGroupsModal"
+        title={
+          tokenGroupsToken
+            ? `路由分组：${(tokenGroupsToken.name || '').trim() || `Token #${tokenGroupsToken.id}`}`
+            : '路由分组'
+        }
+        dialogClassName="modal-dialog-centered modal-lg"
+        onHidden={() => {
+          setTokenGroupsToken(null);
+          setTokenGroupsData(null);
+          setTokenGroupsErr('');
+          setTokenGroupsNotice('');
+          setTokenGroupsLoading(false);
+          setTokenGroupsSaving(false);
+          setSelectedGroups(['default']);
+          setAddGroup('');
+        }}
+      >
+        {!tokenGroupsToken ? (
+          <div className="text-muted">未选择 Token。</div>
+        ) : (
+          <div>
+            {tokenGroupsErr ? (
+              <div className="alert alert-danger d-flex align-items-center" role="alert">
+                <span className="me-2 material-symbols-rounded">warning</span>
+                <div>{tokenGroupsErr}</div>
+              </div>
+            ) : null}
+
+            {tokenGroupsNotice ? (
+              <div className="alert alert-success d-flex align-items-center" role="alert">
+                <span className="me-2 material-symbols-rounded">check_circle</span>
+                <div>{tokenGroupsNotice}</div>
+              </div>
+            ) : null}
+
+            <div className="d-flex flex-wrap gap-2 align-items-center mb-3 small">
+              <span className="badge bg-light text-dark border">
+                用户分组: <span className="font-monospace">{(tokenGroupsData?.user_group || '').trim() || '-'}</span>
+              </span>
+              <span className="badge bg-light text-dark border">
+                生效顺序:{' '}
+                <span className="font-monospace">
+                  {(tokenGroupsData?.effective_bindings || []).map((b) => b.group_name).filter((x) => x).join(' → ') || 'default'}
+                </span>
+              </span>
+            </div>
+
+            {tokenGroupsLoading ? <div className="text-muted small mb-2">加载中…</div> : null}
+
+            <div className="row g-2 mb-3">
+              <div className="col-12 col-md-8">
+                <select className="form-select font-monospace" value={addGroup} onChange={(e) => setAddGroup(e.target.value)} disabled={tokenGroupsLoading || tokenGroupsSaving}>
+                  <option value="">选择要添加的分组…</option>
+                  {(tokenGroupsData?.allowed_groups || [])
+                    .filter((g) => g.status === 1 && g.name !== 'default')
+                    .slice()
+                    .sort((a, b) => {
+                      const pa = Number.isFinite(a.user_group_priority) ? a.user_group_priority : 0;
+                      const pb = Number.isFinite(b.user_group_priority) ? b.user_group_priority : 0;
+                      if (pa !== pb) return pb - pa;
+                      return a.name.localeCompare(b.name, 'zh-CN');
+                    })
+                    .map((g) => (
+                      <option key={g.name} value={g.name} disabled={selectedGroups.includes(g.name)}>
+                        {g.name} · x{g.price_multiplier}
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <div className="col-12 col-md-4 d-grid">
+                <button
+                  type="button"
+                  className="btn btn-outline-primary"
+                  disabled={!addGroup || selectedGroups.includes(addGroup) || tokenGroupsLoading || tokenGroupsSaving}
+                  onClick={() => {
+                    addSelectedGroup(addGroup);
+                    setAddGroup('');
+                  }}
+                >
+                  添加
+                </button>
+              </div>
+            </div>
+
+            <div className="list-group mb-3">
+              {selectedGroups.map((name, idx) => {
+                const option: TokenGroupOption | undefined = (tokenGroupsData?.allowed_groups || []).find((x) => x.name === name);
+                const isDefault = name === 'default';
+                const mult = option ? `x${option.price_multiplier}` : 'x?';
+                const statusLabel = !option ? '未知' : option.status === 1 ? '启用' : '禁用';
+                const statusCls = !option ? 'badge bg-secondary bg-opacity-10 text-secondary border' : option.status === 1 ? 'badge bg-success bg-opacity-10 text-success border border-success-subtle' : 'badge bg-secondary bg-opacity-10 text-secondary border';
+                return (
+                  <div key={name} className="list-group-item d-flex align-items-center justify-content-between">
+                    <div className="d-flex align-items-center gap-3" style={{ minWidth: 0 }}>
+                      <span className="badge bg-light text-dark border font-monospace">{idx + 1}</span>
+                      <div className="d-flex flex-column" style={{ minWidth: 0 }}>
+                        <div className="d-flex align-items-center gap-2" style={{ minWidth: 0 }}>
+                          <span className={`fw-semibold font-monospace text-truncate${isDefault ? ' text-primary' : ''}`} style={{ maxWidth: 260 }} title={name}>
+                            {name}
+                          </span>
+                          <span className="badge bg-light text-dark border fw-normal">{mult}</span>
+                          <span className={statusCls}>{statusLabel}</span>
+                        </div>
+                        {option?.description ? <div className="text-muted smaller text-truncate" style={{ maxWidth: 520 }} title={option.description || ''}>{option.description}</div> : null}
+                      </div>
+                    </div>
+                    <div className="d-inline-flex gap-1">
+                      <button type="button" className="btn btn-sm btn-light border" title="上移" disabled={isDefault || idx === 0 || tokenGroupsLoading || tokenGroupsSaving} onClick={() => moveSelectedGroup(name, -1)}>
+                        <span className="material-symbols-rounded" style={{ fontSize: 18 }}>arrow_upward</span>
+                      </button>
+                      <button type="button" className="btn btn-sm btn-light border" title="下移" disabled={isDefault || idx >= selectedGroups.length - 2 || tokenGroupsLoading || tokenGroupsSaving} onClick={() => moveSelectedGroup(name, 1)}>
+                        <span className="material-symbols-rounded" style={{ fontSize: 18 }}>arrow_downward</span>
+                      </button>
+                      <button type="button" className="btn btn-sm btn-light border text-danger" title={isDefault ? 'default 不可移除' : '移除'} disabled={isDefault || tokenGroupsLoading || tokenGroupsSaving} onClick={() => removeSelectedGroup(name)}>
+                        <i className="ri-close-line"></i>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="text-muted small mb-3">提示：按顺序失败转移；计费时采用最终成功分组的倍率。</div>
+
+            <div className="d-grid d-md-flex justify-content-md-end gap-2">
+              <button type="button" className="btn btn-light" data-bs-dismiss="modal" disabled={tokenGroupsSaving}>
+                关闭
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={tokenGroupsLoading || tokenGroupsSaving}
+                onClick={async () => {
+                  if (!tokenGroupsToken) return;
+                  setTokenGroupsErr('');
+                  setTokenGroupsNotice('');
+                  setTokenGroupsSaving(true);
+                  try {
+                    const res = await replaceUserTokenGroups(tokenGroupsToken.id, selectedGroups);
+                    if (!res.success) throw new Error(res.message || '保存失败');
+                    const refreshed = await getUserTokenGroups(tokenGroupsToken.id);
+                    if (refreshed.success) {
+                      const d = refreshed.data || null;
+                      setTokenGroupsData(d);
+                      const order = (d?.bindings || []).map((x) => (x.group_name || '').trim()).filter((x) => x);
+                      setSelectedGroups(normalizeGroupOrder(order));
+                    }
+                    setTokenGroupsNotice('已保存');
+                  } catch (e) {
+                    setTokenGroupsErr(e instanceof Error ? e.message : '保存失败');
+                  } finally {
+                    setTokenGroupsSaving(false);
+                  }
+                }}
+              >
+                {tokenGroupsSaving ? '保存中…' : '保存'}
+              </button>
+            </div>
+          </div>
+        )}
       </BootstrapModal>
 
       <BootstrapModal

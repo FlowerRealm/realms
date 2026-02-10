@@ -385,9 +385,6 @@ func TestUsageEventDetail_UserResponse_IncludesPricingBreakdown(t *testing.T) {
 	if _, err := st.CreateChannelGroup(ctx, "staff", nil, 1, decimal.RequireFromString("2"), 5); err != nil {
 		t.Fatalf("CreateChannelGroup(staff): %v", err)
 	}
-	if err := st.ReplaceUserGroups(ctx, userID, []string{"vip", "staff"}); err != nil {
-		t.Fatalf("ReplaceUserGroups: %v", err)
-	}
 
 	modelID := "m_detail_1"
 	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
@@ -425,13 +422,18 @@ func TestUsageEventDetail_UserResponse_IncludesPricingBreakdown(t *testing.T) {
 	outTokens := int64(500_000)
 	cachedInTokens := int64(400_000)
 	cachedOutTokens := int64(100_000)
+	groupName := "staff"
 	if err := st.CommitUsage(ctx, store.CommitUsageInput{
-		UsageEventID:       usageEventID,
-		InputTokens:        &inTokens,
-		CachedInputTokens:  &cachedInTokens,
-		OutputTokens:       &outTokens,
-		CachedOutputTokens: &cachedOutTokens,
-		CommittedUSD:       decimal.RequireFromString("9.3"),
+		UsageEventID:             usageEventID,
+		InputTokens:              &inTokens,
+		CachedInputTokens:        &cachedInTokens,
+		OutputTokens:             &outTokens,
+		CachedOutputTokens:       &cachedOutTokens,
+		CommittedUSD:             decimal.RequireFromString("9.3"),
+		PriceMultiplier:          decimal.RequireFromString("3"),
+		PriceMultiplierGroup:     decimal.RequireFromString("2"),
+		PriceMultiplierPayment:   decimal.RequireFromString("1.5"),
+		PriceMultiplierGroupName: &groupName,
 	}); err != nil {
 		t.Fatalf("CommitUsage: %v", err)
 	}
@@ -511,7 +513,9 @@ func TestUsageEventDetail_UserResponse_IncludesPricingBreakdown(t *testing.T) {
 				CacheInputCostUSD    string `json:"cache_input_cost_usd"`
 				CacheOutputCostUSD   string `json:"cache_output_cost_usd"`
 				BaseCostUSD          string `json:"base_cost_usd"`
-				UserMultiplier       string `json:"user_multiplier"`
+				PaymentMultiplier    string `json:"payment_multiplier"`
+				GroupName            string `json:"group_name"`
+				GroupMultiplier      string `json:"group_multiplier"`
 				EffectiveMultiplier  string `json:"effective_multiplier"`
 				FinalCostUSD         string `json:"final_cost_usd"`
 			} `json:"pricing_breakdown"`
@@ -580,8 +584,14 @@ func TestUsageEventDetail_UserResponse_IncludesPricingBreakdown(t *testing.T) {
 	if got.Data.PricingBreakdown.BaseCostUSD != "3.1" {
 		t.Fatalf("base_cost_usd mismatch: got=%q want=%q", got.Data.PricingBreakdown.BaseCostUSD, "3.1")
 	}
-	if got.Data.PricingBreakdown.UserMultiplier != "3" {
-		t.Fatalf("user_multiplier mismatch: got=%q want=%q", got.Data.PricingBreakdown.UserMultiplier, "3")
+	if got.Data.PricingBreakdown.PaymentMultiplier != "1.5" {
+		t.Fatalf("payment_multiplier mismatch: got=%q want=%q", got.Data.PricingBreakdown.PaymentMultiplier, "1.5")
+	}
+	if got.Data.PricingBreakdown.GroupName != "staff" {
+		t.Fatalf("group_name mismatch: got=%q want=%q", got.Data.PricingBreakdown.GroupName, "staff")
+	}
+	if got.Data.PricingBreakdown.GroupMultiplier != "2" {
+		t.Fatalf("group_multiplier mismatch: got=%q want=%q", got.Data.PricingBreakdown.GroupMultiplier, "2")
 	}
 	if got.Data.PricingBreakdown.EffectiveMultiplier != "3" {
 		t.Fatalf("effective_multiplier mismatch: got=%q want=%q", got.Data.PricingBreakdown.EffectiveMultiplier, "3")

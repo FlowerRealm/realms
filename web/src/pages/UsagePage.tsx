@@ -1111,9 +1111,7 @@ function FragmentUsageRow({
                         <div className="mt-1">
                           实际: (({pricingBreakdown.input_tokens_total}-{pricingBreakdown.input_tokens_cached})×{formatUSDPer1M(pricingBreakdown.input_usd_per_1m)} + ({pricingBreakdown.output_tokens_total}-{pricingBreakdown.output_tokens_cached})×{formatUSDPer1M(pricingBreakdown.output_usd_per_1m)} + {pricingBreakdown.input_tokens_cached}×{formatUSDPer1M(pricingBreakdown.cache_input_usd_per_1m)} + {pricingBreakdown.output_tokens_cached}×{formatUSDPer1M(pricingBreakdown.cache_output_usd_per_1m)}) × {formatUSDPlain(pricingBreakdown.effective_multiplier)} = {formatUSD(pricingBreakdown.final_cost_usd)}{' '}
                           <span className="text-muted smaller">
-                            （{costSourceLabel(pricingBreakdown.cost_source)}费用: {formatUSD(pricingBreakdown.cost_source_usd)}；倍率: {pricingBreakdown.user_group_factors.length > 0
-                              ? pricingBreakdown.user_group_factors.map((item) => `${item.group_name}×${formatUSDPlain(item.multiplier)}`).join(' × ')
-                              : 'default×1'}）
+                            （{costSourceLabel(pricingBreakdown.cost_source)}费用: {formatUSD(pricingBreakdown.cost_source_usd)}；倍率: 支付×{formatUSDPlain(pricingBreakdown.payment_multiplier)} × 渠道组({pricingBreakdown.group_name})×{formatUSDPlain(pricingBreakdown.group_multiplier)}）
                           </span>
                         </div>
                       </div>

@@ -157,11 +157,31 @@ VALUES(?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		}
 	}
 
+	priceMultiplier := in.PriceMultiplier
+	if priceMultiplier.IsNegative() || priceMultiplier.LessThanOrEqual(decimal.Zero) {
+		priceMultiplier = DefaultGroupPriceMultiplier
+	}
+	priceMultiplier = priceMultiplier.Truncate(PriceMultiplierScale)
+	priceMultiplierGroup := in.PriceMultiplierGroup
+	if priceMultiplierGroup.IsNegative() || priceMultiplierGroup.LessThanOrEqual(decimal.Zero) {
+		priceMultiplierGroup = DefaultGroupPriceMultiplier
+	}
+	priceMultiplierGroup = priceMultiplierGroup.Truncate(PriceMultiplierScale)
+	priceMultiplierPayment := in.PriceMultiplierPayment
+	if priceMultiplierPayment.IsNegative() || priceMultiplierPayment.LessThanOrEqual(decimal.Zero) {
+		priceMultiplierPayment = DefaultGroupPriceMultiplier
+	}
+	priceMultiplierPayment = priceMultiplierPayment.Truncate(PriceMultiplierScale)
+
 	if _, err := tx.ExecContext(ctx, `
 UPDATE usage_events
-SET state=?, upstream_channel_id=?, input_tokens=?, cached_input_tokens=?, output_tokens=?, cached_output_tokens=?, committed_usd=?, updated_at=CURRENT_TIMESTAMP
+SET state=?, upstream_channel_id=?, input_tokens=?, cached_input_tokens=?, output_tokens=?, cached_output_tokens=?, committed_usd=?,
+    price_multiplier=?, price_multiplier_group=?, price_multiplier_payment=?, price_multiplier_group_name=?,
+    updated_at=CURRENT_TIMESTAMP
 WHERE id=? AND state=?
-`, UsageStateCommitted, in.UpstreamChannelID, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens, committedEffective, in.UsageEventID, UsageStateReserved); err != nil {
+`, UsageStateCommitted, in.UpstreamChannelID, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens, committedEffective,
+		priceMultiplier, priceMultiplierGroup, priceMultiplierPayment, in.PriceMultiplierGroupName,
+		in.UsageEventID, UsageStateReserved); err != nil {
 		return fmt.Errorf("结算 usage_event 失败: %w", err)
 	}
 

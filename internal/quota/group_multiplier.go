@@ -2,6 +2,7 @@ package quota
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 
 	"github.com/shopspring/decimal"
@@ -9,78 +10,87 @@ import (
 	"realms/internal/store"
 )
 
-type userGroupMultiplierSnapshot struct {
-	userMultiplier decimal.Decimal
+type tokenGroupMultiplierSnapshot struct {
+	maxGroupMultiplier decimal.Decimal
 }
 
-func loadUserGroupMultiplierSnapshot(ctx context.Context, st *store.Store, userID int64) (userGroupMultiplierSnapshot, error) {
-	snap := userGroupMultiplierSnapshot{
-		userMultiplier: store.DefaultGroupPriceMultiplier,
+func loadTokenGroupMultiplierSnapshot(ctx context.Context, st *store.Store, tokenID int64) (tokenGroupMultiplierSnapshot, error) {
+	snap := tokenGroupMultiplierSnapshot{
+		maxGroupMultiplier: store.DefaultGroupPriceMultiplier,
 	}
-	if st == nil || userID <= 0 {
+	if st == nil || tokenID <= 0 {
 		return snap, nil
 	}
 
-	groupMultiplierByName := map[string]decimal.Decimal{
-		store.DefaultGroupName: store.DefaultGroupPriceMultiplier,
-	}
-	groups, err := st.ListChannelGroups(ctx)
+	groups, err := st.ListEffectiveTokenGroups(ctx, tokenID)
 	if err != nil {
-		return userGroupMultiplierSnapshot{}, err
+		if err == sql.ErrNoRows {
+			return snap, nil
+		}
+		return tokenGroupMultiplierSnapshot{}, err
 	}
-	for _, g := range groups {
-		name := normalizeGroupForMultiplier(g.Name)
+
+	maxMult := store.DefaultGroupPriceMultiplier
+	for _, raw := range groups {
+		name := strings.TrimSpace(raw)
 		if name == "" {
 			continue
 		}
-		mult := g.PriceMultiplier
-		if mult.IsNegative() {
-			mult = store.DefaultGroupPriceMultiplier
+		g, err := st.GetChannelGroupByName(ctx, name)
+		if err != nil {
+			continue
 		}
-		groupMultiplierByName[name] = mult
+		if g.Status != 1 {
+			continue
+		}
+		m := g.PriceMultiplier
+		if m.IsNegative() || m.LessThanOrEqual(decimal.Zero) {
+			m = store.DefaultGroupPriceMultiplier
+		}
+		m = m.Truncate(store.PriceMultiplierScale)
+		if m.GreaterThan(maxMult) {
+			maxMult = m
+		}
 	}
-
-	userGroups, err := st.ListUserGroups(ctx, userID)
-	if err != nil {
-		return userGroupMultiplierSnapshot{}, err
-	}
-	snap.userMultiplier = stackedMultiplierForGroups(userGroups, groupMultiplierByName)
+	snap.maxGroupMultiplier = maxMult
 	return snap, nil
 }
 
-func stackedMultiplierForGroups(groupNames []string, byGroup map[string]decimal.Decimal) decimal.Decimal {
-	seen := make(map[string]struct{}, len(groupNames))
-
-	mult := store.DefaultGroupPriceMultiplier
-	for _, raw := range groupNames {
-		name := normalizeGroupForMultiplier(raw)
-		if name == "" {
-			continue
-		}
-		if _, ok := seen[name]; ok {
-			continue
-		}
-		seen[name] = struct{}{}
-		mult = mult.Mul(groupMultiplierByName(name, byGroup))
-	}
-	return mult
-}
-
-func groupMultiplierByName(name string, byGroup map[string]decimal.Decimal) decimal.Decimal {
-	if byGroup == nil {
+func normalizeMultiplier(v decimal.Decimal) decimal.Decimal {
+	if v.IsNegative() || v.LessThanOrEqual(decimal.Zero) {
 		return store.DefaultGroupPriceMultiplier
 	}
-	mult, ok := byGroup[name]
-	if !ok || mult.IsNegative() {
-		return store.DefaultGroupPriceMultiplier
-	}
-	return mult
+	return v.Truncate(store.PriceMultiplierScale)
 }
 
-func normalizeGroupForMultiplier(raw string) string {
-	name := strings.TrimSpace(raw)
-	if name == "" {
-		return store.DefaultGroupName
+func groupMultiplierForRouteGroup(ctx context.Context, st *store.Store, routeGroup *string) (decimal.Decimal, *string) {
+	groupName := ""
+	if routeGroup != nil {
+		groupName = strings.TrimSpace(*routeGroup)
 	}
-	return name
+	if groupName == "" {
+		groupName = store.DefaultGroupName
+	}
+	// 用于落库/展示：始终记录规范化后的 group name。
+	groupNamePtr := &groupName
+
+	if st == nil {
+		return store.DefaultGroupPriceMultiplier, groupNamePtr
+	}
+	g, err := st.GetChannelGroupByName(ctx, groupName)
+	if err != nil || g.Status != 1 {
+		return store.DefaultGroupPriceMultiplier, groupNamePtr
+	}
+	return normalizeMultiplier(g.PriceMultiplier), groupNamePtr
+}
+
+func paygoPriceMultiplier(ctx context.Context, st *store.Store) decimal.Decimal {
+	if st == nil {
+		return store.DefaultGroupPriceMultiplier
+	}
+	v, ok, err := st.GetDecimalAppSetting(ctx, store.SettingBillingPayAsYouGoPriceMultiplier)
+	if err != nil || !ok {
+		return store.DefaultGroupPriceMultiplier
+	}
+	return normalizeMultiplier(v)
 }

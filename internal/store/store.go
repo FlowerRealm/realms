@@ -76,13 +76,6 @@ func (s *Store) CreateUser(ctx context.Context, email string, username string, p
 	if err != nil {
 		return 0, fmt.Errorf("获取用户 id 失败: %w", err)
 	}
-	insertGroupStmt := `INSERT IGNORE INTO user_groups(user_id, group_name, created_at) VALUES(?, ?, CURRENT_TIMESTAMP)`
-	if s.dialect == DialectSQLite {
-		insertGroupStmt = `INSERT OR IGNORE INTO user_groups(user_id, group_name, created_at) VALUES(?, ?, CURRENT_TIMESTAMP)`
-	}
-	if _, err := s.db.ExecContext(ctx, insertGroupStmt, id, DefaultGroupName); err != nil {
-		return 0, fmt.Errorf("初始化用户分组失败: %w", err)
-	}
 	return id, nil
 }
 
@@ -90,17 +83,16 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (User, error) 
 	var u User
 	err := s.db.QueryRowContext(ctx, `
 	SELECT
-	  id, email, username, password_hash, role, status, created_at, updated_at
+	  id, email, username, password_hash, role, main_group, status, created_at, updated_at
 	FROM users
 	WHERE email=?
-	`, email).Scan(&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt)
+	`, email).Scan(&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.Role, &u.MainGroup, &u.Status, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, sql.ErrNoRows
 		}
 		return User{}, fmt.Errorf("查询用户失败: %w", err)
 	}
-	u.Groups, _ = s.ListUserGroups(ctx, u.ID)
 	return u, nil
 }
 
@@ -108,17 +100,16 @@ func (s *Store) GetUserByID(ctx context.Context, userID int64) (User, error) {
 	var u User
 	err := s.db.QueryRowContext(ctx, `
 	SELECT
-	  id, email, username, password_hash, role, status, created_at, updated_at
+	  id, email, username, password_hash, role, main_group, status, created_at, updated_at
 	FROM users
 	WHERE id=?
-	`, userID).Scan(&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt)
+	`, userID).Scan(&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.Role, &u.MainGroup, &u.Status, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, sql.ErrNoRows
 		}
 		return User{}, fmt.Errorf("查询用户失败: %w", err)
 	}
-	u.Groups, _ = s.ListUserGroups(ctx, u.ID)
 	return u, nil
 }
 
@@ -126,17 +117,16 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, e
 	var u User
 	err := s.db.QueryRowContext(ctx, `
 	SELECT
-	  id, email, username, password_hash, role, status, created_at, updated_at
+	  id, email, username, password_hash, role, main_group, status, created_at, updated_at
 	FROM users
 	WHERE username=?
-	`, username).Scan(&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt)
+	`, username).Scan(&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.Role, &u.MainGroup, &u.Status, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, sql.ErrNoRows
 		}
 		return User{}, fmt.Errorf("查询用户失败: %w", err)
 	}
-	u.Groups, _ = s.ListUserGroups(ctx, u.ID)
 	return u, nil
 }
 
@@ -354,7 +344,7 @@ WHERE t.token_hash=? AND t.status=1 AND u.status=1
 		}
 		return TokenAuth{}, fmt.Errorf("查询 Token 鉴权失败: %w", err)
 	}
-	auth.Groups, _ = s.ListUserGroups(ctx, auth.UserID)
+	auth.Groups, _ = s.ListEffectiveTokenGroups(ctx, auth.TokenID)
 	_, _ = s.db.ExecContext(ctx, `UPDATE user_tokens SET last_used_at=CURRENT_TIMESTAMP WHERE id=?`, auth.TokenID)
 	return auth, nil
 }

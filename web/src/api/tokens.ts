@@ -53,3 +53,34 @@ export async function deleteUserToken(tokenID: number) {
   const res = await api.delete<APIResponse<void>>(`/api/token/${tokenID}`);
   return res.data;
 }
+
+export type TokenGroupOption = {
+  name: string;
+  description?: string | null;
+  status: number;
+  price_multiplier: string;
+  user_group_priority: number;
+};
+
+export type TokenGroupBinding = {
+  group_name: string;
+  priority: number;
+};
+
+export type UserTokenGroups = {
+  token_id: number;
+  user_group: string;
+  allowed_groups: TokenGroupOption[];
+  bindings: TokenGroupBinding[];
+  effective_bindings: TokenGroupBinding[];
+};
+
+export async function getUserTokenGroups(tokenID: number) {
+  const res = await api.get<APIResponse<UserTokenGroups>>(`/api/token/${tokenID}/groups`);
+  return res.data;
+}
+
+export async function replaceUserTokenGroups(tokenID: number, groups: string[]) {
+  const res = await api.put<APIResponse<void>>(`/api/token/${tokenID}/groups`, { groups });
+  return res.data;
+}

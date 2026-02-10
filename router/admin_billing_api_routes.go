@@ -18,13 +18,14 @@ import (
 )
 
 type adminSubscriptionPlanView struct {
-	ID           int64  `json:"id"`
-	Code         string `json:"code"`
-	Name         string `json:"name"`
-	GroupName    string `json:"group_name"`
-	PriceCNY     string `json:"price_cny"`
-	DurationDays int    `json:"duration_days"`
-	Status       int    `json:"status"`
+	ID              int64  `json:"id"`
+	Code            string `json:"code"`
+	Name            string `json:"name"`
+	GroupName       string `json:"group_name"`
+	PriceMultiplier string `json:"price_multiplier"`
+	PriceCNY        string `json:"price_cny"`
+	DurationDays    int    `json:"duration_days"`
+	Status          int    `json:"status"`
 
 	Limit5H  string `json:"limit_5h,omitempty"`
 	Limit1D  string `json:"limit_1d,omitempty"`
@@ -88,15 +89,16 @@ func adminListSubscriptionPlansHandler(opts Options) gin.HandlerFunc {
 		out := make([]adminSubscriptionPlanView, 0, len(plans))
 		for _, p := range plans {
 			view := adminSubscriptionPlanView{
-				ID:           p.ID,
-				Code:         p.Code,
-				Name:         p.Name,
-				GroupName:    strings.TrimSpace(p.GroupName),
-				PriceCNY:     formatDecimalPlain(p.PriceCNY, store.CNYScale),
-				DurationDays: p.DurationDays,
-				Status:       p.Status,
-				CreatedAt:    p.CreatedAt.Format("2006-01-02 15:04"),
-				UpdatedAt:    p.UpdatedAt.Format("2006-01-02 15:04"),
+				ID:              p.ID,
+				Code:            p.Code,
+				Name:            p.Name,
+				GroupName:       strings.TrimSpace(p.GroupName),
+				PriceMultiplier: formatDecimalPlain(p.PriceMultiplier, store.PriceMultiplierScale),
+				PriceCNY:        formatDecimalPlain(p.PriceCNY, store.CNYScale),
+				DurationDays:    p.DurationDays,
+				Status:          p.Status,
+				CreatedAt:       p.CreatedAt.Format("2006-01-02 15:04"),
+				UpdatedAt:       p.UpdatedAt.Format("2006-01-02 15:04"),
 			}
 			if p.Limit5HUSD.GreaterThan(decimal.Zero) {
 				view.Limit5H = formatDecimalPlain(p.Limit5HUSD, store.USDScale)
@@ -146,15 +148,16 @@ func adminGetSubscriptionPlanHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 		view := adminSubscriptionPlanView{
-			ID:           p.ID,
-			Code:         p.Code,
-			Name:         p.Name,
-			GroupName:    strings.TrimSpace(p.GroupName),
-			PriceCNY:     formatDecimalPlain(p.PriceCNY, store.CNYScale),
-			DurationDays: p.DurationDays,
-			Status:       p.Status,
-			CreatedAt:    p.CreatedAt.Format("2006-01-02 15:04"),
-			UpdatedAt:    p.UpdatedAt.Format("2006-01-02 15:04"),
+			ID:              p.ID,
+			Code:            p.Code,
+			Name:            p.Name,
+			GroupName:       strings.TrimSpace(p.GroupName),
+			PriceMultiplier: formatDecimalPlain(p.PriceMultiplier, store.PriceMultiplierScale),
+			PriceCNY:        formatDecimalPlain(p.PriceCNY, store.CNYScale),
+			DurationDays:    p.DurationDays,
+			Status:          p.Status,
+			CreatedAt:       p.CreatedAt.Format("2006-01-02 15:04"),
+			UpdatedAt:       p.UpdatedAt.Format("2006-01-02 15:04"),
 		}
 		if p.Limit5HUSD.GreaterThan(decimal.Zero) {
 			view.Limit5H = formatDecimalPlain(p.Limit5HUSD, store.USDScale)
@@ -180,12 +183,13 @@ func adminGetSubscriptionPlanHandler(opts Options) gin.HandlerFunc {
 
 func adminCreateSubscriptionPlanHandler(opts Options) gin.HandlerFunc {
 	type reqBody struct {
-		Code         string `json:"code"`
-		Name         string `json:"name"`
-		GroupName    string `json:"group_name"`
-		PriceCNY     string `json:"price_cny"`
-		DurationDays int    `json:"duration_days"`
-		Status       int    `json:"status"`
+		Code            string `json:"code"`
+		Name            string `json:"name"`
+		GroupName       string `json:"group_name"`
+		PriceMultiplier string `json:"price_multiplier"`
+		PriceCNY        string `json:"price_cny"`
+		DurationDays    int    `json:"duration_days"`
+		Status          int    `json:"status"`
 
 		Limit5H  string `json:"limit_5h"`
 		Limit1D  string `json:"limit_1d"`
@@ -236,6 +240,11 @@ func adminCreateSubscriptionPlanHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "价格不合法"})
 			return
 		}
+		priceMultiplier, err := parseOptionalPriceMultiplier(req.PriceMultiplier)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "倍率不合法"})
+			return
+		}
 		limit5H, err := parseOptionalUSD(req.Limit5H)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "5h 限额不合法"})
@@ -267,16 +276,17 @@ func adminCreateSubscriptionPlanHandler(opts Options) gin.HandlerFunc {
 		}
 
 		id, err := opts.Store.CreateSubscriptionPlan(c.Request.Context(), store.SubscriptionPlanCreate{
-			Code:         code,
-			Name:         name,
-			GroupName:    group,
-			PriceCNY:     priceCNY,
-			Limit5HUSD:   limit5H,
-			Limit1DUSD:   limit1D,
-			Limit7DUSD:   limit7D,
-			Limit30DUSD:  limit30D,
-			DurationDays: duration,
-			Status:       status,
+			Code:            code,
+			Name:            name,
+			GroupName:       group,
+			PriceMultiplier: priceMultiplier,
+			PriceCNY:        priceCNY,
+			Limit5HUSD:      limit5H,
+			Limit1DUSD:      limit1D,
+			Limit7DUSD:      limit7D,
+			Limit30DUSD:     limit30D,
+			DurationDays:    duration,
+			Status:          status,
 		})
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建失败"})
@@ -288,12 +298,13 @@ func adminCreateSubscriptionPlanHandler(opts Options) gin.HandlerFunc {
 
 func adminUpdateSubscriptionPlanHandler(opts Options) gin.HandlerFunc {
 	type reqBody struct {
-		Code         string `json:"code"`
-		Name         string `json:"name"`
-		GroupName    string `json:"group_name"`
-		PriceCNY     string `json:"price_cny"`
-		DurationDays int    `json:"duration_days"`
-		Status       int    `json:"status"`
+		Code            string `json:"code"`
+		Name            string `json:"name"`
+		GroupName       string `json:"group_name"`
+		PriceMultiplier string `json:"price_multiplier"`
+		PriceCNY        string `json:"price_cny"`
+		DurationDays    int    `json:"duration_days"`
+		Status          int    `json:"status"`
 
 		Limit5H  string `json:"limit_5h"`
 		Limit1D  string `json:"limit_1d"`
@@ -358,6 +369,11 @@ func adminUpdateSubscriptionPlanHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "价格不合法"})
 			return
 		}
+		priceMultiplier, err := parseOptionalPriceMultiplier(req.PriceMultiplier)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "倍率不合法"})
+			return
+		}
 		limit5H, err := parseOptionalUSD(req.Limit5H)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "5h 限额不合法"})
@@ -389,17 +405,18 @@ func adminUpdateSubscriptionPlanHandler(opts Options) gin.HandlerFunc {
 		}
 
 		if err := opts.Store.UpdateSubscriptionPlan(c.Request.Context(), store.SubscriptionPlanUpdate{
-			ID:           planID,
-			Code:         code,
-			Name:         name,
-			GroupName:    group,
-			PriceCNY:     priceCNY,
-			Limit5HUSD:   limit5H,
-			Limit1DUSD:   limit1D,
-			Limit7DUSD:   limit7D,
-			Limit30DUSD:  limit30D,
-			DurationDays: duration,
-			Status:       status,
+			ID:              planID,
+			Code:            code,
+			Name:            name,
+			GroupName:       group,
+			PriceMultiplier: priceMultiplier,
+			PriceCNY:        priceCNY,
+			Limit5HUSD:      limit5H,
+			Limit1DUSD:      limit1D,
+			Limit7DUSD:      limit7D,
+			Limit30DUSD:     limit30D,
+			DurationDays:    duration,
+			Status:          status,
 		}); err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
 			return
@@ -557,6 +574,21 @@ func parseOptionalUSD(raw string) (decimal.Decimal, error) {
 		return decimal.Zero, err
 	}
 	return v, nil
+}
+
+func parseOptionalPriceMultiplier(raw string) (decimal.Decimal, error) {
+	// empty -> default (=1), for UI convenience.
+	if strings.TrimSpace(raw) == "" {
+		return store.DefaultGroupPriceMultiplier, nil
+	}
+	d, err := parseDecimalNonNeg(raw, store.PriceMultiplierScale)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	if d.Sign() <= 0 {
+		return decimal.Zero, errors.New("倍率必须大于 0")
+	}
+	return d, nil
 }
 
 func validateChannelGroupSelectable(ctx context.Context, st *store.Store, groupName string) error {

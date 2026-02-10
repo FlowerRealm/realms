@@ -169,12 +169,14 @@ type adminSettingsResponse struct {
 	SMTPTokenSet           bool   `json:"smtp_token_set"`
 	SMTPTokenOverride      bool   `json:"smtp_token_override"`
 
-	BillingEnablePayAsYouGo         bool   `json:"billing_enable_pay_as_you_go"`
-	BillingEnablePayAsYouGoOverride bool   `json:"billing_enable_pay_as_you_go_override"`
-	BillingMinTopupCNY              string `json:"billing_min_topup_cny"`
-	BillingMinTopupCNYOverride      bool   `json:"billing_min_topup_cny_override"`
-	BillingCreditUSDPerCNY          string `json:"billing_credit_usd_per_cny"`
-	BillingCreditUSDPerCNYOverride  bool   `json:"billing_credit_usd_per_cny_override"`
+	BillingEnablePayAsYouGo             bool   `json:"billing_enable_pay_as_you_go"`
+	BillingEnablePayAsYouGoOverride     bool   `json:"billing_enable_pay_as_you_go_override"`
+	BillingMinTopupCNY                  string `json:"billing_min_topup_cny"`
+	BillingMinTopupCNYOverride          bool   `json:"billing_min_topup_cny_override"`
+	BillingCreditUSDPerCNY              string `json:"billing_credit_usd_per_cny"`
+	BillingCreditUSDPerCNYOverride      bool   `json:"billing_credit_usd_per_cny_override"`
+	BillingPaygoPriceMultiplier         string `json:"billing_paygo_price_multiplier"`
+	BillingPaygoPriceMultiplierOverride bool   `json:"billing_paygo_price_multiplier_override"`
 }
 
 type adminSettingsUpdateRequest struct {
@@ -190,9 +192,10 @@ type adminSettingsUpdateRequest struct {
 	SMTPFrom       string `json:"smtp_from"`
 	SMTPToken      string `json:"smtp_token"`
 
-	BillingEnablePayAsYouGo bool   `json:"billing_enable_pay_as_you_go"`
-	BillingMinTopupCNY      string `json:"billing_min_topup_cny"`
-	BillingCreditUSDPerCNY  string `json:"billing_credit_usd_per_cny"`
+	BillingEnablePayAsYouGo     bool   `json:"billing_enable_pay_as_you_go"`
+	BillingMinTopupCNY          string `json:"billing_min_topup_cny"`
+	BillingCreditUSDPerCNY      string `json:"billing_credit_usd_per_cny"`
+	BillingPaygoPriceMultiplier string `json:"billing_paygo_price_multiplier"`
 
 	FeatureEnabled map[string]bool `json:"feature_enabled"`
 }
@@ -355,6 +358,19 @@ func adminSettingsGetHandler(opts Options) gin.HandlerFunc {
 		if creditRatioOK {
 			billingEffective.CreditUSDPerCNY = creditRatio
 		}
+		paygoMult := store.DefaultGroupPriceMultiplier
+		paygoMultOK := false
+		if v, ok, err := opts.Store.GetDecimalAppSetting(ctx, store.SettingBillingPayAsYouGoPriceMultiplier); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询配置失败"})
+			return
+		} else if ok {
+			paygoMultOK = true
+			paygoMult = v
+		}
+		if paygoMult.IsNegative() || paygoMult.LessThanOrEqual(decimal.Zero) {
+			paygoMult = store.DefaultGroupPriceMultiplier
+		}
+		paygoMult = paygoMult.Truncate(store.PriceMultiplierScale)
 		if billingEffective.MinTopupCNY.IsNegative() {
 			billingEffective.MinTopupCNY = decimal.Zero
 		}
@@ -396,12 +412,14 @@ func adminSettingsGetHandler(opts Options) gin.HandlerFunc {
 			SMTPTokenSet:           strings.TrimSpace(smtpEffective.SMTPToken) != "",
 			SMTPTokenOverride:      smtpTokenOK,
 
-			BillingEnablePayAsYouGo:         billingEffective.EnablePayAsYouGo,
-			BillingEnablePayAsYouGoOverride: billingEnableOK,
-			BillingMinTopupCNY:              formatCNYFixed(billingEffective.MinTopupCNY),
-			BillingMinTopupCNYOverride:      minTopupOK,
-			BillingCreditUSDPerCNY:          formatUSDPlain(billingEffective.CreditUSDPerCNY),
-			BillingCreditUSDPerCNYOverride:  creditRatioOK,
+			BillingEnablePayAsYouGo:             billingEffective.EnablePayAsYouGo,
+			BillingEnablePayAsYouGoOverride:     billingEnableOK,
+			BillingMinTopupCNY:                  formatCNYFixed(billingEffective.MinTopupCNY),
+			BillingMinTopupCNYOverride:          minTopupOK,
+			BillingCreditUSDPerCNY:              formatUSDPlain(billingEffective.CreditUSDPerCNY),
+			BillingCreditUSDPerCNYOverride:      creditRatioOK,
+			BillingPaygoPriceMultiplier:         formatDecimalPlain(paygoMult, store.PriceMultiplierScale),
+			BillingPaygoPriceMultiplierOverride: paygoMultOK,
 		}
 
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": resp})
@@ -429,6 +447,7 @@ func adminSettingsResetHandler(opts Options) gin.HandlerFunc {
 			store.SettingBillingEnablePayAsYouGo,
 			store.SettingBillingMinTopupCNY,
 			store.SettingBillingCreditUSDPerCNY,
+			store.SettingBillingPayAsYouGoPriceMultiplier,
 			store.SettingFeatureDisableWebAnnouncements,
 			store.SettingFeatureDisableWebTokens,
 			store.SettingFeatureDisableWebUsage,
@@ -630,6 +649,28 @@ func adminSettingsUpdateHandler(opts Options) gin.HandlerFunc {
 					return
 				}
 			} else if err := opts.Store.UpsertDecimalAppSetting(ctx, store.SettingBillingCreditUSDPerCNY, d); err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
+				return
+			}
+		}
+
+		if strings.TrimSpace(req.BillingPaygoPriceMultiplier) == "" {
+			if err := opts.Store.DeleteAppSetting(ctx, store.SettingBillingPayAsYouGoPriceMultiplier); err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
+				return
+			}
+		} else {
+			d, err := parseDecimalNonNeg(req.BillingPaygoPriceMultiplier, store.PriceMultiplierScale)
+			if err != nil || d.Sign() <= 0 {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "billing_paygo_price_multiplier 不合法"})
+				return
+			}
+			if d.Equal(store.DefaultGroupPriceMultiplier) {
+				if err := opts.Store.DeleteAppSetting(ctx, store.SettingBillingPayAsYouGoPriceMultiplier); err != nil {
+					c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
+					return
+				}
+			} else if err := opts.Store.UpsertDecimalAppSetting(ctx, store.SettingBillingPayAsYouGoPriceMultiplier, d); err != nil {
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
 				return
 			}

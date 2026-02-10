@@ -72,6 +72,13 @@ export function AdminLayout() {
               </NavLink>
             </li>
           ) : null}
+          {showUsers ? (
+            <li>
+              <NavLink to="/admin/main-groups" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`} onClick={closeSidebar}>
+                <i className="ri-stack-line"></i> 用户分组
+              </NavLink>
+            </li>
+          ) : null}
           {showModels ? (
             <li>
               <NavLink to="/admin/models" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`} onClick={closeSidebar}>

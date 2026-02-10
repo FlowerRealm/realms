@@ -13,10 +13,35 @@ type User struct {
 	Username     string
 	PasswordHash []byte
 	Role         string
+	MainGroup    string
 	Groups       []string
 	Status       int
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+type MainGroup struct {
+	Name        string
+	Description *string
+	Status      int
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type MainGroupSubgroup struct {
+	MainGroup string
+	Subgroup  string
+	Priority  int
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type TokenGroupBinding struct {
+	TokenID   int64
+	GroupName string
+	Priority  int
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type ChannelGroup struct {
@@ -277,52 +302,57 @@ type ChannelModelBinding struct {
 }
 
 type UsageEvent struct {
-	ID                  int64
-	Time                time.Time
-	RequestID           string
-	Endpoint            *string
-	Method              *string
-	UserID              int64
-	SubscriptionID      *int64
-	TokenID             int64
-	UpstreamChannelID   *int64
-	UpstreamEndpointID  *int64
-	UpstreamCredID      *int64
-	State               string
-	Model               *string
-	InputTokens         *int64
-	CachedInputTokens   *int64
-	OutputTokens        *int64
-	CachedOutputTokens  *int64
-	ReservedUSD         decimal.Decimal
-	CommittedUSD        decimal.Decimal
-	ReserveExpiresAt    time.Time
-	StatusCode          int
-	LatencyMS           int
-	FirstTokenLatencyMS int
-	ErrorClass          *string
-	ErrorMessage        *string
-	IsStream            bool
-	RequestBytes        int64
-	ResponseBytes       int64
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	ID                       int64
+	Time                     time.Time
+	RequestID                string
+	Endpoint                 *string
+	Method                   *string
+	UserID                   int64
+	SubscriptionID           *int64
+	TokenID                  int64
+	UpstreamChannelID        *int64
+	UpstreamEndpointID       *int64
+	UpstreamCredID           *int64
+	State                    string
+	Model                    *string
+	InputTokens              *int64
+	CachedInputTokens        *int64
+	OutputTokens             *int64
+	CachedOutputTokens       *int64
+	ReservedUSD              decimal.Decimal
+	CommittedUSD             decimal.Decimal
+	PriceMultiplier          decimal.Decimal
+	PriceMultiplierGroup     decimal.Decimal
+	PriceMultiplierPayment   decimal.Decimal
+	PriceMultiplierGroupName *string
+	ReserveExpiresAt         time.Time
+	StatusCode               int
+	LatencyMS                int
+	FirstTokenLatencyMS      int
+	ErrorClass               *string
+	ErrorMessage             *string
+	IsStream                 bool
+	RequestBytes             int64
+	ResponseBytes            int64
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
 }
 
 type SubscriptionPlan struct {
-	ID           int64
-	Code         string
-	Name         string
-	GroupName    string
-	PriceCNY     decimal.Decimal
-	Limit5HUSD   decimal.Decimal
-	Limit1DUSD   decimal.Decimal
-	Limit7DUSD   decimal.Decimal
-	Limit30DUSD  decimal.Decimal
-	DurationDays int
-	Status       int
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID              int64
+	Code            string
+	Name            string
+	GroupName       string
+	PriceMultiplier decimal.Decimal
+	PriceCNY        decimal.Decimal
+	Limit5HUSD      decimal.Decimal
+	Limit1DUSD      decimal.Decimal
+	Limit7DUSD      decimal.Decimal
+	Limit30DUSD     decimal.Decimal
+	DurationDays    int
+	Status          int
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 type UserSubscription struct {

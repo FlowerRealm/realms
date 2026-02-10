@@ -166,10 +166,9 @@ export type UsageEventPricingBreakdown = {
   cache_output_cost_usd: string;
   base_cost_usd: string;
 
-  user_groups: string[];
-  user_group_factors: UsageEventGroupMultiplier[];
-  user_multiplier: string;
-  subscription_group?: string;
+  payment_multiplier: string;
+  group_name: string;
+  group_multiplier: string;
   effective_multiplier: string;
 
   final_cost_usd: string;

@@ -75,6 +75,10 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 
 	var cons scheduler.Constraints
 	cons.RequireChannelType = store.UpstreamTypeOpenAICompatible
+	ags := allowGroupsFromPrincipal(p)
+	allowSet := ags.Set
+	cons.AllowGroups = allowSet
+	cons.AllowGroupOrder = ags.Order
 
 	if wantStore {
 		ownerTag := realmsOwnerTagForUser(p.UserID)
@@ -99,12 +103,17 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 	if modelPassthrough {
 		// 非 free_mode 下仍要求模型定价存在（用于配额预留与计费口径），但不要求“启用”。
 		if !freeMode {
-			if _, err := h.models.GetManagedModelByPublicID(r.Context(), publicModel); err != nil {
+			mm, err := h.models.GetManagedModelByPublicID(r.Context(), publicModel)
+			if err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					http.Error(w, "模型不存在", http.StatusBadRequest)
 					return
 				}
 				http.Error(w, "查询模型失败", http.StatusBadGateway)
+				return
+			}
+			if _, ok := allowSet[managedModelGroupName(mm)]; !ok {
+				http.Error(w, "无权限使用该模型", http.StatusBadRequest)
 				return
 			}
 		}
@@ -143,13 +152,17 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 			return raw, nil
 		}
 	} else {
-		_, err := h.models.GetEnabledManagedModelByPublicID(r.Context(), publicModel)
+		mm, err := h.models.GetEnabledManagedModelByPublicID(r.Context(), publicModel)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				http.Error(w, "模型未启用", http.StatusBadRequest)
 				return
 			}
 			http.Error(w, "查询模型失败", http.StatusBadGateway)
+			return
+		}
+		if _, ok := allowSet[managedModelGroupName(mm)]; !ok {
+			http.Error(w, "无权限使用该模型", http.StatusBadRequest)
 			return
 		}
 		bindings, err := h.models.ListEnabledChannelModelBindingsByPublicID(r.Context(), publicModel)
@@ -214,19 +227,6 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 			}
 			return raw, nil
 		}
-	}
-
-	allowGroups := p.Groups
-	if len(allowGroups) == 0 {
-		allowGroups = []string{"default"}
-	}
-	cons.AllowGroups = make(map[string]struct{}, len(allowGroups))
-	for _, g := range allowGroups {
-		g = strings.TrimSpace(g)
-		if g == "" {
-			continue
-		}
-		cons.AllowGroups[g] = struct{}{}
 	}
 
 	routeKey := extractRouteKeyFromPayload(payload)

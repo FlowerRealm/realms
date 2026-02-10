@@ -139,22 +139,26 @@ func userModelsHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
-		uniq := make(map[string]struct{})
-		for _, g := range u.Groups {
-			ms, err := opts.Store.ListEnabledManagedModelsWithBindingsForGroup(c.Request.Context(), g)
-			if err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "模型查询失败"})
-				return
-			}
-			for _, m := range ms {
-				pid := strings.TrimSpace(m.PublicID)
-				if pid == "" {
-					continue
-				}
-				uniq[pid] = struct{}{}
-			}
+		ags, err := allowedSubgroupsForMainGroup(c.Request.Context(), opts.Store, u.MainGroup)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询用户分组失败"})
+			return
 		}
 
+		ms, err := opts.Store.ListEnabledManagedModelsWithBindingsForGroups(c.Request.Context(), ags.Order)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "模型查询失败"})
+			return
+		}
+
+		uniq := make(map[string]struct{}, len(ms))
+		for _, m := range ms {
+			pid := strings.TrimSpace(m.PublicID)
+			if pid == "" {
+				continue
+			}
+			uniq[pid] = struct{}{}
+		}
 		out := make([]string, 0, len(uniq))
 		for id := range uniq {
 			out = append(out, id)
@@ -181,17 +185,14 @@ func userModelsDetailHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "用户查询失败"})
 			return
 		}
-		groupMultiplierByName, err := usageListGroupMultiplierMap(c.Request.Context(), opts.Store)
+
+		ags, err := allowedSubgroupsForMainGroup(c.Request.Context(), opts.Store, u.MainGroup)
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "分组倍率查询失败"})
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询用户分组失败"})
 			return
 		}
-		userMultiplier := userGroupPriceMultiplier(u.Groups, groupMultiplierByName)
-		price := func(v decimal.Decimal) decimal.Decimal {
-			return v.Truncate(store.USDScale).Mul(userMultiplier).Truncate(store.USDScale)
-		}
 
-		ms, err := opts.Store.ListEnabledManagedModelsWithBindingsForGroups(c.Request.Context(), u.Groups)
+		ms, err := opts.Store.ListEnabledManagedModelsWithBindingsForGroups(c.Request.Context(), ags.Order)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "模型查询失败"})
 			return
@@ -209,33 +210,16 @@ func userModelsDetailHandler(opts Options) gin.HandlerFunc {
 				PublicID:            m.PublicID,
 				GroupName:           m.GroupName,
 				OwnedBy:             m.OwnedBy,
-				InputUSDPer1M:       price(m.InputUSDPer1M),
-				OutputUSDPer1M:      price(m.OutputUSDPer1M),
-				CacheInputUSDPer1M:  price(m.CacheInputUSDPer1M),
-				CacheOutputUSDPer1M: price(m.CacheOutputUSDPer1M),
+				InputUSDPer1M:       m.InputUSDPer1M.Truncate(store.USDScale),
+				OutputUSDPer1M:      m.OutputUSDPer1M.Truncate(store.USDScale),
+				CacheInputUSDPer1M:  m.CacheInputUSDPer1M.Truncate(store.USDScale),
+				CacheOutputUSDPer1M: m.CacheOutputUSDPer1M.Truncate(store.USDScale),
 				Status:              m.Status,
 				IconURL:             iconPtr,
 			})
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": out})
 	}
-}
-
-func userGroupPriceMultiplier(groups []string, groupMultiplierByName map[string]decimal.Decimal) decimal.Decimal {
-	multiplier := store.DefaultGroupPriceMultiplier
-	seen := make(map[string]struct{}, len(groups))
-	for _, raw := range groups {
-		groupName := usageNormalizeGroupName(raw)
-		if groupName == "" {
-			continue
-		}
-		if _, ok := seen[groupName]; ok {
-			continue
-		}
-		seen[groupName] = struct{}{}
-		multiplier = multiplier.Mul(usageGroupMultiplierByName(groupName, groupMultiplierByName))
-	}
-	return multiplier.Truncate(store.PriceMultiplierScale)
 }
 
 func derefString(p *string) string {

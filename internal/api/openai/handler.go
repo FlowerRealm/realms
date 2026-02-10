@@ -113,6 +113,9 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ags := allowGroupsFromPrincipal(p)
+	allowSet := ags.Set
+
 	type item struct {
 		ID      string `json:"id"`
 		Object  string `json:"object"`
@@ -127,6 +130,10 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, m := range ms {
 		if strings.TrimSpace(m.PublicID) == "" {
+			continue
+		}
+		groupName := managedModelGroupName(m)
+		if _, ok := allowSet[groupName]; !ok {
 			continue
 		}
 		ownedBy := "realms"
@@ -210,6 +217,12 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	if r != nil && r.URL != nil && r.URL.Path != "/v1/responses" {
 		cons.RequireChannelType = store.UpstreamTypeOpenAICompatible
 	}
+
+	ags := allowGroupsFromPrincipal(p)
+	allowSet := ags.Set
+	cons.AllowGroups = allowSet
+	cons.AllowGroupOrder = ags.Order
+
 	var rewriteBody func(sel scheduler.Selection) ([]byte, error)
 
 	var bindings []store.ChannelModelBinding
@@ -218,12 +231,18 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	if modelPassthrough {
 		// 非 free_mode 下仍要求模型定价存在（用于配额预留与计费口径），但不要求“启用”。
 		if !freeMode {
-			if _, err := h.models.GetManagedModelByPublicID(r.Context(), publicModel); err != nil {
+			mm, err := h.models.GetManagedModelByPublicID(r.Context(), publicModel)
+			if err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					http.Error(w, "模型不存在", http.StatusBadRequest)
 					return
 				}
 				http.Error(w, "查询模型失败", http.StatusBadGateway)
+				return
+			}
+			groupName := managedModelGroupName(mm)
+			if _, ok := allowSet[groupName]; !ok {
+				http.Error(w, "无权限使用该模型", http.StatusBadRequest)
 				return
 			}
 		}
@@ -257,13 +276,18 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			return raw, nil
 		}
 	} else {
-		_, err := h.models.GetEnabledManagedModelByPublicID(r.Context(), publicModel)
+		mm, err := h.models.GetEnabledManagedModelByPublicID(r.Context(), publicModel)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				http.Error(w, "模型未启用", http.StatusBadRequest)
 				return
 			}
 			http.Error(w, "查询模型失败", http.StatusBadGateway)
+			return
+		}
+		groupName := managedModelGroupName(mm)
+		if _, ok := allowSet[groupName]; !ok {
+			http.Error(w, "无权限使用该模型", http.StatusBadRequest)
 			return
 		}
 		bindings, err = h.models.ListEnabledChannelModelBindingsByPublicID(r.Context(), publicModel)
@@ -325,20 +349,6 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			}
 			return raw, nil
 		}
-	}
-
-	allowGroups := p.Groups
-	if len(allowGroups) == 0 {
-		allowGroups = []string{"default"}
-	}
-
-	cons.AllowGroups = make(map[string]struct{}, len(allowGroups))
-	for _, g := range allowGroups {
-		g = strings.TrimSpace(g)
-		if g == "" {
-			continue
-		}
-		cons.AllowGroups[g] = struct{}{}
 	}
 
 	routeKey := extractRouteKeyFromPayload(payload)
@@ -658,6 +668,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 				UsageEventID:       usageID,
 				Model:              model,
 				UpstreamChannelID:  &sel.ChannelID,
+				RouteGroup:         optionalString(sel.RouteGroup),
 				InputTokens:        acc.in,
 				CachedInputTokens:  acc.cachedIn,
 				OutputTokens:       acc.out,
@@ -730,6 +741,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			UsageEventID:       usageID,
 			Model:              model,
 			UpstreamChannelID:  &sel.ChannelID,
+			RouteGroup:         optionalString(sel.RouteGroup),
 			InputTokens:        inTok,
 			CachedInputTokens:  cachedInTok,
 			OutputTokens:       outTok,

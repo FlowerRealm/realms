@@ -69,6 +69,10 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 
 	var cons scheduler.Constraints
 	cons.RequireChannelType = store.UpstreamTypeAnthropic
+	ags := allowGroupsFromPrincipal(p)
+	allowSet := ags.Set
+	cons.AllowGroups = allowSet
+	cons.AllowGroupOrder = ags.Order
 
 	var rewriteBody func(sel scheduler.Selection) ([]byte, error)
 	var upstreamByChannel map[int64]string
@@ -76,12 +80,17 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 	if modelPassthrough {
 		// 非 free_mode 下仍要求模型定价存在（用于配额预留与计费口径），但不要求“启用”。
 		if !freeMode {
-			if _, err := h.models.GetManagedModelByPublicID(r.Context(), publicModel); err != nil {
+			mm, err := h.models.GetManagedModelByPublicID(r.Context(), publicModel)
+			if err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					writeAnthropicError(w, http.StatusBadRequest, "模型不存在")
 					return
 				}
 				writeAnthropicError(w, http.StatusBadGateway, "查询模型失败")
+				return
+			}
+			if _, ok := allowSet[managedModelGroupName(mm)]; !ok {
+				writeAnthropicError(w, http.StatusBadRequest, "无权限使用该模型")
 				return
 			}
 		}
@@ -115,13 +124,17 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 			return raw, nil
 		}
 	} else {
-		_, err := h.models.GetEnabledManagedModelByPublicID(r.Context(), publicModel)
+		mm, err := h.models.GetEnabledManagedModelByPublicID(r.Context(), publicModel)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				writeAnthropicError(w, http.StatusBadRequest, "模型未启用")
 				return
 			}
 			writeAnthropicError(w, http.StatusBadGateway, "查询模型失败")
+			return
+		}
+		if _, ok := allowSet[managedModelGroupName(mm)]; !ok {
+			writeAnthropicError(w, http.StatusBadRequest, "无权限使用该模型")
 			return
 		}
 		bindings, err := h.models.ListEnabledChannelModelBindingsByPublicID(r.Context(), publicModel)
@@ -182,19 +195,6 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 			}
 			return raw, nil
 		}
-	}
-
-	allowGroups := p.Groups
-	if len(allowGroups) == 0 {
-		allowGroups = []string{"default"}
-	}
-	cons.AllowGroups = make(map[string]struct{}, len(allowGroups))
-	for _, g := range allowGroups {
-		g = strings.TrimSpace(g)
-		if g == "" {
-			continue
-		}
-		cons.AllowGroups[g] = struct{}{}
 	}
 
 	routeKey := extractRouteKeyFromPayload(payload)
