@@ -374,7 +374,7 @@ func openTestStore(t *testing.T) *store.Store {
 func createOpenAIChannelWithCredential(t *testing.T, ctx context.Context, st *store.Store, baseURL string) int64 {
 	t.Helper()
 
-	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "test-channel", store.DefaultGroupName, 0, false, false, false, false)
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "test-channel", "", 0, false, false, false, false)
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel: %v", err)
 	}
@@ -393,7 +393,7 @@ func createManagedAndBoundModel(t *testing.T, ctx context.Context, st *store.Sto
 
 	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
 		PublicID:            publicID,
-		GroupName:           store.DefaultGroupName,
+		GroupName:           "",
 		InputUSDPer1M:       decimal.Zero,
 		OutputUSDPer1M:      decimal.Zero,
 		CacheInputUSDPer1M:  decimal.Zero,

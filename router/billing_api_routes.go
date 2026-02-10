@@ -199,9 +199,6 @@ func billingSubscriptionPageHandler(opts Options) gin.HandlerFunc {
 		for _, row := range subs {
 			isActive := !row.Subscription.StartAt.After(now)
 			g := strings.TrimSpace(row.Plan.GroupName)
-			if g == "" {
-				g = store.DefaultGroupName
-			}
 			sv := billingSubscriptionView{
 				Active:    isActive,
 				PlanName:  row.Plan.Name,
@@ -273,11 +270,10 @@ func billingSubscriptionPageHandler(opts Options) gin.HandlerFunc {
 		planViews := make([]billingPlanView, 0, len(plans))
 		for _, p := range plans {
 			g := strings.TrimSpace(p.GroupName)
-			if g == "" {
-				g = store.DefaultGroupName
-			}
-			if _, ok := ags.Set[g]; !ok {
-				continue
+			if g != "" {
+				if _, ok := ags.Set[g]; !ok {
+					continue
+				}
 			}
 			planViews = append(planViews, billingPlanView{
 				ID:           p.ID,

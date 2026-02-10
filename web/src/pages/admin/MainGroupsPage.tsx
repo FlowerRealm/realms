@@ -18,10 +18,6 @@ function statusBadge(status: number): { cls: string; label: string } {
   return { cls: 'badge rounded-pill bg-secondary bg-opacity-10 text-secondary px-2', label: '禁用' };
 }
 
-function isDefaultGroup(name: string): boolean {
-  return name.trim().toLowerCase() === 'default';
-}
-
 export function MainGroupsPage() {
   const [groups, setGroups] = useState<AdminMainGroup[]>([]);
   const [channelGroups, setChannelGroups] = useState<AdminChannelGroup[]>([]);
@@ -40,7 +36,7 @@ export function MainGroupsPage() {
 
   const [subgroupsFor, setSubgroupsFor] = useState<AdminMainGroup | null>(null);
   const [subgroupsLoading, setSubgroupsLoading] = useState(false);
-  const [subgroups, setSubgroups] = useState<string[]>(['default']);
+  const [subgroups, setSubgroups] = useState<string[]>([]);
   const [addSubgroup, setAddSubgroup] = useState('');
 
   const selectableChannelGroups = useMemo(() => channelGroups.filter((g) => g.status === 1).slice().sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')), [channelGroups]);
@@ -96,12 +92,9 @@ export function MainGroupsPage() {
         seen.add(name);
         dedup.push(name);
       }
-      if (!seen.has('default')) dedup.push('default');
-      // force default last
-      const withoutDefault = dedup.filter((x) => x !== 'default');
-      setSubgroups([...withoutDefault, 'default']);
+      setSubgroups(dedup);
     } catch (e) {
-      setSubgroups(['default']);
+      setSubgroups([]);
       setErr(e instanceof Error ? e.message : '加载子组失败');
     } finally {
       setSubgroupsLoading(false);
@@ -109,31 +102,9 @@ export function MainGroupsPage() {
     }
   }
 
-  function moveSubgroup(name: string, dir: -1 | 1) {
-    if (name === 'default') return;
-    setSubgroups((prev) => {
-      const idx = prev.findIndex((x) => x === name);
-      if (idx < 0) return prev;
-      const next = prev.slice();
-      const swap = idx + dir;
-      if (swap < 0) return prev;
-      if (swap >= next.length) return prev;
-      if (next[swap] === 'default') return prev;
-      const tmp = next[idx];
-      next[idx] = next[swap];
-      next[swap] = tmp;
-      return next;
-    });
-  }
-
   function removeSubgroup(name: string) {
-    if (name === 'default') return;
     setSubgroups((prev) => {
-      const next = prev.filter((x) => x !== name);
-      if (!next.includes('default')) next.push('default');
-      // force default last
-      const withoutDefault = next.filter((x) => x !== 'default');
-      return [...withoutDefault, 'default'];
+      return prev.filter((x) => x !== name);
     });
   }
 
@@ -142,8 +113,7 @@ export function MainGroupsPage() {
     if (!v) return;
     setSubgroups((prev) => {
       if (prev.includes(v)) return prev;
-      const withoutDefault = prev.filter((x) => x !== 'default');
-      return [...withoutDefault, v, 'default'];
+      return [...prev, v];
     });
   }
 
@@ -209,15 +179,14 @@ export function MainGroupsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {groups.map((g) => {
-                      const st = statusBadge(g.status);
-                      const name = (g.name || '').trim() || 'default';
-                      const isDefault = isDefaultGroup(name);
-                      return (
-                        <tr key={name}>
-                          <td className="ps-4">
-                            <span className={`badge bg-light text-dark border fw-normal font-monospace${isDefault ? ' border-primary border-opacity-50' : ''}`}>{name}</span>
-                          </td>
+	                    {groups.map((g) => {
+	                      const st = statusBadge(g.status);
+	                      const name = (g.name || '').trim();
+	                      return (
+	                        <tr key={name}>
+	                          <td className="ps-4">
+	                            <span className="badge bg-light text-dark border fw-normal font-monospace">{name}</span>
+	                          </td>
                           <td className="text-muted small">{(g.description || '').toString().trim() || '-'}</td>
                           <td>
                             <span className={st.cls}>{st.label}</span>
@@ -238,17 +207,15 @@ export function MainGroupsPage() {
                               >
                                 <i className="ri-edit-line"></i>
                               </button>
-                              <button
-                                type="button"
-                                className="btn btn-sm btn-light border text-danger"
-                                title={isDefault ? 'default 用户分组不允许删除' : '删除用户分组'}
-                                disabled={isDefault}
-                                onClick={async () => {
-                                  if (isDefault) return;
-                                  if (!window.confirm(`确认删除用户分组 ${name}？该分组下用户会自动回退到 default。此操作不可恢复。`)) return;
-                                  setErr('');
-                                  setNotice('');
-                                  setSaving(true);
+	                              <button
+	                                type="button"
+	                                className="btn btn-sm btn-light border text-danger"
+	                                title="删除用户分组"
+	                                onClick={async () => {
+	                                  if (!window.confirm(`确认删除用户分组 ${name}？此操作不可恢复。`)) return;
+	                                  setErr('');
+	                                  setNotice('');
+	                                  setSaving(true);
                                   try {
                                     const res = await deleteAdminMainGroup(name);
                                     if (!res.success) throw new Error(res.message || '删除失败');
@@ -346,12 +313,12 @@ export function MainGroupsPage() {
             onSubmit={async (e) => {
               e.preventDefault();
               setErr('');
-              setNotice('');
-              setSaving(true);
-              try {
-                const name = (editing.name || '').trim() || 'default';
-                const res = await updateAdminMainGroup(name, { description: editDesc.trim() || undefined, status: editStatus });
-                if (!res.success) throw new Error(res.message || '保存失败');
+	              setNotice('');
+	              setSaving(true);
+	              try {
+	                const name = (editing.name || '').trim();
+	                const res = await updateAdminMainGroup(name, { description: editDesc.trim() || undefined, status: editStatus });
+	                if (!res.success) throw new Error(res.message || '保存失败');
                 closeModalById('editMainGroupModal');
                 setNotice('已保存');
                 await refresh();
@@ -362,24 +329,18 @@ export function MainGroupsPage() {
               }
             }}
           >
-            <div className="row g-3">
-              <div className="col-12 col-md-6">
-                <label className="form-label">名称</label>
-                <input className="form-control font-monospace" value={(editing.name || '').trim() || 'default'} readOnly />
-              </div>
-              <div className="col-12 col-md-6">
-                <label className="form-label">状态</label>
-                <select
-                  className="form-select"
-                  value={editStatus}
-                  onChange={(e) => setEditStatus(Number.parseInt(e.target.value, 10) || 0)}
-                  disabled={isDefaultGroup(editing.name)}
-                >
-                  <option value={1}>启用</option>
-                  <option value={0}>禁用</option>
-                </select>
-                {isDefaultGroup(editing.name) ? <div className="text-muted smaller mt-1">default 用户分组不可禁用。</div> : null}
-              </div>
+	            <div className="row g-3">
+	              <div className="col-12 col-md-6">
+	                <label className="form-label">名称</label>
+	                <input className="form-control font-monospace" value={(editing.name || '').trim()} readOnly />
+	              </div>
+	              <div className="col-12 col-md-6">
+	                <label className="form-label">状态</label>
+	                <select className="form-select" value={editStatus} onChange={(e) => setEditStatus(Number.parseInt(e.target.value, 10) || 0)}>
+	                  <option value={1}>启用</option>
+	                  <option value={0}>禁用</option>
+	                </select>
+	              </div>
               <div className="col-12">
                 <label className="form-label">描述</label>
                 <input className="form-control" value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="可选" />
@@ -403,10 +364,10 @@ export function MainGroupsPage() {
         {!subgroupsFor ? (
           <div className="text-muted">未选择用户分组。</div>
         ) : (
-          <div>
-            <div className="d-flex align-items-center justify-content-between mb-3">
-              <div className="text-muted small">子组是可绑定的“渠道分组”（按顺序用于失败转移；default 永远作为兜底）。</div>
-              <button
+	          <div>
+	            <div className="d-flex align-items-center justify-content-between mb-3">
+	              <div className="text-muted small">子组是可绑定的“渠道分组”（用于限制 Token 的可选范围）。</div>
+	              <button
                 type="button"
                 className="btn btn-primary btn-sm"
                 disabled={saving || subgroupsLoading}
@@ -415,7 +376,7 @@ export function MainGroupsPage() {
                   setNotice('');
                   setSaving(true);
                   try {
-                    const name = (subgroupsFor.name || '').trim() || 'default';
+                    const name = (subgroupsFor.name || '').trim();
                     const res = await replaceAdminMainGroupSubgroups(name, subgroups);
                     if (!res.success) throw new Error(res.message || '保存失败');
                     closeModalById('editMainGroupSubgroupsModal');
@@ -459,42 +420,35 @@ export function MainGroupsPage() {
               </div>
             </div>
 
-            <div className="list-group">
-              {subgroups.map((name, idx) => {
-                const isDefault = name === 'default';
-                const cg = channelGroupByName.get(name);
-                const mult = cg ? `x${cg.price_multiplier}` : 'x?';
-                const status = cg ? (cg.status === 1 ? '启用' : '禁用') : '未知';
-                const statusCls = !cg ? 'badge bg-secondary bg-opacity-10 text-secondary border' : cg.status === 1 ? 'badge bg-success bg-opacity-10 text-success border border-success-subtle' : 'badge bg-secondary bg-opacity-10 text-secondary border';
-                return (
-                  <div key={name} className="list-group-item d-flex align-items-center justify-content-between">
+	            <div className="list-group">
+	              {subgroups.map((name, idx) => {
+	                const cg = channelGroupByName.get(name);
+	                const mult = cg ? `x${cg.price_multiplier}` : 'x?';
+	                const status = cg ? (cg.status === 1 ? '启用' : '禁用') : '未知';
+	                const statusCls = !cg ? 'badge bg-secondary bg-opacity-10 text-secondary border' : cg.status === 1 ? 'badge bg-success bg-opacity-10 text-success border border-success-subtle' : 'badge bg-secondary bg-opacity-10 text-secondary border';
+	                return (
+	                  <div key={name} className="list-group-item d-flex align-items-center justify-content-between">
                     <div className="d-flex align-items-center gap-3" style={{ minWidth: 0 }}>
-                      <span className="badge bg-light text-dark border font-monospace">{idx + 1}</span>
-                      <div className="d-flex flex-column" style={{ minWidth: 0 }}>
-                        <div className="d-flex align-items-center gap-2" style={{ minWidth: 0 }}>
-                          <span className={`fw-semibold font-monospace text-truncate${isDefault ? ' text-primary' : ''}`} style={{ maxWidth: 240 }} title={name}>
-                            {name}
-                          </span>
-                          <span className="badge bg-light text-dark border fw-normal">{mult}</span>
-                          <span className={statusCls}>{status}</span>
-                        </div>
+	                      <span className="badge bg-light text-dark border font-monospace">{idx + 1}</span>
+	                      <div className="d-flex flex-column" style={{ minWidth: 0 }}>
+	                        <div className="d-flex align-items-center gap-2" style={{ minWidth: 0 }}>
+	                          <span className="fw-semibold font-monospace text-truncate" style={{ maxWidth: 240 }} title={name}>
+	                            {name}
+	                          </span>
+	                          <span className="badge bg-light text-dark border fw-normal">{mult}</span>
+	                          <span className={statusCls}>{status}</span>
+	                        </div>
                         {cg?.description ? <div className="text-muted smaller text-truncate" style={{ maxWidth: 520 }} title={cg.description || ''}>{cg.description}</div> : null}
                       </div>
-                    </div>
-                    <div className="d-inline-flex gap-1">
-                      <button type="button" className="btn btn-sm btn-light border" title="上移" disabled={isDefault || idx === 0} onClick={() => moveSubgroup(name, -1)}>
-                        <span className="material-symbols-rounded" style={{ fontSize: 18 }}>arrow_upward</span>
-                      </button>
-                      <button type="button" className="btn btn-sm btn-light border" title="下移" disabled={isDefault || idx >= subgroups.length - 2} onClick={() => moveSubgroup(name, 1)}>
-                        <span className="material-symbols-rounded" style={{ fontSize: 18 }}>arrow_downward</span>
-                      </button>
-                      <button type="button" className="btn btn-sm btn-light border text-danger" title={isDefault ? 'default 不可移除' : '移除'} disabled={isDefault} onClick={() => removeSubgroup(name)}>
-                        <i className="ri-close-line"></i>
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+	                    </div>
+	                    <div className="d-inline-flex gap-1">
+	                      <button type="button" className="btn btn-sm btn-light border text-danger" title="移除" onClick={() => removeSubgroup(name)}>
+	                        <i className="ri-close-line"></i>
+	                      </button>
+	                    </div>
+	                  </div>
+	                );
+	              })}
             </div>
           </div>
         )}

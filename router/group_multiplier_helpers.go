@@ -9,9 +9,7 @@ import (
 )
 
 func usageListGroupMultiplierMap(ctx context.Context, st *store.Store) (map[string]decimal.Decimal, error) {
-	groupMultiplierByName := map[string]decimal.Decimal{
-		store.DefaultGroupName: store.DefaultGroupPriceMultiplier,
-	}
+	groupMultiplierByName := map[string]decimal.Decimal{}
 	groups, err := st.ListChannelGroups(ctx)
 	if err != nil {
 		return nil, err
@@ -40,4 +38,3 @@ func usageGroupMultiplierByName(groupName string, multiplierByName map[string]de
 	}
 	return multiplier
 }
-

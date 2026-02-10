@@ -76,7 +76,7 @@ func pinChannelHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
-		if err := opts.Sched.RefreshPinnedRing(c.Request.Context(), opts.Store); err != nil {
+		if err := opts.Sched.RefreshPinnedRing(c.Request.Context()); err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "构建渠道指针失败：" + err.Error()})
 			return
 		}
@@ -96,6 +96,8 @@ func pinnedNote(ctx context.Context, opts Options, movedAt time.Time, reason str
 		reasonText = "因封禁轮转"
 	case "invalid":
 		reasonText = "指针无效修正"
+	case "route":
+		reasonText = "路由选中"
 	default:
 		reasonText = strings.TrimSpace(reason)
 	}

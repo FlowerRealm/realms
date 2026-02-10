@@ -313,7 +313,6 @@ func (s *Store) ImportAdminConfig(ctx context.Context, in AdminConfigExport) (Ad
 	defer func() { _ = tx.Rollback() }()
 
 	groupNames := make(map[string]struct{})
-	groupNames[DefaultGroupName] = struct{}{}
 	for _, g := range in.ChannelGroups {
 		n := strings.TrimSpace(g.Name)
 		if n == "" {

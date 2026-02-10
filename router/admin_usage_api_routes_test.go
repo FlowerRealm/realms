@@ -52,7 +52,7 @@ func TestAdminUsagePage_EventIncludesFirstTokenLatencyAndTokensPerSecond(t *test
 		t.Fatalf("CreateUserToken: %v", err)
 	}
 
-	chID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "channel-1", store.DefaultGroupName, 0, false, false, false, false)
+	chID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "channel-1", "", 0, false, false, false, false)
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel: %v", err)
 	}
@@ -274,11 +274,11 @@ func TestAdminUsagePage_CodexOAuthUsesAccountInModelField(t *testing.T) {
 		t.Fatalf("CreateUserToken: %v", err)
 	}
 
-	openAIChannelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "channel-openai", store.DefaultGroupName, 0, false, false, false, false)
+	openAIChannelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "channel-openai", "", 0, false, false, false, false)
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel(openai): %v", err)
 	}
-	codexChannelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeCodexOAuth, "channel-codex", store.DefaultGroupName, 0, false, false, false, false)
+	codexChannelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeCodexOAuth, "channel-codex", "", 0, false, false, false, false)
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel(codex): %v", err)
 	}

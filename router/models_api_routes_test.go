@@ -48,8 +48,14 @@ func TestUserModelsDetail_UsesMainGroupSubgroupsAndBasePricing(t *testing.T) {
 	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, decimal.RequireFromString("1.5"), 5); err != nil {
 		t.Fatalf("CreateChannelGroup(vip): %v", err)
 	}
-	if err := st.ReplaceMainGroupSubgroups(ctx, store.DefaultGroupName, []string{"vip"}); err != nil {
+	if err := st.CreateMainGroup(ctx, "ug1", nil, 1); err != nil {
+		t.Fatalf("CreateMainGroup: %v", err)
+	}
+	if err := st.ReplaceMainGroupSubgroups(ctx, "ug1", []string{"vip"}); err != nil {
 		t.Fatalf("ReplaceMainGroupSubgroups: %v", err)
+	}
+	if err := st.SetUserMainGroup(ctx, userID, "ug1"); err != nil {
+		t.Fatalf("SetUserMainGroup: %v", err)
 	}
 
 	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch-model", "vip", 0, false, false, false, false)

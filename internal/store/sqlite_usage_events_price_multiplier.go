@@ -85,4 +85,3 @@ func ensureSQLiteUsageEventsPriceMultiplierColumns(db *sql.DB) error {
 	}
 	return nil
 }
-

@@ -27,7 +27,7 @@ func makeTokenRequest(method string, path string, body string, userID int64) *ht
 		req.Header.Set("Content-Type", "application/json")
 	}
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: userID, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: userID, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{"g1"}}
 	return req.WithContext(auth.WithPrincipal(req.Context(), p))
 }
 
@@ -131,10 +131,11 @@ func TestResponseRetrieve_CodexSelection_Returns501(t *testing.T) {
 }
 
 func TestResponsesInputTokens_RequiresOpenAICompatibleAndSkipsQuota(t *testing.T) {
+	const groupName = "g1"
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
 			{ID: 1, Type: store.UpstreamTypeCodexOAuth, Status: 1},
-			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Groups: groupName},
 		},
 		endpoints: map[int64][]store.UpstreamEndpoint{
 			1: {
@@ -155,7 +156,7 @@ func TestResponsesInputTokens_RequiresOpenAICompatibleAndSkipsQuota(t *testing.T
 			},
 		},
 		models: map[string]store.ManagedModel{
-			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", GroupName: groupName, Status: 1},
 		},
 		bindings: map[string][]store.ChannelModelBinding{
 			"gpt-5.2": {

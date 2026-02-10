@@ -66,17 +66,6 @@ func (r *GroupRouter) Next(ctx context.Context) (Selection, error) {
 		return Selection{}, errors.New("group router 未配置")
 	}
 
-	root, err := r.st.GetChannelGroupByName(ctx, store.DefaultGroupName)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return Selection{}, errors.New("default 分组不存在")
-		}
-		return Selection{}, err
-	}
-	if root.Status != 1 {
-		return Selection{}, errors.New("default 分组已禁用")
-	}
-
 	if _, ok := r.sched.PinnedChannel(); ok {
 		sel, err := r.nextFromPinnedRing(ctx)
 		if err != nil {
@@ -98,15 +87,7 @@ func (r *GroupRouter) Next(ctx context.Context) (Selection, error) {
 		}
 		return sel, nil
 	}
-
-	sel, err := r.nextFromGroup(ctx, root.ID)
-	if err != nil {
-		if errors.Is(err, errGroupExhausted) {
-			return Selection{}, errors.New("上游不可用")
-		}
-		return Selection{}, err
-	}
-	return sel, nil
+	return Selection{}, errors.New("未指定渠道分组")
 }
 
 func (r *GroupRouter) annotateRouteGroup(sel Selection) Selection {
@@ -117,9 +98,6 @@ func (r *GroupRouter) annotateRouteGroup(sel Selection) Selection {
 		return sel
 	}
 	groupsCSV := strings.TrimSpace(sel.ChannelGroups)
-	if groupsCSV == "" {
-		groupsCSV = store.DefaultGroupName
-	}
 	groups := make(map[string]struct{})
 	for _, raw := range strings.Split(groupsCSV, ",") {
 		g := strings.TrimSpace(raw)
@@ -179,7 +157,7 @@ func (r *GroupRouter) nextFromPinnedRing(ctx context.Context) (Selection, error)
 	}
 
 	if !r.channelRingLoaded {
-		ring, err := buildDefaultChannelRing(ctx, r.st)
+		ring, err := buildPinnedChannelRing(ctx, r.sched.st)
 		if err != nil {
 			return Selection{}, err
 		}

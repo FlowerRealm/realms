@@ -202,6 +202,44 @@ func TestPinnedChannelInfo_BanRotationSetsReason(t *testing.T) {
 	}
 }
 
+func TestPinnedChannelInfo_RouteTouchSetsReason(t *testing.T) {
+	s := New(&fakeStore{})
+	s.TouchChannelPointer(3, "route")
+
+	id, movedAt, reason, ok := s.PinnedChannelInfo()
+	if !ok {
+		t.Fatalf("expected pointer to be active")
+	}
+	if id != 3 {
+		t.Fatalf("expected channel=3, got=%d", id)
+	}
+	if movedAt.IsZero() {
+		t.Fatalf("expected movedAt to be set")
+	}
+	if reason != "route" {
+		t.Fatalf("expected reason=route, got=%q", reason)
+	}
+}
+
+func TestPinnedChannel_TouchDoesNotEnablePinnedMode(t *testing.T) {
+	s := New(&fakeStore{})
+	s.TouchChannelPointer(2, "route")
+
+	_, ok := s.PinnedChannel()
+	if ok {
+		t.Fatalf("expected pinned mode to be disabled after touch")
+	}
+
+	s.PinChannel(2)
+	id, ok := s.PinnedChannel()
+	if !ok {
+		t.Fatalf("expected pinned mode to be enabled after pin")
+	}
+	if id != 2 {
+		t.Fatalf("expected pinned channel=2, got=%d", id)
+	}
+}
+
 func TestChannelPointerInfo_PointerOutsideRingIsKept(t *testing.T) {
 	st := NewState()
 	st.SetChannelPointerRing([]int64{1, 2})
@@ -527,6 +565,52 @@ func TestSelect_PinnedChannelOverridesBinding(t *testing.T) {
 	}
 	if got.ChannelID != 2 {
 		t.Fatalf("expected binding channel=2 after select, got=%+v", got)
+	}
+}
+
+func TestSelect_PointerRingDoesNotOverrideBindingWhenNotPinned(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 100},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+			2: {
+				{ID: 21, ChannelID: 2, BaseURL: "https://b.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+			},
+			21: {
+				{ID: 211, EndpointID: 21, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+	s.state.SetChannelPointerRing([]int64{2, 1})
+	s.TouchChannelPointer(2, "route")
+
+	routeKeyHash := s.RouteKeyHash("abc")
+	s.state.SetBinding(10, routeKeyHash, Selection{
+		ChannelID:      1,
+		ChannelType:    store.UpstreamTypeOpenAICompatible,
+		EndpointID:     11,
+		BaseURL:        "https://a.example",
+		CredentialType: CredentialTypeOpenAI,
+		CredentialID:   111,
+	}, time.Now().Add(10*time.Minute))
+
+	sel, err := s.Select(context.Background(), 10, routeKeyHash)
+	if err != nil {
+		t.Fatalf("Select err: %v", err)
+	}
+	if sel.ChannelID != 1 {
+		t.Fatalf("expected channel=1 due to binding (not pinned), got=%+v", sel)
 	}
 }
 

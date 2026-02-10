@@ -82,7 +82,7 @@ func TestMessages_Stream_ExtractsUsageFromSSE_AnthropicCacheTokens(t *testing.T)
 	req.Header.Set("Accept", "text/event-stream")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -182,7 +182,7 @@ func TestMessages_ChannelRequestPolicy_IsPerChannelAttempt(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -289,7 +289,7 @@ func TestMessages_ChannelParamOverride_IsPerChannelAttempt(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", bytes.NewReader([]byte(`{"model":"m1","messages":[{"role":"user","content":"hi"}],"max_tokens":10}`)))
 	req.Header.Set("Content-Type", "application/json")
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -376,7 +376,7 @@ func TestMessages_MaxOutputTokensAlias_NormalizesToMaxTokens(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -459,7 +459,7 @@ func TestMessages_ChannelBodyFilters_ArePerChannelAttempt(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()

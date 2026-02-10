@@ -47,7 +47,7 @@ func TestUsageEvents_UserResponse_HidesUpstreamChannel(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	upstreamChannelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch1", store.DefaultGroupName, 0, false, false, false, false)
+	upstreamChannelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch1", "", 0, false, false, false, false)
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestUsageEventDetail_UserResponse_IncludesPricingBreakdown(t *testing.T) {
 	modelID := "m_detail_1"
 	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
 		PublicID:            modelID,
-		GroupName:           store.DefaultGroupName,
+		GroupName:           "staff",
 		InputUSDPer1M:       decimal.RequireFromString("2"),
 		OutputUSDPer1M:      decimal.RequireFromString("4"),
 		CacheInputUSDPer1M:  decimal.RequireFromString("0.5"),

@@ -52,7 +52,7 @@ func buildUsageEventPricingBreakdown(ctx context.Context, st *store.Store, ev st
 		CostSourceUSD:       usageEventCostSourceAmount(ev),
 		ModelFound:          false,
 		PaymentMultiplier:   store.DefaultGroupPriceMultiplier,
-		GroupName:           store.DefaultGroupName,
+		GroupName:           "",
 		GroupMultiplier:     store.DefaultGroupPriceMultiplier,
 		EffectiveMultiplier: store.DefaultGroupPriceMultiplier,
 	}
@@ -101,11 +101,9 @@ func buildUsageEventPricingBreakdown(ctx context.Context, st *store.Store, ev st
 	}
 	out.PaymentMultiplier = paymentMult.Truncate(store.PriceMultiplierScale)
 
-	groupName := store.DefaultGroupName
 	if ev.PriceMultiplierGroupName != nil {
-		groupName = usageNormalizeGroupName(*ev.PriceMultiplierGroupName)
+		out.GroupName = strings.TrimSpace(*ev.PriceMultiplierGroupName)
 	}
-	out.GroupName = groupName
 
 	groupMult := ev.PriceMultiplierGroup
 	if groupMult.IsNegative() || groupMult.LessThanOrEqual(decimal.Zero) {
@@ -177,9 +175,5 @@ func usageApplyMultiplier(baseUSD decimal.Decimal, multiplier decimal.Decimal) d
 }
 
 func usageNormalizeGroupName(raw string) string {
-	groupName := strings.TrimSpace(raw)
-	if groupName == "" {
-		return store.DefaultGroupName
-	}
-	return groupName
+	return strings.TrimSpace(raw)
 }

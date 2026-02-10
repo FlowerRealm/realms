@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 )
 
@@ -13,7 +12,7 @@ func (s *Store) ListMainGroups(ctx context.Context) ([]MainGroup, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT name, description, status, created_at, updated_at
 FROM main_groups
-ORDER BY (name='default') DESC, status DESC, name ASC
+ORDER BY status DESC, name ASC
 `)
 	if err != nil {
 		return nil, fmt.Errorf("查询 main_groups 失败: %w", err)
@@ -108,9 +107,6 @@ func (s *Store) UpdateMainGroup(ctx context.Context, name string, description *s
 	if status != 0 && status != 1 {
 		return errors.New("status 不合法")
 	}
-	if name == DefaultGroupName && status != 1 {
-		return errors.New("default 用户分组不允许禁用")
-	}
 
 	var desc any
 	if description != nil {
@@ -139,9 +135,6 @@ func (s *Store) DeleteMainGroup(ctx context.Context, name string) error {
 	if name == "" {
 		return errors.New("name 不能为空")
 	}
-	if name == DefaultGroupName {
-		return errors.New("default 用户分组不允许删除")
-	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -149,8 +142,12 @@ func (s *Store) DeleteMainGroup(ctx context.Context, name string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := tx.ExecContext(ctx, `UPDATE users SET main_group=? WHERE main_group=?`, DefaultGroupName, name); err != nil {
-		return fmt.Errorf("回退 users.main_group 失败: %w", err)
+	var nUsers int64
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM users WHERE main_group=?`, name).Scan(&nUsers); err != nil {
+		return fmt.Errorf("检查 users.main_group 引用失败: %w", err)
+	}
+	if nUsers > 0 {
+		return errors.New("该用户分组仍有关联用户，请先迁移用户到其他用户分组")
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM main_group_subgroups WHERE main_group=?`, name); err != nil {
 		return fmt.Errorf("删除 main_group_subgroups 失败: %w", err)
@@ -187,9 +184,6 @@ func normalizeMainGroupSubgroups(subgroups []string) ([]string, error) {
 		seen[name] = struct{}{}
 		out = append(out, name)
 	}
-	if len(out) == 0 {
-		out = append(out, DefaultGroupName)
-	}
 	if len(out) > 50 {
 		out = out[:50]
 	}
@@ -205,7 +199,7 @@ func (s *Store) ListMainGroupSubgroups(ctx context.Context, mainGroup string) ([
 SELECT main_group, subgroup, priority, created_at, updated_at
 FROM main_group_subgroups
 WHERE main_group=?
-ORDER BY priority DESC, subgroup ASC
+ORDER BY subgroup ASC
 `, mainGroup)
 	if err != nil {
 		return nil, fmt.Errorf("查询 main_group_subgroups 失败: %w", err)
@@ -254,49 +248,6 @@ func (s *Store) ReplaceMainGroupSubgroups(ctx context.Context, mainGroup string,
 		}
 	}
 
-	// 允许显式顺序；priority 越大越靠前。
-	type item struct {
-		name string
-	}
-	items := make([]item, 0, len(norm))
-	for _, n := range norm {
-		items = append(items, item{name: n})
-	}
-
-	// 规范化：保证 default 始终可用（便于兜底）。
-	hasDefault := false
-	for _, it := range items {
-		if it.name == DefaultGroupName {
-			hasDefault = true
-			break
-		}
-	}
-	if !hasDefault {
-		items = append(items, item{name: DefaultGroupName})
-	}
-
-	// 去重后保持稳定排序：先按输入顺序，追加 default 后置；再按 name 稳定。
-	seen := map[string]struct{}{}
-	dedup := make([]item, 0, len(items))
-	for _, it := range items {
-		if _, ok := seen[it.name]; ok {
-			continue
-		}
-		seen[it.name] = struct{}{}
-		dedup = append(dedup, it)
-	}
-	items = dedup
-
-	// 使 priority 与顺序一致（不依赖旧值）。
-	// 例：3 个元素 => 30, 20, 10
-	prioBase := len(items) * 10
-	priorityByName := make(map[string]int, len(items))
-	for i, it := range items {
-		priorityByName[it.name] = prioBase - i*10
-	}
-	// 仅用于写入前的 determinism（调试/测试）。
-	sort.SliceStable(items, func(i, j int) bool { return priorityByName[items[i].name] > priorityByName[items[j].name] })
-
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("开始事务失败: %w", err)
@@ -315,8 +266,8 @@ VALUES(?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	}
 	defer stmt.Close()
 
-	for _, it := range items {
-		if _, err := stmt.ExecContext(ctx, mainGroup, it.name, priorityByName[it.name]); err != nil {
+	for _, name := range norm {
+		if _, err := stmt.ExecContext(ctx, mainGroup, name, 0); err != nil {
 			return fmt.Errorf("写入 main_group_subgroups 失败: %w", err)
 		}
 	}

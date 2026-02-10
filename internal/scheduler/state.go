@@ -52,6 +52,7 @@ type State struct {
 	channelPointerIndex   map[int64]int
 	channelPointerMovedAt time.Time
 	channelPointerReason  string
+	channelPointerPinned  bool
 }
 
 func NewState() *State {
@@ -80,14 +81,16 @@ func (s *State) SetChannelPointer(channelID int64) {
 	defer s.mu.Unlock()
 	now := time.Now()
 	if channelID <= 0 {
-		if s.channelPointerID != 0 {
+		if s.channelPointerID != 0 || s.channelPointerPinned {
 			s.channelPointerMovedAt = now
 			s.channelPointerReason = "clear"
 		}
 		s.channelPointerID = 0
+		s.channelPointerPinned = false
 		return
 	}
 	s.channelPointerID = channelID
+	s.channelPointerPinned = true
 	// 若 ring 已存在但不包含该 channel，则把它追加进 ring，避免后续读取时被判定为 invalid 而自动回退。
 	if len(s.channelPointerRing) > 0 {
 		if _, ok := s.channelPointerIndex[s.channelPointerID]; !ok {
@@ -97,6 +100,36 @@ func (s *State) SetChannelPointer(channelID int64) {
 	}
 	s.channelPointerMovedAt = now
 	s.channelPointerReason = "manual"
+}
+
+func (s *State) TouchChannelPointer(channelID int64, reason string) {
+	if s == nil || channelID <= 0 {
+		return
+	}
+	if reason == "" {
+		reason = "route"
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	s.channelPointerID = channelID
+	if len(s.channelPointerRing) > 0 {
+		if _, ok := s.channelPointerIndex[s.channelPointerID]; !ok {
+			s.channelPointerIndex[s.channelPointerID] = len(s.channelPointerRing)
+			s.channelPointerRing = append(s.channelPointerRing, s.channelPointerID)
+		}
+	}
+	s.channelPointerMovedAt = now
+	s.channelPointerReason = reason
+}
+
+func (s *State) IsChannelPointerPinned() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.channelPointerPinned
 }
 
 func (s *State) ChannelPointer(now time.Time) (int64, bool) {
@@ -150,12 +183,13 @@ func (s *State) ClearChannelPointer() {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.channelPointerID != 0 {
+	if s.channelPointerID != 0 || s.channelPointerPinned {
 		now := time.Now()
 		s.channelPointerMovedAt = now
 		s.channelPointerReason = "clear"
 	}
 	s.channelPointerID = 0
+	s.channelPointerPinned = false
 }
 
 func (s *State) SetChannelPointerRing(ring []int64) {

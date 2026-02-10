@@ -12,7 +12,7 @@ SET @col_exists := (
 );
 SET @ddl := IF(
   @col_exists = 0,
-  'ALTER TABLE `managed_models` ADD COLUMN `group_name` VARCHAR(64) NOT NULL DEFAULT ''default'' AFTER `public_id`',
+  'ALTER TABLE `managed_models` ADD COLUMN `group_name` VARCHAR(64) NOT NULL DEFAULT '''' AFTER `public_id`',
   'SELECT 1'
 );
 PREPARE stmt FROM @ddl;
@@ -20,7 +20,7 @@ EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
 UPDATE managed_models
-SET group_name = 'default'
+SET group_name = ''
 WHERE group_name IS NULL OR TRIM(group_name) = '';
 
 SET @idx_exists := (

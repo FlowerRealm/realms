@@ -20,15 +20,8 @@ CREATE TABLE IF NOT EXISTS `channel_group_members` (
   KEY `idx_parent_order` (`parent_group_id`, `promotion`, `priority`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 3) 回填：default 根组挂载所有现有组（不含 default 自身）
-INSERT IGNORE INTO `channel_group_members` (`parent_group_id`, `member_group_id`, `priority`, `promotion`, `created_at`, `updated_at`)
-SELECT d.id, g.id, 0, 0, NOW(), NOW()
-FROM `channel_groups` d
-JOIN `channel_groups` g ON g.name <> 'default'
-WHERE d.name = 'default';
-
 -- 4) 回填：现有 upstream_channels.groups（CSV）→ 组成员（组 -> 渠道）
--- 兼容：空/脏 groups 按 default 处理；并容忍历史上写入的空格（统一去空格）。
+-- 兼容：容忍历史上写入的空格（统一去空格）；空 groups 不再提供默认兜底。
 INSERT IGNORE INTO `channel_group_members` (`parent_group_id`, `member_channel_id`, `priority`, `promotion`, `created_at`, `updated_at`)
 SELECT cg.id, uc.id, uc.priority, uc.promotion, NOW(), NOW()
 FROM `channel_groups` cg
@@ -36,9 +29,8 @@ JOIN `upstream_channels` uc
   ON FIND_IN_SET(
        cg.name,
        REPLACE(
-         IF(TRIM(uc.`groups`)='', 'default', TRIM(uc.`groups`)),
+         TRIM(IFNULL(uc.`groups`, '')),
          ' ',
          ''
        )
      ) > 0;
-

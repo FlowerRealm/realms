@@ -2,94 +2,59 @@ package scheduler
 
 import (
 	"context"
-	"database/sql"
 	"errors"
+	"sort"
 
 	"realms/internal/store"
 )
 
-func buildDefaultChannelRing(ctx context.Context, st ChannelGroupStore) ([]int64, error) {
+func buildPinnedChannelRing(ctx context.Context, st UpstreamStore) ([]int64, error) {
 	if st == nil {
 		return nil, errors.New("channel ring 未配置")
 	}
 
-	root, err := st.GetChannelGroupByName(ctx, store.DefaultGroupName)
+	channels, err := st.ListUpstreamChannels(ctx)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errors.New("default 分组不存在")
-		}
 		return nil, err
 	}
-	if root.Status != 1 {
-		return nil, errors.New("default 分组已禁用")
+	candidates := make([]store.UpstreamChannel, 0, len(channels))
+	for _, ch := range channels {
+		if ch.Status != 1 {
+			continue
+		}
+		if ch.Type != store.UpstreamTypeOpenAICompatible && ch.Type != store.UpstreamTypeCodexOAuth && ch.Type != store.UpstreamTypeAnthropic {
+			continue
+		}
+		candidates = append(candidates, ch)
+	}
+	if len(candidates) == 0 {
+		return nil, errors.New("未配置可用上游 channel")
 	}
 
-	seenGroups := map[int64]struct{}{}
-	seenChannels := map[int64]struct{}{}
-	out := make([]int64, 0, 32)
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].Promotion != candidates[j].Promotion {
+			return candidates[i].Promotion
+		}
+		if candidates[i].Priority != candidates[j].Priority {
+			return candidates[i].Priority > candidates[j].Priority
+		}
+		return candidates[i].ID > candidates[j].ID
+	})
 
-	var walk func(groupID int64) error
-	walk = func(groupID int64) error {
-		if groupID == 0 {
-			return nil
+	out := make([]int64, 0, len(candidates))
+	seen := make(map[int64]struct{}, len(candidates))
+	for _, ch := range candidates {
+		if ch.ID <= 0 {
+			continue
 		}
-		if _, ok := seenGroups[groupID]; ok {
-			return nil
+		if _, ok := seen[ch.ID]; ok {
+			continue
 		}
-		seenGroups[groupID] = struct{}{}
-
-		g, err := st.GetChannelGroupByID(ctx, groupID)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil
-			}
-			return err
-		}
-		if g.Status != 1 {
-			return nil
-		}
-
-		ms, err := st.ListChannelGroupMembers(ctx, groupID)
-		if err != nil {
-			return err
-		}
-		for _, m := range ms {
-			if m.MemberChannelID != nil {
-				chID := *m.MemberChannelID
-				if chID <= 0 {
-					continue
-				}
-				if m.MemberChannelStatus != nil && *m.MemberChannelStatus != 1 {
-					continue
-				}
-				if _, ok := seenChannels[chID]; ok {
-					continue
-				}
-				seenChannels[chID] = struct{}{}
-				out = append(out, chID)
-				continue
-			}
-			if m.MemberGroupID != nil {
-				gid := *m.MemberGroupID
-				if gid <= 0 {
-					continue
-				}
-				if m.MemberGroupStatus != nil && *m.MemberGroupStatus != 1 {
-					continue
-				}
-				if err := walk(gid); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-
-	if err := walk(root.ID); err != nil {
-		return nil, err
+		seen[ch.ID] = struct{}{}
+		out = append(out, ch.ID)
 	}
 	if len(out) == 0 {
-		return nil, errors.New("default 分组未配置可用上游 channel")
+		return nil, errors.New("未配置可用上游 channel")
 	}
 	return out, nil
 }

@@ -344,6 +344,21 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 		billingModel = e2eModelPublicID
 	}
 
+	// 三层分组（E2E 最小可运行集）：
+	// - 用户分组：限制用户可选的渠道分组（小分组）
+	// - 渠道分组：Token 绑定并按顺序 failover；同时也是模型的 group_name
+	const e2eUserGroup = "pw-e2e-users"
+	const e2eChannelGroup = "pw-e2e"
+	if _, err := st.CreateChannelGroup(ctx, e2eChannelGroup, strPtr("Playwright E2E channel group"), 1, store.DefaultGroupPriceMultiplier, 5); err != nil {
+		return e2eSeedResult{}, fmt.Errorf("创建 channel_group 失败: %w", err)
+	}
+	if err := st.CreateMainGroup(ctx, e2eUserGroup, strPtr("Playwright E2E user group"), 1); err != nil {
+		return e2eSeedResult{}, fmt.Errorf("创建 main_group 失败: %w", err)
+	}
+	if err := st.ReplaceMainGroupSubgroups(ctx, e2eUserGroup, []string{e2eChannelGroup}); err != nil {
+		return e2eSeedResult{}, fmt.Errorf("写入 main_group_subgroups 失败: %w", err)
+	}
+
 	u, err := st.GetUserByUsername(ctx, e2eRootUsername)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return e2eSeedResult{}, fmt.Errorf("查询 root 用户失败: %w", err)
@@ -360,8 +375,11 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 		}
 		userID = id
 	}
+	if err := st.SetUserMainGroup(ctx, userID, e2eUserGroup); err != nil {
+		return e2eSeedResult{}, fmt.Errorf("设置 root 用户分组失败: %w", err)
+	}
 
-	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "pw-e2e-upstream", store.DefaultGroupName, 0, false, false, false, false)
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "pw-e2e-upstream", e2eChannelGroup, 0, false, false, false, false)
 	if err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 upstream_channel 失败: %w", err)
 	}
@@ -375,6 +393,7 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 
 	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
 		PublicID:            billingModel,
+		GroupName:           e2eChannelGroup,
 		OwnedBy:             strPtr("upstream"),
 		InputUSDPer1M:       decimal.RequireFromString("10"),
 		OutputUSDPer1M:      decimal.Zero,
@@ -401,22 +420,36 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 	if err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 e2e 用户失败: %w", err)
 	}
+	if err := st.SetUserMainGroup(ctx, e2eUserID, e2eUserGroup); err != nil {
+		return e2eSeedResult{}, fmt.Errorf("设置 e2e 用户分组失败: %w", err)
+	}
 	if _, err := st.AddUserBalanceUSD(ctx, e2eUserID, decimal.RequireFromString(e2eUserInitialBalance)); err != nil {
 		return e2eSeedResult{}, fmt.Errorf("写入 e2e 用户余额失败: %w", err)
 	}
-	if _, _, err := st.CreateUserToken(ctx, e2eUserID, strPtr("pw-e2e-user"), e2eUserTokenPlain); err != nil {
+	e2eTokID, _, err := st.CreateUserToken(ctx, e2eUserID, strPtr("pw-e2e-user"), e2eUserTokenPlain)
+	if err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 e2e 用户 token 失败: %w", err)
+	}
+	if err := st.ReplaceTokenGroups(ctx, e2eTokID, []string{e2eChannelGroup}); err != nil {
+		return e2eSeedResult{}, fmt.Errorf("绑定 e2e 用户 token 渠道分组失败: %w", err)
 	}
 
 	poorUserID, err := st.CreateUser(ctx, e2ePoorUserEmail, e2ePoorUserUsername, userHash, store.UserRoleUser)
 	if err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 poor 用户失败: %w", err)
 	}
+	if err := st.SetUserMainGroup(ctx, poorUserID, e2eUserGroup); err != nil {
+		return e2eSeedResult{}, fmt.Errorf("设置 poor 用户分组失败: %w", err)
+	}
 	if _, err := st.AddUserBalanceUSD(ctx, poorUserID, decimal.RequireFromString(e2ePoorUserInitialBal)); err != nil {
 		return e2eSeedResult{}, fmt.Errorf("写入 poor 用户余额失败: %w", err)
 	}
-	if _, _, err := st.CreateUserToken(ctx, poorUserID, strPtr("pw-e2e-poor"), e2ePoorUserTokenPlain); err != nil {
+	poorTokID, _, err := st.CreateUserToken(ctx, poorUserID, strPtr("pw-e2e-poor"), e2ePoorUserTokenPlain)
+	if err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 poor 用户 token 失败: %w", err)
+	}
+	if err := st.ReplaceTokenGroups(ctx, poorTokID, []string{e2eChannelGroup}); err != nil {
+		return e2eSeedResult{}, fmt.Errorf("绑定 poor 用户 token 渠道分组失败: %w", err)
 	}
 
 	announcementID, err := st.CreateAnnouncement(ctx, e2eAnnouncementTitle, e2eAnnouncementBody, store.AnnouncementStatusPublished)

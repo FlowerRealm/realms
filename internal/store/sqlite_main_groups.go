@@ -45,20 +45,5 @@ CREATE TABLE IF NOT EXISTS main_group_subgroups (
 		return fmt.Errorf("创建 main_group_subgroups subgroup 索引失败: %w", err)
 	}
 
-	// seed default main group + mapping (default → default).
-	if _, err := db.Exec(`
-INSERT INTO main_groups(name, description, status, created_at, updated_at)
-SELECT 'default', '默认用户分组', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-WHERE NOT EXISTS (SELECT 1 FROM main_groups WHERE name='default' LIMIT 1)
-`); err != nil {
-		return fmt.Errorf("初始化 main_groups(default) 失败: %w", err)
-	}
-	if _, err := db.Exec(`
-INSERT OR IGNORE INTO main_group_subgroups(main_group, subgroup, priority, created_at, updated_at)
-VALUES('default', 'default', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-`); err != nil {
-		return fmt.Errorf("初始化 main_group_subgroups(default→default) 失败: %w", err)
-	}
-
 	return nil
 }

@@ -43,15 +43,11 @@ func ptrInt64(v int64) *int64 {
 	return &v
 }
 
-func ptrInt(v int) *int {
-	return &v
-}
-
 func TestGroupRouter_Next_AllowsOneRetryThenSwitchesChannel(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
-			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0},
-			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 100},
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0, Groups: "g0"},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 100, Groups: "g0"},
 		},
 		endpoints: map[int64][]store.UpstreamEndpoint{
 			1: {
@@ -73,17 +69,17 @@ func TestGroupRouter_Next_AllowsOneRetryThenSwitchesChannel(t *testing.T) {
 	}
 	s := New(fs)
 
-	root := store.ChannelGroup{
+	g0 := store.ChannelGroup{
 		ID:          1,
-		Name:        store.DefaultGroupName,
+		Name:        "g0",
 		MaxAttempts: 10,
 		Status:      1,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
 	gs := &fakeGroupStore{
-		groupsByID:   map[int64]store.ChannelGroup{1: root},
-		groupsByName: map[string]store.ChannelGroup{store.DefaultGroupName: root},
+		groupsByID:   map[int64]store.ChannelGroup{1: g0},
+		groupsByName: map[string]store.ChannelGroup{g0.Name: g0},
 		members: map[int64][]store.ChannelGroupMemberDetail{
 			1: {
 				{
@@ -91,7 +87,7 @@ func TestGroupRouter_Next_AllowsOneRetryThenSwitchesChannel(t *testing.T) {
 					ParentGroupID:       1,
 					MemberChannelID:     ptrInt64(2),
 					MemberChannelType:   ptrString(store.UpstreamTypeOpenAICompatible),
-					MemberChannelGroups: ptrString(store.DefaultGroupName),
+					MemberChannelGroups: ptrString(g0.Name),
 					Priority:            100,
 					Promotion:           false,
 					CreatedAt:           time.Now(),
@@ -102,7 +98,7 @@ func TestGroupRouter_Next_AllowsOneRetryThenSwitchesChannel(t *testing.T) {
 					ParentGroupID:       1,
 					MemberChannelID:     ptrInt64(1),
 					MemberChannelType:   ptrString(store.UpstreamTypeOpenAICompatible),
-					MemberChannelGroups: ptrString(store.DefaultGroupName),
+					MemberChannelGroups: ptrString(g0.Name),
 					Priority:            0,
 					Promotion:           false,
 					CreatedAt:           time.Now(),
@@ -112,7 +108,13 @@ func TestGroupRouter_Next_AllowsOneRetryThenSwitchesChannel(t *testing.T) {
 		},
 	}
 
-	router := NewGroupRouter(gs, s, 10, "", Constraints{})
+	cons := Constraints{
+		AllowGroups: map[string]struct{}{g0.Name: {}},
+		AllowGroupOrder: []string{
+			g0.Name,
+		},
+	}
+	router := NewGroupRouter(gs, s, 10, "", cons)
 	first, err := router.Next(context.Background())
 	if err != nil {
 		t.Fatalf("Next err: %v", err)
@@ -286,46 +288,7 @@ func TestGroupRouter_Next_PinnedRingAdvancesOnBanAndWraps(t *testing.T) {
 	s := New(fs)
 	s.PinChannel(2)
 
-	root := store.ChannelGroup{
-		ID:          1,
-		Name:        store.DefaultGroupName,
-		MaxAttempts: 10,
-		Status:      1,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-	}
-	gs := &fakeGroupStore{
-		groupsByID:   map[int64]store.ChannelGroup{1: root},
-		groupsByName: map[string]store.ChannelGroup{store.DefaultGroupName: root},
-		members: map[int64][]store.ChannelGroupMemberDetail{
-			1: {
-				{
-					MemberID:            1,
-					ParentGroupID:       1,
-					MemberChannelID:     ptrInt64(1),
-					MemberChannelType:   ptrString(store.UpstreamTypeOpenAICompatible),
-					MemberChannelGroups: ptrString(store.DefaultGroupName),
-					MemberChannelStatus: ptrInt(1),
-					Priority:            0,
-					Promotion:           false,
-					CreatedAt:           time.Now(),
-					UpdatedAt:           time.Now(),
-				},
-				{
-					MemberID:            2,
-					ParentGroupID:       1,
-					MemberChannelID:     ptrInt64(2),
-					MemberChannelType:   ptrString(store.UpstreamTypeOpenAICompatible),
-					MemberChannelGroups: ptrString(store.DefaultGroupName),
-					MemberChannelStatus: ptrInt(1),
-					Priority:            0,
-					Promotion:           false,
-					CreatedAt:           time.Now(),
-					UpdatedAt:           time.Now(),
-				},
-			},
-		},
-	}
+	gs := &fakeGroupStore{}
 
 	router := NewGroupRouter(gs, s, 10, "", Constraints{})
 	first, err := router.Next(context.Background())
@@ -348,7 +311,7 @@ func TestGroupRouter_Next_PinnedRingAdvancesOnBanAndWraps(t *testing.T) {
 	}
 }
 
-func TestGroupRouter_Next_PinnedChannelOutsideDefaultRingStillTakesEffect(t *testing.T) {
+func TestGroupRouter_Next_PinnedChannelStillTakesEffect(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
 			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0},
@@ -374,35 +337,7 @@ func TestGroupRouter_Next_PinnedChannelOutsideDefaultRingStillTakesEffect(t *tes
 	s := New(fs)
 	s.PinChannel(2)
 
-	root := store.ChannelGroup{
-		ID:          1,
-		Name:        store.DefaultGroupName,
-		MaxAttempts: 10,
-		Status:      1,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-	}
-	gs := &fakeGroupStore{
-		groupsByID:   map[int64]store.ChannelGroup{1: root},
-		groupsByName: map[string]store.ChannelGroup{store.DefaultGroupName: root},
-		// default ring 仅包含 channel=1，channel=2 不在 default 组内。
-		members: map[int64][]store.ChannelGroupMemberDetail{
-			1: {
-				{
-					MemberID:            1,
-					ParentGroupID:       1,
-					MemberChannelID:     ptrInt64(1),
-					MemberChannelType:   ptrString(store.UpstreamTypeOpenAICompatible),
-					MemberChannelGroups: ptrString(store.DefaultGroupName),
-					MemberChannelStatus: ptrInt(1),
-					Priority:            0,
-					Promotion:           false,
-					CreatedAt:           time.Now(),
-					UpdatedAt:           time.Now(),
-				},
-			},
-		},
-	}
+	gs := &fakeGroupStore{}
 
 	router := NewGroupRouter(gs, s, 10, "", Constraints{})
 	first, err := router.Next(context.Background())

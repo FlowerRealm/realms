@@ -141,8 +141,18 @@ func (s *Scheduler) PinChannel(channelID int64) {
 	s.state.SetChannelPointer(channelID)
 }
 
+func (s *Scheduler) TouchChannelPointer(channelID int64, reason string) {
+	if s == nil || s.state == nil {
+		return
+	}
+	s.state.TouchChannelPointer(channelID, reason)
+}
+
 func (s *Scheduler) PinnedChannel() (int64, bool) {
 	if s == nil || s.state == nil {
+		return 0, false
+	}
+	if !s.state.IsChannelPointerPinned() {
 		return 0, false
 	}
 	return s.state.ChannelPointer(time.Now())
@@ -162,11 +172,11 @@ func (s *Scheduler) ClearPinnedChannel() {
 	s.state.ClearChannelPointer()
 }
 
-func (s *Scheduler) RefreshPinnedRing(ctx context.Context, st ChannelGroupStore) error {
+func (s *Scheduler) RefreshPinnedRing(ctx context.Context) error {
 	if s == nil || s.state == nil {
 		return nil
 	}
-	ring, err := buildDefaultChannelRing(ctx, st)
+	ring, err := buildPinnedChannelRing(ctx, s.st)
 	if err != nil {
 		return err
 	}
@@ -260,9 +270,10 @@ func (s *Scheduler) Select(ctx context.Context, userID int64, routeKeyHash strin
 func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, routeKeyHash string, cons Constraints) (Selection, error) {
 	now := time.Now()
 
+	pinned := s.state.IsChannelPointerPinned()
 	pointerID, pointerOK := s.state.ChannelPointer(now)
 	pointerRing := s.state.ChannelPointerRing()
-	pointerRelevant := pointerOK && pointerID != 0 && cons.RequireChannelID == 0 && len(pointerRing) > 0
+	pointerRelevant := pinned && pointerOK && pointerID != 0 && cons.RequireChannelID == 0 && len(pointerRing) > 0
 
 	// 1) 会话粘性：命中绑定则优先
 	if routeKeyHash != "" && !pointerRelevant {
@@ -703,9 +714,6 @@ func channelInAnyGroup(groups string, allowed map[string]struct{}) bool {
 		return false
 	}
 	groups = strings.TrimSpace(groups)
-	if groups == "" {
-		groups = "default"
-	}
 	for _, g := range strings.Split(groups, ",") {
 		g = strings.TrimSpace(g)
 		if g == "" {

@@ -20,6 +20,8 @@ import (
 	"realms/internal/upstream"
 )
 
+const testGroupName = "g1"
+
 type memObjectRefs struct {
 	mu   sync.Mutex
 	data map[string]store.OpenAIObjectRef
@@ -89,7 +91,7 @@ func (m *memObjectRefs) DeleteOpenAIObjectRef(_ context.Context, objectType stri
 func TestResponses_NonStream_StoresObjectRefAndTouchesBinding(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
-			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Groups: testGroupName},
 		},
 		endpoints: map[int64][]store.UpstreamEndpoint{
 			1: {
@@ -102,7 +104,7 @@ func TestResponses_NonStream_StoresObjectRefAndTouchesBinding(t *testing.T) {
 			},
 		},
 		models: map[string]store.ManagedModel{
-			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", GroupName: testGroupName, Status: 1},
 		},
 		bindings: map[string][]store.ChannelModelBinding{
 			"gpt-5.2": {
@@ -125,7 +127,7 @@ func TestResponses_NonStream_StoresObjectRefAndTouchesBinding(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi"}`)))
 	req.Header.Set("Content-Type", "application/json")
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{testGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -145,7 +147,7 @@ func TestResponses_NonStream_StoresObjectRefAndTouchesBinding(t *testing.T) {
 func TestResponses_Stream_StoresObjectRefFromSSE(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
-			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Groups: testGroupName},
 		},
 		endpoints: map[int64][]store.UpstreamEndpoint{
 			1: {
@@ -158,7 +160,7 @@ func TestResponses_Stream_StoresObjectRefFromSSE(t *testing.T) {
 			},
 		},
 		models: map[string]store.ManagedModel{
-			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", GroupName: testGroupName, Status: 1},
 		},
 		bindings: map[string][]store.ChannelModelBinding{
 			"gpt-5.2": {
@@ -185,7 +187,7 @@ func TestResponses_Stream_StoresObjectRefFromSSE(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{testGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -201,7 +203,7 @@ func TestResponses_Stream_StoresObjectRefFromSSE(t *testing.T) {
 func TestChatCompletions_StoreTrue_InsertsOwnerMetadataAndStoresObjectRef(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
-			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Groups: testGroupName},
 		},
 		endpoints: map[int64][]store.UpstreamEndpoint{
 			1: {
@@ -214,7 +216,7 @@ func TestChatCompletions_StoreTrue_InsertsOwnerMetadataAndStoresObjectRef(t *tes
 			},
 		},
 		models: map[string]store.ManagedModel{
-			"m1": {ID: 1, PublicID: "m1", Status: 1},
+			"m1": {ID: 1, PublicID: "m1", GroupName: testGroupName, Status: 1},
 		},
 		bindings: map[string][]store.ChannelModelBinding{
 			"m1": {
@@ -240,7 +242,7 @@ func TestChatCompletions_StoreTrue_InsertsOwnerMetadataAndStoresObjectRef(t *tes
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/chat/completions", bytes.NewReader([]byte(reqBody)))
 	req.Header.Set("Content-Type", "application/json")
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{testGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -271,7 +273,7 @@ func TestResponsesCompact_RequiresOpenAICompatibleAndSkipsQuota(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
 			{ID: 1, Type: store.UpstreamTypeCodexOAuth, Status: 1},
-			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Groups: testGroupName},
 		},
 		endpoints: map[int64][]store.UpstreamEndpoint{
 			1: {
@@ -292,7 +294,7 @@ func TestResponsesCompact_RequiresOpenAICompatibleAndSkipsQuota(t *testing.T) {
 			},
 		},
 		models: map[string]store.ManagedModel{
-			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", GroupName: testGroupName, Status: 1},
 		},
 		bindings: map[string][]store.ChannelModelBinding{
 			"gpt-5.2": {
@@ -319,7 +321,7 @@ func TestResponsesCompact_RequiresOpenAICompatibleAndSkipsQuota(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses/compact", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi"}`)))
 	req.Header.Set("Content-Type", "application/json")
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{testGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -371,7 +373,7 @@ func TestChatCompletionRetrieve_OwnershipRequired(t *testing.T) {
 	makeReq := func(userID int64) *http.Request {
 		req := httptest.NewRequest(http.MethodGet, "http://example.com/v1/chat/completions/chatcmpl-999", nil)
 		tokenID := int64(123)
-		p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: userID, Role: store.UserRoleUser, TokenID: &tokenID}
+		p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: userID, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{testGroupName}}
 		return req.WithContext(auth.WithPrincipal(req.Context(), p))
 	}
 
@@ -626,7 +628,7 @@ func TestChatCompletionUpdate_ForcesOwnerMetadata(t *testing.T) {
 func TestModelRetrieve_ExistsAndMissing(t *testing.T) {
 	fs := &fakeStore{
 		models: map[string]store.ManagedModel{
-			"m1": {ID: 1, PublicID: "m1", Status: 1},
+			"m1": {ID: 1, PublicID: "m1", GroupName: testGroupName, Status: 1},
 		},
 		bindings: map[string][]store.ChannelModelBinding{
 			"m1": {
@@ -639,7 +641,7 @@ func TestModelRetrieve_ExistsAndMissing(t *testing.T) {
 	makeReq := func(path string) *http.Request {
 		req := httptest.NewRequest(http.MethodGet, "http://example.com"+path, nil)
 		tokenID := int64(123)
-		p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+		p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{testGroupName}}
 		return req.WithContext(auth.WithPrincipal(req.Context(), p))
 	}
 

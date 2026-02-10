@@ -16,7 +16,7 @@ func (s *Store) UserMainGroupAllowsSubgroup(ctx context.Context, userID int64, s
 	}
 	subgroup = strings.TrimSpace(subgroup)
 	if subgroup == "" {
-		subgroup = DefaultGroupName
+		return false, errors.New("subgroup 不能为空")
 	}
 	normSubgroup, err := normalizeGroupName(subgroup)
 	if err != nil {
@@ -30,9 +30,12 @@ func (s *Store) UserMainGroupAllowsSubgroup(ctx context.Context, userID int64, s
 		}
 		return false, fmt.Errorf("查询 users.main_group 失败: %w", err)
 	}
-	mainGroupName := DefaultGroupName
-	if mainGroup.Valid && strings.TrimSpace(mainGroup.String) != "" {
+	mainGroupName := ""
+	if mainGroup.Valid {
 		mainGroupName = strings.TrimSpace(mainGroup.String)
+	}
+	if mainGroupName == "" {
+		return false, errors.New("用户未配置用户分组")
 	}
 
 	rows, err := s.ListMainGroupSubgroups(ctx, mainGroupName)
@@ -40,12 +43,12 @@ func (s *Store) UserMainGroupAllowsSubgroup(ctx context.Context, userID int64, s
 		return false, err
 	}
 	if len(rows) == 0 {
-		return normSubgroup == DefaultGroupName, nil
+		return false, nil
 	}
 	for _, row := range rows {
 		if strings.TrimSpace(row.Subgroup) == normSubgroup {
 			return true, nil
 		}
 	}
-	return normSubgroup == DefaultGroupName, nil
+	return false, nil
 }

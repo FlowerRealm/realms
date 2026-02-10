@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { chromium, type FullConfig } from '@playwright/test';
+import { chromium, expect, type FullConfig } from '@playwright/test';
 
 import { E2E_SEED } from './seed';
 
@@ -21,7 +21,8 @@ export default async function globalSetup(config: FullConfig) {
   await page.locator('input[name="login"]').fill(E2E_SEED.root.username);
   await page.locator('input[name="password"]').fill(E2E_SEED.root.password);
   await page.getByRole('button', { name: '立即登录' }).click();
-  await page.waitForURL('**/dashboard', { timeout: 30_000 });
+  await page.waitForURL('**/dashboard', { timeout: 30_000, waitUntil: 'commit' });
+  await expect(page.getByRole('heading', { name: /今日费用/ }).first()).toBeVisible({ timeout: 30_000 });
 
   await page.context().storageState({ path: storageState });
   await browser.close();

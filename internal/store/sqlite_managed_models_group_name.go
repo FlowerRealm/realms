@@ -47,12 +47,12 @@ func ensureSQLiteManagedModelGroupNameColumn(db *sql.DB) error {
 	}
 
 	if _, ok := cols["group_name"]; !ok {
-		if _, err := tx.ExecContext(ctx, `ALTER TABLE managed_models ADD COLUMN group_name TEXT NOT NULL DEFAULT 'default'`); err != nil {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE managed_models ADD COLUMN group_name TEXT NOT NULL DEFAULT ''`); err != nil {
 			return fmt.Errorf("添加 managed_models 列 group_name 失败: %w", err)
 		}
 	}
 
-	if _, err := tx.ExecContext(ctx, `UPDATE managed_models SET group_name='default' WHERE TRIM(IFNULL(group_name, ''))=''`); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE managed_models SET group_name='' WHERE TRIM(IFNULL(group_name, ''))=''`); err != nil {
 		return fmt.Errorf("回填 managed_models.group_name 失败: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_managed_models_status_group ON managed_models(status, group_name)`); err != nil {

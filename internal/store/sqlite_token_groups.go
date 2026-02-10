@@ -41,16 +41,6 @@ WHERE t.status=1
 			return fmt.Errorf("回填 token_groups(从 user_groups) 失败: %w", err)
 		}
 	}
-	// 若用户未配置任何旧分组，确保 token 至少绑定 default。
-	if _, err := db.Exec(`
-INSERT OR IGNORE INTO token_groups(token_id, group_name, priority, created_at, updated_at)
-SELECT t.id, 'default', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-FROM user_tokens t
-WHERE t.status=1
-  AND NOT EXISTS (SELECT 1 FROM token_groups tg WHERE tg.token_id=t.id)
-`); err != nil {
-		return fmt.Errorf("回填 token_groups(default) 失败: %w", err)
-	}
 
 	return nil
 }

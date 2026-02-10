@@ -7,8 +7,6 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-
-	"realms/internal/store"
 )
 
 type adminMainGroupView struct {
@@ -95,11 +93,6 @@ func adminCreateMainGroupHandler(opts Options) gin.HandlerFunc {
 			req.Status = 1
 		}
 		if err := opts.Store.CreateMainGroup(c.Request.Context(), name, req.Description, req.Status); err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
-			return
-		}
-		if err := opts.Store.ReplaceMainGroupSubgroups(c.Request.Context(), name, []string{store.DefaultGroupName}); err != nil {
-			_ = opts.Store.DeleteMainGroup(c.Request.Context(), name)
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 			return
 		}
@@ -269,4 +262,3 @@ func adminReplaceMainGroupSubgroupsHandler(opts Options) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
 	}
 }
-

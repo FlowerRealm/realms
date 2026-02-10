@@ -114,6 +114,10 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ags := allowGroupsFromPrincipal(p)
+	if len(ags.Order) == 0 {
+		http.Error(w, "Token 未配置渠道分组", http.StatusBadRequest)
+		return
+	}
 	allowSet := ags.Set
 
 	type item struct {
@@ -468,6 +472,9 @@ const (
 func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p auth.Principal, sel scheduler.Selection, body []byte, wantStream bool, model *string, usageID int64, reqStart time.Time, reqBytes int64, retries int) bool {
 	if retries <= 0 {
 		retries = 1
+	}
+	if h.sched != nil && sel.ChannelID > 0 {
+		h.sched.TouchChannelPointer(sel.ChannelID, "route")
 	}
 	for i := 0; i < retries; i++ {
 		decision := h.proxyOnce(w, r, sel, body, wantStream, model, p, usageID, reqStart, reqBytes)

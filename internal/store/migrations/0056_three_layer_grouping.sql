@@ -1,4 +1,4 @@
--- 0056_three_layer_grouping.sql: 三层分组系统（主组/Token 分组/倍率拆分）。
+-- 0056_three_layer_grouping.sql: 三层分组系统（用户分组/Token 分组/倍率拆分）。
 
 -- 注意：MySQL 的 DDL 会隐式提交事务；为让迁移可重入，这里对列是否存在做条件判断。
 
@@ -12,7 +12,7 @@ SET @col_exists := (
 );
 SET @ddl := IF(
   @col_exists = 0,
-  'ALTER TABLE `users` ADD COLUMN `main_group` VARCHAR(64) NOT NULL DEFAULT ''default'' AFTER `role`',
+  'ALTER TABLE `users` ADD COLUMN `main_group` VARCHAR(64) NOT NULL DEFAULT '''' AFTER `role`',
   'SELECT 1'
 );
 PREPARE stmt FROM @ddl;
@@ -139,17 +139,7 @@ CREATE TABLE IF NOT EXISTS token_groups (
   KEY idx_token_groups_token_id (token_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- seed default main group + default mapping
-INSERT INTO main_groups(name, description, status, created_at, updated_at)
-SELECT 'default', '默认主组', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM main_groups WHERE name='default' LIMIT 1);
-
-INSERT IGNORE INTO main_group_subgroups(main_group, subgroup, priority, created_at, updated_at)
-VALUES('default', 'default', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
-
--- backfill users.main_group
-UPDATE users SET main_group='default' WHERE TRIM(IFNULL(main_group, ''))='';
+-- 不再提供 default 用户分组/兜底：由管理员显式创建用户分组并配置 subgroups。
 
 -- backfill token_groups from legacy user_groups (active tokens only)
 INSERT IGNORE INTO token_groups(token_id, group_name, priority, created_at, updated_at)
@@ -157,11 +147,3 @@ SELECT t.id, ug.group_name, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM user_tokens t
 JOIN user_groups ug ON ug.user_id=t.user_id
 WHERE t.status=1;
-
--- ensure each active token has at least one group
-INSERT IGNORE INTO token_groups(token_id, group_name, priority, created_at, updated_at)
-SELECT t.id, 'default', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-FROM user_tokens t
-WHERE t.status=1
-  AND NOT EXISTS (SELECT 1 FROM token_groups tg WHERE tg.token_id=t.id);
-

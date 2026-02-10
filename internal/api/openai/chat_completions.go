@@ -76,6 +76,10 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 	var cons scheduler.Constraints
 	cons.RequireChannelType = store.UpstreamTypeOpenAICompatible
 	ags := allowGroupsFromPrincipal(p)
+	if len(ags.Order) == 0 {
+		http.Error(w, "Token 未配置渠道分组", http.StatusBadRequest)
+		return
+	}
 	allowSet := ags.Set
 	cons.AllowGroups = allowSet
 	cons.AllowGroupOrder = ags.Order

@@ -15,7 +15,7 @@ func TestLoadUserGroupMultiplierSnapshot_StacksUserGroups(t *testing.T) {
 	st := newQuotaTestStore(t)
 	ctx := context.Background()
 
-	_, tokID := createQuotaTestUser(t, st, ctx, "alice@example.com", "alice")
+	userID, tokID := createQuotaTestUser(t, st, ctx, "alice@example.com", "alice")
 
 	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, decimal.RequireFromString("1.5"), 5); err != nil {
 		t.Fatalf("CreateChannelGroup(vip): %v", err)
@@ -23,8 +23,14 @@ func TestLoadUserGroupMultiplierSnapshot_StacksUserGroups(t *testing.T) {
 	if _, err := st.CreateChannelGroup(ctx, "staff", nil, 1, decimal.RequireFromString("0.8"), 5); err != nil {
 		t.Fatalf("CreateChannelGroup(staff): %v", err)
 	}
-	if err := st.ReplaceMainGroupSubgroups(ctx, store.DefaultGroupName, []string{"vip", "staff"}); err != nil {
+	if err := st.CreateMainGroup(ctx, "ug1", nil, 1); err != nil {
+		t.Fatalf("CreateMainGroup: %v", err)
+	}
+	if err := st.ReplaceMainGroupSubgroups(ctx, "ug1", []string{"vip", "staff"}); err != nil {
 		t.Fatalf("ReplaceMainGroupSubgroups: %v", err)
+	}
+	if err := st.SetUserMainGroup(ctx, userID, "ug1"); err != nil {
+		t.Fatalf("SetUserMainGroup: %v", err)
 	}
 	if err := st.ReplaceTokenGroups(ctx, tokID, []string{"vip", "staff"}); err != nil {
 		t.Fatalf("ReplaceTokenGroups: %v", err)
@@ -51,8 +57,14 @@ func TestSubscriptionProviderReserveCommit_MultipliesPlanAndRouteGroup(t *testin
 	if _, err := st.CreateChannelGroup(ctx, "staff", nil, 1, decimal.RequireFromString("2"), 5); err != nil {
 		t.Fatalf("CreateChannelGroup(staff): %v", err)
 	}
-	if err := st.ReplaceMainGroupSubgroups(ctx, store.DefaultGroupName, []string{"vip", "staff"}); err != nil {
+	if err := st.CreateMainGroup(ctx, "ug1", nil, 1); err != nil {
+		t.Fatalf("CreateMainGroup: %v", err)
+	}
+	if err := st.ReplaceMainGroupSubgroups(ctx, "ug1", []string{"vip", "staff"}); err != nil {
 		t.Fatalf("ReplaceMainGroupSubgroups: %v", err)
+	}
+	if err := st.SetUserMainGroup(ctx, userID, "ug1"); err != nil {
+		t.Fatalf("SetUserMainGroup: %v", err)
 	}
 	if err := st.ReplaceTokenGroups(ctx, tokenID, []string{"vip", "staff"}); err != nil {
 		t.Fatalf("ReplaceTokenGroups: %v", err)
@@ -61,7 +73,7 @@ func TestSubscriptionProviderReserveCommit_MultipliesPlanAndRouteGroup(t *testin
 	modelID := "m1"
 	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
 		PublicID:            modelID,
-		GroupName:           store.DefaultGroupName,
+		GroupName:           "vip",
 		InputUSDPer1M:       decimal.RequireFromString("1"),
 		OutputUSDPer1M:      decimal.Zero,
 		CacheInputUSDPer1M:  decimal.Zero,
@@ -143,7 +155,7 @@ func TestSubscriptionProviderReserveCommit_MultipliesPlanAndRouteGroup(t *testin
 	}
 }
 
-func TestHybridProviderReserveCommit_AppliesDefaultGroupMultiplier(t *testing.T) {
+func TestHybridProviderReserveCommit_AppliesRouteGroupMultiplier(t *testing.T) {
 	st := newQuotaTestStore(t)
 	ctx := context.Background()
 
@@ -152,25 +164,26 @@ func TestHybridProviderReserveCommit_AppliesDefaultGroupMultiplier(t *testing.T)
 		t.Fatalf("AddUserBalanceUSD: %v", err)
 	}
 
-	defaultGroup, err := st.GetChannelGroupByName(ctx, store.DefaultGroupName)
-	if err != nil {
-		t.Fatalf("GetChannelGroupByName(default): %v", err)
+	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, decimal.RequireFromString("1.5"), 5); err != nil {
+		t.Fatalf("CreateChannelGroup(vip): %v", err)
 	}
-	if err := st.UpdateChannelGroup(
-		ctx,
-		defaultGroup.ID,
-		defaultGroup.Description,
-		defaultGroup.Status,
-		decimal.RequireFromString("1.5"),
-		defaultGroup.MaxAttempts,
-	); err != nil {
-		t.Fatalf("UpdateChannelGroup(default): %v", err)
+	if err := st.CreateMainGroup(ctx, "ug1", nil, 1); err != nil {
+		t.Fatalf("CreateMainGroup: %v", err)
+	}
+	if err := st.ReplaceMainGroupSubgroups(ctx, "ug1", []string{"vip"}); err != nil {
+		t.Fatalf("ReplaceMainGroupSubgroups: %v", err)
+	}
+	if err := st.SetUserMainGroup(ctx, userID, "ug1"); err != nil {
+		t.Fatalf("SetUserMainGroup: %v", err)
+	}
+	if err := st.ReplaceTokenGroups(ctx, tokenID, []string{"vip"}); err != nil {
+		t.Fatalf("ReplaceTokenGroups: %v", err)
 	}
 
 	modelID := "m-default-mult"
 	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
 		PublicID:            modelID,
-		GroupName:           store.DefaultGroupName,
+		GroupName:           "vip",
 		InputUSDPer1M:       decimal.RequireFromString("1"),
 		OutputUSDPer1M:      decimal.Zero,
 		CacheInputUSDPer1M:  decimal.Zero,
@@ -195,6 +208,7 @@ func TestHybridProviderReserveCommit_AppliesDefaultGroupMultiplier(t *testing.T)
 	if err := provider.Commit(ctx, CommitInput{
 		UsageEventID: res.UsageEventID,
 		Model:        &modelID,
+		RouteGroup:   ptrString("vip"),
 		InputTokens:  &inTokens,
 	}); err != nil {
 		t.Fatalf("Commit: %v", err)
@@ -216,7 +230,7 @@ func TestHybridProviderReserveCommit_AppliesDefaultGroupMultiplier(t *testing.T)
 	if got, want := ev.PriceMultiplier.StringFixed(6), "1.500000"; got != want {
 		t.Fatalf("total multiplier mismatch: got=%s want=%s", got, want)
 	}
-	if ev.PriceMultiplierGroupName == nil || *ev.PriceMultiplierGroupName != store.DefaultGroupName {
+	if ev.PriceMultiplierGroupName == nil || *ev.PriceMultiplierGroupName != "vip" {
 		t.Fatalf("group name mismatch: %+v", ev.PriceMultiplierGroupName)
 	}
 

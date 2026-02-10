@@ -47,11 +47,11 @@ func ensureSQLiteUsersMainGroupColumn(db *sql.DB) error {
 	}
 
 	if _, ok := cols["main_group"]; !ok {
-		if _, err := tx.ExecContext(ctx, `ALTER TABLE users ADD COLUMN main_group TEXT NOT NULL DEFAULT 'default'`); err != nil {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE users ADD COLUMN main_group TEXT NOT NULL DEFAULT ''`); err != nil {
 			return fmt.Errorf("添加 users 列 main_group 失败: %w", err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE users SET main_group='default' WHERE TRIM(IFNULL(main_group, ''))=''`); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET main_group='' WHERE TRIM(IFNULL(main_group, ''))=''`); err != nil {
 		return fmt.Errorf("回填 users.main_group 失败: %w", err)
 	}
 
@@ -60,4 +60,3 @@ func ensureSQLiteUsersMainGroupColumn(db *sql.DB) error {
 	}
 	return nil
 }
-

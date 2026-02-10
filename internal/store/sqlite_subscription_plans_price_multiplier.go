@@ -60,4 +60,3 @@ func ensureSQLiteSubscriptionPlansPriceMultiplierColumn(db *sql.DB) error {
 	}
 	return nil
 }
-

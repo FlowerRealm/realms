@@ -192,15 +192,14 @@ func (s *Store) PurchaseSubscriptionByPlanID(ctx context.Context, userID int64, 
 		return UserSubscription{}, SubscriptionPlan{}, errors.New("订阅套餐不可用")
 	}
 	group := strings.TrimSpace(plan.GroupName)
-	if group == "" {
-		group = DefaultGroupName
-	}
-	ok, err := s.UserMainGroupAllowsSubgroup(ctx, userID, group)
-	if err != nil {
-		return UserSubscription{}, SubscriptionPlan{}, err
-	}
-	if !ok {
-		return UserSubscription{}, SubscriptionPlan{}, errors.New("无权限购买该套餐")
+	if group != "" {
+		ok, err := s.UserMainGroupAllowsSubgroup(ctx, userID, group)
+		if err != nil {
+			return UserSubscription{}, SubscriptionPlan{}, err
+		}
+		if !ok {
+			return UserSubscription{}, SubscriptionPlan{}, errors.New("无权限购买该套餐")
+		}
 	}
 	if plan.DurationDays <= 0 {
 		plan.DurationDays = 30
@@ -308,9 +307,6 @@ func (s *Store) CreateSubscriptionPlan(ctx context.Context, in SubscriptionPlanC
 	if in.Status != 0 && in.Status != 1 {
 		in.Status = 1
 	}
-	if strings.TrimSpace(in.GroupName) == "" {
-		in.GroupName = DefaultGroupName
-	}
 
 	priceMultiplier := in.PriceMultiplier
 	if priceMultiplier.IsNegative() || priceMultiplier.LessThanOrEqual(decimal.Zero) {
@@ -357,9 +353,6 @@ func (s *Store) UpdateSubscriptionPlan(ctx context.Context, in SubscriptionPlanU
 	}
 	if in.Status != 0 && in.Status != 1 {
 		in.Status = 1
-	}
-	if strings.TrimSpace(in.GroupName) == "" {
-		in.GroupName = DefaultGroupName
 	}
 
 	priceMultiplier := in.PriceMultiplier

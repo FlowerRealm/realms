@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `username` TEXT NOT NULL CHECK (`username` <> '' AND `username` NOT GLOB '*[^A-Za-z0-9]*'),
   `password_hash` BLOB NOT NULL,
   `role` TEXT NOT NULL DEFAULT 'user',
-  `main_group` TEXT NOT NULL DEFAULT 'default',
+  `main_group` TEXT NOT NULL DEFAULT '',
   `status` INTEGER NOT NULL DEFAULT 1,
   `created_at` DATETIME NOT NULL,
   `updated_at` DATETIME NOT NULL
@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS `upstream_channels` (
   `id` INTEGER PRIMARY KEY AUTOINCREMENT,
   `type` TEXT NOT NULL,
   `name` TEXT NOT NULL,
-  `groups` TEXT NOT NULL DEFAULT 'default',
+  `groups` TEXT NOT NULL DEFAULT '',
   `status` INTEGER NOT NULL DEFAULT 1,
   `priority` INTEGER NOT NULL DEFAULT 0,
   `promotion` INTEGER NOT NULL DEFAULT 0,
@@ -285,7 +285,7 @@ CREATE TABLE IF NOT EXISTS `subscription_plans` (
   `id` INTEGER PRIMARY KEY AUTOINCREMENT,
   `code` TEXT NOT NULL,
   `name` TEXT NOT NULL,
-  `group_name` TEXT NOT NULL DEFAULT 'default',
+  `group_name` TEXT NOT NULL DEFAULT '',
   `price_multiplier` DECIMAL(20,6) NOT NULL DEFAULT 1.000000,
   `price_cny` DECIMAL(20,2) NOT NULL,
   `limit_5h_usd` DECIMAL(20,6) NOT NULL,
@@ -462,7 +462,7 @@ CREATE INDEX IF NOT EXISTS `idx_parent_order` ON `channel_group_members` (`paren
 CREATE TABLE IF NOT EXISTS `managed_models` (
   `id` INTEGER PRIMARY KEY AUTOINCREMENT,
   `public_id` TEXT NOT NULL,
-  `group_name` TEXT NOT NULL DEFAULT 'default',
+  `group_name` TEXT NOT NULL DEFAULT '',
   `upstream_model` TEXT NULL,
   `owned_by` TEXT NULL,
   `input_usd_per_1m` DECIMAL(20,6) NOT NULL DEFAULT 5.000000,
@@ -560,24 +560,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS `uk_oauth_app_tokens_token_id` ON `oauth_app_t
 CREATE INDEX IF NOT EXISTS `idx_oauth_app_tokens_user_id` ON `oauth_app_tokens` (`user_id`);
 CREATE INDEX IF NOT EXISTS `idx_oauth_app_tokens_app_id` ON `oauth_app_tokens` (`app_id`);
 
--- Seed: channel_groups 默认分组
-INSERT INTO channel_groups(name, description, price_multiplier, status, max_attempts, created_at, updated_at)
-SELECT 'default', '默认分组', 1.000000, 1, 5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-WHERE NOT EXISTS (SELECT 1 FROM channel_groups WHERE name='default' LIMIT 1);
-
--- Seed: main_groups 默认用户分组
-INSERT INTO main_groups(name, description, status, created_at, updated_at)
-SELECT 'default', '默认用户分组', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-WHERE NOT EXISTS (SELECT 1 FROM main_groups WHERE name='default' LIMIT 1);
-
--- Seed: main_group_subgroups 默认映射（default → default）
-INSERT INTO main_group_subgroups(main_group, subgroup, priority, created_at, updated_at)
-SELECT 'default', 'default', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-WHERE NOT EXISTS (SELECT 1 FROM main_group_subgroups WHERE main_group='default' AND subgroup='default' LIMIT 1);
-
 -- Seed: 内置 Codex OAuth 渠道
 INSERT INTO upstream_channels(type, name, `groups`, status, priority, promotion, last_test_at, last_test_latency_ms, last_test_ok, created_at, updated_at)
-SELECT 'codex_oauth', 'Codex OAuth', 'default', 1, 0, 0, NULL, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+SELECT 'codex_oauth', 'Codex OAuth', '', 1, 0, 0, NULL, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM upstream_channels WHERE type='codex_oauth' LIMIT 1);
 
 -- Seed: 为内置 codex_oauth 补齐默认 endpoint（与 MySQL 迁移一致）
@@ -594,7 +579,7 @@ INSERT INTO subscription_plans(
   duration_days, status, created_at, updated_at
 )
 SELECT
-  'basic_12', '基础订阅', 'default', 1.000000, 12.00,
+  'basic_12', '基础订阅', '', 1.000000, 12.00,
   6.000000, 0.000000, 20.000000, 80.000000,
   30, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM subscription_plans WHERE code='basic_12' LIMIT 1);

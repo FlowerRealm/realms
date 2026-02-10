@@ -74,9 +74,6 @@ func adminListUsersHandler(opts Options) gin.HandlerFunc {
 		out := make([]adminUserView, 0, len(users))
 		for _, u := range users {
 			mainGroup := strings.TrimSpace(u.MainGroup)
-			if mainGroup == "" {
-				mainGroup = store.DefaultGroupName
-			}
 			out = append(out, adminUserView{
 				ID:         u.ID,
 				Email:      u.Email,
@@ -287,7 +284,7 @@ func adminUpdateUserHandler(opts Options) gin.HandlerFunc {
 		if req.UserGroup != nil {
 			mainGroup := strings.TrimSpace(*req.UserGroup)
 			if mainGroup == "" {
-				mainGroup = store.DefaultGroupName
+				mainGroup = strings.TrimSpace(target.MainGroup)
 			}
 			if mainGroup != strings.TrimSpace(target.MainGroup) {
 				if err := opts.Store.SetUserMainGroup(c.Request.Context(), target.ID, mainGroup); err != nil {

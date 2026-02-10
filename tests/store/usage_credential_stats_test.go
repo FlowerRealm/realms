@@ -37,7 +37,7 @@ func TestGetUsageStatsByCredentialForChannelRange_SQLite(t *testing.T) {
 		t.Fatalf("CreateUserToken: %v", err)
 	}
 
-	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch1", store.DefaultGroupName, 0, false, false, false, false)
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch1", "", 0, false, false, false, false)
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel: %v", err)
 	}

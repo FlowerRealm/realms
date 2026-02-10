@@ -115,9 +115,6 @@ func adminListSubscriptionPlansHandler(opts Options) gin.HandlerFunc {
 			if view.DurationDays <= 0 {
 				view.DurationDays = 30
 			}
-			if view.GroupName == "" {
-				view.GroupName = store.DefaultGroupName
-			}
 			out = append(out, view)
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": out})
@@ -174,9 +171,6 @@ func adminGetSubscriptionPlanHandler(opts Options) gin.HandlerFunc {
 		if view.DurationDays <= 0 {
 			view.DurationDays = 30
 		}
-		if view.GroupName == "" {
-			view.GroupName = store.DefaultGroupName
-		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": view})
 	}
 }
@@ -227,12 +221,11 @@ func adminCreateSubscriptionPlanHandler(opts Options) gin.HandlerFunc {
 		}
 
 		group := strings.TrimSpace(req.GroupName)
-		if group == "" {
-			group = store.DefaultGroupName
-		}
-		if err := validateChannelGroupSelectable(c.Request.Context(), opts.Store, group); err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
-			return
+		if group != "" {
+			if err := validateChannelGroupSelectable(c.Request.Context(), opts.Store, group); err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+				return
+			}
 		}
 
 		priceCNY, err := parseCNY(req.PriceCNY)
@@ -356,12 +349,11 @@ func adminUpdateSubscriptionPlanHandler(opts Options) gin.HandlerFunc {
 		}
 
 		group := strings.TrimSpace(req.GroupName)
-		if group == "" {
-			group = store.DefaultGroupName
-		}
-		if err := validateChannelGroupSelectable(c.Request.Context(), opts.Store, group); err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
-			return
+		if group != "" {
+			if err := validateChannelGroupSelectable(c.Request.Context(), opts.Store, group); err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+				return
+			}
 		}
 
 		priceCNY, err := parseCNY(req.PriceCNY)
@@ -499,9 +491,6 @@ func adminListSubscriptionOrdersHandler(opts Options) gin.HandlerFunc {
 			if row.Order.ApprovedAt != nil {
 				view.ApprovedAt = row.Order.ApprovedAt.Format("2006-01-02 15:04:05")
 			}
-			if view.GroupName == "" {
-				view.GroupName = store.DefaultGroupName
-			}
 			out = append(out, view)
 		}
 
@@ -597,7 +586,7 @@ func validateChannelGroupSelectable(ctx context.Context, st *store.Store, groupN
 	}
 	groupName = strings.TrimSpace(groupName)
 	if groupName == "" {
-		groupName = store.DefaultGroupName
+		return nil
 	}
 	g, err := st.GetChannelGroupByName(ctx, groupName)
 	if err != nil {

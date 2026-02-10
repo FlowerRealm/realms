@@ -128,10 +128,6 @@ func adminCreateChannelGroupHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 			return
 		}
-		if name == store.DefaultGroupName {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "default 分组已存在"})
-			return
-		}
 
 		priceMult := store.DefaultGroupPriceMultiplier
 		if strings.TrimSpace(req.PriceMultiplier) != "" {
@@ -155,19 +151,6 @@ func adminCreateChannelGroupHandler(opts Options) gin.HandlerFunc {
 		id, err := opts.Store.CreateChannelGroup(c.Request.Context(), name, req.Description, status, priceMult, maxAttempts)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建失败（可能分组已存在）"})
-			return
-		}
-
-		// 新建根分组默认挂载到 default 根组（与 SSR 行为一致）。
-		def, err := opts.Store.GetChannelGroupByName(c.Request.Context(), store.DefaultGroupName)
-		if err != nil || def.ID <= 0 {
-			_ = opts.Store.DeleteChannelGroup(c.Request.Context(), id)
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建失败"})
-			return
-		}
-		if err := opts.Store.AddChannelGroupMemberGroup(c.Request.Context(), def.ID, id, 0, false); err != nil {
-			_ = opts.Store.DeleteChannelGroup(c.Request.Context(), id)
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 			return
 		}
 
@@ -211,10 +194,6 @@ func adminUpdateChannelGroupHandler(opts Options) gin.HandlerFunc {
 		status := req.Status
 		if status != 0 && status != 1 {
 			status = g.Status
-		}
-		if strings.TrimSpace(g.Name) == store.DefaultGroupName && status != 1 {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "default 分组不允许禁用"})
-			return
 		}
 
 		priceMult := g.PriceMultiplier
@@ -261,10 +240,6 @@ func adminDeleteChannelGroupHandler(opts Options) gin.HandlerFunc {
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
-			return
-		}
-		if strings.TrimSpace(g.Name) == store.DefaultGroupName {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "default 分组不允许删除"})
 			return
 		}
 
@@ -480,10 +455,6 @@ func adminCreateChildChannelGroupHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 			return
 		}
-		if name == store.DefaultGroupName {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "default 分组已存在"})
-			return
-		}
 
 		priceMult := store.DefaultGroupPriceMultiplier
 		if strings.TrimSpace(req.PriceMultiplier) != "" {
@@ -641,9 +612,6 @@ func channelGroupBreadcrumb(ctx context.Context, st *store.Store, groupID int64)
 			return nil, err
 		}
 		chain = append(chain, g)
-		if strings.TrimSpace(g.Name) == store.DefaultGroupName {
-			break
-		}
 		parentID, ok, err := st.GetChannelGroupParentID(ctx, g.ID)
 		if err != nil {
 			return nil, err

@@ -20,7 +20,7 @@ func (s *Store) ListChannelGroups(ctx context.Context) ([]ChannelGroup, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, name, description, price_multiplier, max_attempts, status, created_at, updated_at
 FROM channel_groups
-ORDER BY (name='default') DESC, status DESC, name ASC, id DESC
+ORDER BY status DESC, name ASC, id DESC
 `)
 	if err != nil {
 		return nil, fmt.Errorf("查询 channel_groups 失败: %w", err)
@@ -246,7 +246,7 @@ func removeGroupFromCSV(groupsCSV string, group string) (string, bool) {
 }
 
 // ForceDeleteChannelGroup 删除分组字典项，并级联清理引用：
-// - upstream_channels.groups: 移除渠道 CSV 中的该 group；若移除后为空则禁用该渠道并回退到 default
+// - upstream_channels.groups: 移除渠道 CSV 中的该 group（允许移除后为空）
 func (s *Store) ForceDeleteChannelGroup(ctx context.Context, id int64) (ChannelGroupDeleteSummary, error) {
 	if id == 0 {
 		return ChannelGroupDeleteSummary{}, errors.New("id 不能为空")
@@ -261,9 +261,6 @@ func (s *Store) ForceDeleteChannelGroup(ctx context.Context, id int64) (ChannelG
 	group := strings.TrimSpace(g.Name)
 	if group == "" {
 		return ChannelGroupDeleteSummary{}, errors.New("group 不能为空")
-	}
-	if group == DefaultGroupName {
-		return ChannelGroupDeleteSummary{}, errors.New("default 分组不允许删除")
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -331,7 +328,6 @@ func (s *Store) ForceDeleteChannelGroup(ctx context.Context, id int64) (ChannelG
 
 	for _, ch := range chans {
 		newCSV, _ := removeGroupFromCSV(ch.groupsCSV, group)
-		disableIfEmpty := strings.TrimSpace(newCSV) == ""
 
 		// 清理脏 groups：移除不存在的分组名（避免后续 SSOT 重建失败）。
 		var kept []string
@@ -345,24 +341,10 @@ func (s *Store) ForceDeleteChannelGroup(ctx context.Context, id int64) (ChannelG
 				continue
 			}
 		}
-		if len(kept) == 0 {
-			kept = []string{DefaultGroupName}
-			disableIfEmpty = true
-		}
 		newCSV = strings.Join(kept, ",")
 
-		if disableIfEmpty {
-			if ch.status == 1 {
-				sum.ChannelsDisabled++
-			}
-			newCSV = DefaultGroupName
-			if _, err := tx.ExecContext(ctx, "UPDATE upstream_channels SET `groups`=?, status=0, updated_at=CURRENT_TIMESTAMP WHERE id=?", newCSV, ch.id); err != nil {
-				return ChannelGroupDeleteSummary{}, fmt.Errorf("更新 upstream_channels.groups 失败: %w", err)
-			}
-		} else {
-			if _, err := tx.ExecContext(ctx, "UPDATE upstream_channels SET `groups`=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", newCSV, ch.id); err != nil {
-				return ChannelGroupDeleteSummary{}, fmt.Errorf("更新 upstream_channels.groups 失败: %w", err)
-			}
+		if _, err := tx.ExecContext(ctx, "UPDATE upstream_channels SET `groups`=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", newCSV, ch.id); err != nil {
+			return ChannelGroupDeleteSummary{}, fmt.Errorf("更新 upstream_channels.groups 失败: %w", err)
 		}
 
 		// 同步 channel_group_members（SSOT）：重建该渠道的“组 -> 渠道”成员关系。

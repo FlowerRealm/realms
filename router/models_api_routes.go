@@ -231,11 +231,11 @@ func derefString(p *string) string {
 
 func normalizeManagedModelGroupNameInput(groupName *string) string {
 	if groupName == nil {
-		return store.DefaultGroupName
+		return ""
 	}
 	group := strings.TrimSpace(*groupName)
 	if group == "" {
-		return store.DefaultGroupName
+		return ""
 	}
 	return group
 }

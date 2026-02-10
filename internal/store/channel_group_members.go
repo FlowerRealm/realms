@@ -165,9 +165,6 @@ func (s *Store) AddChannelGroupMemberGroup(ctx context.Context, parentGroupID in
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(child.Name) == DefaultGroupName {
-		return errors.New("default 分组不允许作为子组")
-	}
 	if strings.TrimSpace(parent.Name) == "" || strings.TrimSpace(child.Name) == "" {
 		return errors.New("分组名不能为空")
 	}
@@ -367,12 +364,12 @@ func (s *Store) syncUpstreamChannelGroupsCacheTx(ctx context.Context, tx *sql.Tx
 	}
 
 	rows, err := tx.QueryContext(ctx, `
-SELECT cg.name
-FROM channel_group_members m
-JOIN channel_groups cg ON cg.id=m.parent_group_id
-WHERE m.member_channel_id=?
-ORDER BY (cg.name='default') DESC, cg.name ASC, cg.id DESC
-`, channelID)
+	SELECT cg.name
+	FROM channel_group_members m
+	JOIN channel_groups cg ON cg.id=m.parent_group_id
+	WHERE m.member_channel_id=?
+	ORDER BY cg.name ASC, cg.id DESC
+	`, channelID)
 	if err != nil {
 		return fmt.Errorf("查询渠道所属分组失败: %w", err)
 	}
@@ -397,20 +394,6 @@ ORDER BY (cg.name='default') DESC, cg.name ASC, cg.id DESC
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("遍历渠道所属分组失败: %w", err)
-	}
-
-	if len(names) == 0 {
-		// 兼容历史语义：空分组视为 default。
-		names = append(names, DefaultGroupName)
-
-		var defaultGroupID int64
-		if err := tx.QueryRowContext(ctx, `SELECT id FROM channel_groups WHERE name='default' LIMIT 1`).Scan(&defaultGroupID); err == nil && defaultGroupID > 0 {
-			stmt := fmt.Sprintf(`
-%s INTO channel_group_members(parent_group_id, member_channel_id, priority, promotion, created_at, updated_at)
-VALUES(?, ?, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-`, insertIgnoreVerb(s.dialect))
-			_, _ = tx.ExecContext(ctx, stmt, defaultGroupID, channelID)
-		}
 	}
 
 	csv := strings.Join(names, ",")

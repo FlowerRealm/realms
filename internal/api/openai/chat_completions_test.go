@@ -18,9 +18,10 @@ import (
 )
 
 func TestChatCompletions_DropsUnknownAndAppliesOModelRules(t *testing.T) {
+	const groupName = "g1"
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
-			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Groups: groupName},
 		},
 		endpoints: map[int64][]store.UpstreamEndpoint{
 			1: {
@@ -33,7 +34,7 @@ func TestChatCompletions_DropsUnknownAndAppliesOModelRules(t *testing.T) {
 			},
 		},
 		models: map[string]store.ManagedModel{
-			"m1": {ID: 1, PublicID: "m1", Status: 1},
+			"m1": {ID: 1, PublicID: "m1", GroupName: groupName, Status: 1},
 		},
 		bindings: map[string][]store.ChannelModelBinding{
 			"m1": {
@@ -63,7 +64,7 @@ func TestChatCompletions_DropsUnknownAndAppliesOModelRules(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{groupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -113,9 +114,10 @@ func TestChatCompletions_DropsUnknownAndAppliesOModelRules(t *testing.T) {
 }
 
 func TestChatCompletions_AliasesMaxOutputTokens(t *testing.T) {
+	const groupName = "g1"
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
-			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Groups: groupName},
 		},
 		endpoints: map[int64][]store.UpstreamEndpoint{
 			1: {
@@ -128,7 +130,7 @@ func TestChatCompletions_AliasesMaxOutputTokens(t *testing.T) {
 			},
 		},
 		models: map[string]store.ManagedModel{
-			"m1": {ID: 1, PublicID: "m1", Status: 1},
+			"m1": {ID: 1, PublicID: "m1", GroupName: groupName, Status: 1},
 		},
 		bindings: map[string][]store.ChannelModelBinding{
 			"m1": {
@@ -155,7 +157,7 @@ func TestChatCompletions_AliasesMaxOutputTokens(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{groupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -184,9 +186,10 @@ func TestChatCompletions_AliasesMaxOutputTokens(t *testing.T) {
 }
 
 func TestChatCompletions_Stream_ForcesStreamOptionsIncludeUsage(t *testing.T) {
+	const groupName = "g1"
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
-			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Groups: groupName},
 		},
 		endpoints: map[int64][]store.UpstreamEndpoint{
 			1: {
@@ -199,7 +202,7 @@ func TestChatCompletions_Stream_ForcesStreamOptionsIncludeUsage(t *testing.T) {
 			},
 		},
 		models: map[string]store.ManagedModel{
-			"m1": {ID: 1, PublicID: "m1", Status: 1},
+			"m1": {ID: 1, PublicID: "m1", GroupName: groupName, Status: 1},
 		},
 		bindings: map[string][]store.ChannelModelBinding{
 			"m1": {
@@ -227,7 +230,7 @@ func TestChatCompletions_Stream_ForcesStreamOptionsIncludeUsage(t *testing.T) {
 	req.Header.Set("Accept", "text/event-stream")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{groupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()

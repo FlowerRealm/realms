@@ -70,7 +70,7 @@ func TestResponses_Stream_ExtractsUsageFromSSE(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -220,7 +220,14 @@ type fakeStore struct {
 }
 
 func (f *fakeStore) ListUpstreamChannels(_ context.Context) ([]store.UpstreamChannel, error) {
-	return f.channels, nil
+	out := make([]store.UpstreamChannel, 0, len(f.channels))
+	for _, ch := range f.channels {
+		if strings.TrimSpace(ch.Groups) == "" {
+			ch.Groups = store.DefaultGroupName
+		}
+		out = append(out, ch)
+	}
+	return out, nil
 }
 
 func (f *fakeStore) ListUpstreamEndpointsByChannel(_ context.Context, channelID int64) ([]store.UpstreamEndpoint, error) {
@@ -247,6 +254,9 @@ func (f *fakeStore) GetEnabledManagedModelByPublicID(_ context.Context, publicID
 	if !ok || m.Status != 1 {
 		return store.ManagedModel{}, sql.ErrNoRows
 	}
+	if strings.TrimSpace(m.GroupName) == "" {
+		m.GroupName = store.DefaultGroupName
+	}
 	return m, nil
 }
 
@@ -254,6 +264,9 @@ func (f *fakeStore) GetManagedModelByPublicID(_ context.Context, publicID string
 	m, ok := f.models[publicID]
 	if !ok {
 		return store.ManagedModel{}, sql.ErrNoRows
+	}
+	if strings.TrimSpace(m.GroupName) == "" {
+		m.GroupName = store.DefaultGroupName
 	}
 	return m, nil
 }
@@ -266,6 +279,9 @@ func (f *fakeStore) ListEnabledManagedModelsWithBindings(_ context.Context) ([]s
 		}
 		if len(f.bindings[m.PublicID]) == 0 {
 			continue
+		}
+		if strings.TrimSpace(m.GroupName) == "" {
+			m.GroupName = store.DefaultGroupName
 		}
 		out = append(out, m)
 	}
@@ -423,7 +439,10 @@ func (f *fakeStore) ListChannelGroupMembers(_ context.Context, parentGroupID int
 			id := ch.ID
 			name := ch.Name
 			typ := ch.Type
-			groups := ch.Groups
+			groups := strings.TrimSpace(ch.Groups)
+			if groups == "" {
+				groups = store.DefaultGroupName
+			}
 			status := ch.Status
 			out = append(out, store.ChannelGroupMemberDetail{
 				MemberID:            id,
@@ -446,7 +465,10 @@ func (f *fakeStore) ListChannelGroupMembers(_ context.Context, parentGroupID int
 		id := ch.ID
 		name := ch.Name
 		typ := ch.Type
-		groups := ch.Groups
+		groups := strings.TrimSpace(ch.Groups)
+		if groups == "" {
+			groups = store.DefaultGroupName
+		}
 		status := ch.Status
 		out = append(out, store.ChannelGroupMemberDetail{
 			MemberID:            id,
@@ -556,6 +578,7 @@ func TestResponses_FailoverCredential(t *testing.T) {
 		UserID:    10,
 		Role:      store.UserRoleUser,
 		TokenID:   &tokenID,
+		Groups:    []string{store.DefaultGroupName},
 	}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
@@ -629,6 +652,7 @@ func TestResponses_RetrySameSelectionOnNetworkErrorBeforeFailover(t *testing.T) 
 		UserID:    10,
 		Role:      store.UserRoleUser,
 		TokenID:   &tokenID,
+		Groups:    []string{store.DefaultGroupName},
 	}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
@@ -707,7 +731,7 @@ func TestResponses_ChannelRequestPolicy_IsPerChannelAttempt(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -814,7 +838,7 @@ func TestResponses_ChannelParamOverride_IsPerChannelAttempt(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
 	req.Header.Set("Content-Type", "application/json")
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -899,7 +923,7 @@ func TestResponses_MaxTokensAlias_PreservesMaxTokens(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi","max_tokens":123}`)))
 	req.Header.Set("Content-Type", "application/json")
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -976,7 +1000,7 @@ func TestResponses_ChannelParamOverride_MaxTokens_PreservesMaxTokens(t *testing.
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
 	req.Header.Set("Content-Type", "application/json")
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -1043,7 +1067,7 @@ func TestResponses_ModelSuffixEffort_IsPerChannelAttempt(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
 	req.Header.Set("Content-Type", "application/json")
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -1137,7 +1161,7 @@ func TestResponses_ChannelBodyFilters_ArePerChannelAttempt(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(reqBody)))
 	req.Header.Set("Content-Type", "application/json")
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -1218,7 +1242,7 @@ func TestResponses_StatusCodeMapping_OverridesDownstreamStatus(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -1272,7 +1296,7 @@ func TestResponses_UsageEvent_RecordsUpstreamErrorMessage(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -1343,6 +1367,7 @@ func TestResponses_FailoverCredentialOn402PaymentRequired(t *testing.T) {
 		UserID:    10,
 		Role:      store.UserRoleUser,
 		TokenID:   &tokenID,
+		Groups:    []string{store.DefaultGroupName},
 	}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
@@ -1394,7 +1419,7 @@ func TestResponses_RouteKeyPrefersPromptCacheKeyInBody(t *testing.T) {
 	req.Header.Set("Idempotency-Key", "rk_header")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -1445,7 +1470,7 @@ func TestResponses_RouteKeyFallsBackToHeader(t *testing.T) {
 	req.Header.Set("X-RC-Route-Key", "rk_header")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -1493,7 +1518,7 @@ func TestResponses_RouteKeyFallsBackToHeaderXSessionID(t *testing.T) {
 	req.Header.Set("X-Session-Id", "rk_x_session")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -1540,7 +1565,7 @@ func TestResponses_RouteKeyFallsBackToBodyMetadataSessionID(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -1598,7 +1623,7 @@ func TestResponses_CodexSessionCompletion_FillsPromptCacheKeyAndSessionHeader(t 
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -1661,7 +1686,7 @@ func TestResponses_ResponseFeedbackTouchesBinding(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -1708,7 +1733,7 @@ func TestChatCompletions_RouteKeyFallsBackToRawBodySessionID(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -1758,7 +1783,7 @@ func TestResponses_AuditFailoverDoesNotRecordResponseBody(t *testing.T) {
 	req.Header.Set("Idempotency-Key", "k1")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -1823,7 +1848,7 @@ func TestResponses_AuditUpstreamErrorDoesNotRecordResponseBody(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -1903,7 +1928,7 @@ func TestResponses_CodexOAuth_UsageLimitFailoverToNextAccount(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -1963,7 +1988,7 @@ func TestResponses_CodexOAuth_UsageLimitSetsPersistentCooldown(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -2022,7 +2047,7 @@ func TestResponses_CodexOAuth_UsageLimitNoFallbackReturnsUpstreamUnavailable(t *
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -2087,6 +2112,7 @@ func TestResponses_QuotaCommitIncludesUpstreamChannelID(t *testing.T) {
 		UserID:    10,
 		Role:      store.UserRoleUser,
 		TokenID:   &tokenID,
+		Groups:    []string{store.DefaultGroupName},
 	}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
@@ -2164,6 +2190,7 @@ func TestResponses_QuotaCommitIgnoresUpstreamCostFields(t *testing.T) {
 		UserID:    10,
 		Role:      store.UserRoleUser,
 		TokenID:   &tokenID,
+		Groups:    []string{store.DefaultGroupName},
 	}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
@@ -2280,7 +2307,7 @@ func TestResponses_ModelNotEnabledRejected(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -2323,7 +2350,7 @@ func TestResponses_ModelPassthrough_AllowsDisabledModelWithoutBindings(t *testin
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -2381,7 +2408,7 @@ func TestResponses_AliasRewrite(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()
@@ -2424,7 +2451,7 @@ func TestModels_ReturnsManagedModels(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/v1/models", nil)
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
 	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
 	rr := httptest.NewRecorder()

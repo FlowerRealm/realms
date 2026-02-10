@@ -115,15 +115,14 @@ func (s *Store) CreateSubscriptionOrderByPlanID(ctx context.Context, userID int6
 	}
 
 	group := strings.TrimSpace(plan.GroupName)
-	if group == "" {
-		group = DefaultGroupName
-	}
-	ok, err := s.UserMainGroupAllowsSubgroup(ctx, userID, group)
-	if err != nil {
-		return SubscriptionOrder{}, SubscriptionPlan{}, err
-	}
-	if !ok {
-		return SubscriptionOrder{}, SubscriptionPlan{}, errors.New("无权限购买该套餐")
+	if group != "" {
+		ok, err := s.UserMainGroupAllowsSubgroup(ctx, userID, group)
+		if err != nil {
+			return SubscriptionOrder{}, SubscriptionPlan{}, err
+		}
+		if !ok {
+			return SubscriptionOrder{}, SubscriptionPlan{}, errors.New("无权限购买该套餐")
+		}
 	}
 
 	o := SubscriptionOrder{

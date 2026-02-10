@@ -70,6 +70,10 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 	var cons scheduler.Constraints
 	cons.RequireChannelType = store.UpstreamTypeAnthropic
 	ags := allowGroupsFromPrincipal(p)
+	if len(ags.Order) == 0 {
+		writeAnthropicError(w, http.StatusBadRequest, "Token 未配置渠道分组")
+		return
+	}
 	allowSet := ags.Set
 	cons.AllowGroups = allowSet
 	cons.AllowGroupOrder = ags.Order

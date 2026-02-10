@@ -75,7 +75,20 @@ func TestBilling_PaygBalanceDebitsByTokensPricing_E2E(t *testing.T) {
 	st.SetDialect(store.DialectSQLite)
 
 	ctx := context.Background()
-	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ci-upstream", store.DefaultGroupName, 0, false, false, false, false)
+
+	const userGroup = "ug1"
+	const routeGroup = "rg1"
+	if _, err := st.CreateChannelGroup(ctx, routeGroup, nil, 1, store.DefaultGroupPriceMultiplier, 5); err != nil {
+		t.Fatalf("CreateChannelGroup: %v", err)
+	}
+	if err := st.CreateMainGroup(ctx, userGroup, nil, 1); err != nil {
+		t.Fatalf("CreateMainGroup: %v", err)
+	}
+	if err := st.ReplaceMainGroupSubgroups(ctx, userGroup, []string{routeGroup}); err != nil {
+		t.Fatalf("ReplaceMainGroupSubgroups: %v", err)
+	}
+
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ci-upstream", routeGroup, 0, false, false, false, false)
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel: %v", err)
 	}
@@ -88,6 +101,7 @@ func TestBilling_PaygBalanceDebitsByTokensPricing_E2E(t *testing.T) {
 	}
 	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
 		PublicID:            model,
+		GroupName:           routeGroup,
 		OwnedBy:             strPtr("upstream"),
 		InputUSDPer1M:       decimal.RequireFromString("10"),
 		OutputUSDPer1M:      decimal.Zero,
@@ -110,6 +124,9 @@ func TestBilling_PaygBalanceDebitsByTokensPricing_E2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
+	if err := st.SetUserMainGroup(ctx, userID, userGroup); err != nil {
+		t.Fatalf("SetUserMainGroup: %v", err)
+	}
 	if _, err := st.AddUserBalanceUSD(ctx, userID, decimal.RequireFromString("1")); err != nil {
 		t.Fatalf("AddUserBalanceUSD: %v", err)
 	}
@@ -117,8 +134,12 @@ func TestBilling_PaygBalanceDebitsByTokensPricing_E2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRandomToken: %v", err)
 	}
-	if _, _, err := st.CreateUserToken(ctx, userID, strPtr("ci-token"), rawToken); err != nil {
+	tokenID, _, err := st.CreateUserToken(ctx, userID, strPtr("ci-token"), rawToken)
+	if err != nil {
 		t.Fatalf("CreateUserToken: %v", err)
+	}
+	if err := st.ReplaceTokenGroups(ctx, tokenID, []string{routeGroup}); err != nil {
+		t.Fatalf("ReplaceTokenGroups: %v", err)
 	}
 
 	// e2e 测试应当与外部环境变量解耦：清空可能影响 Load() 的配置项。

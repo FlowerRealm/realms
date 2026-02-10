@@ -20,26 +20,34 @@ func ensureSQLiteChannelGroupMembers(db *sql.DB) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var defaultGroupID int64
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM channel_groups WHERE name=? LIMIT 1`, DefaultGroupName).Scan(&defaultGroupID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return errors.New("default 分组不存在")
-		}
-		return fmt.Errorf("查询 default 分组失败: %w", err)
-	}
-	if defaultGroupID == 0 {
-		return errors.New("default 分组不存在")
-	}
-
-	// 将“无父级”的分组默认挂到 default 根组（单父约束：已存在父级则忽略）。
+	// channel_group_members（SQLite）首次引入时做最小自举：
+	// - 创建表与索引（若不存在）
+	// - 以 upstream_channels.groups（兼容缓存）为来源，为每个 channel 写入“组 -> 渠道”成员关系。
 	if _, err := tx.ExecContext(ctx, `
-INSERT OR IGNORE INTO channel_group_members(parent_group_id, member_group_id, priority, promotion, created_at, updated_at)
-SELECT d.id, g.id, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-FROM channel_groups d, channel_groups g
-WHERE d.name=? AND g.name<>?
-  AND NOT EXISTS (SELECT 1 FROM channel_group_members m WHERE m.member_group_id=g.id)
-`, DefaultGroupName, DefaultGroupName); err != nil {
-		return fmt.Errorf("回填 default 子组失败: %w", err)
+CREATE TABLE IF NOT EXISTS channel_group_members (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  parent_group_id INTEGER NOT NULL,
+  member_group_id INTEGER NULL,
+  member_channel_id INTEGER NULL,
+  priority INTEGER NOT NULL DEFAULT 0,
+  promotion INTEGER NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL
+)
+`); err != nil {
+		return fmt.Errorf("创建 channel_group_members 表失败: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS uk_parent_member_group ON channel_group_members(parent_group_id, member_group_id)`); err != nil {
+		return fmt.Errorf("创建 channel_group_members 索引失败: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS uk_parent_member_channel ON channel_group_members(parent_group_id, member_channel_id)`); err != nil {
+		return fmt.Errorf("创建 channel_group_members 索引失败: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS uk_group_single_parent ON channel_group_members(member_group_id)`); err != nil {
+		return fmt.Errorf("创建 channel_group_members 索引失败: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_parent_order ON channel_group_members(parent_group_id, promotion, priority, id)`); err != nil {
+		return fmt.Errorf("创建 channel_group_members 索引失败: %w", err)
 	}
 
 	// 以 upstream_channels.groups（兼容缓存）为来源，为每个 channel 写入“组 -> 渠道”成员关系。

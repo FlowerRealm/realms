@@ -14,14 +14,11 @@ type allowedSubgroups struct {
 
 func allowedSubgroupsForMainGroup(ctx context.Context, st *store.Store, mainGroup string) (allowedSubgroups, error) {
 	if st == nil {
-		return allowedSubgroups{
-			Order: []string{store.DefaultGroupName},
-			Set:   map[string]struct{}{store.DefaultGroupName: {}},
-		}, nil
+		return allowedSubgroups{}, nil
 	}
 	mainGroup = strings.TrimSpace(mainGroup)
 	if mainGroup == "" {
-		mainGroup = store.DefaultGroupName
+		return allowedSubgroups{}, nil
 	}
 	rows, err := st.ListMainGroupSubgroups(ctx, mainGroup)
 	if err != nil {
@@ -40,16 +37,6 @@ func allowedSubgroupsForMainGroup(ctx context.Context, st *store.Store, mainGrou
 		}
 		set[name] = struct{}{}
 		order = append(order, name)
-	}
-	if len(order) == 0 {
-		return allowedSubgroups{
-			Order: []string{store.DefaultGroupName},
-			Set:   map[string]struct{}{store.DefaultGroupName: {}},
-		}, nil
-	}
-	if _, ok := set[store.DefaultGroupName]; !ok {
-		set[store.DefaultGroupName] = struct{}{}
-		order = append(order, store.DefaultGroupName)
 	}
 	return allowedSubgroups{Order: order, Set: set}, nil
 }

@@ -56,9 +56,6 @@ func (s *Store) ListTokenGroups(ctx context.Context, tokenID int64) ([]string, e
 		seen[name] = struct{}{}
 		out = append(out, name)
 	}
-	if len(out) == 0 {
-		out = append(out, DefaultGroupName)
-	}
 	return out, nil
 }
 
@@ -80,24 +77,8 @@ func normalizeTokenGroups(in []string) ([]string, error) {
 		seen[name] = struct{}{}
 		out = append(out, name)
 	}
-	if len(out) == 0 {
-		out = append(out, DefaultGroupName)
-	}
-	if _, ok := seen[DefaultGroupName]; !ok {
-		out = append(out, DefaultGroupName)
-	}
 	if len(out) > 20 {
-		keep := make([]string, 0, 20)
-		for _, g := range out {
-			if g == DefaultGroupName {
-				continue
-			}
-			keep = append(keep, g)
-			if len(keep) >= 19 {
-				break
-			}
-		}
-		out = append(keep, DefaultGroupName)
+		out = out[:20]
 	}
 	return out, nil
 }
@@ -109,6 +90,9 @@ func (s *Store) ReplaceTokenGroups(ctx context.Context, tokenID int64, groups []
 	norm, err := normalizeTokenGroups(groups)
 	if err != nil {
 		return err
+	}
+	if len(norm) == 0 {
+		return errors.New("至少选择 1 个渠道分组")
 	}
 
 	// ensure token exists and load its owner's main_group (用于限制可选范围)
@@ -127,9 +111,12 @@ LIMIT 1
 		return fmt.Errorf("查询 token 失败: %w", err)
 	}
 
-	mainGroup := DefaultGroupName
-	if userMainGroup.Valid && strings.TrimSpace(userMainGroup.String) != "" {
+	mainGroup := ""
+	if userMainGroup.Valid {
 		mainGroup = strings.TrimSpace(userMainGroup.String)
+	}
+	if mainGroup == "" {
+		return errors.New("用户未配置用户分组")
 	}
 	allowed, err := s.ListMainGroupSubgroups(ctx, mainGroup)
 	if err != nil {
@@ -144,7 +131,7 @@ LIMIT 1
 		allowedSet[name] = struct{}{}
 	}
 	if len(allowedSet) == 0 {
-		allowedSet[DefaultGroupName] = struct{}{}
+		return errors.New("用户分组未配置可选渠道分组")
 	}
 
 	// validate groups exist and enabled
@@ -221,24 +208,24 @@ LIMIT 1
 		return nil, fmt.Errorf("查询 token 用户分组失败: %w", err)
 	}
 
-	mainGroupName := DefaultGroupName
-	if mainGroup.Valid && strings.TrimSpace(mainGroup.String) != "" {
+	mainGroupName := ""
+	if mainGroup.Valid {
 		mainGroupName = strings.TrimSpace(mainGroup.String)
 	}
-	allowed, err := s.ListMainGroupSubgroups(ctx, mainGroupName)
-	if err != nil {
-		return nil, err
-	}
-	allowedSet := make(map[string]struct{}, len(allowed))
-	for _, row := range allowed {
-		name := strings.TrimSpace(row.Subgroup)
-		if name == "" {
-			continue
+	allowedSet := make(map[string]struct{})
+	if mainGroupName != "" {
+		allowed, err := s.ListMainGroupSubgroups(ctx, mainGroupName)
+		if err != nil {
+			return nil, err
 		}
-		allowedSet[name] = struct{}{}
-	}
-	if len(allowedSet) == 0 {
-		allowedSet[DefaultGroupName] = struct{}{}
+		allowedSet = make(map[string]struct{}, len(allowed))
+		for _, row := range allowed {
+			name := strings.TrimSpace(row.Subgroup)
+			if name == "" {
+				continue
+			}
+			allowedSet[name] = struct{}{}
+		}
 	}
 
 	bindings, err := s.ListTokenGroupBindings(ctx, tokenID)
@@ -264,13 +251,6 @@ LIMIT 1
 		}
 		out = append(out, b)
 	}
-	if len(out) == 0 {
-		out = append(out, TokenGroupBinding{
-			TokenID:   tokenID,
-			GroupName: DefaultGroupName,
-			Priority:  0,
-		})
-	}
 	return out, nil
 }
 
@@ -291,9 +271,6 @@ func (s *Store) ListEffectiveTokenGroups(ctx context.Context, tokenID int64) ([]
 		}
 		seen[name] = struct{}{}
 		out = append(out, name)
-	}
-	if len(out) == 0 {
-		out = append(out, DefaultGroupName)
 	}
 	return out, nil
 }

@@ -58,11 +58,11 @@ func TestChannels_PageAndReorder_RootFlow(t *testing.T) {
 		t.Fatalf("expected tokenID > 0")
 	}
 
-	ch1, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "c1", "default", 0, false, false, false, false)
+	ch1, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "c1", "", 0, false, false, false, false)
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel ch1: %v", err)
 	}
-	ch2, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "c2", "default", 0, false, false, false, false)
+	ch2, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "c2", "", 0, false, false, false, false)
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel ch2: %v", err)
 	}
@@ -427,7 +427,7 @@ func TestChannels_SettingsAndCredentials_RootFlow(t *testing.T) {
 		t.Fatalf("expected userID > 0")
 	}
 
-	chID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "c1", "default", 0, false, false, false, false)
+	chID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "c1", "", 0, false, false, false, false)
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel: %v", err)
 	}
@@ -696,7 +696,7 @@ func TestChannels_CodexOAuthAccounts_RootFlow(t *testing.T) {
 		t.Fatalf("expected userID > 0")
 	}
 
-	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeCodexOAuth, "codex-main", "default", 0, false, false, false, false)
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeCodexOAuth, "codex-main", "", 0, false, false, false, false)
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel: %v", err)
 	}

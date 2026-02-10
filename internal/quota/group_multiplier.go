@@ -69,7 +69,7 @@ func groupMultiplierForRouteGroup(ctx context.Context, st *store.Store, routeGro
 		groupName = strings.TrimSpace(*routeGroup)
 	}
 	if groupName == "" {
-		groupName = store.DefaultGroupName
+		return store.DefaultGroupPriceMultiplier, nil
 	}
 	// 用于落库/展示：始终记录规范化后的 group name。
 	groupNamePtr := &groupName

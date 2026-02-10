@@ -7,13 +7,11 @@ import (
 // splitUpstreamChannelGroupsCSV 解析 upstream_channels.groups（CSV）。
 //
 // 兼容性：
-// - 空字符串视为 default
 // - 去重、去空白项
-// - 不强制包含 default（仅当为空时回退）
 func splitUpstreamChannelGroupsCSV(groupsCSV string) []string {
 	groupsCSV = strings.TrimSpace(groupsCSV)
 	if groupsCSV == "" {
-		return []string{DefaultGroupName}
+		return nil
 	}
 	parts := strings.Split(groupsCSV, ",")
 	seen := make(map[string]struct{}, len(parts))
@@ -30,7 +28,7 @@ func splitUpstreamChannelGroupsCSV(groupsCSV string) []string {
 		out = append(out, p)
 	}
 	if len(out) == 0 {
-		return []string{DefaultGroupName}
+		return nil
 	}
 	if len(out) > 20 {
 		out = out[:20]

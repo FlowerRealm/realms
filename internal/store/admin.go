@@ -65,7 +65,7 @@ func (s *Store) SetUserMainGroup(ctx context.Context, userID int64, mainGroup st
 	}
 	mainGroup = strings.TrimSpace(mainGroup)
 	if mainGroup == "" {
-		mainGroup = DefaultGroupName
+		return errors.New("用户分组不能为空")
 	}
 	name, err := normalizeGroupName(mainGroup)
 	if err != nil {

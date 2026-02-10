@@ -35,7 +35,10 @@ func TestBilling_GroupMultiplierStacking_Payg_E2E(t *testing.T) {
 	if _, err := st.CreateChannelGroup(ctx, "staff", nil, 1, decimal.RequireFromString("2"), 5); err != nil {
 		t.Fatalf("CreateChannelGroup(staff): %v", err)
 	}
-	if err := st.ReplaceMainGroupSubgroups(ctx, store.DefaultGroupName, []string{"vip", "staff"}); err != nil {
+	if err := st.CreateMainGroup(ctx, "ug1", nil, 1); err != nil {
+		t.Fatalf("CreateMainGroup: %v", err)
+	}
+	if err := st.ReplaceMainGroupSubgroups(ctx, "ug1", []string{"vip", "staff"}); err != nil {
 		t.Fatalf("ReplaceMainGroupSubgroups: %v", err)
 	}
 
@@ -53,7 +56,7 @@ func TestBilling_GroupMultiplierStacking_Payg_E2E(t *testing.T) {
 
 	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
 		PublicID:            model,
-		GroupName:           store.DefaultGroupName,
+		GroupName:           "staff",
 		OwnedBy:             strPtr("upstream"),
 		InputUSDPer1M:       decimal.RequireFromString("1"),
 		OutputUSDPer1M:      decimal.Zero,
@@ -79,6 +82,9 @@ func TestBilling_GroupMultiplierStacking_Payg_E2E(t *testing.T) {
 	userID, err := st.CreateUser(ctx, "mul-payg@example.com", "mulpayg", []byte("x"), store.UserRoleUser)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
+	}
+	if err := st.SetUserMainGroup(ctx, userID, "ug1"); err != nil {
+		t.Fatalf("SetUserMainGroup: %v", err)
 	}
 	if _, err := st.AddUserBalanceUSD(ctx, userID, decimal.RequireFromString("10")); err != nil {
 		t.Fatalf("AddUserBalanceUSD: %v", err)
@@ -131,7 +137,10 @@ func TestBilling_GroupMultiplierStacking_Subscription_E2E(t *testing.T) {
 	if _, err := st.CreateChannelGroup(ctx, "staff", nil, 1, decimal.RequireFromString("2"), 5); err != nil {
 		t.Fatalf("CreateChannelGroup(staff): %v", err)
 	}
-	if err := st.ReplaceMainGroupSubgroups(ctx, store.DefaultGroupName, []string{"vip", "staff"}); err != nil {
+	if err := st.CreateMainGroup(ctx, "ug1", nil, 1); err != nil {
+		t.Fatalf("CreateMainGroup: %v", err)
+	}
+	if err := st.ReplaceMainGroupSubgroups(ctx, "ug1", []string{"vip", "staff"}); err != nil {
 		t.Fatalf("ReplaceMainGroupSubgroups: %v", err)
 	}
 
@@ -149,7 +158,7 @@ func TestBilling_GroupMultiplierStacking_Subscription_E2E(t *testing.T) {
 
 	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
 		PublicID:            model,
-		GroupName:           store.DefaultGroupName,
+		GroupName:           "staff",
 		OwnedBy:             strPtr("upstream"),
 		InputUSDPer1M:       decimal.RequireFromString("1"),
 		OutputUSDPer1M:      decimal.Zero,
@@ -171,6 +180,9 @@ func TestBilling_GroupMultiplierStacking_Subscription_E2E(t *testing.T) {
 	userID, err := st.CreateUser(ctx, "mul-sub@example.com", "mulsub", []byte("x"), store.UserRoleUser)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
+	}
+	if err := st.SetUserMainGroup(ctx, userID, "ug1"); err != nil {
+		t.Fatalf("SetUserMainGroup: %v", err)
 	}
 	// 套餐的 group_name 只用于“可购买范围”，计费倍率取订阅倍率 × 请求最终成功分组倍率（不叠加其他分组）。
 

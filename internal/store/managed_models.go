@@ -47,11 +47,7 @@ func normalizeManagedModelPricing(m *ManagedModel) error {
 }
 
 func normalizeManagedModelGroupName(groupName string) string {
-	groupName = strings.TrimSpace(groupName)
-	if groupName == "" {
-		return DefaultGroupName
-	}
-	return groupName
+	return strings.TrimSpace(groupName)
 }
 
 func (s *Store) ListManagedModels(ctx context.Context) ([]ManagedModel, error) {
@@ -239,30 +235,30 @@ func (s *Store) ListEnabledManagedModelsWithBindingsForGroup(ctx context.Context
 	}
 	groupsCol := "`groups`"
 	query := fmt.Sprintf(`
-SELECT DISTINCT m.id, m.public_id, m.group_name, m.upstream_model, m.owned_by,
-       m.input_usd_per_1m, m.output_usd_per_1m, m.cache_input_usd_per_1m, m.cache_output_usd_per_1m,
-       m.status, m.created_at
-FROM managed_models m
-JOIN channel_models cm ON cm.public_id=m.public_id AND cm.status=1
-JOIN upstream_channels ch ON ch.id=cm.channel_id AND ch.status=1
-WHERE m.status=1
-  AND COALESCE(NULLIF(TRIM(m.group_name), ''), '%s')=?
-  AND FIND_IN_SET(?, ch.%s) > 0
-ORDER BY m.id DESC
-`, DefaultGroupName, groupsCol)
+	SELECT DISTINCT m.id, m.public_id, m.group_name, m.upstream_model, m.owned_by,
+	       m.input_usd_per_1m, m.output_usd_per_1m, m.cache_input_usd_per_1m, m.cache_output_usd_per_1m,
+	       m.status, m.created_at
+	FROM managed_models m
+	JOIN channel_models cm ON cm.public_id=m.public_id AND cm.status=1
+	JOIN upstream_channels ch ON ch.id=cm.channel_id AND ch.status=1
+	WHERE m.status=1
+	  AND TRIM(m.group_name)=?
+	  AND FIND_IN_SET(?, ch.%s) > 0
+	ORDER BY m.id DESC
+	`, groupsCol)
 	if s.dialect == DialectSQLite {
 		query = fmt.Sprintf(`
-SELECT DISTINCT m.id, m.public_id, m.group_name, m.upstream_model, m.owned_by,
-       m.input_usd_per_1m, m.output_usd_per_1m, m.cache_input_usd_per_1m, m.cache_output_usd_per_1m,
-       m.status, m.created_at
-FROM managed_models m
-JOIN channel_models cm ON cm.public_id=m.public_id AND cm.status=1
-JOIN upstream_channels ch ON ch.id=cm.channel_id AND ch.status=1
-WHERE m.status=1
-  AND COALESCE(NULLIF(TRIM(m.group_name), ''), '%s')=?
-  AND INSTR(',' || REPLACE(IFNULL(ch.%s, ''), ' ', '') || ',', ',' || ? || ',') > 0
-ORDER BY m.id DESC
-`, DefaultGroupName, groupsCol)
+	SELECT DISTINCT m.id, m.public_id, m.group_name, m.upstream_model, m.owned_by,
+	       m.input_usd_per_1m, m.output_usd_per_1m, m.cache_input_usd_per_1m, m.cache_output_usd_per_1m,
+	       m.status, m.created_at
+	FROM managed_models m
+	JOIN channel_models cm ON cm.public_id=m.public_id AND cm.status=1
+	JOIN upstream_channels ch ON ch.id=cm.channel_id AND ch.status=1
+	WHERE m.status=1
+	  AND TRIM(m.group_name)=?
+	  AND INSTR(',' || REPLACE(IFNULL(ch.%s, ''), ' ', '') || ',', ',' || ? || ',') > 0
+	ORDER BY m.id DESC
+	`, groupsCol)
 	}
 
 	rows, err := s.db.QueryContext(ctx, query, groupName, groupName)
@@ -315,22 +311,22 @@ func (s *Store) ListEnabledManagedModelsWithBindingsForGroups(ctx context.Contex
 		groupNames = append(groupNames, g)
 	}
 	if len(groupNames) == 0 {
-		groupNames = []string{DefaultGroupName}
+		return nil, nil
 	}
 	if len(groupNames) > 20 {
 		groupNames = groupNames[:20]
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf(`
-SELECT DISTINCT m.id, m.public_id, m.group_name, m.upstream_model, m.owned_by,
-       m.input_usd_per_1m, m.output_usd_per_1m, m.cache_input_usd_per_1m, m.cache_output_usd_per_1m,
-       m.status, m.created_at
-FROM managed_models m
-JOIN channel_models cm ON cm.public_id=m.public_id AND cm.status=1
-JOIN upstream_channels ch ON ch.id=cm.channel_id AND ch.status=1
-WHERE m.status=1
-  AND COALESCE(NULLIF(TRIM(m.group_name), ''), '%s') IN (`, DefaultGroupName))
+	b.WriteString(`
+	SELECT DISTINCT m.id, m.public_id, m.group_name, m.upstream_model, m.owned_by,
+	       m.input_usd_per_1m, m.output_usd_per_1m, m.cache_input_usd_per_1m, m.cache_output_usd_per_1m,
+	       m.status, m.created_at
+	FROM managed_models m
+	JOIN channel_models cm ON cm.public_id=m.public_id AND cm.status=1
+	JOIN upstream_channels ch ON ch.id=cm.channel_id AND ch.status=1
+	WHERE m.status=1
+	  AND TRIM(m.group_name) IN (`)
 
 	args := make([]any, 0, len(groupNames)*2)
 	for i, g := range groupNames {
@@ -718,7 +714,7 @@ INSERT INTO managed_models(
 			res.Updated = append(res.Updated, publicID)
 			continue
 		}
-		if _, err := insertStmt.ExecContext(ctx, publicID, DefaultGroupName, it.InputUSDPer1M, it.OutputUSDPer1M, it.CacheInputUSDPer1M, it.CacheOutputUSDPer1M); err != nil {
+		if _, err := insertStmt.ExecContext(ctx, publicID, "", it.InputUSDPer1M, it.OutputUSDPer1M, it.CacheInputUSDPer1M, it.CacheOutputUSDPer1M); err != nil {
 			return UpsertManagedModelPricingResult{}, fmt.Errorf("创建 managed_model(%s) 失败: %w", publicID, err)
 		}
 		res.Added = append(res.Added, publicID)

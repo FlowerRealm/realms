@@ -299,16 +299,14 @@ func getUserTokenGroupsHandler(opts Options) gin.HandlerFunc {
 		}
 		mainGroup := strings.TrimSpace(u.MainGroup)
 		if mainGroup == "" {
-			mainGroup = store.DefaultGroupName
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "用户未配置用户分组"})
+			return
 		}
 
 		allowedRows, err := opts.Store.ListMainGroupSubgroups(c.Request.Context(), mainGroup)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 			return
-		}
-		if len(allowedRows) == 0 {
-			allowedRows = append(allowedRows, store.MainGroupSubgroup{MainGroup: mainGroup, Subgroup: store.DefaultGroupName, Priority: 0})
 		}
 
 		cgs, err := opts.Store.ListChannelGroups(c.Request.Context())
@@ -349,23 +347,6 @@ func getUserTokenGroupsHandler(opts Options) gin.HandlerFunc {
 				UserGroupPriority: row.Priority,
 			})
 		}
-		if _, ok := seenAllowed[store.DefaultGroupName]; !ok {
-			priceMult := store.DefaultGroupPriceMultiplier
-			status := 0
-			var desc *string
-			if cg, ok := cgByName[store.DefaultGroupName]; ok {
-				priceMult = cg.PriceMultiplier
-				status = cg.Status
-				desc = cg.Description
-			}
-			allowedViews = append(allowedViews, tokenGroupOptionView{
-				Name:              store.DefaultGroupName,
-				Description:       desc,
-				Status:            status,
-				PriceMultiplier:   priceMult,
-				UserGroupPriority: 0,
-			})
-		}
 
 		bindings, err := opts.Store.ListTokenGroupBindings(c.Request.Context(), tokenID)
 		if err != nil {
@@ -386,9 +367,6 @@ func getUserTokenGroupsHandler(opts Options) gin.HandlerFunc {
 					continue
 				}
 				out = append(out, tokenGroupBindingView{GroupName: name, Priority: row.Priority})
-			}
-			if len(out) == 0 {
-				out = append(out, tokenGroupBindingView{GroupName: store.DefaultGroupName, Priority: 0})
 			}
 			return out
 		}

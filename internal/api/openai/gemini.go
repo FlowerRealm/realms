@@ -42,6 +42,10 @@ func (h *Handler) GeminiModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ags := allowGroupsFromPrincipal(p)
+	if len(ags.Order) == 0 {
+		http.Error(w, "Token 未配置渠道分组", http.StatusBadRequest)
+		return
+	}
 	allowSet := ags.Set
 
 	items := make([]geminiModelItem, 0, len(ms))
@@ -121,6 +125,10 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 	var cons scheduler.Constraints
 	cons.RequireChannelType = store.UpstreamTypeOpenAICompatible
 	ags := allowGroupsFromPrincipal(p)
+	if len(ags.Order) == 0 {
+		http.Error(w, "Token 未配置渠道分组", http.StatusBadRequest)
+		return
+	}
 	allowSet := ags.Set
 	cons.AllowGroups = allowSet
 	cons.AllowGroupOrder = ags.Order
