@@ -9,6 +9,7 @@ import {
   replaceAdminMainGroupSubgroups,
   updateAdminMainGroup,
   type AdminMainGroup,
+  type UpdateAdminMainGroupRequest,
 } from '../../api/admin/mainGroups';
 import { BootstrapModal } from '../../components/BootstrapModal';
 import { closeModalById } from '../../components/modal';
@@ -31,6 +32,7 @@ export function MainGroupsPage() {
   const [createStatus, setCreateStatus] = useState(1);
 
   const [editing, setEditing] = useState<AdminMainGroup | null>(null);
+  const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [editStatus, setEditStatus] = useState(1);
 
@@ -71,6 +73,7 @@ export function MainGroupsPage() {
 
   useEffect(() => {
     if (!editing) return;
+    setEditName((editing.name || '').toString().trim());
     setEditDesc((editing.description || '').toString());
     setEditStatus(editing.status || 0);
   }, [editing]);
@@ -317,7 +320,10 @@ export function MainGroupsPage() {
 	              setSaving(true);
 	              try {
 	                const name = (editing.name || '').trim();
-	                const res = await updateAdminMainGroup(name, { description: editDesc.trim() || undefined, status: editStatus });
+                  const newName = editName.trim();
+                  const req: UpdateAdminMainGroupRequest = { description: editDesc.trim() || undefined, status: editStatus };
+                  if (newName !== name) req.new_name = newName;
+	                const res = await updateAdminMainGroup(name, req);
 	                if (!res.success) throw new Error(res.message || '保存失败');
                 closeModalById('editMainGroupModal');
                 setNotice('已保存');
@@ -332,7 +338,8 @@ export function MainGroupsPage() {
 	            <div className="row g-3">
 	              <div className="col-12 col-md-6">
 	                <label className="form-label">名称</label>
-	                <input className="form-control font-monospace" value={(editing.name || '').trim()} readOnly />
+	                <input className="form-control font-monospace" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="例如: team_a" />
+                  <div className="text-muted smaller mt-1">仅允许字母/数字/下划线/连字符，最长 64。</div>
 	              </div>
 	              <div className="col-12 col-md-6">
 	                <label className="form-label">状态</label>

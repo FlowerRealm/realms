@@ -100,12 +100,23 @@ VALUES(?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 }
 
 func (s *Store) UpdateMainGroup(ctx context.Context, name string, description *string, status int) error {
+	_, err := s.UpdateMainGroupWithRename(ctx, name, nil, description, status)
+	return err
+}
+
+// UpdateMainGroupWithRename updates a main_group (description/status) and optionally renames it (newName).
+// When renamed, it also updates references in:
+// - users.main_group
+// - main_group_subgroups.main_group
+//
+// It returns the effective main_group name (old or new).
+func (s *Store) UpdateMainGroupWithRename(ctx context.Context, name string, newName *string, description *string, status int) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return errors.New("name 不能为空")
+		return "", errors.New("name 不能为空")
 	}
 	if status != 0 && status != 1 {
-		return errors.New("status 不合法")
+		return "", errors.New("status 不合法")
 	}
 
 	var desc any
@@ -119,15 +130,99 @@ func (s *Store) UpdateMainGroup(ctx context.Context, name string, description *s
 		}
 	}
 
-	_, err := s.db.ExecContext(ctx, `
+	renameTo := ""
+	if newName != nil {
+		v := strings.TrimSpace(*newName)
+		if v == "" {
+			return "", errors.New("new_name 不能为空")
+		}
+		if v != name {
+			norm, err := normalizeGroupName(v)
+			if err != nil {
+				return "", err
+			}
+			renameTo = norm
+		}
+	}
+
+	// No rename: fast path.
+	if renameTo == "" {
+		res, err := s.db.ExecContext(ctx, `
 UPDATE main_groups
 SET description=?, status=?, updated_at=CURRENT_TIMESTAMP
 WHERE name=?
 `, desc, status, name)
-	if err != nil {
-		return fmt.Errorf("更新 main_group 失败: %w", err)
+		if err != nil {
+			return "", fmt.Errorf("更新 main_group 失败: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return "", sql.ErrNoRows
+		}
+		return name, nil
 	}
-	return nil
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("开始事务失败: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var exists int64
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM main_groups WHERE name=?`, name).Scan(&exists); err != nil {
+		return "", fmt.Errorf("查询 main_groups 失败: %w", err)
+	}
+	if exists == 0 {
+		return "", sql.ErrNoRows
+	}
+
+	var dup int64
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM main_groups WHERE name=?`, renameTo).Scan(&dup); err != nil {
+		return "", fmt.Errorf("查询 main_groups 失败: %w", err)
+	}
+	if dup > 0 {
+		return "", errors.New("用户分组名称已存在")
+	}
+
+	var subgroupDup int64
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM main_group_subgroups WHERE main_group=?`, renameTo).Scan(&subgroupDup); err != nil {
+		return "", fmt.Errorf("查询 main_group_subgroups 失败: %w", err)
+	}
+	if subgroupDup > 0 {
+		return "", errors.New("目标名称已被占用（存在子组映射）")
+	}
+
+	res, err := tx.ExecContext(ctx, `
+UPDATE main_groups
+SET name=?, description=?, status=?, updated_at=CURRENT_TIMESTAMP
+WHERE name=?
+`, renameTo, desc, status, name)
+	if err != nil {
+		return "", fmt.Errorf("更新 main_group 失败: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return "", sql.ErrNoRows
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+UPDATE users
+SET main_group=?, updated_at=CURRENT_TIMESTAMP
+WHERE main_group=?
+`, renameTo, name); err != nil {
+		return "", fmt.Errorf("更新 users.main_group 失败: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+UPDATE main_group_subgroups
+SET main_group=?, updated_at=CURRENT_TIMESTAMP
+WHERE main_group=?
+`, renameTo, name); err != nil {
+		return "", fmt.Errorf("更新 main_group_subgroups.main_group 失败: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("提交事务失败: %w", err)
+	}
+	return renameTo, nil
 }
 
 func (s *Store) DeleteMainGroup(ctx context.Context, name string) error {

@@ -23,6 +23,7 @@ export type CreateAdminMainGroupRequest = {
 };
 
 export type UpdateAdminMainGroupRequest = {
+  new_name?: string;
   description?: string;
   status: number;
 };
@@ -61,4 +62,3 @@ export async function replaceAdminMainGroupSubgroups(name: string, subgroups: st
   const res = await api.put<APIResponse<void>>(`/api/admin/main-groups/${encodeURIComponent(name)}/subgroups`, { subgroups });
   return res.data;
 }
-

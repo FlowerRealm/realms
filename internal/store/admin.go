@@ -73,6 +73,9 @@ func (s *Store) SetUserMainGroup(ctx context.Context, userID int64, mainGroup st
 	}
 	g, err := s.GetMainGroupByName(ctx, name)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errors.New("用户分组不存在")
+		}
 		return err
 	}
 	if g.Status != 1 {

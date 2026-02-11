@@ -135,6 +135,7 @@ func adminGetMainGroupHandler(opts Options) gin.HandlerFunc {
 
 func adminUpdateMainGroupHandler(opts Options) gin.HandlerFunc {
 	type reqBody struct {
+		NewName     *string `json:"new_name"`
 		Description *string `json:"description"`
 		Status      int     `json:"status"`
 	}
@@ -159,7 +160,7 @@ func adminUpdateMainGroupHandler(opts Options) gin.HandlerFunc {
 		if req.Status != 0 && req.Status != 1 {
 			req.Status = 1
 		}
-		if err := opts.Store.UpdateMainGroup(c.Request.Context(), name, req.Description, req.Status); err != nil {
+		if _, err := opts.Store.UpdateMainGroupWithRename(c.Request.Context(), name, req.NewName, req.Description, req.Status); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Not Found"})
 				return

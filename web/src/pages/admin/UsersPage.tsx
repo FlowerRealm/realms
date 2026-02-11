@@ -24,6 +24,16 @@ function statusBadge(status: number): { cls: string; label: string } {
   return { cls: 'badge rounded-pill bg-secondary bg-opacity-10 text-secondary px-2', label: '禁用' };
 }
 
+function pickMainGroupName(current: string, groups: AdminMainGroup[]): string {
+  const v = (current || '').trim();
+  if (v && groups.some((g) => (g.name || '').trim() === v)) return v;
+  const enabled = groups.find((g) => g.status === 1 && (g.name || '').trim());
+  if (enabled) return (enabled.name || '').trim();
+  const first = groups.find((g) => (g.name || '').trim());
+  if (first) return (first.name || '').trim();
+  return 'default';
+}
+
 export function UsersPage() {
   const { user: self } = useAuth();
   const selfID = self?.id || 0;
@@ -77,15 +87,20 @@ export function UsersPage() {
   }, []);
 
   useEffect(() => {
+    if (mainGroups.length === 0) return;
+    setCreateMainGroup((prev) => pickMainGroupName(prev, mainGroups));
+  }, [mainGroups]);
+
+  useEffect(() => {
     if (!editing) return;
     setEditEmail(editing.email || '');
     setEditRole((editing.role || 'user') as 'user' | 'root');
     setEditStatus(editing.status || 0);
-    setEditMainGroup((editing.user_group || 'default').trim() || 'default');
+    setEditMainGroup(pickMainGroupName((editing.user_group || '').trim(), mainGroups));
     setBalanceAmount('');
     setBalanceNote('');
     setNewPassword('');
-  }, [editing]);
+  }, [editing, mainGroups]);
 
   return (
     <div className="fade-in-up">
@@ -106,7 +121,13 @@ export function UsersPage() {
               </div>
 
               <div className="d-flex gap-2">
-                <button type="button" className="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createUserModal">
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  data-bs-toggle="modal"
+                  data-bs-target="#createUserModal"
+                  onClick={() => setCreateMainGroup((prev) => pickMainGroupName(prev, mainGroups))}
+                >
                   <span className="me-1 material-symbols-rounded">person_add</span> 创建用户
                 </button>
               </div>
@@ -166,7 +187,11 @@ export function UsersPage() {
                           </td>
                           <td>{u.username ? <span className="text-dark fw-medium user-select-all">{u.username}</span> : <span className="text-muted small fst-italic">未设置</span>}</td>
                           <td>
-                            <span className="badge bg-light text-secondary border fw-normal font-monospace">{(u.user_group || 'default').trim() || 'default'}</span>
+                            {((u.user_group || '').trim()) ? (
+                              <span className="badge bg-light text-secondary border fw-normal font-monospace">{(u.user_group || '').trim()}</span>
+                            ) : (
+                              <span className="text-muted small fst-italic">未设置</span>
+                            )}
                           </td>
                           <td>
                             <span className={roleBadge(u.role)}>{u.role}</span>
@@ -194,7 +219,10 @@ export function UsersPage() {
                                 title="编辑用户"
                                 data-bs-toggle="modal"
                                 data-bs-target="#editUserModal"
-                                onClick={() => setEditing(u)}
+                                onClick={() => {
+                                  setEditMainGroup(pickMainGroupName((u.user_group || '').trim(), mainGroups));
+                                  setEditing(u);
+                                }}
                               >
                                 <i className="ri-edit-line"></i>
                               </button>
