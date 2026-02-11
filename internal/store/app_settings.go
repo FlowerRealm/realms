@@ -39,6 +39,10 @@ const SettingSiteBaseURL = "site_base_url"
 // 为空表示使用系统默认（当前默认为 Asia/Shanghai）。
 const SettingAdminTimeZone = "admin_time_zone"
 
+// SettingSchedulerChannelPointer 用于跨实例持久化调度器的“渠道指针”运行态（JSON）。
+// 注意：该值由运行时自动维护，不属于长期配置项。
+const SettingSchedulerChannelPointer = "scheduler_channel_pointer"
+
 const (
 	SettingSMTPServer     = "smtp_server"
 	SettingSMTPPort       = "smtp_port"

@@ -72,6 +72,7 @@ func setChannelAPIRoutes(r gin.IRoutes, opts Options) {
 	r.GET("/channel/:channel_id/timeseries", admin, channelTimeSeriesHandler(opts))
 	r.GET("/channel/:channel_id/timeseries/", admin, channelTimeSeriesHandler(opts))
 	r.GET("/channel/pinned", admin, pinnedChannelInfoHandler(opts))
+	r.GET("/channel/pinned/stream", admin, pinnedChannelStreamHandler(opts))
 
 	r.POST("/channel", admin, createChannelHandler(opts))
 	r.POST("/channel/", admin, createChannelHandler(opts))

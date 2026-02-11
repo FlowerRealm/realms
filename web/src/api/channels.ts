@@ -359,6 +359,10 @@ function resolveTestStreamURL(channelID: number): string {
   return api.getUri({ url: `/api/channel/test/${channelID}`, params: { stream: 1 } });
 }
 
+function resolvePinnedChannelStreamURL(): string {
+  return api.getUri({ url: '/api/channel/pinned/stream' });
+}
+
 function readRealmsUserHeader(): string {
   try {
     const raw = localStorage.getItem('user');
@@ -372,6 +376,56 @@ function readRealmsUserHeader(): string {
     // ignore
   }
   return '';
+}
+
+export async function watchPinnedChannelStream(onPinned?: (info: PinnedChannelInfo) => void, opts?: { signal?: AbortSignal }): Promise<void> {
+  const headers: Record<string, string> = {
+    Accept: 'text/event-stream',
+    'Cache-Control': 'no-store',
+  };
+  const realmsUser = readRealmsUserHeader();
+  if (realmsUser) headers['Realms-User'] = realmsUser;
+
+  const resp = await fetch(resolvePinnedChannelStreamURL(), {
+    method: 'GET',
+    credentials: 'include',
+    headers,
+    signal: opts?.signal,
+  });
+  if (!resp.ok) {
+    const text = (await resp.text()).trim();
+    throw new Error(text || `渠道指针流订阅失败（HTTP ${resp.status}）`);
+  }
+
+  const contentType = resp.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    const parsed = (await resp.json()) as APIResponse<PinnedChannelInfo>;
+    if (parsed?.success && parsed.data) {
+      onPinned?.(parsed.data);
+      return;
+    }
+    throw new Error(parsed?.message || '渠道指针流返回 JSON，但未包含有效数据');
+  }
+  if (!contentType.includes('text/event-stream') || !resp.body) {
+    throw new Error(`渠道指针流返回非流式内容（${contentType || 'unknown'}）`);
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parsed = parseSSEFrames(buffer);
+    buffer = parsed.rest;
+    for (const frame of parsed.frames) {
+      if (frame.event === 'pinned') {
+        onPinned?.(JSON.parse(frame.data) as PinnedChannelInfo);
+      }
+    }
+  }
 }
 
 export async function testChannelStream(

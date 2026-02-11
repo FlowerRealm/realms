@@ -15,6 +15,7 @@ import {
   getChannelsPage,
   getChannelTimeSeries,
   getPinnedChannelInfo,
+  watchPinnedChannelStream,
   listChannelCodexAccounts,
   listChannelCredentials,
   pinChannel,
@@ -74,10 +75,10 @@ function healthBadge(ch: Channel): { cls: string; label: string; hint?: string }
 function formatPinnedChannelLabel(channelID: number, fallback: string, channels: ChannelAdminItem[]): string {
   const matched = channels.find((ch) => ch.id === channelID);
   const matchedName = (matched?.name || '').trim();
-  if (matchedName) return `${matchedName} (#${channelID})`;
+  if (matchedName) return matchedName;
   const raw = (fallback || '').trim();
   if (raw) return raw;
-  if (channelID > 0) return `渠道 #${channelID}`;
+  if (channelID > 0) return '渠道';
   return '';
 }
 
@@ -90,7 +91,7 @@ function normalizePinnedInfo(info: PinnedChannelInfo | null, channels: ChannelAd
   if ((!out.pinned_active || out.pinned_channel_id <= 0) && runtimePinned) {
     out.pinned_active = true;
     out.pinned_channel_id = runtimePinned.id;
-    out.pinned_channel = runtimePinned.name?.trim() ? `${runtimePinned.name.trim()} (#${runtimePinned.id})` : `渠道 #${runtimePinned.id}`;
+    out.pinned_channel = runtimePinned.name?.trim() ? runtimePinned.name.trim() : '渠道';
   }
 
   if (out.pinned_active && out.pinned_channel_id > 0) {
@@ -142,6 +143,7 @@ type ChannelTestPanelState = {
 
 export function ChannelsPage() {
   const [channels, setChannels] = useState<ChannelAdminItem[]>([]);
+  const channelsRef = useRef<ChannelAdminItem[]>([]);
   const [managedModelIDs, setManagedModelIDs] = useState<string[]>([]);
   const [channelGroups, setChannelGroups] = useState<AdminChannelGroup[]>([]);
   const [pinned, setPinned] = useState<PinnedChannelInfo | null>(null);
@@ -436,14 +438,16 @@ export function ChannelsPage() {
 
       if (!pageRes.success) throw new Error(pageRes.message || '加载渠道失败');
       const pageChannels = pageRes.data?.channels || [];
+      const normalizedChannels = normalizeChannelSections(pageChannels);
+      channelsRef.current = normalizedChannels;
       if (pinnedRes.success) {
-        setPinned(normalizePinnedInfo(pinnedRes.data || null, pageChannels));
+        setPinned(normalizePinnedInfo(pinnedRes.data || null, normalizedChannels));
       } else {
         setPinned(null);
       }
       setUsageStart(pageRes.data?.start || '');
       setUsageEnd(pageRes.data?.end || '');
-      setChannels(normalizeChannelSections(pageChannels));
+      setChannels(normalizedChannels);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败');
     } finally {
@@ -453,6 +457,32 @@ export function ChannelsPage() {
 
   useEffect(() => {
     void refresh();
+  }, []);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    let stopped = false;
+
+    void (async () => {
+      while (!stopped && !ac.signal.aborted) {
+        try {
+          await watchPinnedChannelStream(
+            (info) => {
+              setPinned(normalizePinnedInfo(info, channelsRef.current));
+            },
+            { signal: ac.signal },
+          );
+        } catch {
+          if (ac.signal.aborted) break;
+        }
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 1000));
+      }
+    })();
+
+    return () => {
+      stopped = true;
+      ac.abort();
+    };
   }, []);
 
   useEffect(() => {

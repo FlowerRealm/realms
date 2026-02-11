@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -9,6 +10,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"realms/internal/store"
 )
 
 type pinnedChannelInfo struct {
@@ -19,9 +22,47 @@ type pinnedChannelInfo struct {
 	PinnedNote      string `json:"pinned_note,omitempty"`
 }
 
+func pinnedChannelInfoFromPointerState(ctx context.Context, opts Options, st store.SchedulerChannelPointerState) pinnedChannelInfo {
+	info := pinnedChannelInfo{Available: opts.Sched != nil}
+	if st.ChannelID <= 0 {
+		return info
+	}
+
+	id := st.ChannelID
+	info.PinnedActive = true
+	info.PinnedChannelID = id
+
+	name := ""
+	if opts.Store != nil {
+		if ch, err := opts.Store.GetUpstreamChannelByID(ctx, id); err == nil {
+			name = strings.TrimSpace(ch.Name)
+		}
+	}
+	if name != "" {
+		info.PinnedChannel = name
+	} else {
+		info.PinnedChannel = "渠道"
+	}
+
+	info.PinnedNote = pinnedNote(ctx, opts, st.MovedAt(), st.Reason)
+	return info
+}
+
 func pinnedChannelInfoHandler(opts Options) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		info := pinnedChannelInfo{Available: opts.Sched != nil}
+
+		// 多实例：优先使用 app_settings 中的全局渠道指针运行态。
+		if opts.Store != nil {
+			if raw, ok, err := opts.Store.GetAppSetting(c.Request.Context(), store.SettingSchedulerChannelPointer); err == nil && ok {
+				if st, ok2, err := store.ParseSchedulerChannelPointerState(raw); err == nil && ok2 {
+					info = pinnedChannelInfoFromPointerState(c.Request.Context(), opts, st)
+					c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": info})
+					return
+				}
+			}
+		}
+
 		if opts.Sched == nil {
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": info})
 			return
@@ -42,14 +83,96 @@ func pinnedChannelInfoHandler(opts Options) gin.HandlerFunc {
 			}
 		}
 		if name != "" {
-			info.PinnedChannel = fmt.Sprintf("%s (#%d)", name, id)
+			info.PinnedChannel = name
 		} else {
-			info.PinnedChannel = fmt.Sprintf("渠道 #%d", id)
+			info.PinnedChannel = "渠道"
 		}
 
 		info.PinnedNote = pinnedNote(c.Request.Context(), opts, movedAt, reason)
 
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": info})
+	}
+}
+
+func pinnedChannelStreamHandler(opts Options) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if opts.Store == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			return
+		}
+
+		flusher, ok := c.Writer.(http.Flusher)
+		if !ok {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "当前连接不支持流式输出"})
+			return
+		}
+
+		header := c.Writer.Header()
+		header.Set("Content-Type", "text/event-stream")
+		header.Set("Cache-Control", "no-cache, no-transform")
+		header.Set("Connection", "keep-alive")
+		header.Set("X-Accel-Buffering", "no")
+		c.Status(http.StatusOK)
+		flusher.Flush()
+
+		writeEvent := func(name string, payload any) bool {
+			b, err := json.Marshal(payload)
+			if err != nil {
+				return false
+			}
+			if _, err := c.Writer.Write([]byte("event: " + name + "\n")); err != nil {
+				return false
+			}
+			if _, err := c.Writer.Write([]byte("data: " + string(b) + "\n\n")); err != nil {
+				return false
+			}
+			flusher.Flush()
+			return true
+		}
+
+		// 初始推送一次（即使暂时没有指针记录，也推送 inactive 结构，便于前端统一处理）。
+		lastRaw := ""
+		if raw, ok, err := opts.Store.GetAppSetting(c.Request.Context(), store.SettingSchedulerChannelPointer); err == nil && ok {
+			lastRaw = raw
+			if st, ok2, err := store.ParseSchedulerChannelPointerState(raw); err == nil && ok2 {
+				_ = writeEvent("pinned", pinnedChannelInfoFromPointerState(c.Request.Context(), opts, st))
+			} else {
+				_ = writeEvent("pinned", pinnedChannelInfo{Available: opts.Sched != nil})
+			}
+		} else {
+			_ = writeEvent("pinned", pinnedChannelInfo{Available: opts.Sched != nil})
+		}
+
+		poll := time.NewTicker(1 * time.Second)
+		defer poll.Stop()
+		keepalive := time.NewTicker(15 * time.Second)
+		defer keepalive.Stop()
+
+		for {
+			select {
+			case <-c.Request.Context().Done():
+				return
+			case <-keepalive.C:
+				_, _ = c.Writer.Write([]byte(": keepalive\n\n"))
+				flusher.Flush()
+			case <-poll.C:
+				raw, ok, err := opts.Store.GetAppSetting(c.Request.Context(), store.SettingSchedulerChannelPointer)
+				if err != nil || !ok {
+					continue
+				}
+				if raw == lastRaw {
+					continue
+				}
+				st, ok2, err := store.ParseSchedulerChannelPointerState(raw)
+				if err != nil || !ok2 {
+					continue
+				}
+				lastRaw = raw
+				if !writeEvent("pinned", pinnedChannelInfoFromPointerState(c.Request.Context(), opts, st)) {
+					return
+				}
+			}
+		}
 	}
 }
 
@@ -83,7 +206,7 @@ func pinChannelHandler(opts Options) gin.HandlerFunc {
 		opts.Sched.PinChannel(ch.ID)
 		opts.Sched.ClearChannelBan(ch.ID)
 
-		c.JSON(http.StatusOK, gin.H{"success": true, "message": fmt.Sprintf("已将当前渠道指针指向 %s (#%d)", ch.Name, ch.ID)})
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": fmt.Sprintf("已将当前渠道指针指向 %s", ch.Name)})
 	}
 }
 

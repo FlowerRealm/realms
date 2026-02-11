@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"realms/internal/store"
@@ -75,11 +76,19 @@ type Scheduler struct {
 
 	state         *State
 	bindingStore  BindingStore
+	pointerStore  ChannelPointerStore
 	affinityTTL   time.Duration
 	bindingTTL    time.Duration
 	rpmWindow     time.Duration
 	cooldownBase  time.Duration
 	probeClaimTTL time.Duration
+
+	pointerPersistMu       sync.Mutex
+	pointerPersistLastID   int64
+	pointerPersistLastPin  bool
+	pointerSyncMu          sync.Mutex
+	pointerSyncLastRaw     string
+	pointerSyncLastRefresh time.Time
 }
 
 type Constraints struct {
@@ -104,6 +113,11 @@ type BindingStore interface {
 	DeleteSessionBinding(ctx context.Context, userID int64, routeKeyHash string) error
 }
 
+type ChannelPointerStore interface {
+	GetAppSetting(ctx context.Context, key string) (string, bool, error)
+	UpsertAppSetting(ctx context.Context, key string, value string) error
+}
+
 const (
 	bindingSetSourceSelect      = "select"
 	bindingSetSourceTouch       = "touch"
@@ -116,7 +130,7 @@ const (
 )
 
 func New(st UpstreamStore) *Scheduler {
-	return &Scheduler{
+	s := &Scheduler{
 		st:            st,
 		state:         NewState(),
 		affinityTTL:   30 * time.Minute,
@@ -125,6 +139,10 @@ func New(st UpstreamStore) *Scheduler {
 		cooldownBase:  30 * time.Second,
 		probeClaimTTL: 30 * time.Second,
 	}
+	if s.state != nil {
+		s.state.SetChannelPointerChangeHook(s.onChannelPointerChanged)
+	}
+	return s
 }
 
 func (s *Scheduler) SetBindingStore(bs BindingStore) {
@@ -132,6 +150,131 @@ func (s *Scheduler) SetBindingStore(bs BindingStore) {
 		return
 	}
 	s.bindingStore = bs
+}
+
+func (s *Scheduler) SetPointerStore(ps ChannelPointerStore) {
+	if s == nil {
+		return
+	}
+	s.pointerStore = ps
+}
+
+func (s *Scheduler) SyncChannelPointerFromStore(ctx context.Context) error {
+	if s == nil || s.state == nil || s.pointerStore == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	raw, ok, err := s.pointerStore.GetAppSetting(ctx, store.SettingSchedulerChannelPointer)
+	if err != nil || !ok {
+		return err
+	}
+	rec, ok, err := store.ParseSchedulerChannelPointerState(raw)
+	if err != nil || !ok {
+		return err
+	}
+	s.state.ApplyChannelPointerSnapshot(ChannelPointerSnapshot{
+		ChannelID: rec.ChannelID,
+		MovedAt:   rec.MovedAt(),
+		Reason:    rec.Reason,
+		Pinned:    rec.Pinned,
+	})
+	s.pointerSyncMu.Lock()
+	s.pointerSyncLastRaw = raw
+	s.pointerSyncLastRefresh = time.Now()
+	s.pointerSyncMu.Unlock()
+
+	s.pointerPersistMu.Lock()
+	s.pointerPersistLastID = rec.ChannelID
+	s.pointerPersistLastPin = rec.Pinned
+	s.pointerPersistMu.Unlock()
+
+	return nil
+}
+
+func (s *Scheduler) maybeSyncChannelPointerFromStore(ctx context.Context) {
+	if s == nil || s.state == nil || s.pointerStore == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	now := time.Now()
+
+	s.pointerSyncMu.Lock()
+	if !s.pointerSyncLastRefresh.IsZero() && now.Sub(s.pointerSyncLastRefresh) < 1*time.Second {
+		s.pointerSyncMu.Unlock()
+		return
+	}
+	s.pointerSyncLastRefresh = now
+	s.pointerSyncMu.Unlock()
+
+	raw, ok, err := s.pointerStore.GetAppSetting(ctx, store.SettingSchedulerChannelPointer)
+	if err != nil || !ok {
+		return
+	}
+	s.pointerSyncMu.Lock()
+	if raw == s.pointerSyncLastRaw {
+		s.pointerSyncMu.Unlock()
+		return
+	}
+	s.pointerSyncLastRaw = raw
+	s.pointerSyncMu.Unlock()
+
+	rec, ok, err := store.ParseSchedulerChannelPointerState(raw)
+	if err != nil || !ok {
+		return
+	}
+	s.state.ApplyChannelPointerSnapshot(ChannelPointerSnapshot{
+		ChannelID: rec.ChannelID,
+		MovedAt:   rec.MovedAt(),
+		Reason:    rec.Reason,
+		Pinned:    rec.Pinned,
+	})
+
+	s.pointerPersistMu.Lock()
+	s.pointerPersistLastID = rec.ChannelID
+	s.pointerPersistLastPin = rec.Pinned
+	s.pointerPersistMu.Unlock()
+}
+
+func (s *Scheduler) onChannelPointerChanged(snap ChannelPointerSnapshot) {
+	if s == nil || s.pointerStore == nil {
+		return
+	}
+
+	s.pointerPersistMu.Lock()
+	if snap.ChannelID == s.pointerPersistLastID && snap.Pinned == s.pointerPersistLastPin {
+		s.pointerPersistMu.Unlock()
+		return
+	}
+	s.pointerPersistLastID = snap.ChannelID
+	s.pointerPersistLastPin = snap.Pinned
+	s.pointerPersistMu.Unlock()
+
+	ms := int64(0)
+	if !snap.MovedAt.IsZero() {
+		ms = snap.MovedAt.UnixMilli()
+	}
+	raw, err := store.SchedulerChannelPointerState{
+		V:             1,
+		ChannelID:     snap.ChannelID,
+		Pinned:        snap.Pinned,
+		MovedAtUnixMS: ms,
+		Reason:        strings.TrimSpace(snap.Reason),
+	}.Marshal()
+	if err != nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	_ = s.pointerStore.UpsertAppSetting(ctx, store.SettingSchedulerChannelPointer, raw)
+	cancel()
+
+	s.pointerSyncMu.Lock()
+	s.pointerSyncLastRaw = raw
+	s.pointerSyncMu.Unlock()
 }
 
 func (s *Scheduler) PinChannel(channelID int64) {
@@ -152,6 +295,7 @@ func (s *Scheduler) PinnedChannel() (int64, bool) {
 	if s == nil || s.state == nil {
 		return 0, false
 	}
+	s.maybeSyncChannelPointerFromStore(context.Background())
 	if !s.state.IsChannelPointerPinned() {
 		return 0, false
 	}
@@ -162,6 +306,7 @@ func (s *Scheduler) PinnedChannelInfo() (int64, time.Time, string, bool) {
 	if s == nil || s.state == nil {
 		return 0, time.Time{}, "", false
 	}
+	s.maybeSyncChannelPointerFromStore(context.Background())
 	return s.state.ChannelPointerInfo(time.Now())
 }
 
@@ -268,6 +413,8 @@ func (s *Scheduler) Select(ctx context.Context, userID int64, routeKeyHash strin
 }
 
 func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, routeKeyHash string, cons Constraints) (Selection, error) {
+	s.maybeSyncChannelPointerFromStore(ctx)
+
 	now := time.Now()
 
 	pinned := s.state.IsChannelPointerPinned()
