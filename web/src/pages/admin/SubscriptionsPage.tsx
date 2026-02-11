@@ -41,6 +41,13 @@ export function SubscriptionsPage() {
   const [limit5h, setLimit5h] = useState('');
 
   const enabledCount = useMemo(() => plans.filter((p) => p.status === 1).length, [plans]);
+  const defaultGroupName = useMemo(() => {
+    const byDefault = (groups.find((g) => g.is_default)?.name || '').trim();
+    if (byDefault) return byDefault;
+    const byFirst = (groups[0]?.name || '').trim();
+    if (byFirst) return byFirst;
+    return 'default';
+  }, [groups]);
 
   async function refresh() {
     setErr('');
@@ -49,11 +56,16 @@ export function SubscriptionsPage() {
     try {
       const [plansRes, groupsRes] = await Promise.all([listAdminSubscriptionPlans(), listAdminChannelGroups()]);
       if (!groupsRes.success) throw new Error(groupsRes.message || '加载分组失败');
-      setGroups(groupsRes.data || []);
+      const nextGroups = groupsRes.data || [];
+      setGroups(nextGroups);
       if (!plansRes.success) throw new Error(plansRes.message || '加载套餐失败');
       setPlans(plansRes.data || []);
-      if ((groupsRes.data || []).some((g) => g.name === groupName)) return;
-      if ((groupsRes.data || []).some((g) => g.name === 'default')) setGroupName('default');
+      const nextDefault = (nextGroups.find((g) => g.is_default)?.name || '').trim() || (nextGroups[0]?.name || '').trim() || 'default';
+      setGroupName((prev) => {
+        const cur = (prev || '').trim();
+        if (cur && nextGroups.some((g) => g.name === cur)) return cur;
+        return nextDefault;
+      });
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败');
     } finally {
@@ -63,7 +75,6 @@ export function SubscriptionsPage() {
 
   useEffect(() => {
     void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -145,7 +156,7 @@ export function SubscriptionsPage() {
                         <tr key={p.id}>
                           <td className="ps-4 fw-bold text-dark">{p.name}</td>
                           <td>
-                            <span className="badge bg-light text-secondary border fw-normal">{p.group_name || 'default'}</span>
+                            <span className="badge bg-light text-secondary border fw-normal">{(p.group_name || '').trim() || defaultGroupName}</span>
                           </td>
                           <td className="text-muted small">
                             <span className="badge bg-light text-dark border fw-normal">×{(p.price_multiplier || '1').trim() || '1'}</span>
@@ -216,7 +227,7 @@ export function SubscriptionsPage() {
         onHidden={() => {
           setErr('');
           setName('');
-          setGroupName('default');
+          setGroupName(defaultGroupName);
           setPriceMultiplier('1');
           setPriceCNY('12');
           setDurationDays('30');

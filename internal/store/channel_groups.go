@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/shopspring/decimal"
@@ -154,14 +155,28 @@ VALUES(?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 }
 
 func (s *Store) UpdateChannelGroup(ctx context.Context, id int64, description *string, status int, priceMultiplier decimal.Decimal, maxAttempts int) error {
+	_, err := s.UpdateChannelGroupWithRename(ctx, id, nil, description, status, priceMultiplier, maxAttempts)
+	return err
+}
+
+// UpdateChannelGroupWithRename updates a channel_group (description/status/price_multiplier/max_attempts) and optionally renames it (newName).
+// When renamed, it also updates references in:
+// - upstream_channels.groups
+// - managed_models.group_name
+// - subscription_plans.group_name
+// - token_groups.group_name
+// - main_group_subgroups.subgroup
+//
+// It returns the effective channel_group name (old or new).
+func (s *Store) UpdateChannelGroupWithRename(ctx context.Context, id int64, newName *string, description *string, status int, priceMultiplier decimal.Decimal, maxAttempts int) (string, error) {
 	if id == 0 {
-		return errors.New("id 不能为空")
+		return "", errors.New("id 不能为空")
 	}
 	if status != 0 && status != 1 {
-		return errors.New("status 不合法")
+		return "", errors.New("status 不合法")
 	}
 	if priceMultiplier.IsNegative() {
-		return errors.New("price_multiplier 不合法")
+		return "", errors.New("price_multiplier 不合法")
 	}
 	if maxAttempts <= 0 {
 		maxAttempts = 5
@@ -176,16 +191,228 @@ func (s *Store) UpdateChannelGroup(ctx context.Context, id int64, description *s
 		desc = v
 	}
 
+	g, err := s.GetChannelGroupByID(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	oldName := strings.TrimSpace(g.Name)
+	if oldName == "" {
+		return "", errors.New("name 不能为空")
+	}
+
+	renameTo := ""
+	if newName != nil {
+		v := strings.TrimSpace(*newName)
+		if v == "" {
+			return "", errors.New("name 不能为空")
+		}
+		if v != oldName {
+			norm, err := normalizeGroupName(v)
+			if err != nil {
+				return "", err
+			}
+			renameTo = norm
+		}
+	}
+
+	clearDefault := false
+	if status != 1 {
+		defaultID, ok, err := s.GetInt64AppSetting(ctx, SettingDefaultChannelGroupID)
+		if err != nil {
+			return "", err
+		}
+		if ok && defaultID == id {
+			clearDefault = true
+		}
+	}
+
 	priceMultiplier = priceMultiplier.Truncate(PriceMultiplierScale)
-	_, err := s.db.ExecContext(ctx, `
+
+	// No rename: fast path.
+	if renameTo == "" && !clearDefault {
+		_, err := s.db.ExecContext(ctx, `
 UPDATE channel_groups
 SET description=?, price_multiplier=?, max_attempts=?, status=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
 `, desc, priceMultiplier, maxAttempts, status, id)
-	if err != nil {
-		return fmt.Errorf("更新 channel_group 失败: %w", err)
+		if err != nil {
+			return "", fmt.Errorf("更新 channel_group 失败: %w", err)
+		}
+		return oldName, nil
 	}
-	return nil
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("开始事务失败: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// No rename but need to clear default: update + delete app_settings atomically.
+	if renameTo == "" {
+		if _, err := tx.ExecContext(ctx, `
+UPDATE channel_groups
+SET description=?, price_multiplier=?, max_attempts=?, status=?, updated_at=CURRENT_TIMESTAMP
+WHERE id=?
+`, desc, priceMultiplier, maxAttempts, status, id); err != nil {
+			return "", fmt.Errorf("更新 channel_group 失败: %w", err)
+		}
+		if clearDefault {
+			if _, err := tx.ExecContext(ctx, "DELETE FROM app_settings WHERE `key`=? AND value=?", SettingDefaultChannelGroupID, strconv.FormatInt(id, 10)); err != nil {
+				return "", fmt.Errorf("清理默认分组设置失败: %w", err)
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return "", fmt.Errorf("提交事务失败: %w", err)
+		}
+		return oldName, nil
+	}
+
+	qGroup := "SELECT name FROM channel_groups WHERE id=?" + forUpdateClause(s.dialect)
+	var lockedOldName string
+	if err := tx.QueryRowContext(ctx, qGroup, id).Scan(&lockedOldName); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", sql.ErrNoRows
+		}
+		return "", fmt.Errorf("查询 channel_groups 失败: %w", err)
+	}
+	lockedOldName = strings.TrimSpace(lockedOldName)
+	if lockedOldName == "" {
+		return "", errors.New("name 不能为空")
+	}
+
+	var dup int64
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM channel_groups WHERE name=? AND id<>?`, renameTo, id).Scan(&dup); err != nil {
+		return "", fmt.Errorf("查询 channel_groups 失败: %w", err)
+	}
+	if dup > 0 {
+		return "", errors.New("分组名称已存在")
+	}
+
+	var tokenDup int64
+	if err := tx.QueryRowContext(ctx, `
+SELECT COUNT(1)
+FROM token_groups a
+JOIN token_groups b ON b.token_id=a.token_id
+WHERE a.group_name=? AND b.group_name=?
+`, lockedOldName, renameTo).Scan(&tokenDup); err != nil {
+		return "", fmt.Errorf("查询 token_groups 失败: %w", err)
+	}
+	if tokenDup > 0 {
+		return "", errors.New("目标名称已被占用（存在 Token 路由分组冲突）")
+	}
+
+	var subgroupDup int64
+	if err := tx.QueryRowContext(ctx, `
+SELECT COUNT(1)
+FROM main_group_subgroups a
+JOIN main_group_subgroups b ON b.main_group=a.main_group
+WHERE a.subgroup=? AND b.subgroup=?
+`, lockedOldName, renameTo).Scan(&subgroupDup); err != nil {
+		return "", fmt.Errorf("查询 main_group_subgroups 失败: %w", err)
+	}
+	if subgroupDup > 0 {
+		return "", errors.New("目标名称已被占用（存在用户分组子组映射冲突）")
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+UPDATE channel_groups
+SET name=?, description=?, price_multiplier=?, max_attempts=?, status=?, updated_at=CURRENT_TIMESTAMP
+WHERE id=?
+`, renameTo, desc, priceMultiplier, maxAttempts, status, id); err != nil {
+		return "", fmt.Errorf("更新 channel_group 失败: %w", err)
+	}
+
+	// Precise update: upstream_channels.groups (CSV) old -> new.
+	rows, err := tx.QueryContext(ctx, "SELECT id, `groups` FROM upstream_channels")
+	if err != nil {
+		return "", fmt.Errorf("查询 upstream_channels.groups 失败: %w", err)
+	}
+	type chRow struct {
+		id        int64
+		groupsCSV string
+	}
+	var chans []chRow
+	for rows.Next() {
+		var row chRow
+		if err := rows.Scan(&row.id, &row.groupsCSV); err != nil {
+			_ = rows.Close()
+			return "", fmt.Errorf("扫描 upstream_channels 失败: %w", err)
+		}
+		if csvHasExactGroup(row.groupsCSV, lockedOldName) {
+			chans = append(chans, row)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return "", fmt.Errorf("遍历 upstream_channels 失败: %w", err)
+	}
+	_ = rows.Close()
+	for _, ch := range chans {
+		parts := splitUpstreamChannelGroupsCSV(ch.groupsCSV)
+		out := make([]string, 0, len(parts))
+		seen := make(map[string]struct{}, len(parts))
+		for _, p := range parts {
+			v := strings.TrimSpace(p)
+			if v == "" {
+				continue
+			}
+			if v == lockedOldName {
+				v = renameTo
+			}
+			if _, ok := seen[v]; ok {
+				continue
+			}
+			seen[v] = struct{}{}
+			out = append(out, v)
+		}
+		newCSV := strings.Join(out, ",")
+		if _, err := tx.ExecContext(ctx, "UPDATE upstream_channels SET `groups`=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", newCSV, ch.id); err != nil {
+			return "", fmt.Errorf("更新 upstream_channels.groups 失败: %w", err)
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+UPDATE managed_models
+SET group_name=?
+WHERE group_name=?
+`, renameTo, lockedOldName); err != nil {
+		return "", fmt.Errorf("更新 managed_models.group_name 失败: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+UPDATE subscription_plans
+SET group_name=?, updated_at=CURRENT_TIMESTAMP
+WHERE group_name=?
+`, renameTo, lockedOldName); err != nil {
+		return "", fmt.Errorf("更新 subscription_plans.group_name 失败: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+UPDATE token_groups
+SET group_name=?, updated_at=CURRENT_TIMESTAMP
+WHERE group_name=?
+`, renameTo, lockedOldName); err != nil {
+		return "", fmt.Errorf("更新 token_groups.group_name 失败: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+UPDATE main_group_subgroups
+SET subgroup=?, updated_at=CURRENT_TIMESTAMP
+WHERE subgroup=?
+`, renameTo, lockedOldName); err != nil {
+		return "", fmt.Errorf("更新 main_group_subgroups.subgroup 失败: %w", err)
+	}
+
+	if clearDefault {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM app_settings WHERE `key`=? AND value=?", SettingDefaultChannelGroupID, strconv.FormatInt(id, 10)); err != nil {
+			return "", fmt.Errorf("清理默认分组设置失败: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("提交事务失败: %w", err)
+	}
+	return renameTo, nil
 }
 
 func (s *Store) DeleteChannelGroup(ctx context.Context, id int64) error {
@@ -251,6 +478,16 @@ func (s *Store) ForceDeleteChannelGroup(ctx context.Context, id int64) (ChannelG
 	if id == 0 {
 		return ChannelGroupDeleteSummary{}, errors.New("id 不能为空")
 	}
+
+	clearDefault := false
+	defaultID, ok, err := s.GetInt64AppSetting(ctx, SettingDefaultChannelGroupID)
+	if err != nil {
+		return ChannelGroupDeleteSummary{}, err
+	}
+	if ok && defaultID == id {
+		clearDefault = true
+	}
+
 	g, err := s.GetChannelGroupByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -368,6 +605,12 @@ VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	// 清理与该分组相关的成员关系（作为父/作为子）。
 	if _, err := tx.ExecContext(ctx, `DELETE FROM channel_group_members WHERE parent_group_id=? OR member_group_id=?`, id, id); err != nil {
 		return ChannelGroupDeleteSummary{}, fmt.Errorf("清理 channel_group_members 失败: %w", err)
+	}
+
+	if clearDefault {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM app_settings WHERE `key`=? AND value=?", SettingDefaultChannelGroupID, strconv.FormatInt(id, 10)); err != nil {
+			return ChannelGroupDeleteSummary{}, fmt.Errorf("清理默认分组设置失败: %w", err)
+		}
 	}
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM channel_groups WHERE id=?`, id); err != nil {

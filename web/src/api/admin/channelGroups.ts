@@ -10,6 +10,7 @@ export type AdminChannelGroup = {
   status: number;
   created_at: string;
   updated_at: string;
+  is_default?: boolean;
 };
 
 export type AdminChannelGroupMember = {
@@ -73,6 +74,7 @@ export async function getAdminChannelGroupDetail(groupID: number) {
 }
 
 export type UpdateAdminChannelGroupRequest = {
+  name?: string;
   description?: string | null;
   price_multiplier?: string;
   max_attempts?: number;
@@ -86,6 +88,11 @@ export async function updateAdminChannelGroup(groupID: number, req: UpdateAdminC
 
 export async function deleteAdminChannelGroup(groupID: number) {
   const res = await api.delete<APIResponse<void>>(`/api/admin/channel-groups/${groupID}`);
+  return res.data;
+}
+
+export async function setAdminDefaultChannelGroup(groupID: number) {
+  const res = await api.put<APIResponse<void>>(`/api/admin/channel-groups/${groupID}/default`);
   return res.data;
 }
 
@@ -113,4 +120,3 @@ export async function reorderAdminChannelGroupMembers(parentGroupID: number, ord
   const res = await api.post<APIResponse<void>>(`/api/admin/channel-groups/${parentGroupID}/children/reorder`, orderedMemberIDs);
   return res.data;
 }
-

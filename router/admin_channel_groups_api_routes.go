@@ -22,6 +22,7 @@ type adminChannelGroupView struct {
 	Status          int     `json:"status"`
 	CreatedAt       string  `json:"created_at"`
 	UpdatedAt       string  `json:"updated_at"`
+	IsDefault       bool    `json:"is_default"`
 }
 
 func setAdminChannelGroupAPIRoutes(r gin.IRoutes, opts Options) {
@@ -31,6 +32,7 @@ func setAdminChannelGroupAPIRoutes(r gin.IRoutes, opts Options) {
 	r.GET("/channel-groups/:group_id/detail", adminGetChannelGroupDetailHandler(opts))
 	r.PUT("/channel-groups/:group_id", adminUpdateChannelGroupHandler(opts))
 	r.DELETE("/channel-groups/:group_id", adminDeleteChannelGroupHandler(opts))
+	r.PUT("/channel-groups/:group_id/default", adminSetDefaultChannelGroupHandler(opts))
 
 	r.POST("/channel-groups/:group_id/children/groups", adminCreateChildChannelGroupHandler(opts))
 	r.POST("/channel-groups/:group_id/children/channels", adminAddChannelGroupChannelMemberHandler(opts))
@@ -45,6 +47,7 @@ func adminListChannelGroupsHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
+		defaultID, _, _ := opts.Store.GetDefaultChannelGroupID(c.Request.Context())
 		groups, err := opts.Store.ListChannelGroups(c.Request.Context())
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
@@ -61,6 +64,7 @@ func adminListChannelGroupsHandler(opts Options) gin.HandlerFunc {
 				Status:          g.Status,
 				CreatedAt:       g.CreatedAt.Format("2006-01-02 15:04"),
 				UpdatedAt:       g.UpdatedAt.Format("2006-01-02 15:04"),
+				IsDefault:       defaultID > 0 && g.ID == defaultID,
 			})
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": out})
@@ -87,6 +91,7 @@ func adminGetChannelGroupHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
 			return
 		}
+		defaultID, _, _ := opts.Store.GetDefaultChannelGroupID(c.Request.Context())
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "",
@@ -99,8 +104,28 @@ func adminGetChannelGroupHandler(opts Options) gin.HandlerFunc {
 				Status:          g.Status,
 				CreatedAt:       g.CreatedAt.Format("2006-01-02 15:04"),
 				UpdatedAt:       g.UpdatedAt.Format("2006-01-02 15:04"),
+				IsDefault:       defaultID > 0 && g.ID == defaultID,
 			},
 		})
+	}
+}
+
+func adminSetDefaultChannelGroupHandler(opts Options) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if opts.Store == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			return
+		}
+		groupID, err := strconv.ParseInt(strings.TrimSpace(c.Param("group_id")), 10, 64)
+		if err != nil || groupID <= 0 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "group_id 不合法"})
+			return
+		}
+		if err := opts.Store.SetDefaultChannelGroupID(c.Request.Context(), groupID); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已设置默认分组"})
 	}
 }
 
@@ -160,6 +185,7 @@ func adminCreateChannelGroupHandler(opts Options) gin.HandlerFunc {
 
 func adminUpdateChannelGroupHandler(opts Options) gin.HandlerFunc {
 	type reqBody struct {
+		Name            *string `json:"name,omitempty"`
 		Description     *string `json:"description,omitempty"`
 		PriceMultiplier string  `json:"price_multiplier"`
 		MaxAttempts     int     `json:"max_attempts"`
@@ -211,8 +237,12 @@ func adminUpdateChannelGroupHandler(opts Options) gin.HandlerFunc {
 			maxAttempts = g.MaxAttempts
 		}
 
-		if err := opts.Store.UpdateChannelGroup(c.Request.Context(), g.ID, req.Description, status, priceMult, maxAttempts); err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
+		if _, err := opts.Store.UpdateChannelGroupWithRename(c.Request.Context(), g.ID, req.Name, req.Description, status, priceMult, maxAttempts); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Not Found"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 			return
 		}
 		// best-effort: refresh updated_at for response message consistency.
@@ -245,7 +275,11 @@ func adminDeleteChannelGroupHandler(opts Options) gin.HandlerFunc {
 
 		sum, err := opts.Store.ForceDeleteChannelGroup(c.Request.Context(), g.ID)
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "删除失败"})
+			if errors.Is(err, sql.ErrNoRows) {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Not Found"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 			return
 		}
 		msg := "已删除"

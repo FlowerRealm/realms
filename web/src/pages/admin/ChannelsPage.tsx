@@ -87,7 +87,7 @@ function normalizePinnedInfo(info: PinnedChannelInfo | null, channels: ChannelAd
   if (!info || !info.available) return info;
 
   const runtimePinned = channels.find((ch) => !!ch.runtime?.pinned_active);
-  let out = { ...info };
+  const out = { ...info };
 
   if ((!out.pinned_active || out.pinned_channel_id <= 0) && runtimePinned) {
     out.pinned_active = true;
@@ -534,15 +534,32 @@ export function ChannelsPage() {
     })();
   }, []);
 
+  const defaultGroupName = useMemo(() => {
+    const byDefault = (channelGroups.find((g) => g.is_default)?.name || '').trim();
+    if (byDefault) return byDefault;
+    const byFirst = (channelGroups[0]?.name || '').trim();
+    if (byFirst) return byFirst;
+    return 'default';
+  }, [channelGroups]);
+
+  useEffect(() => {
+    if (!defaultGroupName) return;
+    setCreateGroups((prev) => {
+      const s = (prev || '').trim();
+      if (!s || s === 'default') return defaultGroupName;
+      return prev;
+    });
+  }, [defaultGroupName]);
+
   function parseGroupsCSV(raw: string): string[] {
     const s = raw.trim();
-    if (!s) return ['default'];
+    if (!s) return [defaultGroupName];
     const uniq = new Set<string>();
     for (const part of s.split(',')) {
       const v = part.trim();
       if (v) uniq.add(v);
     }
-    if (uniq.size === 0) return ['default'];
+    if (uniq.size === 0) return [defaultGroupName];
     return Array.from(uniq);
   }
 
@@ -708,7 +725,7 @@ export function ChannelsPage() {
       setSettingsChannel(ch);
 
       setEditName(ch.name || '');
-      setEditGroups(ch.groups || 'default');
+      setEditGroups(ch.groups || defaultGroupName);
       setEditBaseURL(ch.base_url || '');
       setEditStatus(ch.status || 0);
       setEditPriority(String(ch.priority || 0));
@@ -1171,7 +1188,7 @@ export function ChannelsPage() {
                                   {ch.base_url ? <span className="text-secondary">·</span> : null}
                                   <span className={`${ch.base_url ? 'ms-2 ' : ''}me-1`}>组:</span>
                                   <span className="text-secondary font-monospace user-select-all">
-                                    {ch.groups || 'default'}
+                                    {ch.groups || defaultGroupName}
                                   </span>
                                 </div>
                               </div>
@@ -1681,7 +1698,7 @@ export function ChannelsPage() {
           setCreateName('');
           setCreateBaseURL('https://api.openai.com');
           setCreateKey('');
-          setCreateGroups('default');
+          setCreateGroups(defaultGroupName);
           setCreatePriority('0');
           setCreatePromotion(false);
           setCreateAllowServiceTier(false);
@@ -1752,7 +1769,12 @@ export function ChannelsPage() {
           </div>
           <div className="col-md-8">
             <label className="form-label">分组（groups，逗号分隔）</label>
-            <input className="form-control font-monospace" value={createGroups} onChange={(e) => setCreateGroups(e.target.value)} placeholder="default" />
+            <input
+              className="form-control font-monospace"
+              value={createGroups}
+              onChange={(e) => setCreateGroups(e.target.value)}
+              placeholder={defaultGroupName || 'default'}
+            />
           </div>
           <div className="col-md-4 d-flex align-items-end">
             <div className="form-check">
@@ -2133,7 +2155,9 @@ export function ChannelsPage() {
                                       } catch (e) {
                                         try {
                                           popup.close();
-                                        } catch {}
+                                        } catch {
+                                          // ignore
+                                        }
                                         setErr(e instanceof Error ? e.message : '发起授权失败');
                                       }
                                     }}

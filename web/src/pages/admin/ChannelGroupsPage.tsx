@@ -7,13 +7,10 @@ import {
   createAdminChannelGroup,
   deleteAdminChannelGroup,
   listAdminChannelGroups,
+  setAdminDefaultChannelGroup,
   updateAdminChannelGroup,
   type AdminChannelGroup,
 } from '../../api/admin/channelGroups';
-
-function isDefaultGroup(name: string): boolean {
-  return name.trim().toLowerCase() === 'default';
-}
 
 function statusBadge(status: number): { cls: string; label: string } {
   if (status === 1) return { cls: 'badge rounded-pill bg-success bg-opacity-10 text-success px-2', label: '启用' };
@@ -33,10 +30,10 @@ export function ChannelGroupsPage() {
   const [createStatus, setCreateStatus] = useState(1);
 
   const [editing, setEditing] = useState<AdminChannelGroup | null>(null);
+  const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [editMultiplier, setEditMultiplier] = useState('1');
   const [editMaxAttempts, setEditMaxAttempts] = useState('5');
-  const [editStatus, setEditStatus] = useState(1);
 
   const enabledCount = useMemo(() => items.filter((x) => x.status === 1).length, [items]);
 
@@ -61,10 +58,10 @@ export function ChannelGroupsPage() {
 
   useEffect(() => {
     if (!editing) return;
+    setEditName(editing.name || '');
     setEditDesc(editing.description || '');
     setEditMultiplier(editing.price_multiplier || '1');
     setEditMaxAttempts(String(editing.max_attempts || 5));
-    setEditStatus(editing.status || 0);
   }, [editing]);
 
   return (
@@ -142,7 +139,7 @@ export function ChannelGroupsPage() {
                         <tr key={g.id}>
                           <td className="ps-4">
                             <span className="fw-bold text-dark user-select-all">{g.name}</span>
-                            {isDefaultGroup(g.name) ? <span className="badge bg-light text-dark border ms-2">default</span> : null}
+                            {g.is_default ? <span className="badge bg-primary bg-opacity-10 text-primary border ms-2">默认</span> : null}
                           </td>
                           <td className="fw-semibold text-dark">{g.price_multiplier}</td>
                           <td>{g.description ? <span className="text-dark">{g.description}</span> : <span className="text-muted small fst-italic">-</span>}</td>
@@ -153,26 +150,68 @@ export function ChannelGroupsPage() {
                           <td className="text-end pe-4 text-nowrap">
                             <div className="d-inline-flex gap-1">
                               <Link to={`/admin/channel-groups/${g.id}`} className="btn btn-sm btn-light border text-secondary" title="进入">
-                                <i className="ri-folder-open-line"></i>
+                                <span className="material-symbols-rounded" style={{ fontSize: 18 }}>folder_open</span>
                               </Link>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-light border text-warning"
+                                title={g.is_default ? '默认分组' : g.status !== 1 ? '禁用分组不可设为默认' : '设为默认'}
+                                disabled={g.is_default || g.status !== 1}
+                                onClick={async () => {
+                                  if (g.is_default || g.status !== 1) return;
+                                  setErr('');
+                                  setNotice('');
+                                  try {
+                                    const res = await setAdminDefaultChannelGroup(g.id);
+                                    if (!res.success) throw new Error(res.message || '设置失败');
+                                    setNotice(res.message || '已设置默认分组');
+                                    await refresh();
+                                  } catch (e) {
+                                    setErr(e instanceof Error ? e.message : '设置失败');
+                                  }
+                                }}
+                              >
+                                <span className="material-symbols-rounded" style={{ fontSize: 18 }}>star</span>
+                              </button>
+                              <button
+                                type="button"
+                                className={`btn btn-sm btn-light border ${g.status === 1 ? 'text-success' : 'text-secondary'}`}
+                                title={g.status === 1 ? (g.is_default ? '禁用（将清空默认设置）' : '禁用') : '启用'}
+                                onClick={async () => {
+                                  const nextStatus = g.status === 1 ? 0 : 1;
+                                  setErr('');
+                                  setNotice('');
+                                  try {
+                                    const res = await updateAdminChannelGroup(g.id, { status: nextStatus, description: g.description ?? null });
+                                    if (!res.success) throw new Error(res.message || '操作失败');
+                                    setNotice(nextStatus === 1 ? '已启用' : '已禁用');
+                                    await refresh();
+                                  } catch (e) {
+                                    setErr(e instanceof Error ? e.message : '操作失败');
+                                  }
+                                }}
+                              >
+                                <span className="material-symbols-rounded" style={{ fontSize: 18 }}>
+                                  {g.status === 1 ? 'toggle_on' : 'toggle_off'}
+                                </span>
+                              </button>
                               <button
                                 type="button"
                                 className="btn btn-sm btn-light border text-primary"
                                 title="编辑"
                                 data-bs-toggle="modal"
                                 data-bs-target="#editChannelGroupModal"
-                                onClick={() => setEditing(g)}
+                                onClick={() => {
+                                  setEditing(g);
+                                }}
                               >
-                                <i className="ri-edit-line"></i>
+                                <span className="material-symbols-rounded" style={{ fontSize: 18 }}>edit</span>
                               </button>
                               <button
                                 type="button"
                                 className="btn btn-sm btn-light border text-danger"
-                                title={isDefaultGroup(g.name) ? '默认分组不可删除' : '删除'}
-                                disabled={isDefaultGroup(g.name)}
+                                title={g.is_default ? '删除（将清空默认设置）' : '删除'}
                                 onClick={async () => {
-                                  if (isDefaultGroup(g.name)) return;
-                                  if (!window.confirm(`确认删除分组 ${g.name} ?`)) return;
                                   setErr('');
                                   setNotice('');
                                   try {
@@ -186,7 +225,9 @@ export function ChannelGroupsPage() {
                                   }
                                 }}
                               >
-                                <i className="ri-delete-bin-line"></i>
+                                <span className="material-symbols-rounded" style={{ fontSize: 18 }}>
+                                  delete
+                                </span>
                               </button>
                             </div>
                           </td>
@@ -294,11 +335,14 @@ export function ChannelGroupsPage() {
               setErr('');
               setNotice('');
               try {
+                const oldName = (editing.name || '').trim();
+                const newName = editName.trim();
                 const res = await updateAdminChannelGroup(editing.id, {
+                  name: newName && newName !== oldName ? newName : undefined,
                   description: editDesc.trim() || null,
                   price_multiplier: editMultiplier.trim() || undefined,
                   max_attempts: Number.parseInt(editMaxAttempts, 10) || undefined,
-                  status: isDefaultGroup(editing.name) ? 1 : editStatus,
+                  status: editing.status,
                 });
                 if (!res.success) throw new Error(res.message || '保存失败');
                 setNotice('已保存');
@@ -311,7 +355,8 @@ export function ChannelGroupsPage() {
           >
             <div className="col-12">
               <label className="form-label">分组名称</label>
-              <input className="form-control bg-light" value={editing.name} disabled />
+              <input className="form-control" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="例如：vip" required />
+              <div className="form-text small text-muted">仅允许字母/数字及 _ -，最多 64 位。</div>
             </div>
             <div className="col-12">
               <label className="form-label">描述（可选）</label>
@@ -328,14 +373,6 @@ export function ChannelGroupsPage() {
             <div className="col-12">
               <label className="form-label">组内最大尝试次数</label>
               <input className="form-control" value={editMaxAttempts} onChange={(e) => setEditMaxAttempts(e.target.value)} inputMode="numeric" />
-            </div>
-            <div className="col-12">
-              <label className="form-label">状态</label>
-              <select className="form-select" value={editStatus} onChange={(e) => setEditStatus(Number.parseInt(e.target.value, 10) || 0)} disabled={isDefaultGroup(editing.name)}>
-                <option value={1}>启用</option>
-                <option value={0}>禁用</option>
-              </select>
-              {isDefaultGroup(editing.name) ? <div className="form-text small text-muted">default 分组不允许禁用。</div> : null}
             </div>
             <div className="modal-footer border-top-0 px-0 pb-0">
               <button type="button" className="btn btn-light" data-bs-dismiss="modal">

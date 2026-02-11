@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { BootstrapModal } from '../../components/BootstrapModal';
 import { closeModalById } from '../../components/modal';
-import { listAdminChannelGroups } from '../../api/admin/channelGroups';
+import { listAdminChannelGroups, type AdminChannelGroup } from '../../api/admin/channelGroups';
 import {
   createManagedModelAdmin,
   deleteManagedModelAdmin,
@@ -30,10 +30,11 @@ type ModelForm = {
   status: number;
 };
 
-function modelToForm(m: ManagedModel): ModelForm {
+function modelToForm(m: ManagedModel, fallbackGroupName: string): ModelForm {
+  const fallback = fallbackGroupName.trim() || 'default';
   return {
     public_id: m.public_id || '',
-    group_name: (m.group_name || 'default').toString(),
+    group_name: (m.group_name || fallback).toString(),
     owned_by: (m.owned_by || '').toString(),
     input_usd_per_1m: m.input_usd_per_1m || '0',
     output_usd_per_1m: m.output_usd_per_1m || '0',
@@ -45,7 +46,8 @@ function modelToForm(m: ManagedModel): ModelForm {
 
 export function ModelsAdminPage() {
   const [models, setModels] = useState<ManagedModel[]>([]);
-  const [groupNames, setGroupNames] = useState<string[]>(['default']);
+  const [channelGroups, setChannelGroups] = useState<AdminChannelGroup[]>([]);
+  const [defaultGroupName, setDefaultGroupName] = useState('default');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
@@ -63,7 +65,7 @@ export function ModelsAdminPage() {
 
   const [createForm, setCreateForm] = useState<ModelForm>({
     public_id: '',
-    group_name: 'default',
+    group_name: defaultGroupName,
     owned_by: '',
     input_usd_per_1m: '5',
     output_usd_per_1m: '15',
@@ -75,7 +77,7 @@ export function ModelsAdminPage() {
   const [editing, setEditing] = useState<ManagedModel | null>(null);
   const [editForm, setEditForm] = useState<ModelForm>({
     public_id: '',
-    group_name: 'default',
+    group_name: defaultGroupName,
     owned_by: '',
     input_usd_per_1m: '0',
     output_usd_per_1m: '0',
@@ -85,6 +87,7 @@ export function ModelsAdminPage() {
   });
 
   const enabledCount = useMemo(() => models.filter((m) => m.status === 1).length, [models]);
+  const groupNames = useMemo(() => channelGroups.map((g) => (g.name || '').trim()).filter((name) => name.length > 0), [channelGroups]);
   const selectableGroups = useMemo(() => {
     const seen = new Set<string>();
     const out: string[] = [];
@@ -94,16 +97,16 @@ export function ModelsAdminPage() {
       seen.add(trimmed);
       out.push(trimmed);
     };
-    append('default');
+    append(defaultGroupName);
     groupNames.forEach((name) => append(name));
     append(createForm.group_name);
     append(editForm.group_name);
     return out.sort((a, b) => {
-      if (a === 'default') return -1;
-      if (b === 'default') return 1;
+      if (a === defaultGroupName) return -1;
+      if (b === defaultGroupName) return 1;
       return a.localeCompare(b, 'zh-CN');
     });
-  }, [groupNames, createForm.group_name, editForm.group_name]);
+  }, [defaultGroupName, groupNames, createForm.group_name, editForm.group_name]);
 
   async function refresh() {
     setErr('');
@@ -125,10 +128,12 @@ export function ModelsAdminPage() {
     try {
       const res = await listAdminChannelGroups();
       if (!res.success) return;
-      const names = (res.data || []).map((g) => (g?.name || '').trim()).filter((name) => name.length > 0);
-      setGroupNames(names);
+      const groups = res.data || [];
+      setChannelGroups(groups);
+      const nextDefault = (groups.find((g) => g.is_default)?.name || '').trim() || (groups[0]?.name || '').trim() || 'default';
+      setDefaultGroupName(nextDefault);
     } catch {
-      setGroupNames((prev) => (prev.length ? prev : ['default']));
+      setDefaultGroupName((prev) => prev || 'default');
     }
   }
 
@@ -139,8 +144,21 @@ export function ModelsAdminPage() {
 
   useEffect(() => {
     if (!editing) return;
-    setEditForm(modelToForm(editing));
-  }, [editing]);
+    setEditForm(modelToForm(editing, defaultGroupName));
+  }, [editing, defaultGroupName]);
+
+  useEffect(() => {
+    setCreateForm((prev) => {
+      const cur = (prev.group_name || '').trim();
+      if (!cur || cur === 'default') return { ...prev, group_name: defaultGroupName };
+      return prev;
+    });
+    setEditForm((prev) => {
+      const cur = (prev.group_name || '').trim();
+      if (!cur || cur === 'default') return { ...prev, group_name: defaultGroupName };
+      return prev;
+    });
+  }, [defaultGroupName]);
 
   return (
     <div className="fade-in-up">
@@ -242,7 +260,7 @@ export function ModelsAdminPage() {
                             </div>
                           </td>
                           <td>
-                            <span className="badge rounded-pill bg-info bg-opacity-10 text-info px-2">{(m.group_name || 'default').toString()}</span>
+                            <span className="badge rounded-pill bg-info bg-opacity-10 text-info px-2">{(m.group_name || '').toString().trim() || defaultGroupName}</span>
                           </td>
                           <td>
                             {m.owned_by ? <span className="badge rounded-pill bg-light text-secondary border px-2">{m.owned_by}</span> : <span className="text-muted small">-</span>}
@@ -347,7 +365,7 @@ export function ModelsAdminPage() {
         onHidden={() => {
           setCreateForm({
             public_id: '',
-            group_name: 'default',
+            group_name: defaultGroupName,
             owned_by: '',
             input_usd_per_1m: '5',
             output_usd_per_1m: '15',
@@ -370,7 +388,7 @@ export function ModelsAdminPage() {
             try {
               const res = await createManagedModelAdmin({
                 public_id: createForm.public_id.trim(),
-                group_name: createForm.group_name.trim() || 'default',
+                group_name: createForm.group_name.trim() || defaultGroupName,
                 owned_by: createForm.owned_by.trim() ? createForm.owned_by.trim() : null,
                 input_usd_per_1m: createForm.input_usd_per_1m,
                 output_usd_per_1m: createForm.output_usd_per_1m,
@@ -745,7 +763,7 @@ export function ModelsAdminPage() {
                 const res = await updateManagedModelAdmin({
                   ...editing,
                   public_id: editForm.public_id.trim(),
-                  group_name: editForm.group_name.trim() || 'default',
+                  group_name: editForm.group_name.trim() || defaultGroupName,
                   owned_by: editForm.owned_by.trim() ? editForm.owned_by.trim() : null,
                   input_usd_per_1m: editForm.input_usd_per_1m,
                   output_usd_per_1m: editForm.output_usd_per_1m,

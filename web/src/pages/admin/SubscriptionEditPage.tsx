@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
 import { listAdminChannelGroups, type AdminChannelGroup } from '../../api/admin/channelGroups';
@@ -31,6 +31,14 @@ export function SubscriptionEditPage() {
   const [limit1d, setLimit1d] = useState('');
   const [limit5h, setLimit5h] = useState('');
 
+  const defaultGroupName = useMemo(() => {
+    const byDefault = (groups.find((g) => g.is_default)?.name || '').trim();
+    if (byDefault) return byDefault;
+    const byFirst = (groups[0]?.name || '').trim();
+    if (byFirst) return byFirst;
+    return 'default';
+  }, [groups]);
+
   async function refresh() {
     setErr('');
     setNotice('');
@@ -39,13 +47,16 @@ export function SubscriptionEditPage() {
       if (!Number.isFinite(planId) || planId <= 0) throw new Error('参数错误');
       const [planRes, groupsRes] = await Promise.all([getAdminSubscriptionPlan(planId), listAdminChannelGroups()]);
       if (!groupsRes.success) throw new Error(groupsRes.message || '加载分组失败');
-      setGroups(groupsRes.data || []);
+      const nextGroups = groupsRes.data || [];
+      setGroups(nextGroups);
       if (!planRes.success) throw new Error(planRes.message || '加载失败');
       const p = planRes.data || null;
       setPlan(p);
       if (p) {
+        const nextDefault = (nextGroups.find((g) => g.is_default)?.name || '').trim() || (nextGroups[0]?.name || '').trim() || 'default';
+        const pickedGroup = (p.group_name || '').trim();
         setName(p.name || '');
-        setGroupName(p.group_name || 'default');
+        setGroupName(pickedGroup && nextGroups.some((g) => g.name === pickedGroup) ? pickedGroup : nextDefault);
         setPriceMultiplier(p.price_multiplier || '1');
         setPriceCNY(p.price_cny || '');
         setDurationDays(String(p.duration_days || 30));
@@ -150,6 +161,7 @@ export function SubscriptionEditPage() {
                       </option>
                     ))}
                   </select>
+                  <div className="form-text small text-muted">默认分组：{defaultGroupName}</div>
                 </div>
                 <div className="col-md-4">
                   <label className="form-label">订阅倍率</label>
