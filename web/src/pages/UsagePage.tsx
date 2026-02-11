@@ -12,6 +12,7 @@ import {
   type UsageTimeSeriesPoint,
   type UsageWindow,
 } from '../api/usage';
+import { formatIntComma } from '../format/int';
 import { formatUSD, formatUSDPlain } from '../format/money';
 
 type UsageEventDetailState =
@@ -87,9 +88,7 @@ function costLabel(ev: UsageEvent): string {
 }
 
 function tokenText(v: number | null | undefined): string {
-  if (v == null) return '-';
-  if (!Number.isFinite(v)) return '-';
-  return String(v);
+  return formatIntComma(v);
 }
 
 function cachedTokens(ev: UsageEvent): string {
@@ -97,7 +96,7 @@ function cachedTokens(ev: UsageEvent): string {
   const outTok = clampCached(ev.output_tokens ?? 0, ev.cached_output_tokens ?? 0);
   const n = inTok + outTok;
   if (!Number.isFinite(n) || n <= 0) return '-';
-  return String(n);
+  return formatIntComma(n);
 }
 
 function tokenNameFromMap(tokenByID: Record<number, UserToken>, tokenID: number): string {
@@ -499,6 +498,9 @@ export function UsagePage() {
             beginAtZero: true,
             suggestedMax: detailField === 'cache_ratio' ? 100 : undefined,
             grid: { color: 'rgba(148, 163, 184, 0.18)' },
+            ...(detailField === 'requests' || detailField === 'tokens'
+              ? { ticks: { callback: (value: string | number) => formatIntComma(value) } }
+              : {}),
           },
         },
       },
@@ -509,9 +511,10 @@ export function UsagePage() {
     };
   }, [detailSeries, detailField, detailGranularity]);
 
-  const rpm = window0 ? String(window0.rpm ?? 0) : '0';
-  const tpm = window0 ? String(window0.tpm ?? 0) : '0';
+  const rpm = formatIntComma(window0?.rpm ?? 0);
+  const tpm = formatIntComma(window0?.tpm ?? 0);
   const cachedTotal = window0 ? window0.cached_input_tokens + window0.cached_output_tokens : 0;
+  const cachedTotalText = formatIntComma(cachedTotal);
 
   const cursorActive = beforeStack.length > 0;
   const canPrev = beforeStack.length > 0;
@@ -703,20 +706,20 @@ export function UsagePage() {
 
                   <div className="col-lg-8 ps-lg-4">
                     <div className="row g-3">
-                      <div className="col-sm-6 col-md-3">
-                        <div className="metric-card p-3 rounded-3 border">
-                          <div className="text-muted smaller mb-1">请求总数</div>
-                          <div className="h4 fw-bold mb-1">{window0.requests}</div>
-                          <div className="text-primary smaller fw-medium">{rpm} RPM</div>
-                        </div>
-                      </div>
-                      <div className="col-sm-6 col-md-3">
-                        <div className="metric-card p-3 rounded-3 border">
-                          <div className="text-muted smaller mb-1">总 Token</div>
-                          <div className="h4 fw-bold mb-1">{window0.tokens}</div>
-                          <div className="text-primary smaller fw-medium">{tpm} TPM</div>
-                        </div>
-                      </div>
+	                      <div className="col-sm-6 col-md-3">
+	                        <div className="metric-card p-3 rounded-3 border">
+	                          <div className="text-muted smaller mb-1">请求总数</div>
+	                          <div className="h4 fw-bold mb-1">{formatIntComma(window0.requests)}</div>
+	                          <div className="text-primary smaller fw-medium">{rpm} RPM</div>
+	                        </div>
+	                      </div>
+	                      <div className="col-sm-6 col-md-3">
+	                        <div className="metric-card p-3 rounded-3 border">
+	                          <div className="text-muted smaller mb-1">总 Token</div>
+	                          <div className="h4 fw-bold mb-1">{formatIntComma(window0.tokens)}</div>
+	                          <div className="text-primary smaller fw-medium">{tpm} TPM</div>
+	                        </div>
+	                      </div>
                       <div className="col-sm-6 col-md-3">
                         <div className="metric-card p-3 rounded-3 border">
                           <div className="text-muted smaller mb-1">缓存命中率</div>
@@ -724,28 +727,28 @@ export function UsagePage() {
                           <div className="text-success smaller fw-medium">命中统计</div>
                         </div>
                       </div>
-                      <div className="col-sm-6 col-md-3">
-                        <div className="metric-card p-3 rounded-3 border">
-                          <div className="text-muted smaller mb-1">缓存 Token</div>
-                          <div className="h4 fw-bold mb-1">{cachedTotal}</div>
-                          <div className="text-muted smaller fw-medium">输入 + 输出</div>
-                        </div>
-                      </div>
+	                      <div className="col-sm-6 col-md-3">
+	                        <div className="metric-card p-3 rounded-3 border">
+	                          <div className="text-muted smaller mb-1">缓存 Token</div>
+	                          <div className="h4 fw-bold mb-1">{cachedTotalText}</div>
+	                          <div className="text-muted smaller fw-medium">输入 + 输出</div>
+	                        </div>
+	                      </div>
 
                       <div className="col-12 mt-4">
                         <div className="bg-light p-3 rounded-3">
                           <div className="row text-center small">
-                            <div className="col-6 border-end">
-                              <div className="text-muted smaller">输入总计</div>
-                              <div className="fw-medium">{window0.input_tokens}</div>
-                            </div>
-                            <div className="col-6">
-                              <div className="text-muted smaller">输出总计</div>
-                              <div className="fw-medium">{window0.output_tokens}</div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
+	                            <div className="col-6 border-end">
+	                              <div className="text-muted smaller">输入总计</div>
+	                              <div className="fw-medium">{formatIntComma(window0.input_tokens)}</div>
+	                            </div>
+	                            <div className="col-6">
+	                              <div className="text-muted smaller">输出总计</div>
+	                              <div className="fw-medium">{formatIntComma(window0.output_tokens)}</div>
+	                            </div>
+	                          </div>
+	                        </div>
+	                      </div>
                     </div>
                   </div>
                 </div>
@@ -1009,19 +1012,19 @@ function FragmentUsageRow({
         <td className="text-nowrap">
           <div className="badge bg-light text-dark border fw-normal">{model}</div>
           <div className="text-muted smaller mt-1 font-monospace">{endpoint}</div>
-        </td>
-        <td className="text-center">
-          {code === '200' ? (
-            <span className="badge bg-success-subtle text-success border border-success-subtle rounded-pill">200</span>
-          ) : (
-            <span className="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill">{code}</span>
-          )}
-        </td>
-        <td className="text-end font-monospace text-muted">{ev.latency_ms ? `${ev.latency_ms} ms` : '- ms'}</td>
-        <td className="text-end font-monospace">
-          <div>
-            <span className="text-muted">In:</span> {tokenText(ev.input_tokens)}
-          </div>
+	        </td>
+	        <td className="text-center">
+	          {code === '200' ? (
+	            <span className="badge bg-success-subtle text-success border border-success-subtle rounded-pill">200</span>
+	          ) : (
+	            <span className="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill">{code}</span>
+	          )}
+	        </td>
+	        <td className="text-end font-monospace text-muted">{ev.latency_ms ? `${formatIntComma(ev.latency_ms)} ms` : '- ms'}</td>
+	        <td className="text-end font-monospace">
+	          <div>
+	            <span className="text-muted">In:</span> {tokenText(ev.input_tokens)}
+	          </div>
           <div>
             <span className="text-muted">Out:</span> {tokenText(ev.output_tokens)}
           </div>
@@ -1086,16 +1089,16 @@ function FragmentUsageRow({
                   <div className="text-muted smaller">状态码</div>
                   <div className="font-monospace">{code}</div>
                 </div>
-                <div className="col-6 col-lg-3">
-                  <div className="text-muted smaller">耗时</div>
-                  <div className="font-monospace">{ev.latency_ms} ms</div>
-                </div>
-                <div className="col-6 col-lg-3">
-                  <div className="text-muted smaller">请求/响应大小</div>
-                  <div className="font-monospace">
-                    {ev.request_bytes} / {ev.response_bytes} bytes
-                  </div>
-                </div>
+	                <div className="col-6 col-lg-3">
+	                  <div className="text-muted smaller">耗时</div>
+	                  <div className="font-monospace">{formatIntComma(ev.latency_ms)} ms</div>
+	                </div>
+	                <div className="col-6 col-lg-3">
+	                  <div className="text-muted smaller">请求/响应大小</div>
+	                  <div className="font-monospace">
+	                    {formatIntComma(ev.request_bytes)} / {formatIntComma(ev.response_bytes)} bytes
+	                  </div>
+	                </div>
 	                <div className="col-6 col-lg-3">
 	                  <div className="text-muted smaller">费用</div>
 	                  <div className="font-monospace">{cost}</div>
@@ -1106,27 +1109,27 @@ function FragmentUsageRow({
                     {pricingBreakdown ? (
                       <div className="font-monospace">
                         <div>
-                          公式: ((输入总-缓存输入)×输入单价 + (输出总-缓存输出)×输出单价 + 缓存输入×缓存输入单价 + 缓存输出×缓存输出单价) × 生效倍率
-                        </div>
-                        <div className="mt-1">
-                          实际: (({pricingBreakdown.input_tokens_total}-{pricingBreakdown.input_tokens_cached})×{formatUSDPer1M(pricingBreakdown.input_usd_per_1m)} + ({pricingBreakdown.output_tokens_total}-{pricingBreakdown.output_tokens_cached})×{formatUSDPer1M(pricingBreakdown.output_usd_per_1m)} + {pricingBreakdown.input_tokens_cached}×{formatUSDPer1M(pricingBreakdown.cache_input_usd_per_1m)} + {pricingBreakdown.output_tokens_cached}×{formatUSDPer1M(pricingBreakdown.cache_output_usd_per_1m)}) × {formatUSDPlain(pricingBreakdown.effective_multiplier)} = {formatUSD(pricingBreakdown.final_cost_usd)}{' '}
-                          <span className="text-muted smaller">
-                            （{costSourceLabel(pricingBreakdown.cost_source)}费用: {formatUSD(pricingBreakdown.cost_source_usd)}；倍率: 支付×{formatUSDPlain(pricingBreakdown.payment_multiplier)} × 渠道组({pricingBreakdown.group_name})×{formatUSDPlain(pricingBreakdown.group_multiplier)}）
-                          </span>
-                        </div>
-                      </div>
-                    ) : pricingAvailable ? (
-                      <div className="font-monospace">
-                        <div>
-                          公式: 输入计费×输入单价 + 输出计费×输出单价 + 缓存输入×缓存输入单价 + 缓存输出×缓存输出单价
-                        </div>
-                        <div className="mt-1">
-                          实际: {nonCachedInTok}×{formatUSDPer1M(inUSDPer1MStr)} + {nonCachedOutTok}×{formatUSDPer1M(outUSDPer1MStr)} + {cachedInTok}×{formatUSDPer1M(cacheInUSDPer1MStr)} + {cachedOutTok}×{formatUSDPer1M(cacheOutUSDPer1MStr)} = {microUSDToUSDWithDollar(sumCostMicro)}{' '}
-                          <span className="text-muted smaller">
-                            （事件费用: {microUSDToUSDWithDollar(actualMicro)}）
-                          </span>
-                        </div>
-                      </div>
+	                          公式: ((输入总-缓存输入)×输入单价 + (输出总-缓存输出)×输出单价 + 缓存输入×缓存输入单价 + 缓存输出×缓存输出单价) × 生效倍率
+	                        </div>
+	                        <div className="mt-1">
+	                          实际: (({formatIntComma(pricingBreakdown.input_tokens_total)}-{formatIntComma(pricingBreakdown.input_tokens_cached)})×{formatUSDPer1M(pricingBreakdown.input_usd_per_1m)} + ({formatIntComma(pricingBreakdown.output_tokens_total)}-{formatIntComma(pricingBreakdown.output_tokens_cached)})×{formatUSDPer1M(pricingBreakdown.output_usd_per_1m)} + {formatIntComma(pricingBreakdown.input_tokens_cached)}×{formatUSDPer1M(pricingBreakdown.cache_input_usd_per_1m)} + {formatIntComma(pricingBreakdown.output_tokens_cached)}×{formatUSDPer1M(pricingBreakdown.cache_output_usd_per_1m)}) × {formatUSDPlain(pricingBreakdown.effective_multiplier)} = {formatUSD(pricingBreakdown.final_cost_usd)}{' '}
+	                          <span className="text-muted smaller">
+	                            （{costSourceLabel(pricingBreakdown.cost_source)}费用: {formatUSD(pricingBreakdown.cost_source_usd)}；倍率: 支付×{formatUSDPlain(pricingBreakdown.payment_multiplier)} × 渠道组({pricingBreakdown.group_name})×{formatUSDPlain(pricingBreakdown.group_multiplier)}）
+	                          </span>
+	                        </div>
+	                      </div>
+	                    ) : pricingAvailable ? (
+	                      <div className="font-monospace">
+	                        <div>
+	                          公式: 输入计费×输入单价 + 输出计费×输出单价 + 缓存输入×缓存输入单价 + 缓存输出×缓存输出单价
+	                        </div>
+	                        <div className="mt-1">
+	                          实际: {formatIntComma(nonCachedInTok)}×{formatUSDPer1M(inUSDPer1MStr)} + {formatIntComma(nonCachedOutTok)}×{formatUSDPer1M(outUSDPer1MStr)} + {formatIntComma(cachedInTok)}×{formatUSDPer1M(cacheInUSDPer1MStr)} + {formatIntComma(cachedOutTok)}×{formatUSDPer1M(cacheOutUSDPer1MStr)} = {microUSDToUSDWithDollar(sumCostMicro)}{' '}
+	                          <span className="text-muted smaller">
+	                            （事件费用: {microUSDToUSDWithDollar(actualMicro)}）
+	                          </span>
+	                        </div>
+	                      </div>
                     ) : (
                       <div className="text-muted smaller">（未找到可用定价，无法计算明细）</div>
                     )}

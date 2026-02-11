@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 
 import { getDashboard, type DashboardData } from '../api/dashboard';
 import { getUsageTimeSeries, type UsageTimeSeriesPoint } from '../api/usage';
+import { formatIntComma } from '../format/int';
 
 type ChartInstance = {
   destroy?: () => void;
@@ -180,6 +181,9 @@ export function DashboardPage() {
             beginAtZero: true,
             suggestedMax: detailField === 'cache_ratio' ? 100 : undefined,
             grid: { color: 'rgba(148, 163, 184, 0.18)' },
+            ...(detailField === 'requests' || detailField === 'tokens'
+              ? { ticks: { callback: (value: string | number) => formatIntComma(value) } }
+              : {}),
           },
         },
       },
@@ -191,11 +195,12 @@ export function DashboardPage() {
   }, [detailSeries, detailField, detailGranularity]);
 
   const todayUsageUSD = data?.today_usage_usd || '-';
-  const todayRequests = data ? String(data.today_requests) : '-';
-  const todayRPM = data?.today_rpm || '-';
-  const todayTokens = data ? String(data.today_tokens) : '-';
-  const todayTPM = data?.today_tpm || '-';
+  const todayRequests = data ? formatIntComma(data.today_requests) : '-';
+  const todayRPM = data ? formatIntComma(data.today_rpm) : '-';
+  const todayTokens = data ? formatIntComma(data.today_tokens) : '-';
+  const todayTPM = data ? formatIntComma(data.today_tpm) : '-';
   const unreadAnnouncementsCount = data?.unread_announcements_count || 0;
+  const unreadAnnouncementsCountText = formatIntComma(unreadAnnouncementsCount);
 
   const subscription = data?.subscription && data.subscription.active ? data.subscription : null;
 
@@ -329,7 +334,7 @@ export function DashboardPage() {
                       <h6 className="card-title mb-0 fw-bold text-warning-emphasis">重要公告</h6>
                     </div>
                     <div className="flex-grow-1">
-                      <p className="fw-semibold mb-1">你有 {unreadAnnouncementsCount} 条未读公告</p>
+                      <p className="fw-semibold mb-1">你有 {unreadAnnouncementsCountText} 条未读公告</p>
                       <p className="text-muted small">请及时查看最新动态和维护通知。</p>
                     </div>
                     <Link to="/announcements" className="btn btn-warning btn-sm w-100 mt-2">

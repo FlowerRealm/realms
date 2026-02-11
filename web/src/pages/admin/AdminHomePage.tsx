@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { getAdminHome, type AdminHome } from '../../api/admin/home';
 import { getAdminUsageTimeSeries, type AdminUsageTimeSeriesPoint } from '../../api/admin/usage';
+import { formatIntComma } from '../../format/int';
 
 type ChartInstance = {
   destroy?: () => void;
@@ -169,6 +170,9 @@ export function AdminHomePage() {
             beginAtZero: true,
             suggestedMax: detailField === 'cache_ratio' ? 100 : undefined,
             grid: { color: 'rgba(148, 163, 184, 0.18)' },
+            ...(detailField === 'requests' || detailField === 'tokens'
+              ? { ticks: { callback: (value: string | number) => formatIntComma(value) } }
+              : {}),
           },
         },
       },
@@ -218,7 +222,7 @@ export function AdminHomePage() {
               </div>
               <div>
                 <h6 className="text-muted text-uppercase mb-1 small fw-semibold">总用户数</h6>
-                <h3 className="mb-0 fw-bold text-dark">{stats.users_count}</h3>
+                <h3 className="mb-0 fw-bold text-dark">{formatIntComma(stats.users_count)}</h3>
               </div>
             </div>
           </div>
@@ -232,7 +236,7 @@ export function AdminHomePage() {
               </div>
               <div>
                 <h6 className="text-muted text-uppercase mb-1 small fw-semibold">上游渠道</h6>
-                <h3 className="mb-0 fw-bold text-dark">{stats.channels_count}</h3>
+                <h3 className="mb-0 fw-bold text-dark">{formatIntComma(stats.channels_count)}</h3>
               </div>
             </div>
           </div>
@@ -246,7 +250,7 @@ export function AdminHomePage() {
               </div>
               <div>
                 <h6 className="text-muted text-uppercase mb-1 small fw-semibold">上游节点</h6>
-                <h3 className="mb-0 fw-bold text-dark">{stats.endpoints_count}</h3>
+                <h3 className="mb-0 fw-bold text-dark">{formatIntComma(stats.endpoints_count)}</h3>
               </div>
             </div>
           </div>
@@ -268,17 +272,17 @@ export function AdminHomePage() {
           <div className="row text-center">
             <div className="col-md-4 border-end">
               <h6 className="text-muted mb-2 small fw-semibold text-uppercase">总请求数</h6>
-              <h2 className="fw-bold text-dark">{stats.requests_today}</h2>
+              <h2 className="fw-bold text-dark">{formatIntComma(stats.requests_today)}</h2>
             </div>
             <div className="col-md-4 border-end">
               <h6 className="text-muted mb-2 small fw-semibold text-uppercase">Token 消耗</h6>
-              <h2 className="fw-bold text-dark">{stats.tokens_today}</h2>
+              <h2 className="fw-bold text-dark">{formatIntComma(stats.tokens_today)}</h2>
               <div className="small text-muted font-monospace mt-1">
                 <span className="me-2">
-                  <i className="ri-arrow-up-line text-success"></i> {stats.input_tokens_today}
+                  <i className="ri-arrow-up-line text-success"></i> {formatIntComma(stats.input_tokens_today)}
                 </span>
                 <span>
-                  <i className="ri-arrow-down-line text-primary"></i> {stats.output_tokens_today}
+                  <i className="ri-arrow-down-line text-primary"></i> {formatIntComma(stats.output_tokens_today)}
                 </span>
               </div>
             </div>

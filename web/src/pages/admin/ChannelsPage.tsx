@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type Mutab
 
 import { BootstrapModal } from '../../components/BootstrapModal';
 import { closeModalById } from '../../components/modal';
+import { formatIntComma } from '../../format/int';
 import {
   createChannel,
   createChannelCredential,
@@ -65,7 +66,7 @@ function healthBadge(ch: Channel): { cls: string; label: string; hint?: string }
   if (!ch.last_test_at) {
     return { cls: 'badge bg-light text-secondary border', label: '未测试' };
   }
-  const latency = Number.isFinite(ch.last_test_latency_ms) ? `${ch.last_test_latency_ms}ms` : '-';
+  const latency = Number.isFinite(ch.last_test_latency_ms) ? `${formatIntComma(ch.last_test_latency_ms)}ms` : '-';
   if (ch.last_test_ok) {
     return { cls: 'badge bg-success bg-opacity-10 text-success border border-success-subtle', label: `正常 · ${latency}` };
   }
@@ -296,11 +297,6 @@ export function ChannelsPage() {
     const enabled = list.filter((ch) => ch.status === 1);
     const disabled = list.filter((ch) => ch.status !== 1);
     return [...enabled, ...disabled];
-  }
-
-  function fmtNumber(n: number): string {
-    if (!Number.isFinite(n)) return '-';
-    return new Intl.NumberFormat('zh-CN').format(n);
   }
 
   function fmtHHMM(iso?: string | null): string {
@@ -919,14 +915,15 @@ export function ChannelsPage() {
               minRotation: 0,
             },
           },
-          y: {
-            beginAtZero: true,
-            suggestedMax: detailField === 'cache_ratio' ? 100 : undefined,
-            grid: { color: 'rgba(148, 163, 184, 0.18)' },
-          },
-        },
-      },
-    });
+	          y: {
+	            beginAtZero: true,
+	            suggestedMax: detailField === 'cache_ratio' ? 100 : undefined,
+	            grid: { color: 'rgba(148, 163, 184, 0.18)' },
+	            ...(detailField === 'tokens' ? { ticks: { callback: (value: string | number) => formatIntComma(value) } } : {}),
+	          },
+	        },
+	      },
+	    });
 
     return () => {
       destroy(detailTimeLineChartRef);
@@ -939,7 +936,7 @@ export function ChannelsPage() {
         <div>
           <h2 className="h4 fw-bold mb-1">上游渠道管理</h2>
           <p className="text-muted small mb-0">
-            管理模型转发渠道。支持拖拽排序调整优先级（越靠前优先级越高）。当前 {enabledCount} 启用 / {disabledCount} 禁用 / {channels.length} 总计。
+            管理模型转发渠道。支持拖拽排序调整优先级（越靠前优先级越高）。当前 {formatIntComma(enabledCount)} 启用 / {formatIntComma(disabledCount)} 禁用 / {formatIntComma(channels.length)} 总计。
           </p>
         </div>
         <button type="button" className="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createChannelModal">
@@ -1428,11 +1425,11 @@ export function ChannelsPage() {
                                 <div className="border rounded-3 p-3 bg-white">
                                   <div className="d-flex flex-wrap align-items-center gap-2">
                                     <span className="fw-semibold text-dark">测试详情</span>
-                                    {activeTestPanel?.running ? (
-                                      <span className="badge bg-primary bg-opacity-10 text-primary border border-primary-subtle">
-                                        测试中 {activeTestPanel?.done ?? '-'}/{activeTestPanel?.total || '-'}
-                                      </span>
-                                    ) : (
+	                                    {activeTestPanel?.running ? (
+	                                      <span className="badge bg-primary bg-opacity-10 text-primary border border-primary-subtle">
+	                                        测试中 {formatIntComma(activeTestPanel?.done)} / {formatIntComma(activeTestPanel?.total)}
+	                                      </span>
+	                                    ) : (
                                       <span
                                         className={`badge ${
                                           activeTestPanel?.summary?.ok
@@ -1601,10 +1598,10 @@ export function ChannelsPage() {
                                       <span className="me-1">消耗:</span>
                                       <span className="font-monospace fw-bold text-dark">{usage?.committed_usd ?? '0'}</span>
                                     </div>
-                                    <div className="d-flex align-items-center">
-                                      <span className="me-1">Token:</span>
-                                      <span className="fw-medium text-dark">{fmtNumber(usage?.tokens ?? 0)}</span>
-                                    </div>
+	                                    <div className="d-flex align-items-center">
+	                                      <span className="me-1">Token:</span>
+	                                      <span className="fw-medium text-dark">{formatIntComma(usage?.tokens ?? 0)}</span>
+	                                    </div>
                                     <div className="d-flex align-items-center">
                                       <span className="me-1">缓存:</span>
                                       <span className="fw-medium text-success">{usage?.cache_ratio ?? '0.0%'}</span>

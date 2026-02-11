@@ -8,6 +8,7 @@ import {
   type AdminUsageTimeSeriesPoint,
   type UsageEventDetail,
 } from '../../api/admin/usage';
+import { formatIntComma } from '../../format/int';
 
 type ChartInstance = {
   destroy?: () => void;
@@ -273,6 +274,9 @@ export function UsageAdminPage() {
             beginAtZero: true,
             suggestedMax: detailField === 'cache_ratio' ? 100 : undefined,
             grid: { color: 'rgba(148, 163, 184, 0.18)' },
+            ...(detailField === 'requests' || detailField === 'tokens'
+              ? { ticks: { callback: (value: string | number) => formatIntComma(value) } }
+              : {}),
           },
         },
       },
@@ -385,20 +389,20 @@ export function UsageAdminPage() {
                   </div>
                   <div className="col-lg-8 ps-lg-4">
                     <div className="row g-3">
-                      <div className="col-sm-6 col-md-3">
-                        <div className="metric-card p-3 rounded-3 border">
-                          <div className="text-muted smaller mb-1">全局请求数</div>
-                          <div className="h4 fw-bold mb-1">{windowStats.requests}</div>
-                          <div className="text-primary smaller fw-medium">{windowStats.rpm} RPM</div>
-                        </div>
-                      </div>
-                      <div className="col-sm-6 col-md-3">
-                        <div className="metric-card p-3 rounded-3 border">
-                          <div className="text-muted smaller mb-1">Token 吞吐</div>
-                          <div className="h4 fw-bold mb-1">{windowStats.tokens}</div>
-                          <div className="text-primary smaller fw-medium">{windowStats.tpm} TPM</div>
-                        </div>
-                      </div>
+	                      <div className="col-sm-6 col-md-3">
+	                        <div className="metric-card p-3 rounded-3 border">
+	                          <div className="text-muted smaller mb-1">全局请求数</div>
+	                          <div className="h4 fw-bold mb-1">{formatIntComma(windowStats.requests)}</div>
+	                          <div className="text-primary smaller fw-medium">{formatIntComma(windowStats.rpm)} RPM</div>
+	                        </div>
+	                      </div>
+	                      <div className="col-sm-6 col-md-3">
+	                        <div className="metric-card p-3 rounded-3 border">
+	                          <div className="text-muted smaller mb-1">Token 吞吐</div>
+	                          <div className="h4 fw-bold mb-1">{formatIntComma(windowStats.tokens)}</div>
+	                          <div className="text-primary smaller fw-medium">{formatIntComma(windowStats.tpm)} TPM</div>
+	                        </div>
+	                      </div>
                       <div className="col-sm-6 col-md-3">
                         <div className="metric-card p-3 rounded-3 border">
                           <div className="text-muted smaller mb-1">缓存率</div>
@@ -406,13 +410,13 @@ export function UsageAdminPage() {
                           <div className="text-muted smaller fw-medium">输入 + 输出</div>
                         </div>
                       </div>
-                      <div className="col-sm-6 col-md-3">
-                        <div className="metric-card p-3 rounded-3 border">
-                          <div className="text-muted smaller mb-1">缓存 Token</div>
-                          <div className="h4 fw-bold mb-1">{windowStats.cached_tokens}</div>
-                          <div className="text-muted smaller fw-medium">输入 + 输出</div>
-                        </div>
-                      </div>
+	                      <div className="col-sm-6 col-md-3">
+	                        <div className="metric-card p-3 rounded-3 border">
+	                          <div className="text-muted smaller mb-1">缓存 Token</div>
+	                          <div className="h4 fw-bold mb-1">{formatIntComma(windowStats.cached_tokens)}</div>
+	                          <div className="text-muted smaller fw-medium">输入 + 输出</div>
+	                        </div>
+	                      </div>
                       <div className="col-sm-6 col-md-3">
                         <div className="metric-card p-3 rounded-3 border">
                           <div className="text-muted smaller mb-1">平均首字延迟</div>
@@ -430,17 +434,17 @@ export function UsageAdminPage() {
                       <div className="col-12 mt-3">
                         <div className="bg-light p-3 rounded-3">
                           <div className="row text-center small">
-                            <div className="col-6 border-end">
-                              <div className="text-muted smaller">输入总计</div>
-                              <div className="fw-medium">{windowStats.input_tokens}</div>
-                            </div>
-                            <div className="col-6">
-                              <div className="text-muted smaller">输出总计</div>
-                              <div className="fw-medium">{windowStats.output_tokens}</div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
+	                            <div className="col-6 border-end">
+	                              <div className="text-muted smaller">输入总计</div>
+	                              <div className="fw-medium">{formatIntComma(windowStats.input_tokens)}</div>
+	                            </div>
+	                            <div className="col-6">
+	                              <div className="text-muted smaller">输出总计</div>
+	                              <div className="fw-medium">{formatIntComma(windowStats.output_tokens)}</div>
+	                            </div>
+	                          </div>
+	                        </div>
+	                      </div>
                     </div>
                   </div>
                 </div>
@@ -649,24 +653,26 @@ export function UsageAdminPage() {
                               ) : (
                                 <span className="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill">{e.status_code}</span>
                               )}
-                            </td>
-                            <td className="text-end font-monospace text-muted">{e.latency_ms} ms</td>
-                            <td className="text-end font-monospace text-muted">{e.first_token_latency_ms === '-' ? '-' : `${e.first_token_latency_ms} ms`}</td>
-                            <td className="text-end font-monospace">
-                              <div>
-                                <span className="text-muted">In:</span> {e.input_tokens}
-                              </div>
-                              <div>
-                                <span className="text-muted">Out:</span> {e.output_tokens}
-                              </div>
-                              {e.cached_tokens !== '-' ? (
-                                <div className="text-success smaller">
-                                  <span className="material-symbols-rounded">bolt</span> {e.cached_tokens}
-                                </div>
-                              ) : null}
-                            </td>
-                            <td className="text-end font-monospace text-muted">{e.tokens_per_second}</td>
-                            <td className="text-end font-monospace fw-bold text-dark">{e.cost_usd}</td>
+	                            </td>
+	                            <td className="text-end font-monospace text-muted">{formatIntComma(e.latency_ms)} ms</td>
+	                            <td className="text-end font-monospace text-muted">
+	                              {e.first_token_latency_ms === '-' ? '-' : `${formatIntComma(e.first_token_latency_ms)} ms`}
+	                            </td>
+	                            <td className="text-end font-monospace">
+	                              <div>
+	                                <span className="text-muted">In:</span> {formatIntComma(e.input_tokens)}
+	                              </div>
+	                              <div>
+	                                <span className="text-muted">Out:</span> {formatIntComma(e.output_tokens)}
+	                              </div>
+	                              {e.cached_tokens !== '-' ? (
+	                                <div className="text-success smaller">
+	                                  <span className="material-symbols-rounded">bolt</span> {formatIntComma(e.cached_tokens)}
+	                                </div>
+	                              ) : null}
+	                            </td>
+	                            <td className="text-end font-monospace text-muted">{formatIntComma(e.tokens_per_second)}</td>
+	                            <td className="text-end font-monospace fw-bold text-dark">{e.cost_usd}</td>
                             <td className="text-center text-nowrap">
                               <span className={badgeForState(e.state_badge_class)}>{e.state_label}</span>
                               {e.is_stream ? <div className="badge bg-info-subtle text-info border border-info-subtle rounded-pill px-2 scale-90 mt-1">STREAM</div> : null}
@@ -709,13 +715,13 @@ export function UsageAdminPage() {
                                           <div className="font-monospace">
                                             <div>
                                               公式: ((输入总-缓存输入)×输入单价 + (输出总-缓存输出)×输出单价 + 缓存输入×缓存输入单价 + 缓存输出×缓存输出单价) × 生效倍率
-                                            </div>
-                                            <div className="mt-1">
-                                              实际: (({detailByEventID[e.id]?.pricing_breakdown?.input_tokens_total || 0}-{detailByEventID[e.id]?.pricing_breakdown?.input_tokens_cached || 0})×{formatUSD(detailByEventID[e.id]?.pricing_breakdown?.input_usd_per_1m || '0')}/1M + ({detailByEventID[e.id]?.pricing_breakdown?.output_tokens_total || 0}-{detailByEventID[e.id]?.pricing_breakdown?.output_tokens_cached || 0})×{formatUSD(detailByEventID[e.id]?.pricing_breakdown?.output_usd_per_1m || '0')}/1M + {detailByEventID[e.id]?.pricing_breakdown?.input_tokens_cached || 0}×{formatUSD(detailByEventID[e.id]?.pricing_breakdown?.cache_input_usd_per_1m || '0')}/1M + {detailByEventID[e.id]?.pricing_breakdown?.output_tokens_cached || 0}×{formatUSD(detailByEventID[e.id]?.pricing_breakdown?.cache_output_usd_per_1m || '0')}/1M) × {formatDecimalPlain(detailByEventID[e.id]?.pricing_breakdown?.effective_multiplier || '1')} = {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.final_cost_usd || '0')}{' '}
-                                              <span className="text-muted smaller">
-                                                （{costSourceLabel(detailByEventID[e.id]?.pricing_breakdown?.cost_source || '')}费用: {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.cost_source_usd || '0')}；倍率: 支付×{formatDecimalPlain(detailByEventID[e.id]?.pricing_breakdown?.payment_multiplier || '1')} × 渠道组({detailByEventID[e.id]?.pricing_breakdown?.group_name || 'default'})×{formatDecimalPlain(detailByEventID[e.id]?.pricing_breakdown?.group_multiplier || '1')}）
-                                              </span>
-                                            </div>
+	                                            </div>
+	                                            <div className="mt-1">
+	                                              实际: (({formatIntComma(detailByEventID[e.id]?.pricing_breakdown?.input_tokens_total || 0)}-{formatIntComma(detailByEventID[e.id]?.pricing_breakdown?.input_tokens_cached || 0)})×{formatUSD(detailByEventID[e.id]?.pricing_breakdown?.input_usd_per_1m || '0')}/1M + ({formatIntComma(detailByEventID[e.id]?.pricing_breakdown?.output_tokens_total || 0)}-{formatIntComma(detailByEventID[e.id]?.pricing_breakdown?.output_tokens_cached || 0)})×{formatUSD(detailByEventID[e.id]?.pricing_breakdown?.output_usd_per_1m || '0')}/1M + {formatIntComma(detailByEventID[e.id]?.pricing_breakdown?.input_tokens_cached || 0)}×{formatUSD(detailByEventID[e.id]?.pricing_breakdown?.cache_input_usd_per_1m || '0')}/1M + {formatIntComma(detailByEventID[e.id]?.pricing_breakdown?.output_tokens_cached || 0)}×{formatUSD(detailByEventID[e.id]?.pricing_breakdown?.cache_output_usd_per_1m || '0')}/1M) × {formatDecimalPlain(detailByEventID[e.id]?.pricing_breakdown?.effective_multiplier || '1')} = {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.final_cost_usd || '0')}{' '}
+	                                              <span className="text-muted smaller">
+	                                                （{costSourceLabel(detailByEventID[e.id]?.pricing_breakdown?.cost_source || '')}费用: {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.cost_source_usd || '0')}；倍率: 支付×{formatDecimalPlain(detailByEventID[e.id]?.pricing_breakdown?.payment_multiplier || '1')} × 渠道组({detailByEventID[e.id]?.pricing_breakdown?.group_name || 'default'})×{formatDecimalPlain(detailByEventID[e.id]?.pricing_breakdown?.group_multiplier || '1')}）
+	                                              </span>
+	                                            </div>
                                           </div>
                                         </div>
                                       ) : null}
