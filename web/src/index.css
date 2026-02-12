@@ -113,6 +113,43 @@ tr:hover .rlm-model-icon {
   --bs-table-accent-bg: transparent;
 }
 
+.table-hover > tbody > tr.rlm-channel-row-main {
+  transition:
+    background-color 0.12s ease,
+    box-shadow 0.12s ease,
+    opacity 0.12s ease;
+}
+
+.rlm-dnd-sorting .table-hover > tbody > tr.rlm-channel-row-main {
+  will-change: transform;
+}
+
+.table-hover > tbody > tr.rlm-channel-row-drop-target > * {
+  box-shadow: inset 0 0 0 1px rgba(var(--bs-primary-rgb), 0.35);
+}
+
+.table-hover > tbody > tr.rlm-channel-row-dragging {
+  opacity: 0.35;
+}
+
+.rlm-channel-dnd-overlay {
+  pointer-events: none;
+  box-sizing: border-box;
+  border: 1px solid rgba(var(--bs-primary-rgb), 0.16);
+  border-radius: 0.85rem;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 26px 55px rgba(15, 23, 42, 0.22);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .table-hover > tbody > tr.rlm-channel-row-main {
+    transition: none;
+  }
+}
+
 .rlm-models-card {
   overflow: hidden;
 }
