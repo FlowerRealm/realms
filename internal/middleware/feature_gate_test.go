@@ -2,24 +2,24 @@ package middleware
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
 
-type fakeBoolSettingGetter struct {
-	val bool
-	ok  bool
-	err error
+type fakeFeatureDisabledGetter struct {
+	disabled bool
 }
 
-func (f fakeBoolSettingGetter) GetBoolAppSetting(ctx context.Context, key string) (bool, bool, error) {
-	return f.val, f.ok, f.err
+func (f fakeFeatureDisabledGetter) FeatureDisabledEffective(ctx context.Context, selfMode bool, key string) bool {
+	_ = ctx
+	_ = selfMode
+	_ = key
+	return f.disabled
 }
 
-func TestFeatureGate_Disabled_ReturnsNotFound(t *testing.T) {
-	mw := FeatureGate(fakeBoolSettingGetter{val: true, ok: true}, "feature_disable_x")
+func TestFeatureGateEffective_Disabled_ReturnsNotFound(t *testing.T) {
+	mw := FeatureGateEffective(fakeFeatureDisabledGetter{disabled: true}, false, "feature_disable_x")
 
 	nextCalled := 0
 	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,8 +39,8 @@ func TestFeatureGate_Disabled_ReturnsNotFound(t *testing.T) {
 	}
 }
 
-func TestFeatureGate_NotSet_PassesThrough(t *testing.T) {
-	mw := FeatureGate(fakeBoolSettingGetter{val: true, ok: false}, "feature_disable_x")
+func TestFeatureGateEffective_Enabled_PassesThrough(t *testing.T) {
+	mw := FeatureGateEffective(fakeFeatureDisabledGetter{disabled: false}, false, "feature_disable_x")
 
 	nextCalled := 0
 	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -60,8 +60,8 @@ func TestFeatureGate_NotSet_PassesThrough(t *testing.T) {
 	}
 }
 
-func TestFeatureGate_Error_PassesThrough(t *testing.T) {
-	mw := FeatureGate(fakeBoolSettingGetter{val: true, ok: true, err: errors.New("boom")}, "feature_disable_x")
+func TestFeatureGateEffective_EmptyKey_PassesThrough(t *testing.T) {
+	mw := FeatureGateEffective(fakeFeatureDisabledGetter{disabled: true}, false, "   ")
 
 	nextCalled := 0
 	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -81,8 +81,8 @@ func TestFeatureGate_Error_PassesThrough(t *testing.T) {
 	}
 }
 
-func TestFeatureGate_EmptyKey_PassesThrough(t *testing.T) {
-	mw := FeatureGate(fakeBoolSettingGetter{val: true, ok: true}, "   ")
+func TestFeatureGateEffective_NilGetter_PassesThrough(t *testing.T) {
+	mw := FeatureGateEffective(nil, false, "feature_disable_x")
 
 	nextCalled := 0
 	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

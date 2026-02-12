@@ -118,7 +118,7 @@ func TestSelect_PromotionBeatsPriority(t *testing.T) {
 		},
 	}
 	s := New(fs)
-	sel, err := s.Select(context.Background(), 10, "")
+	sel, err := s.SelectWithConstraints(context.Background(), 10, "", Constraints{})
 	if err != nil {
 		t.Fatalf("Select err: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestSelect_PinnedChannelBeatsPromotion(t *testing.T) {
 	s.state.SetChannelPointerRing([]int64{2, 1})
 	s.PinChannel(2)
 
-	sel, err := s.Select(context.Background(), 10, "")
+	sel, err := s.SelectWithConstraints(context.Background(), 10, "", Constraints{})
 	if err != nil {
 		t.Fatalf("Select err: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestPinnedChannelInfo_BanRotationSetsReason(t *testing.T) {
 	s.PinChannel(1)
 
 	now := time.Now()
-	s.BanChannelImmediate(1, now, 10*time.Second)
+	s.state.BanChannelImmediate(1, now, 10*time.Second)
 
 	id, _, reason, ok := s.PinnedChannelInfo()
 	if !ok {
@@ -282,7 +282,7 @@ func TestSelect_AffinityBeatsPriority(t *testing.T) {
 	}
 	s := New(fs)
 	s.state.SetAffinity(99, 1, time.Now().Add(10*time.Minute))
-	sel, err := s.Select(context.Background(), 99, "")
+	sel, err := s.SelectWithConstraints(context.Background(), 99, "", Constraints{})
 	if err != nil {
 		t.Fatalf("Select err: %v", err)
 	}
@@ -346,36 +346,6 @@ func TestState_BanChannelClampedToTenMinutes(t *testing.T) {
 	}
 }
 
-func TestState_ListProbeDueChannels_RespectsClaimAndOrder(t *testing.T) {
-	st := NewState()
-	now := time.Now()
-
-	st.mu.Lock()
-	st.channelProbeDueAt[1] = now.Add(-2 * time.Second)
-	st.channelProbeDueAt[2] = now.Add(-1 * time.Second)
-	st.channelProbeDueAt[3] = now.Add(-3 * time.Second)
-	st.channelProbeClaimUntil[2] = now.Add(10 * time.Second) // active claim
-	st.channelProbeClaimUntil[3] = now.Add(-1 * time.Second) // expired claim
-	st.mu.Unlock()
-
-	got := st.ListProbeDueChannels(now, 10)
-	if len(got) != 2 || got[0] != 3 || got[1] != 1 {
-		t.Fatalf("unexpected probe due channels: %+v", got)
-	}
-
-	got1 := st.ListProbeDueChannels(now, 1)
-	if len(got1) != 1 || got1[0] != 3 {
-		t.Fatalf("unexpected probe due channels with limit=1: %+v", got1)
-	}
-
-	st.mu.Lock()
-	_, ok := st.channelProbeClaimUntil[3]
-	st.mu.Unlock()
-	if ok {
-		t.Fatalf("expected expired claim to be cleared")
-	}
-}
-
 func TestSelect_ProbeChannelBeatsPromotionAndIsSingleFlight(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
@@ -405,7 +375,7 @@ func TestSelect_ProbeChannelBeatsPromotionAndIsSingleFlight(t *testing.T) {
 	s.state.channelProbeDueAt[1] = time.Now()
 	s.state.mu.Unlock()
 
-	first, err := s.Select(context.Background(), 10, "")
+	first, err := s.SelectWithConstraints(context.Background(), 10, "", Constraints{})
 	if err != nil {
 		t.Fatalf("Select err: %v", err)
 	}
@@ -413,7 +383,7 @@ func TestSelect_ProbeChannelBeatsPromotionAndIsSingleFlight(t *testing.T) {
 		t.Fatalf("expected probe channel=1 to be selected first, got=%d", first.ChannelID)
 	}
 
-	second, err := s.Select(context.Background(), 10, "")
+	second, err := s.SelectWithConstraints(context.Background(), 10, "", Constraints{})
 	if err != nil {
 		t.Fatalf("Select err: %v", err)
 	}
@@ -467,7 +437,7 @@ func TestSelect_LowestRPMWins(t *testing.T) {
 	s.state.RecordRPM("openai_compatible:2", now.Add(-10*time.Second))
 	s.state.RecordRPM("openai_compatible:2", now.Add(-9*time.Second))
 
-	sel, err := s.Select(context.Background(), 10, "")
+	sel, err := s.SelectWithConstraints(context.Background(), 10, "", Constraints{})
 	if err != nil {
 		t.Fatalf("Select err: %v", err)
 	}
@@ -504,7 +474,7 @@ func TestSelect_BindingWinsIfNotCooling(t *testing.T) {
 		CredentialID:   2,
 	}
 	s.state.SetBinding(10, routeKeyHash, want, time.Now().Add(10*time.Minute))
-	sel, err := s.Select(context.Background(), 10, routeKeyHash)
+	sel, err := s.SelectWithConstraints(context.Background(), 10, routeKeyHash, Constraints{})
 	if err != nil {
 		t.Fatalf("Select err: %v", err)
 	}
@@ -551,7 +521,7 @@ func TestSelect_PinnedChannelOverridesBinding(t *testing.T) {
 
 	s.PinChannel(2)
 
-	sel, err := s.Select(context.Background(), 10, routeKeyHash)
+	sel, err := s.SelectWithConstraints(context.Background(), 10, routeKeyHash, Constraints{})
 	if err != nil {
 		t.Fatalf("Select err: %v", err)
 	}
@@ -605,7 +575,7 @@ func TestSelect_PointerRingDoesNotOverrideBindingWhenNotPinned(t *testing.T) {
 		CredentialID:   111,
 	}, time.Now().Add(10*time.Minute))
 
-	sel, err := s.Select(context.Background(), 10, routeKeyHash)
+	sel, err := s.SelectWithConstraints(context.Background(), 10, routeKeyHash, Constraints{})
 	if err != nil {
 		t.Fatalf("Select err: %v", err)
 	}
@@ -807,7 +777,7 @@ func TestGetBinding_FallsBackToBindingStore(t *testing.T) {
 	s.TouchBinding(55, routeKeyHash, want)
 	s.state.ClearBinding(55, routeKeyHash)
 
-	got, ok := s.GetBinding(55, routeKeyHash)
+	got, ok := s.getBinding(context.Background(), 55, routeKeyHash)
 	if !ok {
 		t.Fatalf("expected binding hit from binding store")
 	}
@@ -861,11 +831,11 @@ func TestSelect_MultiInstanceStickyHitRateViaSQLiteBindingStore(t *testing.T) {
 		sA.state.RecordRPM("openai_compatible:2", now)
 		sB.state.RecordRPM("openai_compatible:1", now)
 
-		selA, err := sA.Select(context.Background(), userID, routeKeyHash)
+		selA, err := sA.SelectWithConstraints(context.Background(), userID, routeKeyHash, Constraints{})
 		if err != nil {
 			t.Fatalf("Select A err: %v", err)
 		}
-		selB, err := sB.Select(context.Background(), userID, routeKeyHash)
+		selB, err := sB.SelectWithConstraints(context.Background(), userID, routeKeyHash, Constraints{})
 		if err != nil {
 			t.Fatalf("Select B err: %v", err)
 		}
@@ -909,7 +879,7 @@ func TestSelect_BindingStoreFailureFallsBackToInMemory(t *testing.T) {
 		CredentialID:   1,
 	})
 
-	sel, err := s.Select(context.Background(), 99, routeKeyHash)
+	sel, err := s.SelectWithConstraints(context.Background(), 99, routeKeyHash, Constraints{})
 	if err != nil {
 		t.Fatalf("Select err: %v", err)
 	}
@@ -935,19 +905,19 @@ func TestRuntimeBindingStats_BasicCounters(t *testing.T) {
 	}
 
 	s.TouchBinding(userID, routeKeyHash, sel)
-	if _, ok := s.GetBinding(userID, routeKeyHash); !ok {
+	if _, ok := s.getBinding(context.Background(), userID, routeKeyHash); !ok {
 		t.Fatalf("expected memory binding hit")
 	}
 
 	// 清内存、保留持久层，验证 store fallback。
 	s.state.ClearBinding(userID, routeKeyHash)
-	if _, ok := s.GetBinding(userID, routeKeyHash); !ok {
+	if _, ok := s.getBinding(context.Background(), userID, routeKeyHash); !ok {
 		t.Fatalf("expected store binding hit")
 	}
-	if _, ok := s.GetBinding(userID, s.RouteKeyHash("missing")); ok {
+	if _, ok := s.getBinding(context.Background(), userID, s.RouteKeyHash("missing")); ok {
 		t.Fatalf("expected binding miss")
 	}
-	s.ClearBinding(userID, routeKeyHash)
+	s.clearBinding(context.Background(), userID, routeKeyHash, bindingClearReasonManual)
 
 	st := s.RuntimeBindingStats()
 	if st.MemoryHits != 1 {
@@ -983,10 +953,10 @@ func TestRuntimeBindingStats_StoreErrorsCounted(t *testing.T) {
 	})
 
 	s.state.ClearBinding(userID, routeKeyHash)
-	if _, ok := s.GetBinding(userID, routeKeyHash); ok {
+	if _, ok := s.getBinding(context.Background(), userID, routeKeyHash); ok {
 		t.Fatalf("expected miss when binding store read fails")
 	}
-	s.ClearBinding(userID, routeKeyHash)
+	s.clearBinding(context.Background(), userID, routeKeyHash, bindingClearReasonManual)
 
 	st := s.RuntimeBindingStats()
 	if st.StoreWriteErrors == 0 {

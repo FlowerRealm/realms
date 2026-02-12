@@ -21,10 +21,6 @@ func NewStorage(baseDir string) *Storage {
 	return &Storage{baseDir: strings.TrimSpace(baseDir)}
 }
 
-func (s *Storage) BaseDir() string {
-	return s.baseDir
-}
-
 type SaveResult struct {
 	RelPath   string
 	SizeBytes int64

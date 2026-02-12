@@ -17,7 +17,7 @@ export async function listAdminUsers() {
   return res.data;
 }
 
-export type CreateAdminUserRequest = {
+type CreateAdminUserRequest = {
   email: string;
   username: string;
   password: string;
@@ -30,7 +30,7 @@ export async function createAdminUser(req: CreateAdminUserRequest) {
   return res.data;
 }
 
-export type UpdateAdminUserRequest = {
+type UpdateAdminUserRequest = {
   email?: string;
   status?: number;
   role?: string;

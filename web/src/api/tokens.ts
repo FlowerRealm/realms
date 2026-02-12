@@ -11,13 +11,13 @@ export type UserToken = {
   last_used_at?: string | null;
 };
 
-export type CreatedToken = {
+type CreatedToken = {
   token_id: number;
   token: string;
   token_hint?: string | null;
 };
 
-export type RevealedToken = {
+type RevealedToken = {
   token_id: number;
   token: string;
 };

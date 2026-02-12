@@ -53,7 +53,7 @@ export type ChannelUsage = {
   tokens_per_second: string;
 };
 
-export type ChannelUsageOverview = {
+type ChannelUsageOverview = {
   requests: number;
   tokens: number;
   committed_usd: string;
@@ -77,7 +77,7 @@ export type ChannelAdminItem = Channel & {
   runtime: ChannelRuntime;
 };
 
-export type ChannelsPageResponse = {
+type ChannelsPageResponse = {
   admin_time_zone: string;
   start: string;
   end: string;
@@ -94,7 +94,7 @@ export type ChannelTimeSeriesPoint = {
   tokens_per_second: number;
 };
 
-export type ChannelTimeSeriesResponse = {
+type ChannelTimeSeriesResponse = {
   admin_time_zone: string;
   channel_id: number;
   start: string;
@@ -103,7 +103,7 @@ export type ChannelTimeSeriesResponse = {
   points: ChannelTimeSeriesPoint[];
 };
 
-export type CreateChannelRequest = {
+type CreateChannelRequest = {
   type: string;
   name: string;
   groups?: string;
@@ -116,7 +116,7 @@ export type CreateChannelRequest = {
   allow_safety_identifier?: boolean;
 };
 
-export type UpdateChannelRequest = {
+type UpdateChannelRequest = {
   id: number;
   name?: string;
   groups?: string;
@@ -137,11 +137,6 @@ export type PinnedChannelInfo = {
   pinned_channel: string;
   pinned_note?: string | null;
 };
-
-export async function listChannels() {
-  const res = await api.get<APIResponse<Channel[]>>('/api/channel');
-  return res.data;
-}
 
 export async function getChannelsPage(params?: { start?: string; end?: string }) {
   const res = await api.get<APIResponse<ChannelsPageResponse>>('/api/channel/page', { params });
@@ -253,11 +248,6 @@ export async function createChannelCodexAccount(
   return res.data;
 }
 
-export async function refreshChannelCodexAccounts(channelID: number) {
-  const res = await api.post<APIResponse<void>>(`/api/channel/${channelID}/codex-accounts/refresh`);
-  return res.data;
-}
-
 export async function refreshChannelCodexAccount(channelID: number, accountID: number) {
   const res = await api.post<APIResponse<void>>(`/api/channel/${channelID}/codex-accounts/${accountID}/refresh`);
   return res.data;
@@ -270,11 +260,6 @@ export async function deleteChannelCodexAccount(channelID: number, accountID: nu
 
 export async function deleteChannel(channelID: number) {
   const res = await api.delete<APIResponse<void>>(`/api/channel/${channelID}`);
-  return res.data;
-}
-
-export async function testChannel(channelID: number) {
-  const res = await api.get<APIResponse<{ latency_ms: number; probe?: ChannelProbeSummary }>>(`/api/channel/test/${channelID}`);
   return res.data;
 }
 
@@ -494,11 +479,6 @@ export async function testChannelStream(
     throw new Error('测试流未返回总结结果');
   }
   return finalResult;
-}
-
-export async function testAllChannels() {
-  const res = await api.get<APIResponse<Array<{ channel_id: number; ok: boolean; latency_ms: number; message: string }>>>('/api/channel/test');
-  return res.data;
 }
 
 export async function getChannelKey(channelID: number) {

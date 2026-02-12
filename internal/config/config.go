@@ -123,11 +123,6 @@ func LoadFromEnv() (Config, error) {
 	return normalizeAndValidate(cfg)
 }
 
-// Load 等价于 LoadFromEnv（为便于调用保留别名）。
-func Load() (Config, error) {
-	return LoadFromEnv()
-}
-
 func normalizeAndValidate(cfg Config) (Config, error) {
 	publicBaseURL, err := NormalizeHTTPBaseURL(cfg.Server.PublicBaseURL, "server.public_base_url")
 	if err != nil {

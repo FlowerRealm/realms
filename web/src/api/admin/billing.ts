@@ -20,7 +20,7 @@ export type AdminSubscriptionPlan = {
   updated_at: string;
 };
 
-export type CreateAdminSubscriptionPlanRequest = {
+type CreateAdminSubscriptionPlanRequest = {
   code?: string;
   name: string;
   group_name?: string;
@@ -34,7 +34,7 @@ export type CreateAdminSubscriptionPlanRequest = {
   limit_30d?: string;
 };
 
-export type UpdateAdminSubscriptionPlanRequest = CreateAdminSubscriptionPlanRequest;
+type UpdateAdminSubscriptionPlanRequest = CreateAdminSubscriptionPlanRequest;
 
 export async function listAdminSubscriptionPlans() {
   const res = await api.get<APIResponse<AdminSubscriptionPlan[]>>('/api/admin/subscriptions');

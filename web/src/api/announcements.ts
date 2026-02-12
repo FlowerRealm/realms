@@ -8,7 +8,7 @@ export type AnnouncementListItem = {
   read: boolean;
 };
 
-export type AnnouncementsListResponse = {
+type AnnouncementsListResponse = {
   unread_count: number;
   items: AnnouncementListItem[];
 };
@@ -31,9 +31,3 @@ export async function getAnnouncement(id: number) {
   const res = await api.get<APIResponse<AnnouncementDetail>>(`/api/announcements/${id}`);
   return res.data;
 }
-
-export async function markAnnouncementRead(id: number) {
-  const res = await api.post<APIResponse<void>>(`/api/announcements/${id}/read`, {});
-  return res.data;
-}
-

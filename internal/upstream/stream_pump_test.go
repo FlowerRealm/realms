@@ -4,10 +4,37 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 )
+
+type flushWriter struct {
+	h       http.Header
+	buf     bytes.Buffer
+	flushes int
+	status  int
+}
+
+func (w *flushWriter) Header() http.Header {
+	if w.h == nil {
+		w.h = make(http.Header)
+	}
+	return w.h
+}
+
+func (w *flushWriter) WriteHeader(statusCode int) {
+	w.status = statusCode
+}
+
+func (w *flushWriter) Write(p []byte) (int, error) {
+	return w.buf.Write(p)
+}
+
+func (w *flushWriter) Flush() {
+	w.flushes++
+}
 
 func TestPumpSSE_AllowsLargeDataLine(t *testing.T) {
 	t.Parallel()

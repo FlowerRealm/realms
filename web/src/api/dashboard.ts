@@ -1,7 +1,7 @@
 import { api } from './client';
 import type { APIResponse } from './types';
 
-export type DashboardSubscriptionWindow = {
+type DashboardSubscriptionWindow = {
   window: string;
   used_usd: string;
   limit_usd: string;
@@ -15,7 +15,7 @@ export type DashboardSubscription = {
   usage_windows?: DashboardSubscriptionWindow[];
 };
 
-export type DashboardModelUsage = {
+type DashboardModelUsage = {
   model: string;
   icon_url?: string;
   color: string;
@@ -24,7 +24,7 @@ export type DashboardModelUsage = {
   committed_usd: string;
 };
 
-export type DashboardTimeSeriesUsage = {
+type DashboardTimeSeriesUsage = {
   label: string;
   requests: number;
   tokens: number;

@@ -83,7 +83,7 @@ export type AdminUsageTimeSeriesPoint = {
   tokens_per_second: number;
 };
 
-export type AdminUsageTimeSeriesResponse = {
+type AdminUsageTimeSeriesResponse = {
   admin_time_zone: string;
   start: string;
   end: string;
@@ -94,11 +94,6 @@ export type AdminUsageTimeSeriesResponse = {
 export type UsageEventDetail = {
   event_id: number;
   pricing_breakdown?: UsageEventPricingBreakdown;
-};
-
-export type UsageEventGroupMultiplier = {
-  group_name: string;
-  multiplier: string;
 };
 
 export type UsageEventPricingBreakdown = {

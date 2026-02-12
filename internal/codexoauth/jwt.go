@@ -4,22 +4,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"strconv"
 	"strings"
-	"time"
 )
-
-func ParseJWTClaims(raw string) (map[string]any, error) {
-	payload, err := jwtPayload(raw)
-	if err != nil {
-		return nil, err
-	}
-	var m map[string]any
-	if err := json.Unmarshal(payload, &m); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
 
 type OpenAIAuthClaims struct {
 	ChatgptAccountID               string              `json:"chatgpt_account_id"`
@@ -129,19 +115,6 @@ func ParseIDTokenClaims(raw string) (*IDTokenClaims, error) {
 	}, nil
 }
 
-func (c *IDTokenClaims) HasActivePlusSubscription(now time.Time) bool {
-	if c == nil {
-		return false
-	}
-	if until, ok := parseEpochOrTime(c.SubscriptionActiveUntil); ok && !until.After(now) {
-		return false
-	}
-	if start, ok := parseEpochOrTime(c.SubscriptionActiveStart); ok && start.After(now) {
-		return false
-	}
-	return true
-}
-
 func defaultOrganizationID(organizations []OrganizationClaim) string {
 	for _, org := range organizations {
 		if org.IsDefault && strings.TrimSpace(org.ID) != "" {
@@ -152,49 +125,6 @@ func defaultOrganizationID(organizations []OrganizationClaim) string {
 		return ""
 	}
 	return strings.TrimSpace(organizations[0].ID)
-}
-
-func parseEpochOrTime(v any) (time.Time, bool) {
-	switch value := v.(type) {
-	case float64:
-		return unixTimeFromInt64(int64(value))
-	case int64:
-		return unixTimeFromInt64(value)
-	case int:
-		return unixTimeFromInt64(int64(value))
-	case json.Number:
-		n, err := value.Int64()
-		if err != nil {
-			return time.Time{}, false
-		}
-		return unixTimeFromInt64(n)
-	case string:
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return time.Time{}, false
-		}
-		if n, err := strconv.ParseInt(value, 10, 64); err == nil {
-			return unixTimeFromInt64(n)
-		}
-		t, err := time.Parse(time.RFC3339, value)
-		if err != nil {
-			return time.Time{}, false
-		}
-		return t, true
-	default:
-		return time.Time{}, false
-	}
-}
-
-func unixTimeFromInt64(v int64) (time.Time, bool) {
-	if v <= 0 {
-		return time.Time{}, false
-	}
-	// 兼容毫秒级时间戳。
-	if v > 1_000_000_000_000 {
-		return time.UnixMilli(v), true
-	}
-	return time.Unix(v, 0), true
 }
 
 func jwtPayload(raw string) ([]byte, error) {

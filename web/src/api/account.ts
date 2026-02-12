@@ -1,7 +1,7 @@
 import { api } from './client';
 import type { APIResponse } from './types';
 
-export type ForceLogoutResponse = {
+type ForceLogoutResponse = {
   force_logout?: boolean;
 };
 

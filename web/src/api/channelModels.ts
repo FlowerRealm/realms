@@ -27,8 +27,3 @@ export async function updateChannelModel(channelID: number, binding: { id: numbe
   const res = await api.put<APIResponse<void>>(`/api/channel/${channelID}/models`, binding);
   return res.data;
 }
-
-export async function deleteChannelModel(channelID: number, bindingID: number) {
-  const res = await api.delete<APIResponse<void>>(`/api/channel/${channelID}/models/${bindingID}`);
-  return res.data;
-}

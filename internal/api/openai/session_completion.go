@@ -82,20 +82,8 @@ func (h *Handler) touchBindingFromRouteKey(userID int64, sel scheduler.Selection
 	h.sched.TouchBinding(userID, h.sched.RouteKeyHash(normalized), sel)
 }
 
-func (h *Handler) touchBindingFromPromptCacheKey(userID int64, sel scheduler.Selection, promptCacheKey string) {
-	h.touchBindingFromRouteKey(userID, sel, promptCacheKey)
-}
-
-func extractPromptCacheKeyFromRawBody(body []byte) string {
-	return extractRouteKeyFromRawBody(body)
-}
-
 func extractRouteKeyFromStructuredData(v any) string {
 	return extractRouteKeyFromStructuredDataDepth(v, 8)
-}
-
-func extractPromptCacheKey(v any) string {
-	return extractRouteKeyFromStructuredData(v)
 }
 
 func extractRouteKeyFromStructuredDataDepth(v any, depth int) string {

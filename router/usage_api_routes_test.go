@@ -601,30 +601,6 @@ func TestUsageEventDetail_UserResponse_IncludesPricingBreakdown(t *testing.T) {
 	}
 }
 
-func TestParseDateRangeUTC_RejectsFutureStartAfterClamp(t *testing.T) {
-	now := time.Date(2026, 2, 8, 16, 0, 0, 0, time.UTC)
-
-	_, _, ok := parseDateRangeUTC(now, "2026-02-09", "2026-02-09")
-	if ok {
-		t.Fatalf("expected future-only range to be rejected")
-	}
-}
-
-func TestParseDateRangeUTC_AllowsTodayRange(t *testing.T) {
-	now := time.Date(2026, 2, 8, 16, 0, 0, 0, time.UTC)
-
-	since, until, ok := parseDateRangeUTC(now, "2026-02-08", "2026-02-08")
-	if !ok {
-		t.Fatalf("expected today range to be accepted")
-	}
-	if got, want := since, time.Date(2026, 2, 8, 0, 0, 0, 0, time.UTC); !got.Equal(want) {
-		t.Fatalf("since=%s want=%s", got.Format(time.RFC3339), want.Format(time.RFC3339))
-	}
-	if got, want := until, now; !got.Equal(want) {
-		t.Fatalf("until=%s want=%s", got.Format(time.RFC3339), want.Format(time.RFC3339))
-	}
-}
-
 func TestParseDateRangeInLocation_UsesLocalDayBoundary(t *testing.T) {
 	loc := time.FixedZone("CST", 8*60*60)
 	nowUTC := time.Date(2026, 2, 8, 1, 30, 0, 0, time.UTC) // CST: 2026-02-08 09:30

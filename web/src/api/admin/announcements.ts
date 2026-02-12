@@ -15,7 +15,7 @@ export async function listAdminAnnouncements() {
   return res.data;
 }
 
-export type CreateAdminAnnouncementRequest = {
+type CreateAdminAnnouncementRequest = {
   title: string;
   body: string;
   status?: number;
@@ -35,4 +35,3 @@ export async function deleteAdminAnnouncement(id: number) {
   const res = await api.delete<APIResponse<void>>(`/api/admin/announcements/${id}`);
   return res.data;
 }
-

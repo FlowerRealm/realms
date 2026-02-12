@@ -481,11 +481,3 @@ func parseDateRangeInLocation(nowUTC time.Time, startStr, endStr string, loc *ti
 	}
 	return sinceLocal.UTC(), untilLocal.UTC(), sinceLocal, untilLocal, true
 }
-
-func parseDateRangeUTC(now time.Time, startStr, endStr string) (since time.Time, until time.Time, ok bool) {
-	sinceUTC, untilUTC, _, _, ok := parseDateRangeInLocation(now.UTC(), startStr, endStr, time.UTC)
-	if !ok {
-		return time.Time{}, time.Time{}, false
-	}
-	return sinceUTC, untilUTC, true
-}

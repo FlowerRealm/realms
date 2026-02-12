@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -42,115 +41,6 @@ type CommitInput struct {
 	CachedInputTokens  *int64
 	OutputTokens       *int64
 	CachedOutputTokens *int64
-}
-
-type UsageProvider struct {
-	st *store.Store
-
-	reserveTTL time.Duration
-
-	defaultReserveUSD decimal.Decimal
-}
-
-func NewUsageProvider(st *store.Store, reserveTTL time.Duration, defaultReserveUSD decimal.Decimal) *UsageProvider {
-	if reserveTTL <= 0 {
-		reserveTTL = 2 * time.Minute
-	}
-	return &UsageProvider{
-		st:                st,
-		reserveTTL:        reserveTTL,
-		defaultReserveUSD: defaultReserveUSD,
-	}
-}
-
-func (p *UsageProvider) Reserve(ctx context.Context, in ReserveInput) (ReserveResult, error) {
-	reservedUSD := p.defaultReserveUSD
-	if reservedUSD.LessThanOrEqual(decimal.Zero) {
-		reservedUSD = decimal.NewFromInt(1).Div(decimal.NewFromInt(1000)) // 0.001 USD
-	}
-	if in.Model != nil && ((in.InputTokens != nil && *in.InputTokens > 0) || (in.MaxOutputTokens != nil && *in.MaxOutputTokens > 0)) {
-		c, err := estimateCostUSD(ctx, p.st, in.Model, in.InputTokens, nil, in.MaxOutputTokens, nil)
-		if err != nil {
-			return ReserveResult{}, err
-		}
-		if c.GreaterThan(decimal.Zero) {
-			reservedUSD = c
-		}
-	}
-	multSnap, err := loadTokenGroupMultiplierSnapshot(ctx, p.st, in.TokenID)
-	if err != nil {
-		return ReserveResult{}, err
-	}
-	paymentMult := paygoPriceMultiplier(ctx, p.st)
-	reserveMult := normalizeMultiplier(paymentMult.Mul(multSnap.maxGroupMultiplier))
-	reservedUSD, err = applyPriceMultiplierUSD(reservedUSD, reserveMult)
-	if err != nil {
-		return ReserveResult{}, err
-	}
-	id, err := p.st.ReserveUsage(ctx, store.ReserveUsageInput{
-		RequestID:        in.RequestID,
-		UserID:           in.UserID,
-		SubscriptionID:   nil,
-		TokenID:          in.TokenID,
-		Model:            in.Model,
-		ReservedUSD:      reservedUSD,
-		ReserveExpiresAt: time.Now().Add(p.reserveTTL),
-	})
-	if err != nil {
-		return ReserveResult{}, err
-	}
-	return ReserveResult{UsageEventID: id}, nil
-}
-
-func (p *UsageProvider) Commit(ctx context.Context, in CommitInput) error {
-	if in.UsageEventID == 0 {
-		return nil
-	}
-	usd, err := estimateCostUSD(ctx, p.st, in.Model, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens)
-	if err != nil {
-		return err
-	}
-	ev, err := p.st.GetUsageEvent(ctx, in.UsageEventID)
-	if err != nil {
-		return err
-	}
-	paymentMult := store.DefaultGroupPriceMultiplier
-	if ev.SubscriptionID != nil && *ev.SubscriptionID > 0 {
-		sub, err := p.st.GetSubscriptionWithPlanByID(ctx, *ev.SubscriptionID)
-		if err == nil {
-			paymentMult = sub.Plan.PriceMultiplier
-		}
-	} else {
-		paymentMult = paygoPriceMultiplier(ctx, p.st)
-	}
-	paymentMult = normalizeMultiplier(paymentMult)
-
-	groupMult, groupName := groupMultiplierForRouteGroup(ctx, p.st, in.RouteGroup)
-	totalMult := normalizeMultiplier(paymentMult.Mul(groupMult))
-	usd, err = applyPriceMultiplierUSD(usd, totalMult)
-	if err != nil {
-		return err
-	}
-	if usd.Equal(decimal.Zero) {
-		usd = ev.ReservedUSD
-	}
-	return p.st.CommitUsage(ctx, store.CommitUsageInput{
-		UsageEventID:             in.UsageEventID,
-		UpstreamChannelID:        in.UpstreamChannelID,
-		InputTokens:              in.InputTokens,
-		CachedInputTokens:        in.CachedInputTokens,
-		OutputTokens:             in.OutputTokens,
-		CachedOutputTokens:       in.CachedOutputTokens,
-		CommittedUSD:             usd,
-		PriceMultiplier:          totalMult,
-		PriceMultiplierGroup:     groupMult,
-		PriceMultiplierPayment:   paymentMult,
-		PriceMultiplierGroupName: groupName,
-	})
-}
-
-func (p *UsageProvider) Void(ctx context.Context, usageEventID int64) error {
-	return p.st.VoidUsage(ctx, usageEventID)
 }
 
 func applyPriceMultiplierUSD(baseUSD decimal.Decimal, multiplier decimal.Decimal) (decimal.Decimal, error) {

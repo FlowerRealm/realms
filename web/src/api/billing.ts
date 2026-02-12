@@ -11,7 +11,7 @@ export type BillingSubscriptionOrderView = {
   approved_at?: string;
 };
 
-export type BillingSubscriptionWindow = {
+type BillingSubscriptionWindow = {
   window: string;
   used_usd: string;
   limit_usd: string;
@@ -117,7 +117,7 @@ export async function cancelPayOrder(kind: string, orderId: number) {
   return res.data;
 }
 
-export type StartPaymentRequest = {
+type StartPaymentRequest = {
   payment_channel_id: number;
   epay_type?: string;
 };

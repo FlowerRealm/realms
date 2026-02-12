@@ -31,7 +31,7 @@ export type UsageWindow = {
   remaining_usd: string;
 };
 
-export type UsageWindowsResponse = {
+type UsageWindowsResponse = {
   time_zone?: string;
   now: string;
   subscription?: {
@@ -72,7 +72,7 @@ export type UsageEvent = {
   updated_at: string;
 };
 
-export type UsageEventsResponse = {
+type UsageEventsResponse = {
   events: UsageEvent[];
   next_before_id?: number | null;
 };
@@ -87,7 +87,7 @@ export type UsageTimeSeriesPoint = {
   tokens_per_second: number;
 };
 
-export type UsageTimeSeriesResponse = {
+type UsageTimeSeriesResponse = {
   time_zone?: string;
   start: string;
   end: string;
@@ -134,11 +134,6 @@ export async function getUsageTimeSeries(start?: string, end?: string, granulari
 export type UsageEventDetail = {
   event_id: number;
   pricing_breakdown?: UsageEventPricingBreakdown;
-};
-
-export type UsageEventGroupMultiplier = {
-  group_name: string;
-  multiplier: string;
 };
 
 export type UsageEventPricingBreakdown = {

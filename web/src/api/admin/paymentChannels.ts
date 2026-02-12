@@ -23,7 +23,7 @@ export type AdminPaymentChannel = {
   updated_at: string;
 };
 
-export type CreateAdminPaymentChannelRequest = {
+type CreateAdminPaymentChannelRequest = {
   type: string;
   name: string;
   enabled: boolean;
@@ -37,18 +37,13 @@ export type CreateAdminPaymentChannelRequest = {
   epay_key?: string;
 };
 
-export type UpdateAdminPaymentChannelRequest = Partial<CreateAdminPaymentChannelRequest> & {
+type UpdateAdminPaymentChannelRequest = Partial<CreateAdminPaymentChannelRequest> & {
   name?: string;
   enabled?: boolean;
 };
 
 export async function listAdminPaymentChannels() {
   const res = await api.get<APIResponse<AdminPaymentChannel[]>>('/api/admin/payment-channels');
-  return res.data;
-}
-
-export async function getAdminPaymentChannel(paymentChannelID: number) {
-  const res = await api.get<APIResponse<AdminPaymentChannel>>(`/api/admin/payment-channels/${paymentChannelID}`);
   return res.data;
 }
 
@@ -66,4 +61,3 @@ export async function deleteAdminPaymentChannel(paymentChannelID: number) {
   const res = await api.delete<APIResponse<void>>(`/api/admin/payment-channels/${paymentChannelID}`);
   return res.data;
 }
-

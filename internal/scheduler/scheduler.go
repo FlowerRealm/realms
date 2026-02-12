@@ -310,13 +310,6 @@ func (s *Scheduler) PinnedChannelInfo() (int64, time.Time, string, bool) {
 	return s.state.ChannelPointerInfo(time.Now())
 }
 
-func (s *Scheduler) ClearPinnedChannel() {
-	if s == nil || s.state == nil {
-		return
-	}
-	s.state.ClearChannelPointer()
-}
-
 func (s *Scheduler) RefreshPinnedRing(ctx context.Context) error {
 	if s == nil || s.state == nil {
 		return nil
@@ -336,55 +329,6 @@ func (s *Scheduler) ClearChannelBan(channelID int64) {
 	s.state.ClearChannelBan(channelID)
 }
 
-func (s *Scheduler) BanChannel(channelID int64, now time.Time, base time.Duration) time.Time {
-	if s == nil || s.state == nil {
-		return now
-	}
-	return s.state.BanChannel(channelID, now, base)
-}
-
-func (s *Scheduler) BanChannelImmediate(channelID int64, now time.Time, base time.Duration) time.Time {
-	if s == nil || s.state == nil {
-		return now
-	}
-	return s.state.BanChannelImmediate(channelID, now, base)
-}
-
-func (s *Scheduler) ResetChannelFailScore(channelID int64) {
-	if s == nil || s.state == nil {
-		return
-	}
-	s.state.ResetChannelFailScore(channelID)
-}
-
-func (s *Scheduler) SweepExpiredChannelBans(now time.Time) {
-	if s == nil || s.state == nil {
-		return
-	}
-	s.state.SweepExpiredChannelBans(now)
-}
-
-func (s *Scheduler) ListProbeDueChannels(now time.Time, limit int) []int64 {
-	if s == nil || s.state == nil {
-		return nil
-	}
-	return s.state.ListProbeDueChannels(now, limit)
-}
-
-func (s *Scheduler) TryClaimChannelProbe(channelID int64, now time.Time, ttl time.Duration) bool {
-	if s == nil || s.state == nil {
-		return false
-	}
-	return s.state.TryClaimChannelProbe(channelID, now, ttl)
-}
-
-func (s *Scheduler) ClearChannelProbe(channelID int64) {
-	if s == nil || s.state == nil {
-		return
-	}
-	s.state.ClearChannelProbe(channelID)
-}
-
 func (s *Scheduler) RouteKeyHash(routeKey string) string {
 	if routeKey == "" {
 		return ""
@@ -393,23 +337,11 @@ func (s *Scheduler) RouteKeyHash(routeKey string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (s *Scheduler) GetBinding(userID int64, routeKeyHash string) (Selection, bool) {
-	return s.getBinding(context.Background(), userID, routeKeyHash)
-}
-
 func (s *Scheduler) TouchBinding(userID int64, routeKeyHash string, sel Selection) {
 	if routeKeyHash == "" {
 		return
 	}
 	s.setBinding(context.Background(), userID, routeKeyHash, sel, bindingSetSourceTouch)
-}
-
-func (s *Scheduler) ClearBinding(userID int64, routeKeyHash string) {
-	s.clearBinding(context.Background(), userID, routeKeyHash, bindingClearReasonManual)
-}
-
-func (s *Scheduler) Select(ctx context.Context, userID int64, routeKeyHash string) (Selection, error) {
-	return s.SelectWithConstraints(ctx, userID, routeKeyHash, Constraints{})
 }
 
 func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, routeKeyHash string, cons Constraints) (Selection, error) {

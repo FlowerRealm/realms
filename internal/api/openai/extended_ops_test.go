@@ -122,6 +122,8 @@ func TestResponses_NonStream_StoresObjectRefAndTouchesBinding(t *testing.T) {
 		}, nil
 	})
 	sched := scheduler.New(fs)
+	bs := newRecordingBindingStore()
+	sched.SetBindingStore(bs)
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi"}`)))
@@ -139,7 +141,7 @@ func TestResponses_NonStream_StoresObjectRefAndTouchesBinding(t *testing.T) {
 	if _, ok, _ := refs.GetOpenAIObjectRefForUser(context.Background(), 10, openAIObjectTypeResponse, "resp_123"); !ok {
 		t.Fatalf("expected response object ref to be stored")
 	}
-	if _, ok := sched.GetBinding(10, sched.RouteKeyHash("resp_123")); !ok {
+	if !bs.Has(10, sched.RouteKeyHash("resp_123")) {
 		t.Fatalf("expected binding to be touched by response id")
 	}
 }

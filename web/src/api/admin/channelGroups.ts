@@ -50,7 +50,7 @@ export async function listAdminChannelGroups() {
   return res.data;
 }
 
-export type CreateAdminChannelGroupRequest = {
+type CreateAdminChannelGroupRequest = {
   name: string;
   description?: string | null;
   price_multiplier?: string;
@@ -63,17 +63,12 @@ export async function createAdminChannelGroup(req: CreateAdminChannelGroupReques
   return res.data;
 }
 
-export async function getAdminChannelGroup(groupID: number) {
-  const res = await api.get<APIResponse<AdminChannelGroup>>(`/api/admin/channel-groups/${groupID}`);
-  return res.data;
-}
-
 export async function getAdminChannelGroupDetail(groupID: number) {
   const res = await api.get<APIResponse<AdminChannelGroupDetail>>(`/api/admin/channel-groups/${groupID}/detail`);
   return res.data;
 }
 
-export type UpdateAdminChannelGroupRequest = {
+type UpdateAdminChannelGroupRequest = {
   name?: string;
   description?: string | null;
   price_multiplier?: string;

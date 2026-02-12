@@ -16,7 +16,7 @@ export async function listAdminOAuthApps() {
   return res.data;
 }
 
-export type CreateAdminOAuthAppRequest = {
+type CreateAdminOAuthAppRequest = {
   name: string;
   status?: number;
   redirect_uris: string[];
@@ -32,7 +32,7 @@ export async function getAdminOAuthApp(appID: number) {
   return res.data;
 }
 
-export type UpdateAdminOAuthAppRequest = {
+type UpdateAdminOAuthAppRequest = {
   name: string;
   status: number;
   redirect_uris: string[];
@@ -47,4 +47,3 @@ export async function rotateAdminOAuthAppSecret(appID: number) {
   const res = await api.post<APIResponse<{ client_secret: string }>>(`/api/admin/oauth-apps/${appID}/rotate-secret`);
   return res.data;
 }
-

@@ -122,7 +122,7 @@ func TestPointerStore_BanRotationPersistsNextPointer(t *testing.T) {
 	s.PinChannel(1)
 
 	now := time.Now()
-	s.BanChannelImmediate(1, now, 10*time.Second)
+	s.state.BanChannelImmediate(1, now, 10*time.Second)
 
 	id, _, reason, ok := s.PinnedChannelInfo()
 	if !ok {

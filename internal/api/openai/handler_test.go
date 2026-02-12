@@ -641,6 +641,8 @@ func TestResponses_RetrySameSelectionOnNetworkErrorBeforeFailover(t *testing.T) 
 	})
 
 	sched := scheduler.New(fs)
+	bs := newRecordingBindingStore()
+	sched.SetBindingStore(bs)
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
@@ -918,6 +920,8 @@ func TestResponses_MaxTokensAlias_PreservesMaxTokens(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
+	bs := newRecordingBindingStore()
+	sched.SetBindingStore(bs)
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi","max_tokens":123}`)))
@@ -995,6 +999,8 @@ func TestResponses_ChannelParamOverride_MaxTokens_PreservesMaxTokens(t *testing.
 	})
 
 	sched := scheduler.New(fs)
+	bs := newRecordingBindingStore()
+	sched.SetBindingStore(bs)
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
@@ -1062,6 +1068,8 @@ func TestResponses_ModelSuffixEffort_IsPerChannelAttempt(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
+	bs := newRecordingBindingStore()
+	sched.SetBindingStore(bs)
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
@@ -1155,6 +1163,8 @@ func TestResponses_ChannelBodyFilters_ArePerChannelAttempt(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
+	bs := newRecordingBindingStore()
+	sched.SetBindingStore(bs)
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
 	reqBody := `{"model":"m1","input":"hi","metadata":{"trace":"t","keep":"k"},"extra":"x"}`
@@ -1411,6 +1421,8 @@ func TestResponses_RouteKeyPrefersPromptCacheKeyInBody(t *testing.T) {
 	}
 
 	sched := scheduler.New(fs)
+	bs := newRecordingBindingStore()
+	sched.SetBindingStore(bs)
 	doer := &okDoer{}
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
@@ -1428,10 +1440,10 @@ func TestResponses_RouteKeyPrefersPromptCacheKeyInBody(t *testing.T) {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	if _, ok := sched.GetBinding(p.UserID, sched.RouteKeyHash("rk_body")); !ok {
+	if !bs.Has(p.UserID, sched.RouteKeyHash("rk_body")) {
 		t.Fatalf("expected binding for body route key")
 	}
-	if _, ok := sched.GetBinding(p.UserID, sched.RouteKeyHash("rk_header")); ok {
+	if bs.Has(p.UserID, sched.RouteKeyHash("rk_header")) {
 		t.Fatalf("expected no binding for header route key when body prompt_cache_key exists")
 	}
 }
@@ -1462,6 +1474,8 @@ func TestResponses_RouteKeyFallsBackToHeader(t *testing.T) {
 	}
 
 	sched := scheduler.New(fs)
+	bs := newRecordingBindingStore()
+	sched.SetBindingStore(bs)
 	doer := &okDoer{}
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
@@ -1479,7 +1493,7 @@ func TestResponses_RouteKeyFallsBackToHeader(t *testing.T) {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	if _, ok := sched.GetBinding(p.UserID, sched.RouteKeyHash("rk_header")); !ok {
+	if !bs.Has(p.UserID, sched.RouteKeyHash("rk_header")) {
 		t.Fatalf("expected binding for header route key when body prompt_cache_key missing")
 	}
 }
@@ -1510,6 +1524,8 @@ func TestResponses_RouteKeyFallsBackToHeaderXSessionID(t *testing.T) {
 	}
 
 	sched := scheduler.New(fs)
+	bs := newRecordingBindingStore()
+	sched.SetBindingStore(bs)
 	doer := &okDoer{}
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
@@ -1527,7 +1543,7 @@ func TestResponses_RouteKeyFallsBackToHeaderXSessionID(t *testing.T) {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	if _, ok := sched.GetBinding(p.UserID, sched.RouteKeyHash("rk_x_session")); !ok {
+	if !bs.Has(p.UserID, sched.RouteKeyHash("rk_x_session")) {
 		t.Fatalf("expected binding for X-Session-Id route key")
 	}
 }
@@ -1558,6 +1574,8 @@ func TestResponses_RouteKeyFallsBackToBodyMetadataSessionID(t *testing.T) {
 	}
 
 	sched := scheduler.New(fs)
+	bs := newRecordingBindingStore()
+	sched.SetBindingStore(bs)
 	doer := &okDoer{}
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
@@ -1574,7 +1592,7 @@ func TestResponses_RouteKeyFallsBackToBodyMetadataSessionID(t *testing.T) {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	if _, ok := sched.GetBinding(p.UserID, sched.RouteKeyHash("rk_meta")); !ok {
+	if !bs.Has(p.UserID, sched.RouteKeyHash("rk_meta")) {
 		t.Fatalf("expected binding for metadata.session_id route key")
 	}
 }
@@ -1617,6 +1635,8 @@ func TestResponses_CodexSessionCompletion_FillsPromptCacheKeyAndSessionHeader(t 
 	})
 
 	sched := scheduler.New(fs)
+	bs := newRecordingBindingStore()
+	sched.SetBindingStore(bs)
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":false}`)))
@@ -1641,7 +1661,7 @@ func TestResponses_CodexSessionCompletion_FillsPromptCacheKeyAndSessionHeader(t 
 	if promptCacheKey != sessionHeader {
 		t.Fatalf("expected prompt_cache_key and Session_id to be aligned, got body=%q header=%q", promptCacheKey, sessionHeader)
 	}
-	if _, ok := sched.GetBinding(p.UserID, sched.RouteKeyHash(promptCacheKey)); !ok {
+	if !bs.Has(p.UserID, sched.RouteKeyHash(promptCacheKey)) {
 		t.Fatalf("expected binding for generated prompt_cache_key")
 	}
 }
@@ -1680,6 +1700,8 @@ func TestResponses_ResponseFeedbackTouchesBinding(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
+	bs := newRecordingBindingStore()
+	sched.SetBindingStore(bs)
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":false}`)))
@@ -1695,7 +1717,7 @@ func TestResponses_ResponseFeedbackTouchesBinding(t *testing.T) {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	if _, ok := sched.GetBinding(p.UserID, sched.RouteKeyHash("rk_feedback")); !ok {
+	if !bs.Has(p.UserID, sched.RouteKeyHash("rk_feedback")) {
 		t.Fatalf("expected binding touched by response prompt_cache_key")
 	}
 }
@@ -1726,6 +1748,8 @@ func TestChatCompletions_RouteKeyFallsBackToRawBodySessionID(t *testing.T) {
 	}
 
 	sched := scheduler.New(fs)
+	bs := newRecordingBindingStore()
+	sched.SetBindingStore(bs)
 	doer := &okDoer{}
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
@@ -1742,7 +1766,7 @@ func TestChatCompletions_RouteKeyFallsBackToRawBodySessionID(t *testing.T) {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	if _, ok := sched.GetBinding(p.UserID, sched.RouteKeyHash("rk_chat_raw")); !ok {
+	if !bs.Has(p.UserID, sched.RouteKeyHash("rk_chat_raw")) {
 		t.Fatalf("expected binding for raw body session_id route key")
 	}
 }

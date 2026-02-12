@@ -133,60 +133,6 @@ func TestParseIDTokenClaims(t *testing.T) {
 	})
 }
 
-func TestIDTokenClaimsHasActivePlusSubscription(t *testing.T) {
-	now := time.Unix(1700000000, 0)
-
-	t.Run("plus_active", func(t *testing.T) {
-		claims := &IDTokenClaims{
-			PlanType:                "plus",
-			SubscriptionActiveUntil: float64(4102444800),
-		}
-		if !claims.HasActivePlusSubscription(now) {
-			t.Fatalf("expected plus account to be active")
-		}
-	})
-
-	t.Run("pro_active", func(t *testing.T) {
-		claims := &IDTokenClaims{
-			PlanType:                "pro",
-			SubscriptionActiveUntil: "4102444800",
-		}
-		if !claims.HasActivePlusSubscription(now) {
-			t.Fatalf("expected pro account to be active")
-		}
-	})
-
-	t.Run("free_plan", func(t *testing.T) {
-		claims := &IDTokenClaims{
-			PlanType:                "free",
-			SubscriptionActiveUntil: float64(4102444800),
-		}
-		if !claims.HasActivePlusSubscription(now) {
-			t.Fatalf("expected free plan to be accepted")
-		}
-	})
-
-	t.Run("team_plan", func(t *testing.T) {
-		claims := &IDTokenClaims{
-			PlanType:                "team",
-			SubscriptionActiveUntil: float64(4102444800),
-		}
-		if !claims.HasActivePlusSubscription(now) {
-			t.Fatalf("expected team plan to be accepted")
-		}
-	})
-
-	t.Run("expired_subscription", func(t *testing.T) {
-		claims := &IDTokenClaims{
-			PlanType:                "plus",
-			SubscriptionActiveUntil: float64(1600000000),
-		}
-		if claims.HasActivePlusSubscription(now) {
-			t.Fatalf("expected expired subscription to be rejected")
-		}
-	})
-}
-
 func TestParseOAuthCallback(t *testing.T) {
 	t.Run("full_url", func(t *testing.T) {
 		cb, err := ParseOAuthCallback("http://localhost:8080/auth/callback?code=c&state=s")

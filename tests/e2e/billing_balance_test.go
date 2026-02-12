@@ -147,9 +147,9 @@ func TestBilling_PaygBalanceDebitsByTokensPricing_E2E(t *testing.T) {
 	t.Setenv("REALMS_DB_DSN", "")
 	t.Setenv("REALMS_SQLITE_PATH", "")
 
-	appCfg, err := config.Load()
+	appCfg, err := config.LoadFromEnv()
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("LoadFromEnv: %v", err)
 	}
 	appCfg.Env = "dev"
 	appCfg.SelfMode.Enable = false

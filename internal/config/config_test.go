@@ -11,9 +11,9 @@ func TestLoad_DefaultsToSQLite(t *testing.T) {
 	t.Setenv("REALMS_DB_DSN", "")
 	t.Setenv("REALMS_SQLITE_PATH", "")
 
-	cfg, err := config.Load()
+	cfg, err := config.LoadFromEnv()
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("LoadFromEnv: %v", err)
 	}
 	if cfg.DB.Driver != "sqlite" {
 		t.Fatalf("expected db.driver=sqlite, got %q", cfg.DB.Driver)
@@ -28,9 +28,9 @@ func TestLoad_InferMySQLFromDSN(t *testing.T) {
 	t.Setenv("REALMS_SQLITE_PATH", "")
 	t.Setenv("REALMS_DB_DSN", "user:pass@tcp(127.0.0.1:3306)/realms?parseTime=true")
 
-	cfg, err := config.Load()
+	cfg, err := config.LoadFromEnv()
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("LoadFromEnv: %v", err)
 	}
 	if cfg.DB.Driver != "mysql" {
 		t.Fatalf("expected db.driver=mysql, got %q", cfg.DB.Driver)
@@ -45,9 +45,9 @@ func TestLoad_EnvOverridesDBDriver(t *testing.T) {
 	t.Setenv("REALMS_DB_DRIVER", "sqlite")
 	t.Setenv("REALMS_SQLITE_PATH", "./data/test.db?_busy_timeout=30000")
 
-	cfg, err := config.Load()
+	cfg, err := config.LoadFromEnv()
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("LoadFromEnv: %v", err)
 	}
 	if cfg.DB.Driver != "sqlite" {
 		t.Fatalf("expected db.driver=sqlite, got %q", cfg.DB.Driver)

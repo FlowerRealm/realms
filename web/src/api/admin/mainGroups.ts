@@ -9,14 +9,14 @@ export type AdminMainGroup = {
   updated_at: string;
 };
 
-export type AdminMainGroupSubgroup = {
+type AdminMainGroupSubgroup = {
   subgroup: string;
   priority: number;
   created_at: string;
   updated_at: string;
 };
 
-export type CreateAdminMainGroupRequest = {
+type CreateAdminMainGroupRequest = {
   name: string;
   description?: string;
   status?: number;
@@ -35,11 +35,6 @@ export async function listAdminMainGroups() {
 
 export async function createAdminMainGroup(req: CreateAdminMainGroupRequest) {
   const res = await api.post<APIResponse<void>>('/api/admin/main-groups', req);
-  return res.data;
-}
-
-export async function getAdminMainGroup(name: string) {
-  const res = await api.get<APIResponse<AdminMainGroup>>(`/api/admin/main-groups/${encodeURIComponent(name)}`);
   return res.data;
 }
 

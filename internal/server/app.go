@@ -247,21 +247,6 @@ func localBaseURL(cfg config.Config) string {
 	return scheme + "://" + host + ":" + port
 }
 
-func localhostBaseURLFromAddr(addr string) string {
-	scheme := "http"
-	host := "localhost"
-	port := ""
-	if _, p, err := net.SplitHostPort(addr); err == nil {
-		port = p
-	} else {
-		port = strings.TrimPrefix(addr, ":")
-	}
-	if port == "" {
-		return scheme + "://" + host
-	}
-	return scheme + "://" + host + ":" + port
-}
-
 func codexOAuthRedirectURI(addr string) string {
 	if v := strings.TrimSpace(os.Getenv("REALMS_CODEX_OAUTH_REDIRECT_URI")); v != "" {
 		return v
@@ -333,54 +318,6 @@ func (a *App) bootstrap() error {
 		go a.ticketAttachmentsCleanupLoop()
 	}
 	return nil
-}
-
-func (a *App) channelAutoProbeLoop() {
-	if a.sched == nil || a.store == nil || a.exec == nil {
-		return
-	}
-
-	const (
-		tick       = 5 * time.Second
-		claimTTL   = 2 * time.Minute
-		maxPerTick = 1
-	)
-
-	ticker := time.NewTicker(tick)
-	defer ticker.Stop()
-	for range ticker.C {
-		now := time.Now()
-		a.sched.SweepExpiredChannelBans(now)
-
-		ids := a.sched.ListProbeDueChannels(now, maxPerTick)
-		for _, channelID := range ids {
-			if channelID <= 0 {
-				continue
-			}
-			if !a.sched.TryClaimChannelProbe(channelID, now, claimTTL) {
-				continue
-			}
-
-			ctx, cancel := context.WithTimeout(context.Background(), claimTTL)
-			ch, err := a.store.GetUpstreamChannelByID(ctx, channelID)
-			if err != nil || ch.ID <= 0 || ch.Status != 1 {
-				a.sched.ClearChannelProbe(channelID)
-				cancel()
-				continue
-			}
-
-			ok, _, _ := testChannelOnce(ctx, a.store, ch.ID)
-			cancel()
-			if ok {
-				a.sched.ClearChannelBan(channelID)
-				a.sched.ResetChannelFailScore(channelID)
-				continue
-			}
-
-			a.sched.ClearChannelProbe(channelID)
-			a.sched.BanChannelImmediate(channelID, time.Now(), 30*time.Second)
-		}
-	}
 }
 
 func (a *App) usageCleanupLoop() {

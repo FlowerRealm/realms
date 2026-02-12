@@ -2,7 +2,6 @@
 package scheduler
 
 import (
-	"sort"
 	"sync"
 	"time"
 )
@@ -34,7 +33,6 @@ type State struct {
 	tokens map[string][]tokenEvent
 
 	credentialSessions map[string]int
-	lastBindingSweep   time.Time
 
 	credentialCooldown map[string]time.Time
 
@@ -98,15 +96,6 @@ func (s *State) channelPointerSnapshotLocked() ChannelPointerSnapshot {
 		Reason:    s.channelPointerReason,
 		Pinned:    s.channelPointerPinned,
 	}
-}
-
-func (s *State) ChannelPointerSnapshot() ChannelPointerSnapshot {
-	if s == nil {
-		return ChannelPointerSnapshot{}
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.channelPointerSnapshotLocked()
 }
 
 func (s *State) SetChannelPointer(channelID int64) {
@@ -266,36 +255,6 @@ func (s *State) channelPointerLocked(now time.Time) (int64, time.Time, string, b
 		return 0, time.Time{}, "", false, originalID != s.channelPointerID
 	}
 	return s.channelPointerID, s.channelPointerMovedAt, s.channelPointerReason, true, originalID != s.channelPointerID
-}
-
-func (s *State) ClearChannelPointer() {
-	if s == nil {
-		return
-	}
-
-	var hook func(ChannelPointerSnapshot)
-	var snap ChannelPointerSnapshot
-
-	s.mu.Lock()
-	oldID := s.channelPointerID
-	oldPinned := s.channelPointerPinned
-	if s.channelPointerID != 0 || s.channelPointerPinned {
-		now := time.Now()
-		s.channelPointerMovedAt = now
-		s.channelPointerReason = "clear"
-	}
-	s.channelPointerID = 0
-	s.channelPointerPinned = false
-
-	if oldID != s.channelPointerID || oldPinned != s.channelPointerPinned {
-		hook = s.channelPointerChangeHook
-		snap = s.channelPointerSnapshotLocked()
-	}
-	s.mu.Unlock()
-
-	if hook != nil {
-		hook(snap)
-	}
 }
 
 func (s *State) ApplyChannelPointerSnapshot(snap ChannelPointerSnapshot) {
@@ -594,49 +553,6 @@ func (s *State) RecordTokens(credentialKey string, t time.Time, tokens int) {
 	s.tokens[credentialKey] = append(s.tokens[credentialKey], tokenEvent{time: t, tokens: tokens})
 }
 
-func (s *State) TPM(credentialKey string, now time.Time, window time.Duration) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	events := s.tokens[credentialKey]
-	if len(events) == 0 {
-		return 0
-	}
-	cutoff := now.Add(-window)
-	total := 0
-	var kept []tokenEvent
-	for _, e := range events {
-		if e.time.After(cutoff) {
-			kept = append(kept, e)
-			total += e.tokens
-		}
-	}
-	s.tokens[credentialKey] = kept
-	return total
-}
-
-func (s *State) CredentialSessions(credentialKey string, now time.Time) int {
-	if credentialKey == "" {
-		return 0
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.maybeSweepBindingsLocked(now)
-	return s.credentialSessions[credentialKey]
-}
-
-func (s *State) maybeSweepBindingsLocked(now time.Time) {
-	if !s.lastBindingSweep.IsZero() && now.Sub(s.lastBindingSweep) < 10*time.Second {
-		return
-	}
-	s.lastBindingSweep = now
-	for k, e := range s.binding {
-		if now.After(e.expiresAt) {
-			s.decCredentialSessionsLocked(e.sel.CredentialKey())
-			delete(s.binding, k)
-		}
-	}
-}
-
 func (s *State) incCredentialSessionsLocked(credentialKey string) {
 	if credentialKey == "" {
 		return
@@ -910,48 +826,6 @@ func (s *State) ClearChannelProbe(channelID int64) {
 	defer s.mu.Unlock()
 	delete(s.channelProbeDueAt, channelID)
 	delete(s.channelProbeClaimUntil, channelID)
-}
-
-func (s *State) ListProbeDueChannels(now time.Time, limit int) []int64 {
-	if s == nil {
-		return nil
-	}
-	if limit <= 0 {
-		limit = 20
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	type item struct {
-		id int64
-		at time.Time
-	}
-	ready := make([]item, 0, len(s.channelProbeDueAt))
-	for channelID, dueAt := range s.channelProbeDueAt {
-		if until, ok := s.channelProbeClaimUntil[channelID]; ok {
-			if now.After(until) {
-				delete(s.channelProbeClaimUntil, channelID)
-			} else {
-				continue
-			}
-		}
-		ready = append(ready, item{id: channelID, at: dueAt})
-	}
-	sort.SliceStable(ready, func(i, j int) bool {
-		if ready[i].at.Equal(ready[j].at) {
-			return ready[i].id < ready[j].id
-		}
-		return ready[i].at.Before(ready[j].at)
-	})
-	if len(ready) < limit {
-		limit = len(ready)
-	}
-	out := make([]int64, 0, limit)
-	for i := 0; i < limit; i++ {
-		out = append(out, ready[i].id)
-	}
-	return out
 }
 
 func (s *State) ResetChannelFailScore(channelID int64) {

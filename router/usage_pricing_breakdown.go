@@ -173,7 +173,3 @@ func usageApplyMultiplier(baseUSD decimal.Decimal, multiplier decimal.Decimal) d
 	}
 	return baseUSD.Mul(multiplier).Truncate(store.USDScale)
 }
-
-func usageNormalizeGroupName(raw string) string {
-	return strings.TrimSpace(raw)
-}
