@@ -186,7 +186,7 @@ export function ChannelsPage() {
   const [createName, setCreateName] = useState('');
   const [createBaseURL, setCreateBaseURL] = useState('https://api.openai.com');
   const [createKey, setCreateKey] = useState('');
-  const [createGroups, setCreateGroups] = useState('default');
+  const [createGroups, setCreateGroups] = useState('');
   const [createPriority, setCreatePriority] = useState('0');
   const [createPromotion, setCreatePromotion] = useState(false);
   const [createAllowServiceTier, setCreateAllowServiceTier] = useState(false);
@@ -542,24 +542,14 @@ export function ChannelsPage() {
     return 'default';
   }, [channelGroups]);
 
-  useEffect(() => {
-    if (!defaultGroupName) return;
-    setCreateGroups((prev) => {
-      const s = (prev || '').trim();
-      if (!s || s === 'default') return defaultGroupName;
-      return prev;
-    });
-  }, [defaultGroupName]);
-
   function parseGroupsCSV(raw: string): string[] {
     const s = raw.trim();
-    if (!s) return [defaultGroupName];
+    if (!s) return [];
     const uniq = new Set<string>();
     for (const part of s.split(',')) {
       const v = part.trim();
       if (v) uniq.add(v);
     }
-    if (uniq.size === 0) return [defaultGroupName];
     return Array.from(uniq);
   }
 
@@ -725,7 +715,7 @@ export function ChannelsPage() {
       setSettingsChannel(ch);
 
       setEditName(ch.name || '');
-      setEditGroups(ch.groups || defaultGroupName);
+      setEditGroups(ch.groups || '');
       setEditBaseURL(ch.base_url || '');
       setEditStatus(ch.status || 0);
       setEditPriority(String(ch.priority || 0));
@@ -1188,7 +1178,7 @@ export function ChannelsPage() {
                                   {ch.base_url ? <span className="text-secondary">·</span> : null}
                                   <span className={`${ch.base_url ? 'ms-2 ' : ''}me-1`}>组:</span>
                                   <span className="text-secondary font-monospace user-select-all">
-                                    {ch.groups || defaultGroupName}
+                                    {(ch.groups || '').trim() || '-'}
                                   </span>
                                 </div>
                               </div>
@@ -1698,7 +1688,7 @@ export function ChannelsPage() {
           setCreateName('');
           setCreateBaseURL('https://api.openai.com');
           setCreateKey('');
-          setCreateGroups(defaultGroupName);
+          setCreateGroups('');
           setCreatePriority('0');
           setCreatePromotion(false);
           setCreateAllowServiceTier(false);
