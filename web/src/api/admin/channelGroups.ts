@@ -11,6 +11,8 @@ export type AdminChannelGroup = {
   created_at: string;
   updated_at: string;
   is_default?: boolean;
+  pointer_channel_id?: number;
+  pointer_channel_name?: string | null;
 };
 
 export type AdminChannelGroupMember = {
@@ -45,6 +47,16 @@ export type AdminChannelGroupDetail = {
   channels: AdminChannelRef[];
 };
 
+export type AdminChannelGroupPointer = {
+  group_id: number;
+  channel_id: number;
+  channel_name?: string | null;
+  pinned: boolean;
+  moved_at?: string | null;
+  reason?: string | null;
+  note?: string | null;
+};
+
 export async function listAdminChannelGroups() {
   const res = await api.get<APIResponse<AdminChannelGroup[]>>('/api/admin/channel-groups');
   return res.data;
@@ -65,6 +77,16 @@ export async function createAdminChannelGroup(req: CreateAdminChannelGroupReques
 
 export async function getAdminChannelGroupDetail(groupID: number) {
   const res = await api.get<APIResponse<AdminChannelGroupDetail>>(`/api/admin/channel-groups/${groupID}/detail`);
+  return res.data;
+}
+
+export async function getAdminChannelGroupPointer(groupID: number) {
+  const res = await api.get<APIResponse<AdminChannelGroupPointer>>(`/api/admin/channel-groups/${groupID}/pointer`);
+  return res.data;
+}
+
+export async function upsertAdminChannelGroupPointer(groupID: number, req: { channel_id: number; pinned?: boolean }) {
+  const res = await api.put<APIResponse<void>>(`/api/admin/channel-groups/${groupID}/pointer`, req);
   return res.data;
 }
 

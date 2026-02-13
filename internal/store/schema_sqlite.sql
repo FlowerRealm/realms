@@ -459,6 +459,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS `uk_parent_member_channel` ON `channel_group_m
 CREATE UNIQUE INDEX IF NOT EXISTS `uk_group_single_parent` ON `channel_group_members` (`member_group_id`);
 CREATE INDEX IF NOT EXISTS `idx_parent_order` ON `channel_group_members` (`parent_group_id`, `promotion`, `priority`, `id`);
 
+CREATE TABLE IF NOT EXISTS `channel_group_pointers` (
+  `group_id` INTEGER NOT NULL,
+  `channel_id` INTEGER NOT NULL DEFAULT 0,
+  `pinned` INTEGER NOT NULL DEFAULT 0,
+  `moved_at_unix_ms` INTEGER NOT NULL DEFAULT 0,
+  `reason` TEXT NOT NULL DEFAULT '',
+  `created_at` DATETIME NOT NULL,
+  `updated_at` DATETIME NOT NULL,
+  PRIMARY KEY (`group_id`)
+);
+CREATE INDEX IF NOT EXISTS `idx_channel_group_pointers_channel_id` ON `channel_group_pointers` (`channel_id`);
+CREATE INDEX IF NOT EXISTS `idx_channel_group_pointers_updated_at` ON `channel_group_pointers` (`updated_at`);
+
 CREATE TABLE IF NOT EXISTS `managed_models` (
   `id` INTEGER PRIMARY KEY AUTOINCREMENT,
   `public_id` TEXT NOT NULL,

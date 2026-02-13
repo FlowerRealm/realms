@@ -76,19 +76,17 @@ type Scheduler struct {
 
 	state         *State
 	bindingStore  BindingStore
-	pointerStore  ChannelPointerStore
+	groupPointers ChannelGroupPointerStore
 	affinityTTL   time.Duration
 	bindingTTL    time.Duration
 	rpmWindow     time.Duration
 	cooldownBase  time.Duration
 	probeClaimTTL time.Duration
 
-	pointerPersistMu       sync.Mutex
-	pointerPersistLastID   int64
-	pointerPersistLastPin  bool
-	pointerSyncMu          sync.Mutex
-	pointerSyncLastRaw     string
-	pointerSyncLastRefresh time.Time
+	groupPointerPersistMu   sync.Mutex
+	groupPointerPersistLast map[int64]groupPointerPersistState
+	groupPointerSyncMu      sync.Mutex
+	groupPointerSync        map[int64]groupPointerSyncState
 }
 
 type Constraints struct {
@@ -113,9 +111,9 @@ type BindingStore interface {
 	DeleteSessionBinding(ctx context.Context, userID int64, routeKeyHash string) error
 }
 
-type ChannelPointerStore interface {
-	GetAppSetting(ctx context.Context, key string) (string, bool, error)
-	UpsertAppSetting(ctx context.Context, key string, value string) error
+type ChannelGroupPointerStore interface {
+	GetChannelGroupPointer(ctx context.Context, groupID int64) (store.ChannelGroupPointer, bool, error)
+	UpsertChannelGroupPointer(ctx context.Context, in store.ChannelGroupPointer) error
 }
 
 const (
@@ -138,9 +136,8 @@ func New(st UpstreamStore) *Scheduler {
 		rpmWindow:     60 * time.Second,
 		cooldownBase:  30 * time.Second,
 		probeClaimTTL: 30 * time.Second,
-	}
-	if s.state != nil {
-		s.state.SetChannelPointerChangeHook(s.onChannelPointerChanged)
+		groupPointerPersistLast: make(map[int64]groupPointerPersistState),
+		groupPointerSync:        make(map[int64]groupPointerSyncState),
 	}
 	return s
 }
@@ -152,174 +149,136 @@ func (s *Scheduler) SetBindingStore(bs BindingStore) {
 	s.bindingStore = bs
 }
 
-func (s *Scheduler) SetPointerStore(ps ChannelPointerStore) {
+func (s *Scheduler) SetGroupPointerStore(ps ChannelGroupPointerStore) {
 	if s == nil {
 		return
 	}
-	s.pointerStore = ps
+	s.groupPointers = ps
 }
 
-func (s *Scheduler) SyncChannelPointerFromStore(ctx context.Context) error {
-	if s == nil || s.state == nil || s.pointerStore == nil {
-		return nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	raw, ok, err := s.pointerStore.GetAppSetting(ctx, store.SettingSchedulerChannelPointer)
-	if err != nil || !ok {
-		return err
-	}
-	rec, ok, err := store.ParseSchedulerChannelPointerState(raw)
-	if err != nil || !ok {
-		return err
-	}
-	s.state.ApplyChannelPointerSnapshot(ChannelPointerSnapshot{
-		ChannelID: rec.ChannelID,
-		MovedAt:   rec.MovedAt(),
-		Reason:    rec.Reason,
-		Pinned:    rec.Pinned,
-	})
-	s.pointerSyncMu.Lock()
-	s.pointerSyncLastRaw = raw
-	s.pointerSyncLastRefresh = time.Now()
-	s.pointerSyncMu.Unlock()
-
-	s.pointerPersistMu.Lock()
-	s.pointerPersistLastID = rec.ChannelID
-	s.pointerPersistLastPin = rec.Pinned
-	s.pointerPersistMu.Unlock()
-
-	return nil
+type groupPointerPersistState struct {
+	channelID int64
+	pinned    bool
 }
 
-func (s *Scheduler) maybeSyncChannelPointerFromStore(ctx context.Context) {
-	if s == nil || s.state == nil || s.pointerStore == nil {
-		return
+type groupPointerSyncState struct {
+	rec         store.ChannelGroupPointer
+	ok          bool
+	lastRefresh time.Time
+}
+
+func (s *Scheduler) maybeSyncChannelGroupPointerFromStore(ctx context.Context, groupID int64) (store.ChannelGroupPointer, bool) {
+	if s == nil || s.groupPointers == nil || groupID <= 0 {
+		return store.ChannelGroupPointer{}, false
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	now := time.Now()
 
-	s.pointerSyncMu.Lock()
-	if !s.pointerSyncLastRefresh.IsZero() && now.Sub(s.pointerSyncLastRefresh) < 1*time.Second {
-		s.pointerSyncMu.Unlock()
-		return
+	s.groupPointerSyncMu.Lock()
+	entry := s.groupPointerSync[groupID]
+	if !entry.lastRefresh.IsZero() && now.Sub(entry.lastRefresh) < 1*time.Second {
+		s.groupPointerSyncMu.Unlock()
+		return entry.rec, entry.ok
 	}
-	s.pointerSyncLastRefresh = now
-	s.pointerSyncMu.Unlock()
+	entry.lastRefresh = now
+	prevRec := entry.rec
+	prevOK := entry.ok
+	s.groupPointerSync[groupID] = entry
+	s.groupPointerSyncMu.Unlock()
 
-	raw, ok, err := s.pointerStore.GetAppSetting(ctx, store.SettingSchedulerChannelPointer)
-	if err != nil || !ok {
-		return
+	rec, ok, err := s.groupPointers.GetChannelGroupPointer(ctx, groupID)
+	if err != nil {
+		return prevRec, prevOK
 	}
-	s.pointerSyncMu.Lock()
-	if raw == s.pointerSyncLastRaw {
-		s.pointerSyncMu.Unlock()
-		return
+	if !ok {
+		rec = store.ChannelGroupPointer{GroupID: groupID}
 	}
-	s.pointerSyncLastRaw = raw
-	s.pointerSyncMu.Unlock()
 
-	rec, ok, err := store.ParseSchedulerChannelPointerState(raw)
-	if err != nil || !ok {
-		return
+	s.groupPointerSyncMu.Lock()
+	s.groupPointerSync[groupID] = groupPointerSyncState{
+		rec:         rec,
+		ok:          ok,
+		lastRefresh: now,
 	}
-	s.state.ApplyChannelPointerSnapshot(ChannelPointerSnapshot{
-		ChannelID: rec.ChannelID,
-		MovedAt:   rec.MovedAt(),
-		Reason:    rec.Reason,
-		Pinned:    rec.Pinned,
-	})
+	s.groupPointerSyncMu.Unlock()
 
-	s.pointerPersistMu.Lock()
-	s.pointerPersistLastID = rec.ChannelID
-	s.pointerPersistLastPin = rec.Pinned
-	s.pointerPersistMu.Unlock()
+	s.groupPointerPersistMu.Lock()
+	s.groupPointerPersistLast[groupID] = groupPointerPersistState{
+		channelID: rec.ChannelID,
+		pinned:    rec.Pinned,
+	}
+	s.groupPointerPersistMu.Unlock()
+
+	return rec, ok
 }
 
-func (s *Scheduler) onChannelPointerChanged(snap ChannelPointerSnapshot) {
-	if s == nil || s.pointerStore == nil {
+func (s *Scheduler) upsertChannelGroupPointer(in store.ChannelGroupPointer) {
+	if s == nil || s.groupPointers == nil || in.GroupID <= 0 {
 		return
 	}
 
-	s.pointerPersistMu.Lock()
-	if snap.ChannelID == s.pointerPersistLastID && snap.Pinned == s.pointerPersistLastPin {
-		s.pointerPersistMu.Unlock()
+	s.groupPointerPersistMu.Lock()
+	last := s.groupPointerPersistLast[in.GroupID]
+	if in.ChannelID == last.channelID && in.Pinned == last.pinned {
+		s.groupPointerPersistMu.Unlock()
 		return
 	}
-	s.pointerPersistLastID = snap.ChannelID
-	s.pointerPersistLastPin = snap.Pinned
-	s.pointerPersistMu.Unlock()
-
-	ms := int64(0)
-	if !snap.MovedAt.IsZero() {
-		ms = snap.MovedAt.UnixMilli()
+	s.groupPointerPersistLast[in.GroupID] = groupPointerPersistState{
+		channelID: in.ChannelID,
+		pinned:    in.Pinned,
 	}
-	raw, err := store.SchedulerChannelPointerState{
-		V:             1,
-		ChannelID:     snap.ChannelID,
-		Pinned:        snap.Pinned,
-		MovedAtUnixMS: ms,
-		Reason:        strings.TrimSpace(snap.Reason),
-	}.Marshal()
-	if err != nil {
-		return
-	}
+	s.groupPointerPersistMu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	_ = s.pointerStore.UpsertAppSetting(ctx, store.SettingSchedulerChannelPointer, raw)
+	_ = s.groupPointers.UpsertChannelGroupPointer(ctx, in)
 	cancel()
 
-	s.pointerSyncMu.Lock()
-	s.pointerSyncLastRaw = raw
-	s.pointerSyncMu.Unlock()
+	s.groupPointerSyncMu.Lock()
+	entry := s.groupPointerSync[in.GroupID]
+	entry.rec = in
+	entry.ok = true
+	entry.lastRefresh = time.Now()
+	s.groupPointerSync[in.GroupID] = entry
+	s.groupPointerSyncMu.Unlock()
 }
 
-func (s *Scheduler) PinChannel(channelID int64) {
-	if s == nil || s.state == nil {
+func (s *Scheduler) setChannelGroupPointer(groupID int64, channelID int64, pinned bool, reason string) {
+	if s == nil || s.groupPointers == nil || groupID <= 0 {
 		return
 	}
-	s.state.SetChannelPointer(channelID)
+	if reason == "" {
+		reason = "route"
+	}
+	now := time.Now()
+	ms := now.UnixMilli()
+	s.upsertChannelGroupPointer(store.ChannelGroupPointer{
+		GroupID:       groupID,
+		ChannelID:     channelID,
+		Pinned:        pinned,
+		MovedAtUnixMS: ms,
+		Reason:        reason,
+	})
 }
 
-func (s *Scheduler) TouchChannelPointer(channelID int64, reason string) {
-	if s == nil || s.state == nil {
+func (s *Scheduler) touchChannelGroupPointer(ctx context.Context, groupID int64, channelID int64, reason string) {
+	if s == nil || s.groupPointers == nil || groupID <= 0 || channelID <= 0 {
 		return
 	}
-	s.state.TouchChannelPointer(channelID, reason)
-}
+	if reason == "" {
+		reason = "route"
+	}
 
-func (s *Scheduler) PinnedChannel() (int64, bool) {
-	if s == nil || s.state == nil {
-		return 0, false
+	rec, ok := s.maybeSyncChannelGroupPointerFromStore(ctx, groupID)
+	pinned := false
+	if ok {
+		pinned = rec.Pinned
 	}
-	s.maybeSyncChannelPointerFromStore(context.Background())
-	if !s.state.IsChannelPointerPinned() {
-		return 0, false
+	if ok && rec.ChannelID == channelID {
+		return
 	}
-	return s.state.ChannelPointer(time.Now())
-}
-
-func (s *Scheduler) PinnedChannelInfo() (int64, time.Time, string, bool) {
-	if s == nil || s.state == nil {
-		return 0, time.Time{}, "", false
-	}
-	s.maybeSyncChannelPointerFromStore(context.Background())
-	return s.state.ChannelPointerInfo(time.Now())
-}
-
-func (s *Scheduler) RefreshPinnedRing(ctx context.Context) error {
-	if s == nil || s.state == nil {
-		return nil
-	}
-	ring, err := buildPinnedChannelRing(ctx, s.st)
-	if err != nil {
-		return err
-	}
-	s.state.SetChannelPointerRing(ring)
-	return nil
+	s.setChannelGroupPointer(groupID, channelID, pinned, reason)
 }
 
 func (s *Scheduler) ClearChannelBan(channelID int64) {
@@ -345,17 +304,10 @@ func (s *Scheduler) TouchBinding(userID int64, routeKeyHash string, sel Selectio
 }
 
 func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, routeKeyHash string, cons Constraints) (Selection, error) {
-	s.maybeSyncChannelPointerFromStore(ctx)
-
 	now := time.Now()
 
-	pinned := s.state.IsChannelPointerPinned()
-	pointerID, pointerOK := s.state.ChannelPointer(now)
-	pointerRing := s.state.ChannelPointerRing()
-	pointerRelevant := pinned && pointerOK && pointerID != 0 && cons.RequireChannelID == 0 && len(pointerRing) > 0
-
 	// 1) 会话粘性：命中绑定则优先
-	if routeKeyHash != "" && !pointerRelevant {
+	if routeKeyHash != "" {
 		if sel, ok := s.getBinding(ctx, userID, routeKeyHash); ok {
 			credKey := sel.CredentialKey()
 			if selectionMatchesConstraints(sel, cons) &&
@@ -418,47 +370,9 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 	if affinityOK && s.state.ChannelFailScore(affinityChannelID) > 0 {
 		affinityOK = false
 	}
-	var ordered []store.UpstreamChannel
-	if pointerRelevant {
-		byID := make(map[int64]store.UpstreamChannel, len(candidates))
-		for _, ch := range candidates {
-			byID[ch.ID] = ch
-		}
-		startIdx := 0
-		for i, id := range pointerRing {
-			if id == pointerID {
-				startIdx = i
-				break
-			}
-		}
-		ordered = make([]store.UpstreamChannel, 0, len(candidates))
-		for step := 0; step < len(pointerRing); step++ {
-			id := pointerRing[(startIdx+step)%len(pointerRing)]
-			if ch, ok := byID[id]; ok {
-				ordered = append(ordered, ch)
-			}
-		}
-		if len(ordered) == 0 {
-			ordered = orderChannels(candidates, affinityChannelID, affinityOK, func(channelID int64) bool {
-				return s.state.IsChannelProbePending(channelID, now)
-			}, s.state.ChannelFailScore)
-		} else if len(ordered) < len(candidates) {
-			seen := make(map[int64]struct{}, len(ordered))
-			for _, ch := range ordered {
-				seen[ch.ID] = struct{}{}
-			}
-			for _, ch := range candidates {
-				if _, ok := seen[ch.ID]; ok {
-					continue
-				}
-				ordered = append(ordered, ch)
-			}
-		}
-	} else {
-		ordered = orderChannels(candidates, affinityChannelID, affinityOK, func(channelID int64) bool {
-			return s.state.IsChannelProbePending(channelID, now)
-		}, s.state.ChannelFailScore)
-	}
+	ordered := orderChannels(candidates, affinityChannelID, affinityOK, func(channelID int64) bool {
+		return s.state.IsChannelProbePending(channelID, now)
+	}, s.state.ChannelFailScore)
 
 	// 3) 选择 endpoint + credential
 	for _, ch := range ordered {

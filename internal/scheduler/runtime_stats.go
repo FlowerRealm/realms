@@ -30,8 +30,6 @@ type RuntimeChannelStats struct {
 
 	BannedUntil *time.Time
 	BanStreak   int
-
-	Pointer bool
 }
 
 func (s *Scheduler) RuntimeChannelStats(channelID int64) RuntimeChannelStats {
@@ -47,7 +45,6 @@ func (s *Scheduler) RuntimeChannelStats(channelID int64) RuntimeChannelStats {
 	out := RuntimeChannelStats{
 		FailScore: st.channelFails[channelID],
 		BanStreak: st.channelBanStreak[channelID],
-		Pointer:   st.channelPointerID == channelID,
 	}
 
 	if until, ok := st.channelBanUntil[channelID]; ok {

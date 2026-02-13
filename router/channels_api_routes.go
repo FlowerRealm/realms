@@ -71,8 +71,6 @@ func setChannelAPIRoutes(r gin.IRoutes, opts Options) {
 	r.GET("/channel/page/", admin, channelsPageHandler(opts))
 	r.GET("/channel/:channel_id/timeseries", admin, channelTimeSeriesHandler(opts))
 	r.GET("/channel/:channel_id/timeseries/", admin, channelTimeSeriesHandler(opts))
-	r.GET("/channel/pinned", admin, pinnedChannelInfoHandler(opts))
-	r.GET("/channel/pinned/stream", admin, pinnedChannelStreamHandler(opts))
 
 	r.POST("/channel", admin, createChannelHandler(opts))
 	r.POST("/channel/", admin, createChannelHandler(opts))
@@ -83,7 +81,6 @@ func setChannelAPIRoutes(r gin.IRoutes, opts Options) {
 	r.GET("/channel/:channel_id", admin, getChannelHandler(opts))
 	r.DELETE("/channel/:channel_id", admin, deleteChannelHandler(opts))
 	r.DELETE("/channel/:channel_id/", admin, deleteChannelHandler(opts))
-	r.POST("/channel/:channel_id/promote", admin, pinChannelHandler(opts))
 
 	r.POST("/channel/:channel_id/key", admin, getChannelKeyHandler(opts))
 	r.POST("/channel/:channel_id/key/", admin, getChannelKeyHandler(opts))

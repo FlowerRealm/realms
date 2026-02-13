@@ -32,11 +32,8 @@ import {
   getChannelKey,
   getChannelsPage,
   getChannelTimeSeries,
-  getPinnedChannelInfo,
-  watchPinnedChannelStream,
   listChannelCodexAccounts,
   listChannelCredentials,
-  pinChannel,
   refreshChannelCodexAccount,
   reorderChannels,
   startChannelCodexOAuth,
@@ -58,7 +55,6 @@ import {
   type ChannelTestProgressEvent,
   type ChannelTimeSeriesPoint,
   type CodexOAuthAccount,
-  type PinnedChannelInfo,
 } from '../../api/channels';
 import { listAdminChannelGroups, type AdminChannelGroup } from '../../api/admin/channelGroups';
 import { createChannelModel, listChannelModels, updateChannelModel, type ChannelModelBinding } from '../../api/channelModels';
@@ -154,35 +150,6 @@ function healthBadge(ch: Channel): { cls: string; label: string; hint?: string }
   return { cls: 'badge bg-danger bg-opacity-10 text-danger border border-danger-subtle', label: `异常 · ${latency}` };
 }
 
-function formatPinnedChannelLabel(channelID: number, fallback: string, channels: ChannelAdminItem[]): string {
-  const matched = channels.find((ch) => ch.id === channelID);
-  const matchedName = (matched?.name || '').trim();
-  if (matchedName) return matchedName;
-  const raw = (fallback || '').trim();
-  if (raw) return raw;
-  if (channelID > 0) return '渠道';
-  return '';
-}
-
-function normalizePinnedInfo(info: PinnedChannelInfo | null, channels: ChannelAdminItem[]): PinnedChannelInfo | null {
-  if (!info || !info.available) return info;
-
-  const runtimePinned = channels.find((ch) => !!ch.runtime?.pinned_active);
-  const out = { ...info };
-
-  if ((!out.pinned_active || out.pinned_channel_id <= 0) && runtimePinned) {
-    out.pinned_active = true;
-    out.pinned_channel_id = runtimePinned.id;
-    out.pinned_channel = runtimePinned.name?.trim() ? runtimePinned.name.trim() : '渠道';
-  }
-
-  if (out.pinned_active && out.pinned_channel_id > 0) {
-    out.pinned_channel = formatPinnedChannelLabel(out.pinned_channel_id, out.pinned_channel, channels);
-  }
-
-  return out;
-}
-
 function compactProbeMessage(raw: string): string {
   let msg = raw.trim();
   if (!msg) return '';
@@ -228,7 +195,6 @@ export function ChannelsPage() {
   const channelsRef = useRef<ChannelAdminItem[]>([]);
   const [managedModelIDs, setManagedModelIDs] = useState<string[]>([]);
   const [channelGroups, setChannelGroups] = useState<AdminChannelGroup[]>([]);
-  const [pinned, setPinned] = useState<PinnedChannelInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [reordering, setReordering] = useState(false);
   const [err, setErr] = useState('');
@@ -606,7 +572,7 @@ export function ChannelsPage() {
     setNotice('');
     setLoading(true);
     try {
-      const [pageRes, modelsRes, pinnedRes] = await Promise.all([getChannelsPage(params), listManagedModelsAdmin(1, 1000), getPinnedChannelInfo()]);
+      const [pageRes, modelsRes] = await Promise.all([getChannelsPage(params), listManagedModelsAdmin(1, 1000)]);
       if (!modelsRes.success) throw new Error(modelsRes.message || '加载模型失败');
       setManagedModelIDs(
         (modelsRes.data?.items || [])
@@ -619,11 +585,6 @@ export function ChannelsPage() {
       const pageChannels = pageRes.data?.channels || [];
       const normalizedChannels = normalizeChannelSections(pageChannels);
       channelsRef.current = normalizedChannels;
-      if (pinnedRes.success) {
-        setPinned(normalizePinnedInfo(pinnedRes.data || null, normalizedChannels));
-      } else {
-        setPinned(null);
-      }
       setUsageStart(pageRes.data?.start || '');
       setUsageEnd(pageRes.data?.end || '');
       setChannels(normalizedChannels);
@@ -637,32 +598,6 @@ export function ChannelsPage() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
-
-  useEffect(() => {
-    const ac = new AbortController();
-    let stopped = false;
-
-    void (async () => {
-      while (!stopped && !ac.signal.aborted) {
-        try {
-          await watchPinnedChannelStream(
-            (info) => {
-              setPinned(normalizePinnedInfo(info, channelsRef.current));
-            },
-            { signal: ac.signal },
-          );
-        } catch {
-          if (ac.signal.aborted) break;
-        }
-        await new Promise<void>((resolve) => window.setTimeout(resolve, 1000));
-      }
-    })();
-
-    return () => {
-      stopped = true;
-      ac.abort();
-    };
-  }, []);
 
   useEffect(() => {
     if (!usageRangeDirty) return;
@@ -1123,7 +1058,6 @@ export function ChannelsPage() {
   const dragOverlayStatus = dragOverlayChannel ? statusBadge(dragOverlayChannel.status) : null;
   const dragOverlayHealth = dragOverlayChannel ? healthBadge(dragOverlayChannel) : null;
   const dragOverlayCheckedAt = dragOverlayChannel ? fmtHHMM(dragOverlayChannel.last_test_at) : '';
-  const dragOverlayIsPinned = !!dragOverlayChannel && !!pinned?.pinned_active && pinned.pinned_channel_id === dragOverlayChannel.id;
 
   return (
     <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
@@ -1151,11 +1085,6 @@ export function ChannelsPage() {
                         <div className="d-flex flex-wrap align-items-center gap-2">
                           <span className="fw-bold text-dark">{dragOverlayChannel.name || `渠道 #${dragOverlayChannel.id}`}</span>
                           <span className="text-muted small">({channelTypeLabel(dragOverlayChannel.type)})</span>
-                          {dragOverlayIsPinned ? (
-                            <span className="small text-primary fw-medium">
-                              <i className="ri-pushpin-2-fill me-1"></i>指针
-                            </span>
-                          ) : null}
                           {dragOverlayChannel.promotion ? (
                             <span className="small text-warning fw-medium">
                               <i className="ri-fire-line me-1"></i>优先
@@ -1259,21 +1188,6 @@ export function ChannelsPage() {
         </div>
       ) : null}
 
-      {pinned?.available ? (
-        <div className="card border-0 shadow-sm mb-4">
-          <div className="card-body py-3 d-flex flex-wrap gap-2 align-items-center">
-            <span className="text-muted small">智能调度</span>
-            {pinned.pinned_active ? (
-              <span className="badge bg-warning-subtle text-warning-emphasis border" title={pinned.pinned_note || undefined}>
-                渠道指针：{pinned.pinned_channel}
-              </span>
-            ) : (
-              <span className="badge bg-light text-muted border">渠道指针：-</span>
-            )}
-          </div>
-        </div>
-      ) : null}
-
       <div className="card border-0 shadow-sm overflow-hidden mb-0">
         <div className="bg-primary bg-opacity-10 py-3 px-4 d-flex justify-content-between align-items-center">
           <div>
@@ -1314,7 +1228,6 @@ export function ChannelsPage() {
                       const st = statusBadge(ch.status);
                       const hb = healthBadge(ch);
                       const channelDisabled = ch.status !== 1;
-                      const isPinned = !!pinned?.pinned_active && pinned.pinned_channel_id === ch.id;
                       const runtime = ch.runtime;
                       const usage = ch.usage;
                       const testPanel = testPanels[ch.id];
@@ -1394,18 +1307,13 @@ export function ChannelsPage() {
 	                          </td>
 	                          <td className="ps-4" style={{ minWidth: 0 }}>
 	                            <div className="d-flex flex-column">
-	                              <div className="d-flex flex-wrap align-items-center gap-2">
-	                                <span className="fw-bold text-dark">{ch.name || `渠道 #${ch.id}`}</span>
-	                                <span className="text-muted small">({channelTypeLabel(ch.type)})</span>
-	                                {isPinned ? (
-	                                  <span className="small text-primary fw-medium">
-	                                    <i className="ri-pushpin-2-fill me-1"></i>指针
-	                                  </span>
-	                                ) : null}
-	                                {ch.promotion ? (
-	                                  <span className="small text-warning fw-medium">
-	                                    <i className="ri-fire-line me-1"></i>优先
-	                                  </span>
+                                <div className="d-flex flex-wrap align-items-center gap-2">
+                                  <span className="fw-bold text-dark">{ch.name || `渠道 #${ch.id}`}</span>
+                                  <span className="text-muted small">({channelTypeLabel(ch.type)})</span>
+                                  {ch.promotion ? (
+                                    <span className="small text-warning fw-medium">
+                                      <i className="ri-fire-line me-1"></i>优先
+                                    </span>
 	                                ) : null}
 	                              </div>
                               <div className="d-flex flex-wrap align-items-center gap-2 small text-muted mt-1">
@@ -1557,27 +1465,6 @@ export function ChannelsPage() {
                                   <i className="ri-flashlight-line me-1"></i>
                                 )}
                                 {testRunning ? '测试中' : '测试'}
-                              </button>
-
-                              <button
-                                className="btn btn-sm btn-light border text-primary"
-                                type="button"
-                                title="设为指针"
-                                disabled={loading || reordering || !(pinned?.available ?? false)}
-                                onClick={async () => {
-                                  setErr('');
-                                  setNotice('');
-                                  try {
-                                    const res = await pinChannel(ch.id);
-                                    if (!res.success) throw new Error(res.message || '设置失败');
-                                    setNotice(res.message || '已设置');
-                                    await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
-                                  } catch (e) {
-                                    setErr(e instanceof Error ? e.message : '设置失败');
-                                  }
-                                }}
-                              >
-                                <i className="ri-rocket-2-line me-1"></i>设为指针
                               </button>
 
                               <button

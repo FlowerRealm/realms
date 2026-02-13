@@ -14,8 +14,6 @@ type channelRuntimeInfo struct {
 	BannedRemaining string `json:"banned_remaining,omitempty"`
 	BanStreak       int    `json:"ban_streak"`
 	BannedActive    bool   `json:"banned_active"`
-
-	PinnedActive bool `json:"pinned_active"`
 }
 
 type bindingRuntimeInfo struct {
@@ -52,7 +50,6 @@ func channelRuntimeForAPI(ctx context.Context, opts Options, channelID int64, lo
 
 	out.FailScore = rt.FailScore
 	out.BanStreak = rt.BanStreak
-	out.PinnedActive = rt.Pointer
 	if rt.BannedUntil != nil {
 		out.BannedActive = true
 		out.BannedUntil = formatTimeIn(*rt.BannedUntil, time.RFC3339, loc)

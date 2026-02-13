@@ -62,8 +62,7 @@ func NewApp(opts AppOptions) (*App, error) {
 
 	sched := scheduler.New(st)
 	sched.SetBindingStore(st)
-	sched.SetPointerStore(st)
-	_ = sched.SyncChannelPointerFromStore(context.Background())
+	sched.SetGroupPointerStore(st)
 	exec := upstream.NewExecutor(st, opts.Config)
 
 	publicBaseURL := opts.Config.Server.PublicBaseURL

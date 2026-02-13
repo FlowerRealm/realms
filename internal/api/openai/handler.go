@@ -473,9 +473,6 @@ func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p aut
 	if retries <= 0 {
 		retries = 1
 	}
-	if h.sched != nil && sel.ChannelID > 0 {
-		h.sched.TouchChannelPointer(sel.ChannelID, "route")
-	}
 	for i := 0; i < retries; i++ {
 		decision := h.proxyOnce(w, r, sel, body, wantStream, model, p, usageID, reqStart, reqBytes)
 		switch decision {

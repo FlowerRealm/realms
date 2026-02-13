@@ -9,9 +9,12 @@ import {
   deleteAdminChannelGroupChannelMember,
   deleteAdminChannelGroupGroupMember,
   getAdminChannelGroupDetail,
+  getAdminChannelGroupPointer,
   reorderAdminChannelGroupMembers,
+  upsertAdminChannelGroupPointer,
   type AdminChannelGroupDetail,
   type AdminChannelGroupMember,
+  type AdminChannelGroupPointer,
 } from '../../api/admin/channelGroups';
 
 function memberType(m: AdminChannelGroupMember): 'group' | 'channel' | 'unknown' {
@@ -31,6 +34,7 @@ export function ChannelGroupDetailPage() {
 
   const [data, setData] = useState<AdminChannelGroupDetail | null>(null);
   const [members, setMembers] = useState<AdminChannelGroupMember[]>([]);
+  const [pointer, setPointer] = useState<AdminChannelGroupPointer | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const [notice, setNotice] = useState('');
@@ -49,15 +53,21 @@ export function ChannelGroupDetailPage() {
     setLoading(true);
     try {
       if (!Number.isFinite(groupId) || groupId <= 0) throw new Error('参数错误');
-      const res = await getAdminChannelGroupDetail(groupId);
-      if (!res.success) throw new Error(res.message || '加载失败');
-      const d = res.data || null;
+      const [detailRes, pointerRes] = await Promise.all([getAdminChannelGroupDetail(groupId), getAdminChannelGroupPointer(groupId)]);
+      if (!detailRes.success) throw new Error(detailRes.message || '加载失败');
+      const d = detailRes.data || null;
       setData(d);
       setMembers(d?.members || []);
+      if (pointerRes.success) {
+        setPointer(pointerRes.data || null);
+      } else {
+        setPointer(null);
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败');
       setData(null);
       setMembers([]);
+      setPointer(null);
     } finally {
       setLoading(false);
     }
@@ -71,6 +81,7 @@ export function ChannelGroupDetailPage() {
   const group = data?.group;
   const breadcrumb = data?.breadcrumb || [];
   const channels = data?.channels || [];
+  const canClearPointer = !!pointer && pointer.pinned && pointer.channel_id > 0;
 
   async function persistOrder(nextIDs: number[]) {
     setErr('');
@@ -129,6 +140,26 @@ export function ChannelGroupDetailPage() {
           <button type="button" className="btn btn-light border" data-bs-toggle="modal" data-bs-target="#addChannelToGroupModal" disabled={!group}>
             <span className="me-1 material-symbols-rounded">add</span> 添加渠道
           </button>
+          <button
+            type="button"
+            className="btn btn-light border"
+            disabled={!group || !canClearPointer}
+            onClick={async () => {
+              if (!window.confirm('确认清除该组指针？')) return;
+              setErr('');
+              setNotice('');
+              try {
+                const res = await upsertAdminChannelGroupPointer(groupId, { channel_id: 0, pinned: false });
+                if (!res.success) throw new Error(res.message || '清除失败');
+                setNotice('已清除指针');
+                await refresh();
+              } catch (e) {
+                setErr(e instanceof Error ? e.message : '清除失败');
+              }
+            }}
+          >
+            清除指针
+          </button>
           <button type="button" className="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createChildGroupModal" disabled={!group}>
             <span className="me-1 material-symbols-rounded">add</span> 新建子组
           </button>
@@ -183,8 +214,9 @@ export function ChannelGroupDetailPage() {
                           : typ === 'channel'
                             ? statusBadge(m.member_channel_status)
                             : statusBadge(0);
+                      const isPointerChannel = typ === 'channel' && !!pointer && pointer.pinned && pointer.channel_id === m.member_channel_id;
                       return (
-                        <tr key={m.member_id}>
+                        <tr key={m.member_id} className={isPointerChannel ? 'table-warning' : undefined}>
                           <td className="text-center">
                             <div className="d-inline-flex gap-1">
                               <button
@@ -257,6 +289,34 @@ export function ChannelGroupDetailPage() {
                           </td>
                           <td className="text-end pe-4 text-nowrap">
                             <div className="d-inline-flex gap-1">
+                              {typ === 'channel' && typeof m.member_channel_id === 'number' && m.member_channel_id > 0
+                                ? (() => {
+                                    const channelID = m.member_channel_id;
+                                    return (
+                                      <button
+                                        type="button"
+                                        className="btn btn-sm btn-light border text-warning"
+                                        title="设为指针"
+                                        disabled={isPointerChannel}
+                                        onClick={async () => {
+                                          if (!window.confirm('确认将该渠道设为该组指针？')) return;
+                                          setErr('');
+                                          setNotice('');
+                                          try {
+                                            const res = await upsertAdminChannelGroupPointer(groupId, { channel_id: channelID, pinned: true });
+                                            if (!res.success) throw new Error(res.message || '设置失败');
+                                            setNotice('已设置指针');
+                                            await refresh();
+                                          } catch (e) {
+                                            setErr(e instanceof Error ? e.message : '设置失败');
+                                          }
+                                        }}
+                                      >
+                                        <i className="ri-pushpin-2-line"></i>
+                                      </button>
+                                    );
+                                  })()
+                                : null}
                               {typ === 'group' && m.member_group_id ? (
                                 <Link to={`/admin/channel-groups/${m.member_group_id}`} className="btn btn-sm btn-light border text-secondary" title="进入">
                                   <i className="ri-folder-open-line"></i>

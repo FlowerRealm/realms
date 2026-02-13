@@ -44,22 +44,6 @@ type State struct {
 
 	channelProbeDueAt      map[int64]time.Time
 	channelProbeClaimUntil map[int64]time.Time
-
-	channelPointerID      int64
-	channelPointerRing    []int64
-	channelPointerIndex   map[int64]int
-	channelPointerMovedAt time.Time
-	channelPointerReason  string
-	channelPointerPinned  bool
-
-	channelPointerChangeHook func(ChannelPointerSnapshot)
-}
-
-type ChannelPointerSnapshot struct {
-	ChannelID int64
-	MovedAt   time.Time
-	Reason    string
-	Pinned    bool
 }
 
 func NewState() *State {
@@ -76,274 +60,7 @@ func NewState() *State {
 		channelBanStreak:       make(map[int64]int),
 		channelProbeDueAt:      make(map[int64]time.Time),
 		channelProbeClaimUntil: make(map[int64]time.Time),
-		channelPointerIndex:    make(map[int64]int),
 	}
-}
-
-func (s *State) SetChannelPointerChangeHook(h func(ChannelPointerSnapshot)) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.channelPointerChangeHook = h
-}
-
-func (s *State) channelPointerSnapshotLocked() ChannelPointerSnapshot {
-	return ChannelPointerSnapshot{
-		ChannelID: s.channelPointerID,
-		MovedAt:   s.channelPointerMovedAt,
-		Reason:    s.channelPointerReason,
-		Pinned:    s.channelPointerPinned,
-	}
-}
-
-func (s *State) SetChannelPointer(channelID int64) {
-	if s == nil {
-		return
-	}
-	var hook func(ChannelPointerSnapshot)
-	var snap ChannelPointerSnapshot
-
-	s.mu.Lock()
-	oldID := s.channelPointerID
-	oldPinned := s.channelPointerPinned
-	now := time.Now()
-	if channelID <= 0 {
-		if s.channelPointerID != 0 || s.channelPointerPinned {
-			s.channelPointerMovedAt = now
-			s.channelPointerReason = "clear"
-		}
-		s.channelPointerID = 0
-		s.channelPointerPinned = false
-	} else {
-		s.channelPointerID = channelID
-		s.channelPointerPinned = true
-		// 若 ring 已存在但不包含该 channel，则把它追加进 ring，避免后续读取时被判定为 invalid 而自动回退。
-		if len(s.channelPointerRing) > 0 {
-			if _, ok := s.channelPointerIndex[s.channelPointerID]; !ok {
-				s.channelPointerIndex[s.channelPointerID] = len(s.channelPointerRing)
-				s.channelPointerRing = append(s.channelPointerRing, s.channelPointerID)
-			}
-		}
-		s.channelPointerMovedAt = now
-		s.channelPointerReason = "manual"
-	}
-
-	if oldID != s.channelPointerID || oldPinned != s.channelPointerPinned {
-		hook = s.channelPointerChangeHook
-		snap = s.channelPointerSnapshotLocked()
-	}
-	s.mu.Unlock()
-
-	if hook != nil {
-		hook(snap)
-	}
-}
-
-func (s *State) TouchChannelPointer(channelID int64, reason string) {
-	if s == nil || channelID <= 0 {
-		return
-	}
-	if reason == "" {
-		reason = "route"
-	}
-
-	var hook func(ChannelPointerSnapshot)
-	var snap ChannelPointerSnapshot
-
-	s.mu.Lock()
-	oldID := s.channelPointerID
-	now := time.Now()
-	s.channelPointerID = channelID
-	if len(s.channelPointerRing) > 0 {
-		if _, ok := s.channelPointerIndex[s.channelPointerID]; !ok {
-			s.channelPointerIndex[s.channelPointerID] = len(s.channelPointerRing)
-			s.channelPointerRing = append(s.channelPointerRing, s.channelPointerID)
-		}
-	}
-	s.channelPointerMovedAt = now
-	s.channelPointerReason = reason
-
-	if oldID != s.channelPointerID {
-		hook = s.channelPointerChangeHook
-		snap = s.channelPointerSnapshotLocked()
-	}
-	s.mu.Unlock()
-
-	if hook != nil {
-		hook(snap)
-	}
-}
-
-func (s *State) IsChannelPointerPinned() bool {
-	if s == nil {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.channelPointerPinned
-}
-
-func (s *State) ChannelPointer(now time.Time) (int64, bool) {
-	if s == nil {
-		return 0, false
-	}
-
-	var hook func(ChannelPointerSnapshot)
-	var snap ChannelPointerSnapshot
-
-	s.mu.Lock()
-	id, _, _, ok, changed := s.channelPointerLocked(now)
-	if changed {
-		hook = s.channelPointerChangeHook
-		snap = s.channelPointerSnapshotLocked()
-	}
-	s.mu.Unlock()
-
-	if hook != nil {
-		hook(snap)
-	}
-	return id, ok
-}
-
-func (s *State) ChannelPointerInfo(now time.Time) (int64, time.Time, string, bool) {
-	if s == nil {
-		return 0, time.Time{}, "", false
-	}
-
-	var hook func(ChannelPointerSnapshot)
-	var snap ChannelPointerSnapshot
-
-	s.mu.Lock()
-	id, movedAt, reason, ok, changed := s.channelPointerLocked(now)
-	if changed {
-		hook = s.channelPointerChangeHook
-		snap = s.channelPointerSnapshotLocked()
-	}
-	s.mu.Unlock()
-
-	if hook != nil {
-		hook(snap)
-	}
-	return id, movedAt, reason, ok
-}
-
-func (s *State) channelPointerLocked(now time.Time) (int64, time.Time, string, bool, bool) {
-	originalID := s.channelPointerID
-
-	if len(s.channelPointerRing) > 0 {
-		if _, ok := s.channelPointerIndex[s.channelPointerID]; !ok {
-			s.channelPointerID = s.channelPointerRing[0]
-			s.channelPointerMovedAt = now
-			s.channelPointerReason = "invalid"
-		}
-		for i := 0; i < len(s.channelPointerRing); i++ {
-			if s.channelPointerID <= 0 {
-				break
-			}
-			until, ok := s.channelBanUntil[s.channelPointerID]
-			if ok && now.Before(until) {
-				s.advanceChannelPointerLocked(now, "ban")
-				continue
-			}
-			break
-		}
-	}
-
-	if s.channelPointerID <= 0 {
-		return 0, time.Time{}, "", false, originalID != s.channelPointerID
-	}
-	return s.channelPointerID, s.channelPointerMovedAt, s.channelPointerReason, true, originalID != s.channelPointerID
-}
-
-func (s *State) ApplyChannelPointerSnapshot(snap ChannelPointerSnapshot) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.channelPointerID = snap.ChannelID
-	s.channelPointerPinned = snap.Pinned
-	s.channelPointerMovedAt = snap.MovedAt
-	s.channelPointerReason = snap.Reason
-
-	if s.channelPointerID > 0 && len(s.channelPointerRing) > 0 {
-		if _, ok := s.channelPointerIndex[s.channelPointerID]; !ok {
-			s.channelPointerIndex[s.channelPointerID] = len(s.channelPointerRing)
-			s.channelPointerRing = append(s.channelPointerRing, s.channelPointerID)
-		}
-	}
-}
-
-func (s *State) SetChannelPointerRing(ring []int64) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.channelPointerRing = append(s.channelPointerRing[:0], ring...)
-	clear(s.channelPointerIndex)
-	for i, id := range s.channelPointerRing {
-		if id <= 0 {
-			continue
-		}
-		if _, ok := s.channelPointerIndex[id]; ok {
-			continue
-		}
-		s.channelPointerIndex[id] = i
-	}
-	// 指针可能指向“非 default ring” 的 channel（例如手动 pin 到某个不在默认组的 channel）。
-	// 为保证指针实时生效，这里确保 ring 中至少包含当前指针 channel。
-	if s.channelPointerID > 0 {
-		if _, ok := s.channelPointerIndex[s.channelPointerID]; !ok {
-			s.channelPointerIndex[s.channelPointerID] = len(s.channelPointerRing)
-			s.channelPointerRing = append(s.channelPointerRing, s.channelPointerID)
-		}
-	}
-}
-
-func (s *State) ChannelPointerRing() []int64 {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(s.channelPointerRing) == 0 {
-		return nil
-	}
-	return append([]int64(nil), s.channelPointerRing...)
-}
-
-func (s *State) advanceChannelPointerLocked(now time.Time, reason string) bool {
-	if s.channelPointerID <= 0 || len(s.channelPointerRing) == 0 {
-		return false
-	}
-	startIdx, ok := s.channelPointerIndex[s.channelPointerID]
-	if !ok {
-		s.channelPointerID = s.channelPointerRing[0]
-		s.channelPointerMovedAt = now
-		s.channelPointerReason = "invalid"
-		return true
-	}
-	for step := 1; step <= len(s.channelPointerRing); step++ {
-		idx := (startIdx + step) % len(s.channelPointerRing)
-		nextID := s.channelPointerRing[idx]
-		if nextID <= 0 {
-			continue
-		}
-		until, ok := s.channelBanUntil[nextID]
-		if ok && now.Before(until) {
-			continue
-		}
-		s.channelPointerID = nextID
-		s.channelPointerMovedAt = now
-		s.channelPointerReason = reason
-		return true
-	}
-	return false
 }
 
 func (s *State) bindingKey(userID int64, routeKeyHash string) string {
@@ -653,12 +370,8 @@ func (s *State) BanChannel(channelID int64, now time.Time, base time.Duration) t
 	if channelID == 0 || base <= 0 {
 		return now
 	}
-	var hook func(ChannelPointerSnapshot)
-	var snap ChannelPointerSnapshot
-	changed := false
-
 	s.mu.Lock()
-
+	defer s.mu.Unlock()
 	streak := s.channelBanStreak[channelID] + 1
 	// 溢出保护：避免不受控的指数/线性增长导致 duration 过大。
 	if streak > 20 {
@@ -670,7 +383,6 @@ func (s *State) BanChannel(channelID int64, now time.Time, base time.Duration) t
 	// 连续失败达到阈值后才进入 ban。
 	if streak < 2 {
 		delete(s.channelBanUntil, channelID)
-		s.mu.Unlock()
 		return now
 	}
 
@@ -688,20 +400,6 @@ func (s *State) BanChannel(channelID int64, now time.Time, base time.Duration) t
 		newUntil = maxUntil
 	}
 	s.channelBanUntil[channelID] = newUntil
-	if s.channelPointerID == channelID {
-		before := s.channelPointerID
-		s.advanceChannelPointerLocked(now, "ban")
-		changed = before != s.channelPointerID
-		if changed {
-			hook = s.channelPointerChangeHook
-			snap = s.channelPointerSnapshotLocked()
-		}
-	}
-	s.mu.Unlock()
-
-	if hook != nil {
-		hook(snap)
-	}
 	return newUntil
 }
 
@@ -709,12 +407,8 @@ func (s *State) BanChannelImmediate(channelID int64, now time.Time, base time.Du
 	if channelID == 0 || base <= 0 {
 		return now
 	}
-	var hook func(ChannelPointerSnapshot)
-	var snap ChannelPointerSnapshot
-	changed := false
-
 	s.mu.Lock()
-
+	defer s.mu.Unlock()
 	streak := s.channelBanStreak[channelID] + 1
 	// 溢出保护：避免不受控的指数/线性增长导致 duration 过大。
 	if streak > 20 {
@@ -736,20 +430,6 @@ func (s *State) BanChannelImmediate(channelID int64, now time.Time, base time.Du
 		newUntil = maxUntil
 	}
 	s.channelBanUntil[channelID] = newUntil
-	if s.channelPointerID == channelID {
-		before := s.channelPointerID
-		s.advanceChannelPointerLocked(now, "ban")
-		changed = before != s.channelPointerID
-		if changed {
-			hook = s.channelPointerChangeHook
-			snap = s.channelPointerSnapshotLocked()
-		}
-	}
-	s.mu.Unlock()
-
-	if hook != nil {
-		hook(snap)
-	}
 	return newUntil
 }
 

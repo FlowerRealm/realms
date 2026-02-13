@@ -33,9 +33,6 @@ type GroupRouter struct {
 
 	lastSelectedChannelID int64
 	lastSelectedStreak    int
-
-	channelRingLoaded bool
-	channelRing       []int64
 }
 
 type groupCursor struct {
@@ -66,17 +63,6 @@ func (r *GroupRouter) Next(ctx context.Context) (Selection, error) {
 		return Selection{}, errors.New("group router 未配置")
 	}
 
-	if _, ok := r.sched.PinnedChannel(); ok {
-		sel, err := r.nextFromPinnedRing(ctx)
-		if err != nil {
-			if errors.Is(err, errGroupExhausted) {
-				return Selection{}, errors.New("上游不可用")
-			}
-			return Selection{}, err
-		}
-		return r.annotateRouteGroup(sel), nil
-	}
-
 	if len(r.cons.AllowGroupOrder) > 0 {
 		sel, err := r.nextFromOrderedGroups(ctx)
 		if err != nil {
@@ -88,35 +74,6 @@ func (r *GroupRouter) Next(ctx context.Context) (Selection, error) {
 		return sel, nil
 	}
 	return Selection{}, errors.New("未指定渠道分组")
-}
-
-func (r *GroupRouter) annotateRouteGroup(sel Selection) Selection {
-	if strings.TrimSpace(sel.RouteGroup) != "" {
-		return sel
-	}
-	if len(r.cons.AllowGroupOrder) == 0 {
-		return sel
-	}
-	groupsCSV := strings.TrimSpace(sel.ChannelGroups)
-	groups := make(map[string]struct{})
-	for _, raw := range strings.Split(groupsCSV, ",") {
-		g := strings.TrimSpace(raw)
-		if g == "" {
-			continue
-		}
-		groups[g] = struct{}{}
-	}
-	for _, raw := range r.cons.AllowGroupOrder {
-		name := strings.TrimSpace(raw)
-		if name == "" {
-			continue
-		}
-		if _, ok := groups[name]; ok {
-			sel.RouteGroup = name
-			return sel
-		}
-	}
-	return sel
 }
 
 func (r *GroupRouter) nextFromOrderedGroups(ctx context.Context) (Selection, error) {
@@ -148,63 +105,6 @@ func (r *GroupRouter) nextFromOrderedGroups(ctx context.Context) (Selection, err
 		sel.RouteGroup = name
 		return sel, nil
 	}
-	return Selection{}, errGroupExhausted
-}
-
-func (r *GroupRouter) nextFromPinnedRing(ctx context.Context) (Selection, error) {
-	if r.st == nil || r.sched == nil || r.sched.state == nil {
-		return Selection{}, errGroupExhausted
-	}
-
-	if !r.channelRingLoaded {
-		ring, err := buildPinnedChannelRing(ctx, r.sched.st)
-		if err != nil {
-			return Selection{}, err
-		}
-		r.sched.state.SetChannelPointerRing(ring)
-		r.channelRing = r.sched.state.ChannelPointerRing()
-		r.channelRingLoaded = true
-	}
-	if len(r.channelRing) == 0 {
-		return Selection{}, errGroupExhausted
-	}
-
-	now := time.Now()
-	pointerID, ok := r.sched.PinnedChannel()
-	if !ok || pointerID <= 0 {
-		return Selection{}, errGroupExhausted
-	}
-
-	startIdx := 0
-	for i, id := range r.channelRing {
-		if id == pointerID {
-			startIdx = i
-			break
-		}
-	}
-
-	// 指针模式：按 ring 从指针位置开始遍历一圈（到底从头再来），直到找到可用渠道。
-	for step := 0; step < len(r.channelRing); step++ {
-		chID := r.channelRing[(startIdx+step)%len(r.channelRing)]
-		if chID <= 0 {
-			continue
-		}
-		if _, excluded := r.excludedChannels[chID]; excluded {
-			continue
-		}
-		if r.sched.state.IsChannelBanned(chID, now) {
-			continue
-		}
-		cons := r.cons
-		cons.RequireChannelID = chID
-		sel, err := r.sched.SelectWithConstraints(ctx, r.userID, r.routeKeyHash, cons)
-		if err != nil {
-			r.excludedChannels[chID] = struct{}{}
-			continue
-		}
-		return sel, nil
-	}
-
 	return Selection{}, errGroupExhausted
 }
 
@@ -268,6 +168,107 @@ func (r *GroupRouter) nextFromGroup(ctx context.Context, groupID int64) (Selecti
 	if r.sched != nil && r.sched.state != nil {
 		r.sched.state.SweepExpiredChannelBans(now)
 	}
+
+	// 指针模式（按组）：当该组指针 pinned=true 时，从指针位置开始按 ring 遍历一圈。
+	// 注意：指针不应绕过 AllowGroupOrder，仅在“当前正在尝试的 groupID”作用域内生效。
+	if r.sched != nil && r.sched.state != nil && r.sched.groupPointers != nil {
+		rec, _ := r.sched.maybeSyncChannelGroupPointerFromStore(ctx, groupID)
+		if rec.Pinned {
+			ring := buildCandidateRing(cands)
+			if len(ring) > 0 {
+				startID := rec.ChannelID
+				if startID <= 0 {
+					startID = ring[0]
+				}
+				index := make(map[int64]int, len(ring))
+				for i, id := range ring {
+					index[id] = i
+				}
+				startIdx, ok := index[startID]
+				if !ok {
+					startID = ring[0]
+					startIdx = 0
+					r.sched.setChannelGroupPointer(groupID, startID, rec.Pinned, "invalid")
+				}
+
+				// 若指针当前渠道处于 ban，按 ring 向后轮转到下一个未封禁渠道并持久化。
+				if r.sched.state.IsChannelBanned(startID, now) && len(ring) > 1 {
+					rotatedID, rotatedIdx, rotatedOK := nextUnbannedInRing(ring, startIdx, func(channelID int64) bool {
+						return r.sched.state.IsChannelBanned(channelID, now)
+					})
+					if rotatedOK && rotatedID != startID {
+						startID = rotatedID
+						startIdx = rotatedIdx
+						r.sched.setChannelGroupPointer(groupID, startID, rec.Pinned, "ban")
+					}
+				}
+
+				const maxConsecutiveSameChannel = 2
+				deferredID := int64(0)
+				if r.lastSelectedChannelID != 0 && r.lastSelectedStreak >= maxConsecutiveSameChannel && len(ring) > 1 {
+					if _, ok := index[r.lastSelectedChannelID]; ok {
+						deferredID = r.lastSelectedChannelID
+					}
+				}
+
+				try := func(chID int64) (Selection, bool) {
+					if chID <= 0 {
+						return Selection{}, false
+					}
+					if _, excluded := r.excludedChannels[chID]; excluded {
+						return Selection{}, false
+					}
+					if r.sched.state.IsChannelBanned(chID, now) {
+						return Selection{}, false
+					}
+					cons := r.cons
+					cons.RequireChannelID = chID
+					sel, err := r.sched.SelectWithConstraints(ctx, r.userID, r.routeKeyHash, cons)
+					if err != nil {
+						r.excludedChannels[chID] = struct{}{}
+						return Selection{}, false
+					}
+
+					c.attemptsUsed++
+					if cand, ok := cands[chID]; ok {
+						if cand.SourceGroupID != 0 && cand.SourceGroupID != groupID {
+							if sc, err := r.cursorForGroup(ctx, cand.SourceGroupID); err == nil {
+								sc.attemptsUsed++
+							}
+						}
+					}
+
+					if chID == r.lastSelectedChannelID {
+						r.lastSelectedStreak++
+					} else {
+						r.lastSelectedChannelID = chID
+						r.lastSelectedStreak = 1
+					}
+
+					r.sched.touchChannelGroupPointer(ctx, groupID, chID, "route")
+					return sel, true
+				}
+
+				// 第 1 轮：跳过 deferredID（若存在），优先尝试其他渠道。
+				for step := 0; step < len(ring); step++ {
+					chID := ring[(startIdx+step)%len(ring)]
+					if deferredID != 0 && chID == deferredID {
+						continue
+					}
+					if sel, ok := try(chID); ok {
+						return sel, nil
+					}
+				}
+				// 第 2 轮：最后再尝试 deferredID（避免同渠道无限重试导致 failover 无法前进）。
+				if deferredID != 0 {
+					if sel, ok := try(deferredID); ok {
+						return sel, nil
+					}
+				}
+				return Selection{}, errGroupExhausted
+			}
+		}
+	}
 	ordered := sortCandidates(cands, func(channelID int64) bool {
 		if r.sched == nil || r.sched.state == nil {
 			return false
@@ -320,6 +321,9 @@ func (r *GroupRouter) nextFromGroup(ctx context.Context, groupID int64) (Selecti
 		} else {
 			r.lastSelectedChannelID = cand.ChannelID
 			r.lastSelectedStreak = 1
+		}
+		if r.sched != nil {
+			r.sched.touchChannelGroupPointer(ctx, groupID, cand.ChannelID, "route")
 		}
 		return sel, nil
 	}
@@ -407,6 +411,54 @@ func (r *GroupRouter) collectCandidates(ctx context.Context, groupID int64, out 
 		out[chID] = cand
 	}
 	return nil
+}
+
+func buildCandidateRing(in map[int64]channelCandidate) []int64 {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]channelCandidate, 0, len(in))
+	for _, c := range in {
+		out = append(out, c)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Promotion != out[j].Promotion {
+			return out[i].Promotion
+		}
+		if out[i].Priority != out[j].Priority {
+			return out[i].Priority > out[j].Priority
+		}
+		return out[i].ChannelID > out[j].ChannelID
+	})
+	ids := make([]int64, 0, len(out))
+	for _, c := range out {
+		if c.ChannelID <= 0 {
+			continue
+		}
+		ids = append(ids, c.ChannelID)
+	}
+	return ids
+}
+
+func nextUnbannedInRing(ring []int64, startIdx int, isBanned func(channelID int64) bool) (int64, int, bool) {
+	if len(ring) == 0 {
+		return 0, 0, false
+	}
+	if startIdx < 0 || startIdx >= len(ring) {
+		startIdx = 0
+	}
+	for step := 1; step <= len(ring); step++ {
+		idx := (startIdx + step) % len(ring)
+		id := ring[idx]
+		if id <= 0 {
+			continue
+		}
+		if isBanned != nil && isBanned(id) {
+			continue
+		}
+		return id, idx, true
+	}
+	return 0, 0, false
 }
 
 func sortCandidates(in map[int64]channelCandidate, isProbePending func(channelID int64) bool, failScore func(channelID int64) int) []channelCandidate {
