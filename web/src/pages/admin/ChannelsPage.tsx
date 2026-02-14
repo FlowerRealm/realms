@@ -38,7 +38,7 @@ import {
   type ChannelTimeSeriesPoint,
   type CodexOAuthAccount,
 } from '../../api/channels';
-import { listAdminChannelGroups, type AdminChannelGroup } from '../../api/admin/channelGroups';
+import { listAdminChannelGroups, upsertAdminChannelGroupPointer, type AdminChannelGroup } from '../../api/admin/channelGroups';
 import { createChannelModel, listChannelModels, updateChannelModel, type ChannelModelBinding } from '../../api/channelModels';
 import { listManagedModelsAdmin } from '../../api/models';
 
@@ -108,6 +108,12 @@ type ChannelTestPanelState = {
   summaryMessage: string;
 };
 
+type ChannelPointerTarget = {
+  id: number;
+  name: string;
+  groups: string;
+};
+
 export function ChannelsPage() {
   const [channels, setChannels] = useState<ChannelAdminItem[]>([]);
   const channelsRef = useRef<ChannelAdminItem[]>([]);
@@ -119,6 +125,8 @@ export function ChannelsPage() {
   const [testingChannelID, setTestingChannelID] = useState<number | null>(null);
   const [expandedChannelID, setExpandedChannelID] = useState<number | null>(null);
   const [testPanels, setTestPanels] = useState<Record<number, ChannelTestPanelState>>({});
+  const [pointerTarget, setPointerTarget] = useState<ChannelPointerTarget | null>(null);
+  const [pointerGroupID, setPointerGroupID] = useState('');
 
   const [usageStart, setUsageStart] = useState('');
   const [usageEnd, setUsageEnd] = useState('');
@@ -460,6 +468,29 @@ export function ChannelsPage() {
     if (byFirst) return byFirst;
     return 'default';
   }, [channelGroups]);
+
+  const channelGroupByName = useMemo(() => {
+    const m = new Map<string, AdminChannelGroup>();
+    for (const g of channelGroups) {
+      const name = (g.name || '').trim();
+      if (!name) continue;
+      if (m.has(name)) continue;
+      m.set(name, g);
+    }
+    return m;
+  }, [channelGroups]);
+
+  const pointerGroupOptions = useMemo(() => {
+    if (!pointerTarget) return [];
+    const names = parseGroupsCSV(pointerTarget.groups || '');
+    const out: AdminChannelGroup[] = [];
+    for (const name of names) {
+      const g = channelGroupByName.get(name);
+      if (!g || g.status !== 1) continue;
+      out.push(g);
+    }
+    return out;
+  }, [pointerTarget, channelGroupByName]);
 
   function parseGroupsCSV(raw: string): string[] {
     const s = raw.trim();
@@ -963,6 +994,12 @@ export function ChannelsPage() {
                       const codexPanelLoading = !!codexAccountsLoadingByChannel[ch.id];
                       const codexPanelErr = codexAccountsErrByChannel[ch.id] || '';
                       const rowBaseClassName = ['rlm-channel-row-main', channelDisabled ? 'table-secondary opacity-75' : ''].filter((v) => v).join(' ');
+                      const groupNames = parseGroupsCSV(ch.groups || '');
+                      const pointerGroups = groupNames
+                        .map((name) => channelGroupByName.get(name))
+                        .filter((g): g is AdminChannelGroup => !!g && g.status === 1);
+                      const canSetPointer = !channelDisabled && pointerGroups.length > 0;
+                      const setPointerTitle = channelDisabled ? '禁用渠道不可设为指针' : pointerGroups.length === 0 ? '该渠道未加入任何启用的渠道组' : '设为指针';
 
                       return (
                         <Fragment key={ch.id}>
@@ -1173,6 +1210,22 @@ export function ChannelsPage() {
                               >
                                 <i className={`me-1 ${ch.status === 1 ? 'ri-pause-circle-line' : 'ri-play-circle-line'}`}></i>
                                 {ch.status === 1 ? '禁用' : '启用'}
+                              </button>
+
+                              <button
+                                className="btn btn-sm btn-light border text-warning"
+                                type="button"
+                                title={setPointerTitle}
+                                disabled={loading || !canSetPointer}
+                                data-bs-toggle="modal"
+                                data-bs-target="#setChannelPointerModal"
+                                onClick={() => {
+                                  if (!canSetPointer) return;
+                                  setPointerTarget({ id: ch.id, name: ch.name || `渠道 #${ch.id}`, groups: ch.groups || '' });
+                                  setPointerGroupID(String(pointerGroups[0].id));
+                                }}
+                              >
+                                <i className="ri-pushpin-2-line me-1"></i>指针
                               </button>
 
                               <button
@@ -1492,6 +1545,68 @@ export function ChannelsPage() {
           </table>
         </div>
       </div>
+
+      <BootstrapModal
+        id="setChannelPointerModal"
+        title={pointerTarget ? `设为指针：${pointerTarget.name || `#${pointerTarget.id}`}` : '设为指针'}
+        dialogClassName="modal-dialog-centered"
+        onHidden={() => {
+          setPointerTarget(null);
+          setPointerGroupID('');
+        }}
+      >
+        {!pointerTarget ? (
+          <div className="text-muted">未选择渠道。</div>
+        ) : pointerGroupOptions.length === 0 ? (
+          <div className="text-muted">该渠道未加入任何启用的渠道组，无法设为指针。</div>
+        ) : (
+          <form
+            className="row g-3"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!pointerTarget) return;
+              const groupID = Number.parseInt(pointerGroupID, 10) || 0;
+              if (groupID <= 0) {
+                setErr('请选择渠道组');
+                return;
+              }
+              const g = pointerGroupOptions.find((x) => x.id === groupID) || null;
+              if (!window.confirm(`确认将渠道 ${pointerTarget.name || pointerTarget.id} 设为渠道组 ${g?.name || groupID} 的指针？`)) return;
+              setErr('');
+              setNotice('');
+              try {
+                const res = await upsertAdminChannelGroupPointer(groupID, { channel_id: pointerTarget.id, pinned: true });
+                if (!res.success) throw new Error(res.message || '设置失败');
+                setNotice(`已设置指针：${g?.name || groupID} → ${pointerTarget.name || pointerTarget.id}`);
+                closeModalById('setChannelPointerModal');
+              } catch (e) {
+                setErr(e instanceof Error ? e.message : '设置失败');
+              }
+            }}
+          >
+            <div className="col-12">
+              <label className="form-label">选择渠道组</label>
+              <select className="form-select" value={pointerGroupID} onChange={(e) => setPointerGroupID(e.target.value)}>
+                {pointerGroupOptions.map((g) => (
+                  <option key={g.id} value={String(g.id)}>
+                    {g.name} #{g.id}
+                  </option>
+                ))}
+              </select>
+              <div className="form-text small text-muted">指针会固定到该渠道，直到被重新设置。</div>
+            </div>
+
+            <div className="modal-footer border-top-0 px-0 pb-0">
+              <button type="button" className="btn btn-light" data-bs-dismiss="modal">
+                取消
+              </button>
+              <button type="submit" className="btn btn-primary px-4">
+                保存
+              </button>
+            </div>
+          </form>
+        )}
+      </BootstrapModal>
 
       <BootstrapModal
         id="createChannelModal"

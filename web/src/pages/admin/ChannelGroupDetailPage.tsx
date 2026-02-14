@@ -173,7 +173,6 @@ export function ChannelGroupDetailPage() {
   const group = data?.group;
   const breadcrumb = data?.breadcrumb || [];
   const channels = data?.channels || [];
-  const canClearPointer = !!pointer && pointer.pinned && pointer.channel_id > 0;
 
   const reduceMotion = useMemo(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
@@ -430,26 +429,6 @@ export function ChannelGroupDetailPage() {
         <div className="d-flex gap-2">
           <button type="button" className="btn btn-light border" data-bs-toggle="modal" data-bs-target="#addChannelToGroupModal" disabled={!group}>
             <span className="me-1 material-symbols-rounded">add</span> 添加渠道
-          </button>
-          <button
-            type="button"
-            className="btn btn-light border"
-            disabled={!group || !canClearPointer}
-            onClick={async () => {
-              if (!window.confirm('确认清除该组指针？')) return;
-              setErr('');
-              setNotice('');
-              try {
-                const res = await upsertAdminChannelGroupPointer(groupId, { channel_id: 0, pinned: false });
-                if (!res.success) throw new Error(res.message || '清除失败');
-                setNotice('已清除指针');
-                await refresh();
-              } catch (e) {
-                setErr(e instanceof Error ? e.message : '清除失败');
-              }
-            }}
-          >
-            清除指针
           </button>
           <button type="button" className="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createChildGroupModal" disabled={!group}>
             <span className="me-1 material-symbols-rounded">add</span> 新建子组

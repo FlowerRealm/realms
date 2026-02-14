@@ -26,6 +26,7 @@ type adminChannelGroupView struct {
 	IsDefault          bool    `json:"is_default"`
 	PointerChannelID   int64   `json:"pointer_channel_id,omitempty"`
 	PointerChannelName string  `json:"pointer_channel_name,omitempty"`
+	PointerPinned      bool    `json:"pointer_pinned,omitempty"`
 }
 
 func setAdminChannelGroupAPIRoutes(r gin.IRoutes, opts Options) {
@@ -34,6 +35,7 @@ func setAdminChannelGroupAPIRoutes(r gin.IRoutes, opts Options) {
 	r.GET("/channel-groups/:group_id", adminGetChannelGroupHandler(opts))
 	r.GET("/channel-groups/:group_id/detail", adminGetChannelGroupDetailHandler(opts))
 	r.GET("/channel-groups/:group_id/pointer", adminGetChannelGroupPointerHandler(opts))
+	r.GET("/channel-groups/:group_id/pointer/candidates", adminListChannelGroupPointerCandidatesHandler(opts))
 	r.PUT("/channel-groups/:group_id", adminUpdateChannelGroupHandler(opts))
 	r.DELETE("/channel-groups/:group_id", adminDeleteChannelGroupHandler(opts))
 	r.PUT("/channel-groups/:group_id/default", adminSetDefaultChannelGroupHandler(opts))
@@ -72,10 +74,20 @@ func adminListChannelGroupsHandler(opts Options) gin.HandlerFunc {
 		for _, g := range groups {
 			var ptrChannelID int64
 			var ptrChannelName string
+			var ptrPinned bool
 			if pointers != nil {
-				if ptr, ok := pointers[g.ID]; ok && ptr.Pinned && ptr.ChannelID > 0 {
+				if ptr, ok := pointers[g.ID]; ok && ptr.ChannelID > 0 {
 					ptrChannelID = ptr.ChannelID
 					ptrChannelName = strings.TrimSpace(ptr.ChannelName)
+					ptrPinned = ptr.Pinned
+				}
+			}
+			if ptrChannelID <= 0 {
+				id, name, ok, err := defaultChannelGroupPointerCandidate(c.Request.Context(), opts.Store, g.ID)
+				if err == nil && ok && id > 0 {
+					ptrChannelID = id
+					ptrChannelName = strings.TrimSpace(name)
+					ptrPinned = false
 				}
 			}
 
@@ -91,6 +103,7 @@ func adminListChannelGroupsHandler(opts Options) gin.HandlerFunc {
 				IsDefault:          defaultID > 0 && g.ID == defaultID,
 				PointerChannelID:   ptrChannelID,
 				PointerChannelName: ptrChannelName,
+				PointerPinned:      ptrPinned,
 			})
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": out})
@@ -741,6 +754,14 @@ func adminGetChannelGroupPointerHandler(opts Options) gin.HandlerFunc {
 		}
 
 		chName := ""
+		if rec.ChannelID <= 0 {
+			id, name, ok, err := defaultChannelGroupPointerCandidate(c.Request.Context(), opts.Store, groupID)
+			if err == nil && ok && id > 0 {
+				rec.ChannelID = id
+				rec.Pinned = false
+				chName = strings.TrimSpace(name)
+			}
+		}
 		if rec.ChannelID > 0 {
 			if ch, err := opts.Store.GetUpstreamChannelByID(c.Request.Context(), rec.ChannelID); err == nil {
 				chName = strings.TrimSpace(ch.Name)
@@ -916,4 +937,135 @@ func channelBelongsToGroup(ctx context.Context, st *store.Store, groupID int64, 
 		return false, nil
 	}
 	return walk(groupID)
+}
+
+type channelGroupPointerCandidate struct {
+	channelID int64
+	name      string
+	promotion bool
+	priority  int
+	enabled   bool
+}
+
+func defaultChannelGroupPointerCandidate(ctx context.Context, st *store.Store, groupID int64) (int64, string, bool, error) {
+	if st == nil || groupID <= 0 {
+		return 0, "", false, nil
+	}
+
+	visited := make(map[int64]struct{}, 64)
+	cands := make(map[int64]channelGroupPointerCandidate, 128)
+
+	var walk func(gid int64) error
+	walk = func(gid int64) error {
+		if gid <= 0 {
+			return nil
+		}
+		if _, ok := visited[gid]; ok {
+			return nil
+		}
+		visited[gid] = struct{}{}
+
+		members, err := st.ListChannelGroupMembers(ctx, gid)
+		if err != nil {
+			return err
+		}
+		for _, m := range members {
+			// 成员类型校验：必须且只能存在一种 member。
+			if m.MemberGroupID != nil && m.MemberChannelID != nil {
+				continue
+			}
+			if m.MemberGroupID == nil && m.MemberChannelID == nil {
+				continue
+			}
+
+			if m.MemberGroupID != nil {
+				if m.MemberGroupStatus != nil && *m.MemberGroupStatus != 1 {
+					continue
+				}
+				if err := walk(*m.MemberGroupID); err != nil {
+					return err
+				}
+				continue
+			}
+
+			if m.MemberChannelID == nil || *m.MemberChannelID <= 0 {
+				continue
+			}
+			chID := *m.MemberChannelID
+			name := ""
+			if m.MemberChannelName != nil {
+				name = strings.TrimSpace(*m.MemberChannelName)
+			}
+			enabled := m.MemberChannelStatus != nil && *m.MemberChannelStatus == 1
+			cand := channelGroupPointerCandidate{
+				channelID: chID,
+				name:      name,
+				promotion: m.Promotion,
+				priority:  m.Priority,
+				enabled:   enabled,
+			}
+			if prev, ok := cands[chID]; ok {
+				if cand.promotion && !prev.promotion {
+					cands[chID] = cand
+					continue
+				}
+				if cand.promotion == prev.promotion && cand.priority > prev.priority {
+					cands[chID] = cand
+					continue
+				}
+				if prev.name == "" && cand.name != "" {
+					prev.name = cand.name
+					cands[chID] = prev
+				}
+				continue
+			}
+			cands[chID] = cand
+		}
+		return nil
+	}
+
+	if err := walk(groupID); err != nil {
+		return 0, "", false, err
+	}
+	if len(cands) == 0 {
+		return 0, "", false, nil
+	}
+
+	better := func(a, b channelGroupPointerCandidate) bool {
+		if a.promotion != b.promotion {
+			return a.promotion && !b.promotion
+		}
+		if a.priority != b.priority {
+			return a.priority > b.priority
+		}
+		return a.channelID > b.channelID
+	}
+
+	var bestEnabled channelGroupPointerCandidate
+	bestEnabledOK := false
+	var bestAny channelGroupPointerCandidate
+	bestAnyOK := false
+	for _, v := range cands {
+		if v.channelID <= 0 {
+			continue
+		}
+		if !bestAnyOK || better(v, bestAny) {
+			bestAny = v
+			bestAnyOK = true
+		}
+		if v.enabled {
+			if !bestEnabledOK || better(v, bestEnabled) {
+				bestEnabled = v
+				bestEnabledOK = true
+			}
+		}
+	}
+
+	if bestEnabledOK {
+		return bestEnabled.channelID, bestEnabled.name, true, nil
+	}
+	if bestAnyOK {
+		return bestAny.channelID, bestAny.name, true, nil
+	}
+	return 0, "", false, nil
 }

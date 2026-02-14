@@ -8,7 +8,6 @@ import {
   deleteAdminChannelGroup,
   listAdminChannelGroups,
   setAdminDefaultChannelGroup,
-  upsertAdminChannelGroupPointer,
   updateAdminChannelGroup,
   type AdminChannelGroup,
 } from '../../api/admin/channelGroups';
@@ -138,6 +137,7 @@ export function ChannelGroupsPage() {
                     {items.map((g) => {
                       const st = statusBadge(g.status);
                       const ptrID = typeof g.pointer_channel_id === 'number' ? g.pointer_channel_id : 0;
+                      const ptrPinned = !!g.pointer_pinned;
                       const ptrLabel = ptrID
                         ? g.pointer_channel_name?.trim()
                           ? g.pointer_channel_name.trim()
@@ -151,7 +151,16 @@ export function ChannelGroupsPage() {
                           </td>
                           <td>
                             {ptrID > 0 ? (
-                              <code className="text-warning user-select-all">{ptrLabel}</code>
+                              <span className="d-inline-flex align-items-center gap-1">
+                                <span
+                                  className={`material-symbols-rounded ${ptrPinned ? 'text-warning' : 'text-muted'}`}
+                                  style={{ fontSize: 18 }}
+                                  title={ptrPinned ? '已固定' : '未固定'}
+                                >
+                                  push_pin
+                                </span>
+                                <code className={`${ptrPinned ? 'text-warning' : 'text-muted'} user-select-all`}>{ptrLabel}</code>
+                              </span>
                             ) : (
                               <span className="text-muted small fst-italic">-</span>
                             )}
@@ -167,28 +176,6 @@ export function ChannelGroupsPage() {
                               <Link to={`/admin/channel-groups/${g.id}`} className="btn btn-sm btn-light border text-secondary" title="进入">
                                 <span className="material-symbols-rounded" style={{ fontSize: 18 }}>folder_open</span>
                               </Link>
-                              {ptrID > 0 ? (
-                                <button
-                                  type="button"
-                                  className="btn btn-sm btn-light border text-warning"
-                                  title="清除指针"
-                                  onClick={async () => {
-                                    if (!window.confirm('确认清除该组指针？')) return;
-                                    setErr('');
-                                    setNotice('');
-                                    try {
-                                      const res = await upsertAdminChannelGroupPointer(g.id, { channel_id: 0, pinned: false });
-                                      if (!res.success) throw new Error(res.message || '清除失败');
-                                      setNotice('已清除指针');
-                                      await refresh();
-                                    } catch (e) {
-                                      setErr(e instanceof Error ? e.message : '清除失败');
-                                    }
-                                  }}
-                                >
-                                  <span className="material-symbols-rounded" style={{ fontSize: 18 }}>close</span>
-                                </button>
-                              ) : null}
                               <button
                                 type="button"
                                 className="btn btn-sm btn-light border text-warning"

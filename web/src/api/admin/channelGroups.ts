@@ -13,6 +13,7 @@ export type AdminChannelGroup = {
   is_default?: boolean;
   pointer_channel_id?: number;
   pointer_channel_name?: string | null;
+  pointer_pinned?: boolean;
 };
 
 export type AdminChannelGroupMember = {
@@ -82,6 +83,11 @@ export async function getAdminChannelGroupDetail(groupID: number) {
 
 export async function getAdminChannelGroupPointer(groupID: number) {
   const res = await api.get<APIResponse<AdminChannelGroupPointer>>(`/api/admin/channel-groups/${groupID}/pointer`);
+  return res.data;
+}
+
+export async function listAdminChannelGroupPointerCandidates(groupID: number) {
+  const res = await api.get<APIResponse<AdminChannelRef[]>>(`/api/admin/channel-groups/${groupID}/pointer/candidates`);
   return res.data;
 }
 
