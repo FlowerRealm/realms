@@ -72,6 +72,7 @@ export type ChannelRuntime = {
 };
 
 export type ChannelAdminItem = Channel & {
+  in_use: boolean;
   usage: ChannelUsage;
   runtime: ChannelRuntime;
 };
@@ -420,11 +421,6 @@ export async function testChannelStream(
 
 export async function getChannelKey(channelID: number) {
   const res = await api.post<APIResponse<{ key: string }>>(`/api/channel/${channelID}/key`);
-  return res.data;
-}
-
-export async function reorderChannels(ids: number[]) {
-  const res = await api.post<APIResponse<void>>('/api/channel/reorder', ids);
   return res.data;
 }
 

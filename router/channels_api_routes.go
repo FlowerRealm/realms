@@ -107,9 +107,6 @@ func setChannelAPIRoutes(r gin.IRoutes, opts Options) {
 
 	r.GET("/channel/test", admin, testAllChannelsHandler(opts))
 	r.GET("/channel/test/:channel_id", admin, testChannelHandler(opts))
-
-	r.POST("/channel/reorder", admin, reorderChannelsHandler(opts))
-	r.POST("/channel/reorder/", admin, reorderChannelsHandler(opts))
 }
 
 func listChannelsHandler(opts Options) gin.HandlerFunc {
@@ -185,6 +182,7 @@ type channelUsageOverviewView struct {
 
 type channelAdminListItem struct {
 	channelView
+	InUse   bool               `json:"in_use"`
 	Usage   channelUsageView   `json:"usage"`
 	Runtime channelRuntimeInfo `json:"runtime"`
 }
@@ -299,6 +297,16 @@ func channelsPageHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
+		usedIDs, err := opts.Store.ListUsedUpstreamChannelIDs(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询使用中渠道失败"})
+			return
+		}
+		usedSet := make(map[int64]struct{}, len(usedIDs))
+		for _, id := range usedIDs {
+			usedSet[id] = struct{}{}
+		}
+
 		out := make([]channelAdminListItem, 0, len(channels))
 		for _, ch := range channels {
 			view := channelView{
@@ -347,8 +355,14 @@ func channelsPageHandler(opts Options) gin.HandlerFunc {
 
 			runtime := channelRuntimeForAPI(c.Request.Context(), opts, ch.ID, loc)
 
+			inUse := false
+			if _, ok := usedSet[ch.ID]; ok {
+				inUse = true
+			}
+
 			out = append(out, channelAdminListItem{
 				channelView: view,
+				InUse:       inUse,
 				Usage:       usageView,
 				Runtime:     runtime,
 			})
@@ -465,69 +479,6 @@ func channelTimeSeriesHandler(opts Options) gin.HandlerFunc {
 				Points:        points,
 			},
 		})
-	}
-}
-
-func reorderChannelsHandler(opts Options) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if opts.Store == nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
-			return
-		}
-
-		var ids []int64
-		if err := json.NewDecoder(c.Request.Body).Decode(&ids); err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
-			return
-		}
-
-		seen := make(map[int64]struct{}, len(ids))
-		cleaned := make([]int64, 0, len(ids))
-		for _, id := range ids {
-			if id <= 0 {
-				continue
-			}
-			if _, ok := seen[id]; ok {
-				continue
-			}
-			seen[id] = struct{}{}
-			cleaned = append(cleaned, id)
-		}
-		if len(cleaned) == 0 {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "ids 不能为空"})
-			return
-		}
-
-		channels, err := opts.Store.ListUpstreamChannels(c.Request.Context())
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询渠道失败"})
-			return
-		}
-		if len(cleaned) != len(channels) {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "渠道列表不完整，请刷新后重试"})
-			return
-		}
-
-		existing := make(map[int64]struct{}, len(channels))
-		for _, ch := range channels {
-			existing[ch.ID] = struct{}{}
-		}
-		for _, id := range cleaned {
-			if _, ok := existing[id]; !ok {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "存在未知的 channel_id，请刷新后重试"})
-				return
-			}
-		}
-		if len(seen) != len(existing) {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "渠道列表不完整，请刷新后重试"})
-			return
-		}
-
-		if err := opts.Store.ReorderUpstreamChannels(c.Request.Context(), cleaned); err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存排序失败"})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存排序"})
 	}
 }
 

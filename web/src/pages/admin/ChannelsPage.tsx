@@ -1,24 +1,7 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type ReactNode } from 'react';
-
-import {
-  DndContext,
-  MouseSensor,
-  TouchSensor,
-  closestCenter,
-  pointerWithin,
-  useSensor,
-  useSensors,
-  type CollisionDetection,
-  type DragEndEvent,
-  type DragStartEvent,
-  type Modifier,
-} from '@dnd-kit/core';
-import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 
 import { BootstrapModal } from '../../components/BootstrapModal';
 import { closeModalById } from '../../components/modal';
-import { PortalDragOverlay } from '../../components/PortalDragOverlay';
 import { formatIntComma } from '../../format/int';
 import {
   createChannel,
@@ -35,7 +18,6 @@ import {
   listChannelCodexAccounts,
   listChannelCredentials,
   refreshChannelCodexAccount,
-  reorderChannels,
   startChannelCodexOAuth,
   testChannelStream,
   updateChannel,
@@ -59,70 +41,6 @@ import {
 import { listAdminChannelGroups, type AdminChannelGroup } from '../../api/admin/channelGroups';
 import { createChannelModel, listChannelModels, updateChannelModel, type ChannelModelBinding } from '../../api/channelModels';
 import { listManagedModelsAdmin } from '../../api/models';
-
-type UseSortableReturn = ReturnType<typeof useSortable>;
-type SortableRowRenderArgs = Pick<
-  UseSortableReturn,
-  'attributes' | 'listeners' | 'setActivatorNodeRef' | 'setNodeRef' | 'transform' | 'transition' | 'isDragging' | 'isOver'
-> & {
-  setRowRef: (node: HTMLTableRowElement | null) => void;
-};
-
-function wrapDndListeners(listeners: SortableRowRenderArgs['listeners']): SortableRowRenderArgs['listeners'] {
-  if (!listeners) return listeners;
-
-  const getTarget = (e: unknown): Element | null => {
-    if (!e || typeof e !== 'object') return null;
-    const target = (e as { target?: unknown }).target;
-    return target instanceof Element ? target : null;
-  };
-
-  const shouldIgnore = (target: Element | null) => {
-    if (!target) return false;
-    return !!target.closest('button, a, input, textarea, select, label, [data-rlm-dnd-ignore]');
-  };
-
-  const wrap = (fn: unknown) => {
-    if (typeof fn !== 'function') return fn;
-    return (e: unknown) => {
-      if (shouldIgnore(getTarget(e))) return;
-      (fn as (e: unknown) => void)(e);
-    };
-  };
-
-  const base = listeners as unknown as Record<string, unknown>;
-  const out: Record<string, unknown> = { ...base };
-  out.onMouseDown = wrap(base.onMouseDown);
-  out.onTouchStart = wrap(base.onTouchStart);
-  out.onPointerDown = wrap(base.onPointerDown);
-  return out as unknown as SortableRowRenderArgs['listeners'];
-}
-
-const restrictToVerticalAxisModifier: Modifier = ({ transform }) => {
-  if (!transform) return transform;
-  return { ...transform, x: 0 };
-};
-
-function SortableRow({
-  id,
-  disabled,
-  children,
-}: {
-  id: number;
-  disabled: boolean | { draggable?: boolean; droppable?: boolean };
-  children: (args: SortableRowRenderArgs) => ReactNode;
-}) {
-  const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, transition, isDragging, isOver } = useSortable({ id, disabled });
-  const wrappedListeners = useMemo(() => wrapDndListeners(listeners), [listeners]);
-  const setRowRef = useCallback(
-    (node: HTMLTableRowElement | null) => {
-      setNodeRef(node);
-      setActivatorNodeRef(node);
-    },
-    [setActivatorNodeRef, setNodeRef],
-  );
-  return children({ attributes, listeners: wrappedListeners, setActivatorNodeRef, setNodeRef, setRowRef, transform, transition, isDragging, isOver });
-}
 
 function channelTypeLabel(t: string): string {
   if (t === 'openai_compatible') return 'OpenAI 兼容';
@@ -196,7 +114,6 @@ export function ChannelsPage() {
   const [managedModelIDs, setManagedModelIDs] = useState<string[]>([]);
   const [channelGroups, setChannelGroups] = useState<AdminChannelGroup[]>([]);
   const [loading, setLoading] = useState(true);
-  const [reordering, setReordering] = useState(false);
   const [err, setErr] = useState('');
   const [notice, setNotice] = useState('');
   const [testingChannelID, setTestingChannelID] = useState<number | null>(null);
@@ -225,10 +142,6 @@ export function ChannelsPage() {
     { value: 'hour', label: '按小时' },
     { value: 'day', label: '按天' },
   ];
-
-  const [draggingID, setDraggingID] = useState<number | null>(null);
-  const [dragOverlayWidth, setDragOverlayWidth] = useState<number | null>(null);
-  const [dragOverlayColWidths, setDragOverlayColWidths] = useState<number[] | null>(null);
 
   const [createType, setCreateType] = useState<'openai_compatible' | 'anthropic' | 'codex_oauth'>('openai_compatible');
   const [createName, setCreateName] = useState('');
@@ -329,118 +242,6 @@ export function ChannelsPage() {
     for (const b of bindings) m.set(b.public_id, b);
     return m;
   }, [bindings]);
-
-  const enabledChannelIDs = useMemo(() => channels.filter((c) => c.status === 1).map((c) => c.id), [channels]);
-  const reduceMotion = useMemo(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
-    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  }, []);
-
-  const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 7 } }),
-  );
-  const collisionDetection = useCallback<CollisionDetection>((args) => {
-    const pointerCollisions = pointerWithin(args);
-    if (pointerCollisions.length > 0) return pointerCollisions;
-    return closestCenter(args);
-  }, []);
-
-  const dragOverlayChannel = useMemo(() => {
-    if (draggingID === null) return null;
-    return channels.find((ch) => ch.id === draggingID) || null;
-  }, [channels, draggingID]);
-
-  useEffect(() => {
-    if (draggingID === null) return;
-    const prevCursor = document.body.style.cursor;
-    const prevUserSelect = document.body.style.userSelect;
-    document.body.style.cursor = 'grabbing';
-    document.body.style.userSelect = 'none';
-    document.body.classList.add('rlm-dnd-sorting');
-    return () => {
-      document.body.style.cursor = prevCursor;
-      document.body.style.userSelect = prevUserSelect;
-      document.body.classList.remove('rlm-dnd-sorting');
-    };
-  }, [draggingID]);
-
-  function sameIDOrder(a: number[], b: number[]): boolean {
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) {
-      if (a[i] !== b[i]) return false;
-    }
-    return true;
-  }
-
-  function handleDragStart(e: DragStartEvent) {
-    if (loading || reordering) return;
-    const raw = e.active.id;
-    const channelID = typeof raw === 'number' ? raw : Number.parseInt(String(raw), 10);
-    if (!Number.isFinite(channelID) || channelID <= 0) return;
-
-    setExpandedChannelID(null);
-    setDraggingID(channelID);
-
-    const row =
-      typeof document !== 'undefined'
-        ? (document.querySelector(`tr[data-rlm-channel-row="main"][data-rlm-channel-id="${channelID}"]`) as HTMLElement | null)
-        : null;
-    const rect = row?.getBoundingClientRect() || null;
-    setDragOverlayWidth(rect ? Math.round(rect.width) : null);
-
-    const cols = row ? Array.from(row.querySelectorAll('td')) : [];
-    const colWidths = cols.map((td) => Math.round(td.getBoundingClientRect().width));
-    setDragOverlayColWidths(colWidths.length > 0 && colWidths.every((w) => Number.isFinite(w) && w > 0) ? colWidths : null);
-  }
-
-  function handleDragCancel() {
-    setDraggingID(null);
-    setDragOverlayWidth(null);
-    setDragOverlayColWidths(null);
-  }
-
-  async function handleDragEnd(e: DragEndEvent) {
-    const rawActive = e.active.id;
-    const rawOver = e.over?.id;
-    const activeID = typeof rawActive === 'number' ? rawActive : Number.parseInt(String(rawActive), 10);
-    const overID = rawOver == null ? null : typeof rawOver === 'number' ? rawOver : Number.parseInt(String(rawOver), 10);
-
-    setDraggingID(null);
-    setDragOverlayWidth(null);
-    setDragOverlayColWidths(null);
-
-    if (!overID || !Number.isFinite(activeID) || activeID <= 0) return;
-    if (activeID === overID) return;
-
-    const startList = channels;
-    const enabled = startList.filter((ch) => ch.status === 1);
-    const disabled = startList.filter((ch) => ch.status !== 1);
-    const from = enabled.findIndex((c) => c.id === activeID);
-    const to = enabled.findIndex((c) => c.id === overID);
-    if (from < 0 || to < 0) return;
-
-    const nextEnabled = arrayMove(enabled, from, to);
-    const next = [...nextEnabled, ...disabled];
-    const nextIDs = next.map((c) => c.id);
-    if (sameIDOrder(nextIDs, startList.map((c) => c.id))) return;
-
-    setReordering(true);
-    setErr('');
-    setNotice('');
-    setChannels(next);
-    try {
-      const res = await reorderChannels(nextIDs);
-      if (!res.success) throw new Error(res.message || '保存排序失败');
-      setNotice(res.message || '已保存排序');
-      await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
-    } catch (e2) {
-      setChannels(startList);
-      setErr(e2 instanceof Error ? e2.message : '保存排序失败');
-    } finally {
-      setReordering(false);
-    }
-  }
 
   function normalizeChannelSections(list: ChannelAdminItem[]): ChannelAdminItem[] {
     const enabled = list.filter((ch) => ch.status === 1);
@@ -1055,88 +856,13 @@ export function ChannelsPage() {
     };
   }, [channels, expandedChannelID, detailSeries, detailField, detailGranularity]);
 
-  const dragOverlayStatus = dragOverlayChannel ? statusBadge(dragOverlayChannel.status) : null;
-  const dragOverlayHealth = dragOverlayChannel ? healthBadge(dragOverlayChannel) : null;
-  const dragOverlayCheckedAt = dragOverlayChannel ? fmtHHMM(dragOverlayChannel.last_test_at) : '';
-
   return (
-    <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
-      <div className="fade-in-up">
-        <PortalDragOverlay modifiers={[restrictToVerticalAxisModifier]} zIndex={2000}>
-          {dragOverlayChannel ? (
-            <div className="rlm-channel-dnd-overlay" style={{ width: dragOverlayWidth || undefined }}>
-              <table className="table table-hover align-middle mb-0" style={{ tableLayout: 'fixed', width: '100%' }}>
-                {dragOverlayColWidths ? (
-                  <colgroup>
-                    {dragOverlayColWidths.map((w, idx) => (
-                      <col key={idx} style={{ width: w }} />
-                    ))}
-                  </colgroup>
-                ) : null}
-                <tbody>
-                  <tr className="rlm-channel-row-main rlm-channel-row-drag-preview">
-                    <td className="text-center text-muted">
-                      <span className="d-inline-flex align-items-center justify-content-center" style={{ width: 48 }}>
-                        <i className="ri-drag-move-2-line fs-5"></i>
-                      </span>
-                    </td>
-                    <td className="ps-4" style={{ minWidth: 0 }}>
-                      <div className="d-flex flex-column">
-                        <div className="d-flex flex-wrap align-items-center gap-2">
-                          <span className="fw-bold text-dark">{dragOverlayChannel.name || `渠道 #${dragOverlayChannel.id}`}</span>
-                          <span className="text-muted small">({channelTypeLabel(dragOverlayChannel.type)})</span>
-                          {dragOverlayChannel.promotion ? (
-                            <span className="small text-warning fw-medium">
-                              <i className="ri-fire-line me-1"></i>优先
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="d-flex flex-wrap align-items-center gap-2 small text-muted mt-1">
-                          {dragOverlayChannel.base_url ? (
-                            <span
-                              className="font-monospace d-inline-block user-select-all"
-                              style={{ maxWidth: 360, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
-                              title={dragOverlayChannel.base_url}
-                            >
-                              {dragOverlayChannel.base_url}
-                            </span>
-                          ) : null}
-                          <div className="d-flex align-items-center">
-                            {dragOverlayChannel.base_url ? <span className="text-secondary">·</span> : null}
-                            <span className={`${dragOverlayChannel.base_url ? 'ms-2 ' : ''}me-1`}>渠道组:</span>
-                            <span className="text-secondary font-monospace user-select-all">{(dragOverlayChannel.groups || '').trim() || '-'}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td>{dragOverlayStatus ? <span className={dragOverlayStatus.cls}>{dragOverlayStatus.label}</span> : null}</td>
-                    <td>
-                      {dragOverlayHealth ? (
-                        <div className="d-flex flex-column">
-                          <span className={dragOverlayHealth.cls} title={dragOverlayHealth.hint}>
-                            {dragOverlayHealth.label}
-                          </span>
-                          {dragOverlayCheckedAt ? (
-                            <small className="text-muted mt-1 smaller" title={dragOverlayChannel.last_test_at || undefined}>
-                              {dragOverlayCheckedAt} 已检查
-                            </small>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td className="text-end pe-4 text-muted small">拖动中…</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-        </PortalDragOverlay>
-
+    <div className="fade-in-up">
       <div className="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-3">
         <div>
           <h2 className="h4 fw-bold mb-1">上游渠道管理</h2>
           <p className="text-muted small mb-0">
-            管理模型转发渠道。支持拖拽排序调整优先级（越靠前优先级越高）。当前 {formatIntComma(enabledCount)} 启用 / {formatIntComma(disabledCount)} 禁用 / {formatIntComma(channels.length)} 总计。
+            管理模型转发渠道。当前 {formatIntComma(enabledCount)} 启用 / {formatIntComma(disabledCount)} 禁用 / {formatIntComma(channels.length)} 总计。
           </p>
         </div>
         <button type="button" className="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createChannelModal">
@@ -1193,15 +919,11 @@ export function ChannelsPage() {
           <div>
             <span className="text-primary fw-bold text-uppercase small">渠道列表</span>
           </div>
-          <div className="text-primary text-opacity-75 small">
-            <i className="ri-drag-move-2-line me-1"></i> 支持拖拽排序
-          </div>
         </div>
         <div className="table-responsive">
           <table className="table table-hover align-middle mb-0">
             <thead className="table-light">
               <tr>
-                <th style={{ width: 60 }}></th>
                 <th className="ps-4">渠道详情</th>
                 <th>状态</th>
                 <th>健康状况</th>
@@ -1211,19 +933,19 @@ export function ChannelsPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="text-center py-5 text-muted">
+                  <td colSpan={4} className="text-center py-5 text-muted">
                     加载中…
                   </td>
                 </tr>
               ) : channels.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="text-center py-5 text-muted">
+                  <td colSpan={4} className="text-center py-5 text-muted">
                     <span className="fs-1 d-block mb-3 material-symbols-rounded">inbox</span>
                     暂无渠道。
                   </td>
                 </tr>
               ) : (
-                <SortableContext items={enabledChannelIDs} strategy={verticalListSortingStrategy}>
+                <>
                   {channels.map((ch, idx) => {
                       const st = statusBadge(ch.status);
                       const hb = healthBadge(ch);
@@ -1243,73 +965,33 @@ export function ChannelsPage() {
                       const rowBaseClassName = ['rlm-channel-row-main', channelDisabled ? 'table-secondary opacity-75' : ''].filter((v) => v).join(' ');
 
                       return (
-	                        <SortableRow
-	                          key={ch.id}
-	                          id={ch.id}
-	                          disabled={{ draggable: loading || reordering || channelDisabled, droppable: loading || reordering || channelDisabled }}
-	                        >
-		                          {({ attributes, listeners, setRowRef, transform, transition, isDragging, isOver }) => {
-		                            const rowClassName = [
-		                              rowBaseClassName,
-		                              draggingID !== null && isOver && !isDragging ? 'table-primary rlm-channel-row-drop-target' : '',
-		                              isDragging ? 'rlm-channel-row-dragging' : '',
-		                            ]
-                              .filter((v) => v)
-                              .join(' ');
-	                            const style: CSSProperties = {
-	                              transform: CSS.Transform.toString(transform ? { ...transform, x: 0, scaleX: 1, scaleY: 1 } : null),
-	                              transition: reduceMotion
-	                                ? undefined
-	                                : transition
-	                                  ? `${transition}, background-color 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease`
-	                                  : undefined,
-	                              cursor: loading || reordering || channelDisabled ? 'not-allowed' : isDragging ? 'grabbing' : 'grab',
-	                            };
-	                            return (
-	                              <Fragment>
-	                                {idx === firstDisabledIndex ? (
-                          <tr className="table-light">
-                            <td colSpan={5} className="px-4 py-2">
-                              <span className="text-muted small">
-                                <i className="ri-forbid-2-line me-1"></i>已禁用渠道（{disabledCount}）已固定在底部分区
-                              </span>
-                            </td>
-                          </tr>
-                                ) : null}
-	                        <tr
-	                          className={rowClassName || undefined}
-	                          ref={setRowRef}
-	                          style={style}
-	                          {...attributes}
-	                          {...listeners}
-	                          data-rlm-channel-row="main"
-	                          data-rlm-channel-id={ch.id}
-	                          data-rlm-channel-disabled={channelDisabled ? '1' : '0'}
-	                          onClick={(e) => {
-	                            const target = e.target as HTMLElement;
-	                            if (target.closest('button, a, input, textarea, select, label')) return;
-	                            toggleChannelPanel(ch.id);
-	                          }}
-	                        >
-	                          <td
-	                            className="text-center text-muted"
-	                            title={channelDisabled ? '禁用渠道固定在底部' : '拖动排序'}
-	                          >
-	                            <span
-	                                      className="d-inline-flex align-items-center justify-content-center"
-	                                      style={{ width: 48, touchAction: loading || reordering || channelDisabled ? 'auto' : isDragging ? 'none' : 'auto' }}
-	                                      aria-label="拖动排序"
-	                                      data-rlm-drag-handle="1"
-	                                      onClick={(e) => e.stopPropagation()}
-	                                    >
-	                              <i className="ri-drag-move-2-line fs-5"></i>
-	                            </span>
-	                          </td>
-	                          <td className="ps-4" style={{ minWidth: 0 }}>
+                        <Fragment key={ch.id}>
+                          {idx === firstDisabledIndex ? (
+                            <tr className="table-light">
+                              <td colSpan={4} className="px-4 py-2">
+                                <span className="text-muted small">
+                                  <i className="ri-forbid-2-line me-1"></i>已禁用渠道（{disabledCount}）已固定在底部分区
+                                </span>
+                              </td>
+                            </tr>
+                          ) : null}
+                          <tr
+                            className={rowBaseClassName || undefined}
+                            data-rlm-channel-row="main"
+                            data-rlm-channel-id={ch.id}
+                            data-rlm-channel-disabled={channelDisabled ? '1' : '0'}
+                            onClick={(e) => {
+                              const target = e.target as HTMLElement;
+                              if (target.closest('button, a, input, textarea, select, label')) return;
+                              toggleChannelPanel(ch.id);
+                            }}
+                          >
+                            <td className="ps-4" style={{ minWidth: 0 }}>
 	                            <div className="d-flex flex-column">
                                 <div className="d-flex flex-wrap align-items-center gap-2">
                                   <span className="fw-bold text-dark">{ch.name || `渠道 #${ch.id}`}</span>
                                   <span className="text-muted small">({channelTypeLabel(ch.type)})</span>
+                                  {ch.in_use ? <span className="badge bg-info bg-opacity-10 text-info border border-info-subtle">使用中</span> : null}
                                   {ch.promotion ? (
                                     <span className="small text-warning fw-medium">
                                       <i className="ri-fire-line me-1"></i>优先
@@ -1371,7 +1053,7 @@ export function ChannelsPage() {
                                 className="btn btn-sm btn-light border text-primary"
                                 type="button"
                                 title="测试连接"
-                                disabled={loading || reordering || ch.type === 'codex_oauth' || anyTesting}
+                                disabled={loading || ch.type === 'codex_oauth' || anyTesting}
                                 onClick={async () => {
                                   if (ch.type === 'codex_oauth') return;
                                   openChannelPanel(ch.id);
@@ -1471,7 +1153,7 @@ export function ChannelsPage() {
                                 className={`btn btn-sm ${ch.status === 1 ? 'btn-light border text-warning' : 'btn-light border text-success'}`}
                                 type="button"
                                 title={ch.status === 1 ? '禁用渠道' : '启用渠道'}
-                                disabled={loading || reordering}
+                                disabled={loading}
                                 onClick={async () => {
                                   const targetStatus = ch.status === 1 ? 0 : 1;
                                   setErr('');
@@ -1497,7 +1179,7 @@ export function ChannelsPage() {
                                 className="btn btn-sm btn-primary"
                                 type="button"
                                 title="设置"
-                                disabled={loading || reordering}
+                                disabled={loading}
                                 onClick={() => openChannelSettingsModal({ id: ch.id, name: ch.name }, 'common')}
                               >
                                 <i className="ri-settings-3-line me-1"></i>设置
@@ -1507,7 +1189,7 @@ export function ChannelsPage() {
                                 className="btn btn-sm btn-light border text-danger"
                                 type="button"
                                 title="删除"
-                                disabled={loading || reordering}
+                                disabled={loading}
                                 onClick={async () => {
                                   if (!window.confirm(`确认删除渠道 ${ch.name || ch.id} ? 此操作不可恢复。`)) return;
                                   setErr('');
@@ -1529,7 +1211,7 @@ export function ChannelsPage() {
                         </tr>
                         {panelOpen ? (
                           <tr className={`${channelDisabled ? 'table-secondary opacity-75' : 'bg-light-subtle'} rlm-channel-detail-row`}>
-                            <td colSpan={5} className="px-4 py-3">
+                            <td colSpan={4} className="px-4 py-3">
                               <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
                                 <button
                                   type="button"
@@ -1803,11 +1485,8 @@ export function ChannelsPage() {
                         ) : null}
                         </Fragment>
                       );
-                    }}
-                  </SortableRow>
-                );
                   })}
-                </SortableContext>
+                </>
               )}
             </tbody>
           </table>
@@ -3097,6 +2776,5 @@ export function ChannelsPage() {
         )}
       </BootstrapModal>
     </div>
-    </DndContext>
   );
 }

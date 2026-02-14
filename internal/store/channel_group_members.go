@@ -128,6 +128,30 @@ func (s *Store) ListChannelGroupMembers(ctx context.Context, parentGroupID int64
 	return out, nil
 }
 
+func (s *Store) ListUsedUpstreamChannelIDs(ctx context.Context) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT member_channel_id FROM channel_group_members WHERE member_channel_id IS NOT NULL AND member_channel_id > 0`)
+	if err != nil {
+		return nil, fmt.Errorf("查询使用中渠道失败: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]int64, 0, 64)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("扫描使用中渠道失败: %w", err)
+		}
+		if id <= 0 {
+			continue
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历使用中渠道失败: %w", err)
+	}
+	return out, nil
+}
+
 func (s *Store) GetChannelGroupParentID(ctx context.Context, groupID int64) (int64, bool, error) {
 	if groupID == 0 {
 		return 0, false, errors.New("groupID 不能为空")
@@ -138,7 +162,7 @@ func (s *Store) GetChannelGroupParentID(ctx context.Context, groupID int64) (int
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, false, nil
 		}
-			return 0, false, fmt.Errorf("查询父渠道组失败: %w", err)
+		return 0, false, fmt.Errorf("查询父渠道组失败: %w", err)
 	}
 	if parentID == 0 {
 		return 0, false, nil
@@ -349,7 +373,7 @@ func (s *Store) ReorderChannelGroupMembers(ctx context.Context, parentGroupID in
 			return fmt.Errorf("更新成员(%d) priority 失败: %w", id, err)
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
-				return fmt.Errorf("成员(%d) 不属于该渠道组", id)
+			return fmt.Errorf("成员(%d) 不属于该渠道组", id)
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -380,7 +404,7 @@ func (s *Store) syncUpstreamChannelGroupsCacheTx(ctx context.Context, tx *sql.Tx
 	for rows.Next() {
 		var n string
 		if err := rows.Scan(&n); err != nil {
-				return fmt.Errorf("扫描渠道所属渠道组失败: %w", err)
+			return fmt.Errorf("扫描渠道所属渠道组失败: %w", err)
 		}
 		n = strings.TrimSpace(n)
 		if n == "" {

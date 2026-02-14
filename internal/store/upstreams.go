@@ -1399,27 +1399,6 @@ func looksLikeLegacyEncryptedBlob(b []byte) bool {
 	return len(b) >= 1+12 && b[0] == 1
 }
 
-func (s *Store) ReorderUpstreamChannels(ctx context.Context, ids []int64) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("开始事务失败: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	count := len(ids)
-	for i, id := range ids {
-		priority := count - i
-		if _, err := tx.ExecContext(ctx, `UPDATE upstream_channels SET priority=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, priority, id); err != nil {
-			return fmt.Errorf("更新 channel(%d) priority 失败: %w", id, err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("提交事务失败: %w", err)
-	}
-	return nil
-}
-
 func (s *Store) DeleteUpstreamChannel(ctx context.Context, channelID int64) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

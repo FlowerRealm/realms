@@ -20,7 +20,7 @@ import (
 	"realms/internal/store"
 )
 
-func TestChannels_PageAndReorder_RootFlow(t *testing.T) {
+func TestChannels_PageAndInUse_RootFlow(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	dir := t.TempDir()
@@ -65,6 +65,14 @@ func TestChannels_PageAndReorder_RootFlow(t *testing.T) {
 	ch2, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "c2", "", 0, false, false, false, false)
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel ch2: %v", err)
+	}
+
+	groupID, err := st.CreateChannelGroup(ctx, "g1", nil, 1, store.DefaultGroupPriceMultiplier, 5)
+	if err != nil {
+		t.Fatalf("CreateChannelGroup: %v", err)
+	}
+	if err := st.AddChannelGroupMemberChannel(ctx, groupID, ch1, 0, false); err != nil {
+		t.Fatalf("AddChannelGroupMemberChannel: %v", err)
 	}
 
 	usageID, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
@@ -175,6 +183,7 @@ func TestChannels_PageAndReorder_RootFlow(t *testing.T) {
 			} `json:"overview"`
 			Channels []struct {
 				ID    int64 `json:"id"`
+				InUse bool  `json:"in_use"`
 				Usage struct {
 					CommittedUSD          string `json:"committed_usd"`
 					Tokens                int64  `json:"tokens"`
@@ -213,9 +222,13 @@ func TestChannels_PageAndReorder_RootFlow(t *testing.T) {
 		t.Fatalf("expected >=2 channels, got %d", len(pageResp.Data.Channels))
 	}
 	foundCh1 := false
+	foundCh2 := false
 	for _, it := range pageResp.Data.Channels {
 		if it.ID == ch1 {
 			foundCh1 = true
+			if !it.InUse {
+				t.Fatalf("expected ch1 in_use=true")
+			}
 			if it.Usage.CommittedUSD != "1.23" {
 				t.Fatalf("expected ch1 committed_usd=1.23, got %q", it.Usage.CommittedUSD)
 			}
@@ -235,9 +248,18 @@ func TestChannels_PageAndReorder_RootFlow(t *testing.T) {
 				t.Fatalf("expected runtime.available=false when opts.Admin nil")
 			}
 		}
+		if it.ID == ch2 {
+			foundCh2 = true
+			if it.InUse {
+				t.Fatalf("expected ch2 in_use=false")
+			}
+		}
 	}
 	if !foundCh1 {
 		t.Fatalf("expected ch1 in response")
+	}
+	if !foundCh2 {
+		t.Fatalf("expected ch2 in response")
 	}
 
 	// channel timeseries
@@ -316,84 +338,6 @@ func TestChannels_PageAndReorder_RootFlow(t *testing.T) {
 	}
 	if tsResp.Data.Granularity != "day" {
 		t.Fatalf("expected granularity=day, got %q", tsResp.Data.Granularity)
-	}
-
-	// reorder: place ch1 before ch2 (keep other channels in-place)
-	ids := make([]int64, 0, len(pageResp.Data.Channels))
-	for _, it := range pageResp.Data.Channels {
-		ids = append(ids, it.ID)
-	}
-	desired := make([]int64, 0, len(ids))
-	for _, id := range ids {
-		if id == ch1 {
-			continue
-		}
-		desired = append(desired, id)
-	}
-	// insert ch1 before ch2
-	inserted := false
-	out := make([]int64, 0, len(desired)+1)
-	for _, id := range desired {
-		if !inserted && id == ch2 {
-			out = append(out, ch1)
-			inserted = true
-		}
-		out = append(out, id)
-	}
-	if !inserted {
-		out = append(out, ch1)
-	}
-
-	reorderBody, _ := json.Marshal(out)
-	req = httptest.NewRequest(http.MethodPost, "http://example.com/api/channel/reorder", bytes.NewReader(reorderBody))
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
-	req.Header.Set("Cookie", sessionCookie)
-	rr = httptest.NewRecorder()
-	engine.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("reorder status=%d body=%s", rr.Code, rr.Body.String())
-	}
-	var okResp struct {
-		Success bool   `json:"success"`
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &okResp); err != nil {
-		t.Fatalf("json.Unmarshal reorder: %v", err)
-	}
-	if !okResp.Success {
-		t.Fatalf("expected reorder success, got message=%q", okResp.Message)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/channel/page", nil)
-	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
-	req.Header.Set("Cookie", sessionCookie)
-	rr = httptest.NewRecorder()
-	engine.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("page2 status=%d body=%s", rr.Code, rr.Body.String())
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &pageResp); err != nil {
-		t.Fatalf("json.Unmarshal page2: %v", err)
-	}
-	if !pageResp.Success || len(pageResp.Data.Channels) < 2 {
-		t.Fatalf("unexpected page2 resp: %#v", pageResp)
-	}
-	idx1 := -1
-	idx2 := -1
-	for i, it := range pageResp.Data.Channels {
-		if it.ID == ch1 {
-			idx1 = i
-		}
-		if it.ID == ch2 {
-			idx2 = i
-		}
-	}
-	if idx1 < 0 || idx2 < 0 {
-		t.Fatalf("expected ch1/ch2 in response, got idx1=%d idx2=%d", idx1, idx2)
-	}
-	if idx1 >= idx2 {
-		t.Fatalf("expected ch1 before ch2 after reorder, got idx1=%d idx2=%d", idx1, idx2)
 	}
 }
 
