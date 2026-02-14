@@ -80,15 +80,15 @@ func featureBanGroups(selfMode bool, fs store.FeatureState) []featureBanGroupVie
 			},
 		},
 		{
-			Title: "管理后台",
-			Items: []featureBanItemView{
-				b(store.SettingFeatureDisableAdminChannels, "上游渠道", "隐藏入口，并对 /admin/channels* 等返回 404。", fs.AdminChannelsDisabled, false, false),
-				b(store.SettingFeatureDisableAdminChannelGroups, "分组", "隐藏入口，并对 /admin/channel-groups* 返回 404。", fs.AdminChannelGroupsDisabled, false, false),
-				b(store.SettingFeatureDisableAdminUsers, "用户管理", "隐藏入口，并对 /admin/users* 返回 404。", fs.AdminUsersDisabled, false, false),
-				b(store.SettingFeatureDisableAdminUsage, "用量统计（管理后台）", "隐藏入口，并对 /admin/usage 返回 404。", fs.AdminUsageDisabled, false, false),
-				b(store.SettingFeatureDisableAdminAnnouncements, "公告（管理后台）", "隐藏入口，并对 /admin/announcements* 返回 404。", fs.AdminAnnouncementsDisabled, false, false),
+				Title: "管理后台",
+				Items: []featureBanItemView{
+					b(store.SettingFeatureDisableAdminChannels, "上游渠道", "隐藏入口，并对 /admin/channels* 等返回 404。", fs.AdminChannelsDisabled, false, false),
+					b(store.SettingFeatureDisableAdminChannelGroups, "渠道组", "隐藏入口，并对 /admin/channel-groups* 返回 404。", fs.AdminChannelGroupsDisabled, false, false),
+					b(store.SettingFeatureDisableAdminUsers, "用户管理", "隐藏入口，并对 /admin/users* 返回 404。", fs.AdminUsersDisabled, false, false),
+					b(store.SettingFeatureDisableAdminUsage, "用量统计（管理后台）", "隐藏入口，并对 /admin/usage 返回 404。", fs.AdminUsageDisabled, false, false),
+					b(store.SettingFeatureDisableAdminAnnouncements, "公告（管理后台）", "隐藏入口，并对 /admin/announcements* 返回 404。", fs.AdminAnnouncementsDisabled, false, false),
+				},
 			},
-		},
 	}
 }
 

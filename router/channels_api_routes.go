@@ -774,7 +774,7 @@ func updateChannelHandler(opts Options) gin.HandlerFunc {
 
 		if req.Groups != nil {
 			if err := opts.Store.SetUpstreamChannelGroups(c.Request.Context(), ch.ID, strings.TrimSpace(*req.Groups)); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "更新分组失败"})
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "更新渠道组失败"})
 				return
 			}
 		}

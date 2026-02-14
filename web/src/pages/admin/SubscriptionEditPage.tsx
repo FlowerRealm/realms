@@ -46,7 +46,7 @@ export function SubscriptionEditPage() {
     try {
       if (!Number.isFinite(planId) || planId <= 0) throw new Error('参数错误');
       const [planRes, groupsRes] = await Promise.all([getAdminSubscriptionPlan(planId), listAdminChannelGroups()]);
-      if (!groupsRes.success) throw new Error(groupsRes.message || '加载分组失败');
+      if (!groupsRes.success) throw new Error(groupsRes.message || '加载渠道组失败');
       const nextGroups = groupsRes.data || [];
       setGroups(nextGroups);
       if (!planRes.success) throw new Error(planRes.message || '加载失败');
@@ -161,7 +161,7 @@ export function SubscriptionEditPage() {
                       </option>
                     ))}
                   </select>
-                  <div className="form-text small text-muted">默认分组：{defaultGroupName}</div>
+                  <div className="form-text small text-muted">默认渠道组：{defaultGroupName}</div>
                 </div>
                 <div className="col-md-4">
                   <label className="form-label">订阅倍率</label>
@@ -169,7 +169,7 @@ export function SubscriptionEditPage() {
                     <span className="input-group-text">×</span>
                     <input className="form-control" value={priceMultiplier} onChange={(e) => setPriceMultiplier(e.target.value)} inputMode="decimal" placeholder="1" />
                   </div>
-                  <div className="form-text small text-muted">最终计费倍率 = 订阅倍率 × 最终成功分组倍率。</div>
+                  <div className="form-text small text-muted">最终计费倍率 = 订阅倍率 × 最终成功渠道组倍率。</div>
                 </div>
                 <div className="col-md-4">
                   <label className="form-label">价格（CNY）</label>

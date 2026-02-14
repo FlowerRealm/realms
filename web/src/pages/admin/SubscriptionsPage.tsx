@@ -55,7 +55,7 @@ export function SubscriptionsPage() {
     setLoading(true);
     try {
       const [plansRes, groupsRes] = await Promise.all([listAdminSubscriptionPlans(), listAdminChannelGroups()]);
-      if (!groupsRes.success) throw new Error(groupsRes.message || '加载分组失败');
+      if (!groupsRes.success) throw new Error(groupsRes.message || '加载渠道组失败');
       const nextGroups = groupsRes.data || [];
       setGroups(nextGroups);
       if (!plansRes.success) throw new Error(plansRes.message || '加载套餐失败');
@@ -301,7 +301,7 @@ export function SubscriptionsPage() {
                 placeholder="1"
               />
             </div>
-            <div className="form-text small text-muted">最终计费倍率 = 订阅倍率 × 最终成功分组倍率。</div>
+            <div className="form-text small text-muted">最终计费倍率 = 订阅倍率 × 最终成功渠道组倍率。</div>
           </div>
           <div className="col-md-4">
             <label className="form-label">价格（CNY）</label>

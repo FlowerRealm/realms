@@ -1,5 +1,7 @@
 package store
 
+// token_channel_groups_store.go: Token 绑定渠道组（token_channel_groups）。
+
 import (
 	"context"
 	"database/sql"
@@ -9,44 +11,44 @@ import (
 	"strings"
 )
 
-func (s *Store) ListTokenGroupBindings(ctx context.Context, tokenID int64) ([]TokenGroupBinding, error) {
+func (s *Store) ListTokenChannelGroupBindings(ctx context.Context, tokenID int64) ([]TokenChannelGroupBinding, error) {
 	if tokenID <= 0 {
 		return nil, errors.New("token_id 不合法")
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT token_id, group_name, priority, created_at, updated_at
-FROM token_groups
+SELECT token_id, channel_group_name, priority, created_at, updated_at
+FROM token_channel_groups
 WHERE token_id=?
-ORDER BY priority DESC, group_name ASC
+ORDER BY priority DESC, channel_group_name ASC
 `, tokenID)
 	if err != nil {
-		return nil, fmt.Errorf("查询 token_groups 失败: %w", err)
+		return nil, fmt.Errorf("查询 token_channel_groups 失败: %w", err)
 	}
 	defer rows.Close()
 
-	var out []TokenGroupBinding
+	var out []TokenChannelGroupBinding
 	for rows.Next() {
-		var row TokenGroupBinding
-		if err := rows.Scan(&row.TokenID, &row.GroupName, &row.Priority, &row.CreatedAt, &row.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("扫描 token_groups 失败: %w", err)
+		var row TokenChannelGroupBinding
+		if err := rows.Scan(&row.TokenID, &row.ChannelGroupName, &row.Priority, &row.CreatedAt, &row.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("扫描 token_channel_groups 失败: %w", err)
 		}
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("遍历 token_groups 失败: %w", err)
+		return nil, fmt.Errorf("遍历 token_channel_groups 失败: %w", err)
 	}
 	return out, nil
 }
 
-func (s *Store) ListTokenGroups(ctx context.Context, tokenID int64) ([]string, error) {
-	rows, err := s.ListTokenGroupBindings(ctx, tokenID)
+func (s *Store) ListTokenChannelGroups(ctx context.Context, tokenID int64) ([]string, error) {
+	rows, err := s.ListTokenChannelGroupBindings(ctx, tokenID)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]string, 0, len(rows))
 	seen := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
-		name := strings.TrimSpace(row.GroupName)
+		name := strings.TrimSpace(row.ChannelGroupName)
 		if name == "" {
 			continue
 		}
@@ -59,7 +61,7 @@ func (s *Store) ListTokenGroups(ctx context.Context, tokenID int64) ([]string, e
 	return out, nil
 }
 
-func normalizeTokenGroups(in []string) ([]string, error) {
+func normalizeTokenChannelGroups(in []string) ([]string, error) {
 	seen := make(map[string]struct{}, len(in))
 	out := make([]string, 0, len(in))
 	for _, raw := range in {
@@ -83,16 +85,16 @@ func normalizeTokenGroups(in []string) ([]string, error) {
 	return out, nil
 }
 
-func (s *Store) ReplaceTokenGroups(ctx context.Context, tokenID int64, groups []string) error {
+func (s *Store) ReplaceTokenChannelGroups(ctx context.Context, tokenID int64, channelGroups []string) error {
 	if tokenID <= 0 {
 		return errors.New("token_id 不合法")
 	}
-	norm, err := normalizeTokenGroups(groups)
+	norm, err := normalizeTokenChannelGroups(channelGroups)
 	if err != nil {
 		return err
 	}
 	if len(norm) == 0 {
-		return errors.New("至少选择 1 个渠道分组")
+		return errors.New("至少选择 1 个渠道组")
 	}
 
 	// ensure token exists and load its owner's main_group (用于限制可选范围)
@@ -131,23 +133,23 @@ LIMIT 1
 		allowedSet[name] = struct{}{}
 	}
 	if len(allowedSet) == 0 {
-		return errors.New("用户分组未配置可选渠道分组")
+		return errors.New("用户分组未配置可选渠道组")
 	}
 
 	// validate groups exist and enabled
 	for _, g := range norm {
 		if _, ok := allowedSet[g]; !ok {
-			return errors.New("分组不在用户分组可选范围内: " + g)
+			return errors.New("渠道组不在用户分组可选范围内: " + g)
 		}
 		row, err := s.GetChannelGroupByName(ctx, g)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return errors.New("分组不存在: " + g)
+				return errors.New("渠道组不存在: " + g)
 			}
 			return err
 		}
 		if row.Status != 1 {
-			return errors.New("分组已禁用: " + g)
+			return errors.New("渠道组已禁用: " + g)
 		}
 	}
 
@@ -165,21 +167,21 @@ LIMIT 1
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM token_groups WHERE token_id=?`, tokenID); err != nil {
-		return fmt.Errorf("清理 token_groups 失败: %w", err)
+	if _, err := tx.ExecContext(ctx, `DELETE FROM token_channel_groups WHERE token_id=?`, tokenID); err != nil {
+		return fmt.Errorf("清理 token_channel_groups 失败: %w", err)
 	}
 	stmt, err := tx.PrepareContext(ctx, `
-INSERT INTO token_groups(token_id, group_name, priority, created_at, updated_at)
+INSERT INTO token_channel_groups(token_id, channel_group_name, priority, created_at, updated_at)
 VALUES(?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `)
 	if err != nil {
-		return fmt.Errorf("准备写入 token_groups 失败: %w", err)
+		return fmt.Errorf("准备写入 token_channel_groups 失败: %w", err)
 	}
 	defer stmt.Close()
 
 	for _, g := range ordered {
 		if _, err := stmt.ExecContext(ctx, tokenID, g, priorityByName[g]); err != nil {
-			return fmt.Errorf("写入 token_groups 失败: %w", err)
+			return fmt.Errorf("写入 token_channel_groups 失败: %w", err)
 		}
 	}
 
@@ -189,7 +191,7 @@ VALUES(?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	return nil
 }
 
-func (s *Store) ListEffectiveTokenGroupBindings(ctx context.Context, tokenID int64) ([]TokenGroupBinding, error) {
+func (s *Store) ListEffectiveTokenChannelGroupBindings(ctx context.Context, tokenID int64) ([]TokenChannelGroupBinding, error) {
 	if tokenID <= 0 {
 		return nil, errors.New("token_id 不合法")
 	}
@@ -228,14 +230,14 @@ LIMIT 1
 		}
 	}
 
-	bindings, err := s.ListTokenGroupBindings(ctx, tokenID)
+	bindings, err := s.ListTokenChannelGroupBindings(ctx, tokenID)
 	if err != nil {
 		return nil, err
 	}
 
-	out := make([]TokenGroupBinding, 0, len(bindings))
+	out := make([]TokenChannelGroupBinding, 0, len(bindings))
 	for _, b := range bindings {
-		name := strings.TrimSpace(b.GroupName)
+		name := strings.TrimSpace(b.ChannelGroupName)
 		if name == "" {
 			continue
 		}
@@ -254,15 +256,15 @@ LIMIT 1
 	return out, nil
 }
 
-func (s *Store) ListEffectiveTokenGroups(ctx context.Context, tokenID int64) ([]string, error) {
-	bindings, err := s.ListEffectiveTokenGroupBindings(ctx, tokenID)
+func (s *Store) ListEffectiveTokenChannelGroups(ctx context.Context, tokenID int64) ([]string, error) {
+	bindings, err := s.ListEffectiveTokenChannelGroupBindings(ctx, tokenID)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]string, 0, len(bindings))
 	seen := make(map[string]struct{}, len(bindings))
 	for _, b := range bindings {
-		name := strings.TrimSpace(b.GroupName)
+		name := strings.TrimSpace(b.ChannelGroupName)
 		if name == "" {
 			continue
 		}

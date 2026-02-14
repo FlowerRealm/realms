@@ -17,7 +17,7 @@ type Principal struct {
 	UserID    int64
 	TokenID   *int64
 	Role      string
-	// Groups 用于数据面“分组路由/模型 ACL”的有序分组集合（通常来自 token_groups，并受 users.main_group 限制）。
+	// Groups 用于数据面“渠道组路由/模型 ACL”的有序渠道组集合（通常来自 token_channel_groups，并受 users.main_group 限制）。
 	Groups    []string
 	CSRFToken *string
 }

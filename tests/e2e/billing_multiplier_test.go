@@ -97,8 +97,8 @@ func TestBilling_GroupMultiplierStacking_Payg_E2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUserToken: %v", err)
 	}
-	if err := st.ReplaceTokenGroups(ctx, tokenID, []string{"staff"}); err != nil {
-		t.Fatalf("ReplaceTokenGroups: %v", err)
+	if err := st.ReplaceTokenChannelGroups(ctx, tokenID, []string{"staff"}); err != nil {
+		t.Fatalf("ReplaceTokenChannelGroups: %v", err)
 	}
 
 	ts := newMultiplierAppServer(t, db, dbPath, true, false)
@@ -184,7 +184,7 @@ func TestBilling_GroupMultiplierStacking_Subscription_E2E(t *testing.T) {
 	if err := st.SetUserMainGroup(ctx, userID, "ug1"); err != nil {
 		t.Fatalf("SetUserMainGroup: %v", err)
 	}
-	// 套餐的 group_name 只用于“可购买范围”，计费倍率取订阅倍率 × 请求最终成功分组倍率（不叠加其他分组）。
+	// 套餐的 group_name 只用于“可购买范围”，计费倍率取订阅倍率 × 请求最终成功渠道组倍率（不叠加其他分组）。
 
 	planID, err := st.CreateSubscriptionPlan(ctx, store.SubscriptionPlanCreate{
 		Code:         "ci-vip-plan",
@@ -214,8 +214,8 @@ func TestBilling_GroupMultiplierStacking_Subscription_E2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUserToken: %v", err)
 	}
-	if err := st.ReplaceTokenGroups(ctx, tokenID, []string{"staff"}); err != nil {
-		t.Fatalf("ReplaceTokenGroups: %v", err)
+	if err := st.ReplaceTokenChannelGroups(ctx, tokenID, []string{"staff"}); err != nil {
+		t.Fatalf("ReplaceTokenChannelGroups: %v", err)
 	}
 
 	ts := newMultiplierAppServer(t, db, dbPath, false, false)

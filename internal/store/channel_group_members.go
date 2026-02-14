@@ -138,7 +138,7 @@ func (s *Store) GetChannelGroupParentID(ctx context.Context, groupID int64) (int
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, false, nil
 		}
-		return 0, false, fmt.Errorf("查询父分组失败: %w", err)
+			return 0, false, fmt.Errorf("查询父渠道组失败: %w", err)
 	}
 	if parentID == 0 {
 		return 0, false, nil
@@ -154,7 +154,7 @@ func (s *Store) AddChannelGroupMemberGroup(ctx context.Context, parentGroupID in
 		return errors.New("memberGroupID 不能为空")
 	}
 	if parentGroupID == memberGroupID {
-		return errors.New("不允许将分组添加为自身的子组")
+		return errors.New("不允许将渠道组添加为自身的子组")
 	}
 
 	parent, err := s.GetChannelGroupByID(ctx, parentGroupID)
@@ -166,7 +166,7 @@ func (s *Store) AddChannelGroupMemberGroup(ctx context.Context, parentGroupID in
 		return err
 	}
 	if strings.TrimSpace(parent.Name) == "" || strings.TrimSpace(child.Name) == "" {
-		return errors.New("分组名不能为空")
+		return errors.New("渠道组名不能为空")
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -199,7 +199,7 @@ func (s *Store) AddChannelGroupMemberGroup(ctx context.Context, parentGroupID in
 			break
 		}
 		if pid.Int64 == memberGroupID {
-			return errors.New("检测到环：不允许将该分组加入当前父组")
+			return errors.New("检测到环：不允许将该渠道组加入当前父渠道组")
 		}
 		cur = pid.Int64
 	}
@@ -349,7 +349,7 @@ func (s *Store) ReorderChannelGroupMembers(ctx context.Context, parentGroupID in
 			return fmt.Errorf("更新成员(%d) priority 失败: %w", id, err)
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
-			return fmt.Errorf("成员(%d) 不属于该分组", id)
+				return fmt.Errorf("成员(%d) 不属于该渠道组", id)
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -371,7 +371,7 @@ func (s *Store) syncUpstreamChannelGroupsCacheTx(ctx context.Context, tx *sql.Tx
 	ORDER BY cg.name ASC, cg.id DESC
 	`, channelID)
 	if err != nil {
-		return fmt.Errorf("查询渠道所属分组失败: %w", err)
+		return fmt.Errorf("查询渠道所属渠道组失败: %w", err)
 	}
 	defer rows.Close()
 
@@ -380,7 +380,7 @@ func (s *Store) syncUpstreamChannelGroupsCacheTx(ctx context.Context, tx *sql.Tx
 	for rows.Next() {
 		var n string
 		if err := rows.Scan(&n); err != nil {
-			return fmt.Errorf("扫描渠道所属分组失败: %w", err)
+				return fmt.Errorf("扫描渠道所属渠道组失败: %w", err)
 		}
 		n = strings.TrimSpace(n)
 		if n == "" {
@@ -393,7 +393,7 @@ func (s *Store) syncUpstreamChannelGroupsCacheTx(ctx context.Context, tx *sql.Tx
 		names = append(names, n)
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("遍历渠道所属分组失败: %w", err)
+		return fmt.Errorf("遍历渠道所属渠道组失败: %w", err)
 	}
 
 	csv := strings.Join(names, ",")

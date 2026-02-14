@@ -164,7 +164,7 @@ func (s *Store) UpdateChannelGroup(ctx context.Context, id int64, description *s
 // - upstream_channels.groups
 // - managed_models.group_name
 // - subscription_plans.group_name
-// - token_groups.group_name
+// - token_channel_groups.channel_group_name
 // - main_group_subgroups.subgroup
 //
 // It returns the effective channel_group name (old or new).
@@ -258,7 +258,7 @@ WHERE id=?
 		}
 		if clearDefault {
 			if _, err := tx.ExecContext(ctx, "DELETE FROM app_settings WHERE `key`=? AND value=?", SettingDefaultChannelGroupID, strconv.FormatInt(id, 10)); err != nil {
-				return "", fmt.Errorf("清理默认分组设置失败: %w", err)
+				return "", fmt.Errorf("清理默认渠道组设置失败: %w", err)
 			}
 		}
 		if err := tx.Commit(); err != nil {
@@ -285,20 +285,20 @@ WHERE id=?
 		return "", fmt.Errorf("查询 channel_groups 失败: %w", err)
 	}
 	if dup > 0 {
-		return "", errors.New("分组名称已存在")
+		return "", errors.New("渠道组名称已存在")
 	}
 
 	var tokenDup int64
 	if err := tx.QueryRowContext(ctx, `
-SELECT COUNT(1)
-FROM token_groups a
-JOIN token_groups b ON b.token_id=a.token_id
-WHERE a.group_name=? AND b.group_name=?
-`, lockedOldName, renameTo).Scan(&tokenDup); err != nil {
-		return "", fmt.Errorf("查询 token_groups 失败: %w", err)
+	SELECT COUNT(1)
+	FROM token_channel_groups a
+	JOIN token_channel_groups b ON b.token_id=a.token_id
+	WHERE a.channel_group_name=? AND b.channel_group_name=?
+	`, lockedOldName, renameTo).Scan(&tokenDup); err != nil {
+		return "", fmt.Errorf("查询 token_channel_groups 失败: %w", err)
 	}
 	if tokenDup > 0 {
-		return "", errors.New("目标名称已被占用（存在 Token 路由分组冲突）")
+		return "", errors.New("目标名称已被占用（存在 Token 渠道组绑定冲突）")
 	}
 
 	var subgroupDup int64
@@ -388,11 +388,11 @@ WHERE group_name=?
 	}
 
 	if _, err := tx.ExecContext(ctx, `
-UPDATE token_groups
-SET group_name=?, updated_at=CURRENT_TIMESTAMP
-WHERE group_name=?
-`, renameTo, lockedOldName); err != nil {
-		return "", fmt.Errorf("更新 token_groups.group_name 失败: %w", err)
+	UPDATE token_channel_groups
+	SET channel_group_name=?, updated_at=CURRENT_TIMESTAMP
+	WHERE channel_group_name=?
+	`, renameTo, lockedOldName); err != nil {
+		return "", fmt.Errorf("更新 token_channel_groups.channel_group_name 失败: %w", err)
 	}
 
 	if _, err := tx.ExecContext(ctx, `
@@ -405,7 +405,7 @@ WHERE subgroup=?
 
 	if clearDefault {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM app_settings WHERE `key`=? AND value=?", SettingDefaultChannelGroupID, strconv.FormatInt(id, 10)); err != nil {
-			return "", fmt.Errorf("清理默认分组设置失败: %w", err)
+			return "", fmt.Errorf("清理默认渠道组设置失败: %w", err)
 		}
 	}
 
@@ -472,7 +472,7 @@ func removeGroupFromCSV(groupsCSV string, group string) (string, bool) {
 	return strings.Join(out, ","), changed
 }
 
-// ForceDeleteChannelGroup 删除分组字典项，并级联清理引用：
+// ForceDeleteChannelGroup 删除渠道组字典项，并级联清理引用：
 // - upstream_channels.groups: 移除渠道 CSV 中的该 group（允许移除后为空）
 func (s *Store) ForceDeleteChannelGroup(ctx context.Context, id int64) (ChannelGroupDeleteSummary, error) {
 	if id == 0 {
@@ -534,21 +534,18 @@ func (s *Store) ForceDeleteChannelGroup(ctx context.Context, id int64) (ChannelG
 		_ = rows.Close()
 	}
 
-	rows, err := tx.QueryContext(ctx, "SELECT id, `groups`, status, priority, promotion FROM upstream_channels")
+	rows, err := tx.QueryContext(ctx, "SELECT id, `groups` FROM upstream_channels")
 	if err != nil {
 		return ChannelGroupDeleteSummary{}, fmt.Errorf("查询 upstream_channels.groups 失败: %w", err)
 	}
 	type chUpd struct {
 		id        int64
 		groupsCSV string
-		status    int
-		priority  int
-		promotion int
 	}
 	var chans []chUpd
 	for rows.Next() {
 		var row chUpd
-		if err := rows.Scan(&row.id, &row.groupsCSV, &row.status, &row.priority, &row.promotion); err != nil {
+		if err := rows.Scan(&row.id, &row.groupsCSV); err != nil {
 			_ = rows.Close()
 			return ChannelGroupDeleteSummary{}, fmt.Errorf("扫描 upstream_channels 失败: %w", err)
 		}
@@ -566,7 +563,7 @@ func (s *Store) ForceDeleteChannelGroup(ctx context.Context, id int64) (ChannelG
 	for _, ch := range chans {
 		newCSV, _ := removeGroupFromCSV(ch.groupsCSV, group)
 
-		// 清理脏 groups：移除不存在的分组名（避免后续 SSOT 重建失败）。
+		// 清理脏 groups：移除不存在的渠道组名（避免后续 SSOT 重建失败）。
 		var kept []string
 		for _, name := range splitUpstreamChannelGroupsCSV(newCSV) {
 			name = strings.TrimSpace(name)
@@ -583,33 +580,16 @@ func (s *Store) ForceDeleteChannelGroup(ctx context.Context, id int64) (ChannelG
 		if _, err := tx.ExecContext(ctx, "UPDATE upstream_channels SET `groups`=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", newCSV, ch.id); err != nil {
 			return ChannelGroupDeleteSummary{}, fmt.Errorf("更新 upstream_channels.groups 失败: %w", err)
 		}
-
-		// 同步 channel_group_members（SSOT）：重建该渠道的“组 -> 渠道”成员关系。
-		if _, err := tx.ExecContext(ctx, `DELETE FROM channel_group_members WHERE member_channel_id=?`, ch.id); err != nil {
-			return ChannelGroupDeleteSummary{}, fmt.Errorf("清理 channel_group_members 失败: %w", err)
-		}
-		for _, name := range splitUpstreamChannelGroupsCSV(newCSV) {
-			gid := groupIDByName[name]
-			if gid == 0 {
-				continue
-			}
-			if _, err := tx.ExecContext(ctx, `
-INSERT INTO channel_group_members(parent_group_id, member_channel_id, priority, promotion, created_at, updated_at)
-VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-`, gid, ch.id, ch.priority, ch.promotion); err != nil {
-				return ChannelGroupDeleteSummary{}, fmt.Errorf("写入 channel_group_members 失败: %w", err)
-			}
-		}
 	}
 
-	// 清理与该分组相关的成员关系（作为父/作为子）。
+	// 清理与该渠道组相关的成员关系（作为父/作为子）。
 	if _, err := tx.ExecContext(ctx, `DELETE FROM channel_group_members WHERE parent_group_id=? OR member_group_id=?`, id, id); err != nil {
 		return ChannelGroupDeleteSummary{}, fmt.Errorf("清理 channel_group_members 失败: %w", err)
 	}
 
 	if clearDefault {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM app_settings WHERE `key`=? AND value=?", SettingDefaultChannelGroupID, strconv.FormatInt(id, 10)); err != nil {
-			return ChannelGroupDeleteSummary{}, fmt.Errorf("清理默认分组设置失败: %w", err)
+			return ChannelGroupDeleteSummary{}, fmt.Errorf("清理默认渠道组设置失败: %w", err)
 		}
 	}
 

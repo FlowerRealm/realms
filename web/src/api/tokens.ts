@@ -54,7 +54,7 @@ export async function deleteUserToken(tokenID: number) {
   return res.data;
 }
 
-export type TokenGroupOption = {
+export type TokenChannelGroupOption = {
   name: string;
   description?: string | null;
   status: number;
@@ -62,25 +62,25 @@ export type TokenGroupOption = {
   user_group_priority: number;
 };
 
-export type TokenGroupBinding = {
-  group_name: string;
+export type TokenChannelGroupBinding = {
+  channel_group_name: string;
   priority: number;
 };
 
-export type UserTokenGroups = {
+export type UserTokenChannelGroups = {
   token_id: number;
   user_group: string;
-  allowed_groups: TokenGroupOption[];
-  bindings: TokenGroupBinding[];
-  effective_bindings: TokenGroupBinding[];
+  allowed_channel_groups: TokenChannelGroupOption[];
+  bindings: TokenChannelGroupBinding[];
+  effective_bindings: TokenChannelGroupBinding[];
 };
 
-export async function getUserTokenGroups(tokenID: number) {
-  const res = await api.get<APIResponse<UserTokenGroups>>(`/api/token/${tokenID}/groups`);
+export async function getUserTokenChannelGroups(tokenID: number) {
+  const res = await api.get<APIResponse<UserTokenChannelGroups>>(`/api/token/${tokenID}/channel-groups`);
   return res.data;
 }
 
-export async function replaceUserTokenGroups(tokenID: number, groups: string[]) {
-  const res = await api.put<APIResponse<void>>(`/api/token/${tokenID}/groups`, { groups });
+export async function replaceUserTokenChannelGroups(tokenID: number, channelGroups: string[]) {
+  const res = await api.put<APIResponse<void>>(`/api/token/${tokenID}/channel-groups`, { channel_groups: channelGroups });
   return res.data;
 }

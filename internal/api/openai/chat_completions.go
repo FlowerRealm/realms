@@ -77,7 +77,7 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 	cons.RequireChannelType = store.UpstreamTypeOpenAICompatible
 	ags := allowGroupsFromPrincipal(p)
 	if len(ags.Order) == 0 {
-		http.Error(w, "Token 未配置渠道分组", http.StatusBadRequest)
+		http.Error(w, "Token 未配置渠道组", http.StatusBadRequest)
 		return
 	}
 	allowSet := ags.Set

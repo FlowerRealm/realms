@@ -16,7 +16,7 @@ func ensureSQLiteChannelGroupMembers(db *sql.DB) error {
 	ctx := context.Background()
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("开始 SQLite 分组自举事务失败: %w", err)
+		return fmt.Errorf("开始 SQLite 渠道组自举事务失败: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -119,7 +119,7 @@ ON CONFLICT(parent_group_id, member_channel_id) DO UPDATE SET priority=excluded.
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("提交 SQLite 分组自举事务失败: %w", err)
+		return fmt.Errorf("提交 SQLite 渠道组自举事务失败: %w", err)
 	}
 	return nil
 }

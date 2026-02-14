@@ -22,7 +22,7 @@ func loadTokenGroupMultiplierSnapshot(ctx context.Context, st *store.Store, toke
 		return snap, nil
 	}
 
-	groups, err := st.ListEffectiveTokenGroups(ctx, tokenID)
+	groups, err := st.ListEffectiveTokenChannelGroups(ctx, tokenID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return snap, nil

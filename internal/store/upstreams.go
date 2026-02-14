@@ -219,12 +219,12 @@ func (s *Store) CreateUpstreamChannel(ctx context.Context, typ, name, groups str
 		for _, gname := range names {
 			gid, ok := idByName[gname]
 			if !ok || gid == 0 {
-				return 0, fmt.Errorf("分组不存在：%s", gname)
+				return 0, fmt.Errorf("渠道组不存在：%s", gname)
 			}
 			if _, err := tx.ExecContext(ctx, `
 INSERT INTO channel_group_members(parent_group_id, member_channel_id, priority, promotion, created_at, updated_at)
 VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-`, gid, id, priority, p); err != nil {
+`, gid, id, 0, p); err != nil {
 				return 0, fmt.Errorf("创建 channel_group_members 失败: %w", err)
 			}
 		}
@@ -288,13 +288,10 @@ WHERE id=?
 		return sql.ErrNoRows
 	}
 
-	// 同步 channel_group_members（SSOT）：组内排序依赖 priority/promotion。
-	if _, err := tx.ExecContext(ctx, `
-UPDATE channel_group_members
-SET priority=?, promotion=?, updated_at=CURRENT_TIMESTAMP
-WHERE member_channel_id=?
-`, priority, promotionInt, channelID); err != nil {
-		return fmt.Errorf("更新 channel_group_members 失败: %w", err)
+	// 注意：channel_group_members 的组内顺序（priority）由“渠道组”侧独立维护（拖拽排序）。
+	// 这里仅同步 promotion（用于全局“优先”语义），避免 upstream 侧变更导致组内优先状态失真。
+	if _, err := tx.ExecContext(ctx, `UPDATE channel_group_members SET promotion=?, updated_at=CURRENT_TIMESTAMP WHERE member_channel_id=?`, promotionInt, channelID); err != nil {
+		return fmt.Errorf("同步 channel_group_members promotion 失败: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -643,9 +640,8 @@ func (s *Store) SetUpstreamChannelGroups(ctx context.Context, channelID int64, g
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var chPriority int
 	var chPromotion int
-	if err := tx.QueryRowContext(ctx, `SELECT priority, promotion FROM upstream_channels WHERE id=?`, channelID).Scan(&chPriority, &chPromotion); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT promotion FROM upstream_channels WHERE id=?`, channelID).Scan(&chPromotion); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return sql.ErrNoRows
 		}
@@ -653,10 +649,7 @@ func (s *Store) SetUpstreamChannelGroups(ctx context.Context, channelID int64, g
 	}
 
 	// SSOT：同步更新成员关系（组 -> 渠道），并回填 upstream_channels.groups 兼容缓存。
-	if _, err := tx.ExecContext(ctx, `DELETE FROM channel_group_members WHERE member_channel_id=?`, channelID); err != nil {
-		return fmt.Errorf("清理 channel_group_members 失败: %w", err)
-	}
-
+	// 注意：组内顺序（priority）由“渠道组”侧维护。这里仅做成员关系的增删，不重建 priority。
 	if len(names) > 0 {
 		var b strings.Builder
 		b.WriteString("SELECT id, name FROM channel_groups WHERE name IN (")
@@ -707,15 +700,60 @@ ON CONFLICT(parent_group_id, member_channel_id) DO UPDATE SET priority=excluded.
 `
 		}
 
+		existingRows, err := tx.QueryContext(ctx, `SELECT parent_group_id FROM channel_group_members WHERE member_channel_id=?`, channelID)
+		if err != nil {
+			return fmt.Errorf("查询 channel_group_members 失败: %w", err)
+		}
+		existing := make(map[int64]struct{})
+		for existingRows.Next() {
+			var gid int64
+			if err := existingRows.Scan(&gid); err != nil {
+				_ = existingRows.Close()
+				return fmt.Errorf("扫描 channel_group_members 失败: %w", err)
+			}
+			if gid == 0 {
+				continue
+			}
+			existing[gid] = struct{}{}
+		}
+		if err := existingRows.Err(); err != nil {
+			_ = existingRows.Close()
+			return fmt.Errorf("遍历 channel_group_members 失败: %w", err)
+		}
+		_ = existingRows.Close()
+
+		desired := make(map[int64]struct{}, len(names))
 		for _, name := range names {
 			id, ok := idByName[name]
 			if !ok || id == 0 {
-				return fmt.Errorf("分组不存在：%s", name)
+				return fmt.Errorf("渠道组不存在：%s", name)
 			}
-			_, err := tx.ExecContext(ctx, memberUpsert, id, channelID, chPriority, chPromotion)
-			if err != nil {
+			desired[id] = struct{}{}
+		}
+
+		// 删除被移除的成员关系（不影响其他组内顺序）。
+		for gid := range existing {
+			if _, keep := desired[gid]; keep {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, `DELETE FROM channel_group_members WHERE parent_group_id=? AND member_channel_id=?`, gid, channelID); err != nil {
+				return fmt.Errorf("删除 channel_group_members 失败: %w", err)
+			}
+		}
+
+		// 插入新增的成员关系（默认 priority=0，不从上游渠道反向构建组内顺序）。
+		for gid := range desired {
+			if _, already := existing[gid]; already {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, memberUpsert, gid, channelID, 0, chPromotion); err != nil {
 				return fmt.Errorf("写入 channel_group_members 失败: %w", err)
 			}
+		}
+	} else {
+		// 清空所有成员关系（仅解绑，不重建顺序）。
+		if _, err := tx.ExecContext(ctx, `DELETE FROM channel_group_members WHERE member_channel_id=?`, channelID); err != nil {
+			return fmt.Errorf("清理 channel_group_members 失败: %w", err)
 		}
 	}
 

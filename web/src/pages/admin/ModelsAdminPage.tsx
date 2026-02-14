@@ -214,7 +214,7 @@ export function ModelsAdminPage() {
                 <thead className="table-light">
                   <tr>
                     <th className="ps-4">对外 ID</th>
-                    <th>模型分组</th>
+                    <th>渠道组</th>
                     <th>归属方</th>
                     <th>
                       计费 <span className="text-muted small">（每 1M Token）</span>
@@ -496,7 +496,7 @@ export function ModelsAdminPage() {
             </select>
           </div>
           <div className="col-md-4">
-            <label className="form-label">模型分组（group_name）</label>
+            <label className="form-label">渠道组（group_name）</label>
             <select className="form-select" value={createForm.group_name} onChange={(e) => setCreateForm((p) => ({ ...p, group_name: e.target.value }))}>
               {selectableGroups.map((name) => (
                 <option key={name} value={name}>
@@ -794,7 +794,7 @@ export function ModelsAdminPage() {
               </select>
             </div>
             <div className="col-md-4">
-              <label className="form-label">模型分组（group_name）</label>
+              <label className="form-label">渠道组（group_name）</label>
               <select className="form-select" value={editForm.group_name} onChange={(e) => setEditForm((p) => ({ ...p, group_name: e.target.value }))}>
                 {selectableGroups.map((name) => (
                   <option key={name} value={name}>

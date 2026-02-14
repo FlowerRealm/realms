@@ -6,10 +6,10 @@ import (
 	"errors"
 )
 
-// EnsureDefaultChannelGroupID 返回默认渠道分组（channel_groups.id）。
+// EnsureDefaultChannelGroupID 返回默认渠道组（channel_groups.id）。
 //
 // 该值由管理员通过后台显式设置（app_settings[default_channel_group_id]）。
-// 当未设置或设置无效（分组不存在/已禁用）时，将自动清理该设置并返回空。
+// 当未设置或设置无效（渠道组不存在/已禁用）时，将自动清理该设置并返回空。
 func (s *Store) EnsureDefaultChannelGroupID(ctx context.Context) (int64, bool, error) {
 	return s.GetDefaultChannelGroupID(ctx)
 }
@@ -44,12 +44,12 @@ func (s *Store) SetDefaultChannelGroupID(ctx context.Context, groupID int64) err
 	g, err := s.GetChannelGroupByID(ctx, groupID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return errors.New("分组不存在")
+			return errors.New("渠道组不存在")
 		}
 		return err
 	}
 	if g.Status != 1 {
-		return errors.New("默认分组必须为启用状态")
+		return errors.New("默认渠道组必须为启用状态")
 	}
 	return s.UpsertInt64AppSetting(ctx, SettingDefaultChannelGroupID, groupID)
 }

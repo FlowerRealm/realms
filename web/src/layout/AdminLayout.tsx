@@ -68,7 +68,7 @@ export function AdminLayout() {
           {showChannelGroups ? (
             <li>
               <NavLink to="/admin/channel-groups" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`} onClick={closeSidebar}>
-                <i className="ri-folder-settings-line"></i> 分组
+                <i className="ri-folder-settings-line"></i> 渠道组
               </NavLink>
             </li>
           ) : null}

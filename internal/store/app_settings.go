@@ -39,9 +39,9 @@ const SettingSiteBaseURL = "site_base_url"
 // 为空表示使用系统默认（当前默认为 Asia/Shanghai）。
 const SettingAdminTimeZone = "admin_time_zone"
 
-// SettingDefaultChannelGroupID 用于标记管理后台“默认渠道分组”（channel_groups.id）。
-// 该值由管理员显式设置；若配置无效（分组不存在/已禁用），读取时会自动清理该设置。
-// 默认分组用于 UI 的默认值与兜底展示，必须是启用状态。
+// SettingDefaultChannelGroupID 用于标记管理后台“默认渠道组”（channel_groups.id）。
+// 该值由管理员显式设置；若配置无效（渠道组不存在/已禁用），读取时会自动清理该设置。
+// 默认渠道组用于 UI 的默认值与兜底展示，必须是启用状态。
 const SettingDefaultChannelGroupID = "default_channel_group_id"
 
 const (

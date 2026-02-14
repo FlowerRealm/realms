@@ -71,7 +71,7 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 	cons.RequireChannelType = store.UpstreamTypeAnthropic
 	ags := allowGroupsFromPrincipal(p)
 	if len(ags.Order) == 0 {
-		writeAnthropicError(w, http.StatusBadRequest, "Token 未配置渠道分组")
+		writeAnthropicError(w, http.StatusBadRequest, "Token 未配置渠道组")
 		return
 	}
 	allowSet := ags.Set

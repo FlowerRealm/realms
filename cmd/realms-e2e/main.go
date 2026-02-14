@@ -345,8 +345,8 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 	}
 
 	// 三层分组（E2E 最小可运行集）：
-	// - 用户分组：限制用户可选的渠道分组（小分组）
-	// - 渠道分组：Token 绑定并按顺序 failover；同时也是模型的 group_name
+	// - 用户分组：限制用户可选的渠道组（小分组）
+	// - 渠道组：Token 绑定并按顺序 failover；同时也是模型的 group_name
 	const e2eUserGroup = "pw-e2e-users"
 	const e2eChannelGroup = "pw-e2e"
 	if _, err := st.CreateChannelGroup(ctx, e2eChannelGroup, strPtr("Playwright E2E channel group"), 1, store.DefaultGroupPriceMultiplier, 5); err != nil {
@@ -430,9 +430,9 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 	if err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 e2e 用户 token 失败: %w", err)
 	}
-	if err := st.ReplaceTokenGroups(ctx, e2eTokID, []string{e2eChannelGroup}); err != nil {
-		return e2eSeedResult{}, fmt.Errorf("绑定 e2e 用户 token 渠道分组失败: %w", err)
-	}
+		if err := st.ReplaceTokenChannelGroups(ctx, e2eTokID, []string{e2eChannelGroup}); err != nil {
+			return e2eSeedResult{}, fmt.Errorf("绑定 e2e 用户 token 渠道组失败: %w", err)
+		}
 
 	poorUserID, err := st.CreateUser(ctx, e2ePoorUserEmail, e2ePoorUserUsername, userHash, store.UserRoleUser)
 	if err != nil {
@@ -448,9 +448,9 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 	if err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 poor 用户 token 失败: %w", err)
 	}
-	if err := st.ReplaceTokenGroups(ctx, poorTokID, []string{e2eChannelGroup}); err != nil {
-		return e2eSeedResult{}, fmt.Errorf("绑定 poor 用户 token 渠道分组失败: %w", err)
-	}
+		if err := st.ReplaceTokenChannelGroups(ctx, poorTokID, []string{e2eChannelGroup}); err != nil {
+			return e2eSeedResult{}, fmt.Errorf("绑定 poor 用户 token 渠道组失败: %w", err)
+		}
 
 	announcementID, err := st.CreateAnnouncement(ctx, e2eAnnouncementTitle, e2eAnnouncementBody, store.AnnouncementStatusPublished)
 	if err != nil {

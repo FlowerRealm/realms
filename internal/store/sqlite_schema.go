@@ -23,7 +23,7 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 		if err := ensureSQLiteMainGroupsTables(db); err != nil {
 			return err
 		}
-		if err := ensureSQLiteTokenGroupsTable(db); err != nil {
+		if err := ensureSQLiteTokenChannelGroupsTable(db); err != nil {
 			return err
 		}
 		if err := ensureSQLiteUpstreamChannelRequestPolicyColumns(db); err != nil {
@@ -103,7 +103,7 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 	if err := ensureSQLiteMainGroupsTables(db); err != nil {
 		return err
 	}
-	if err := ensureSQLiteTokenGroupsTable(db); err != nil {
+	if err := ensureSQLiteTokenChannelGroupsTable(db); err != nil {
 		return err
 	}
 	if err := ensureSQLiteManagedModelGroupNameColumn(db); err != nil {

@@ -486,7 +486,7 @@ export function SettingsAdminPage() {
                               inputMode="decimal"
                             />
                           </div>
-                          <div className="form-text small text-muted">留空表示恢复默认（×1）。最终计费倍率 = PayGO 倍率 × 最终成功分组倍率。</div>
+                          <div className="form-text small text-muted">留空表示恢复默认（×1）。最终计费倍率 = PayGO 倍率 × 最终成功渠道组倍率。</div>
                         </div>
                       </div>
                     </div>

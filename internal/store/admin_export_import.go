@@ -420,17 +420,17 @@ ON CONFLICT(name) DO UPDATE SET
 		}
 	}
 
-	ensureGroupID := func(name string) (int64, error) {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			return 0, errors.New("group name 不能为空")
+		ensureGroupID := func(name string) (int64, error) {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				return 0, errors.New("渠道组名称不能为空")
+			}
+			id, ok := groupIDByName[name]
+			if !ok || id == 0 {
+				return 0, fmt.Errorf("渠道组不存在: %s", name)
+			}
+			return id, nil
 		}
-		id, ok := groupIDByName[name]
-		if !ok || id == 0 {
-			return 0, fmt.Errorf("分组不存在: %s", name)
-		}
-		return id, nil
-	}
 
 	channelIDByKey := make(map[string]int64)
 

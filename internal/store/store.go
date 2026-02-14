@@ -344,7 +344,7 @@ WHERE t.token_hash=? AND t.status=1 AND u.status=1
 		}
 		return TokenAuth{}, fmt.Errorf("查询 Token 鉴权失败: %w", err)
 	}
-	auth.Groups, _ = s.ListEffectiveTokenGroups(ctx, auth.TokenID)
+		auth.Groups, _ = s.ListEffectiveTokenChannelGroups(ctx, auth.TokenID)
 	_, _ = s.db.ExecContext(ctx, `UPDATE user_tokens SET last_used_at=CURRENT_TIMESTAMP WHERE id=?`, auth.TokenID)
 	return auth, nil
 }

@@ -110,8 +110,8 @@ func TestBilling_InsufficientBalanceReturnsPaymentRequired_E2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUserToken: %v", err)
 	}
-	if err := st.ReplaceTokenGroups(ctx, tokenID, []string{routeGroup}); err != nil {
-		t.Fatalf("ReplaceTokenGroups: %v", err)
+	if err := st.ReplaceTokenChannelGroups(ctx, tokenID, []string{routeGroup}); err != nil {
+		t.Fatalf("ReplaceTokenChannelGroups: %v", err)
 	}
 
 	// e2e 测试应当与外部环境变量解耦：清空可能影响 Load() 的配置项。

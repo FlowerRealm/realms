@@ -52,15 +52,15 @@ CREATE TABLE IF NOT EXISTS `user_tokens` (
 CREATE UNIQUE INDEX IF NOT EXISTS `uk_user_tokens_hash` ON `user_tokens` (`token_hash`);
 CREATE INDEX IF NOT EXISTS `idx_user_tokens_user_id` ON `user_tokens` (`user_id`);
 
-CREATE TABLE IF NOT EXISTS `token_groups` (
+CREATE TABLE IF NOT EXISTS `token_channel_groups` (
   `token_id` INTEGER NOT NULL,
-  `group_name` TEXT NOT NULL,
+  `channel_group_name` TEXT NOT NULL,
   `priority` INTEGER NOT NULL DEFAULT 0,
   `created_at` DATETIME NOT NULL,
   `updated_at` DATETIME NOT NULL,
-  PRIMARY KEY (`token_id`, `group_name`)
+  PRIMARY KEY (`token_id`, `channel_group_name`)
 );
-CREATE INDEX IF NOT EXISTS `idx_token_groups_token_id` ON `token_groups` (`token_id`);
+CREATE INDEX IF NOT EXISTS `idx_token_channel_groups_token_id` ON `token_channel_groups` (`token_id`);
 
 CREATE TABLE IF NOT EXISTS `user_sessions` (
   `id` INTEGER PRIMARY KEY AUTOINCREMENT,

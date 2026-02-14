@@ -73,7 +73,7 @@ func (r *GroupRouter) Next(ctx context.Context) (Selection, error) {
 		}
 		return sel, nil
 	}
-	return Selection{}, errors.New("未指定渠道分组")
+		return Selection{}, errors.New("未指定渠道组")
 }
 
 func (r *GroupRouter) nextFromOrderedGroups(ctx context.Context) (Selection, error) {

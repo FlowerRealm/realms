@@ -15,17 +15,17 @@ import (
 )
 
 type adminChannelGroupView struct {
-	ID              int64   `json:"id"`
-	Name            string  `json:"name"`
-	Description     *string `json:"description,omitempty"`
-	PriceMultiplier string  `json:"price_multiplier"`
-	MaxAttempts     int     `json:"max_attempts"`
-	Status          int     `json:"status"`
-	CreatedAt       string  `json:"created_at"`
-	UpdatedAt       string  `json:"updated_at"`
-	IsDefault       bool    `json:"is_default"`
-	PointerChannelID   int64  `json:"pointer_channel_id,omitempty"`
-	PointerChannelName string `json:"pointer_channel_name,omitempty"`
+	ID                 int64   `json:"id"`
+	Name               string  `json:"name"`
+	Description        *string `json:"description,omitempty"`
+	PriceMultiplier    string  `json:"price_multiplier"`
+	MaxAttempts        int     `json:"max_attempts"`
+	Status             int     `json:"status"`
+	CreatedAt          string  `json:"created_at"`
+	UpdatedAt          string  `json:"updated_at"`
+	IsDefault          bool    `json:"is_default"`
+	PointerChannelID   int64   `json:"pointer_channel_id,omitempty"`
+	PointerChannelName string  `json:"pointer_channel_name,omitempty"`
 }
 
 func setAdminChannelGroupAPIRoutes(r gin.IRoutes, opts Options) {
@@ -80,15 +80,15 @@ func adminListChannelGroupsHandler(opts Options) gin.HandlerFunc {
 			}
 
 			out = append(out, adminChannelGroupView{
-				ID:              g.ID,
-				Name:            g.Name,
-				Description:     g.Description,
-				PriceMultiplier: formatDecimalPlain(g.PriceMultiplier, store.PriceMultiplierScale),
-				MaxAttempts:     g.MaxAttempts,
-				Status:          g.Status,
-				CreatedAt:       g.CreatedAt.Format("2006-01-02 15:04"),
-				UpdatedAt:       g.UpdatedAt.Format("2006-01-02 15:04"),
-				IsDefault:       defaultID > 0 && g.ID == defaultID,
+				ID:                 g.ID,
+				Name:               g.Name,
+				Description:        g.Description,
+				PriceMultiplier:    formatDecimalPlain(g.PriceMultiplier, store.PriceMultiplierScale),
+				MaxAttempts:        g.MaxAttempts,
+				Status:             g.Status,
+				CreatedAt:          g.CreatedAt.Format("2006-01-02 15:04"),
+				UpdatedAt:          g.UpdatedAt.Format("2006-01-02 15:04"),
+				IsDefault:          defaultID > 0 && g.ID == defaultID,
 				PointerChannelID:   ptrChannelID,
 				PointerChannelName: ptrChannelName,
 			})
@@ -151,7 +151,7 @@ func adminSetDefaultChannelGroupHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已设置默认分组"})
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已设置默认渠道组"})
 	}
 }
 
@@ -201,7 +201,7 @@ func adminCreateChannelGroupHandler(opts Options) gin.HandlerFunc {
 
 		id, err := opts.Store.CreateChannelGroup(c.Request.Context(), name, req.Description, status, priceMult, maxAttempts)
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建失败（可能分组已存在）"})
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建失败（可能渠道组已存在）"})
 			return
 		}
 
@@ -537,7 +537,7 @@ func adminCreateChildChannelGroupHandler(opts Options) gin.HandlerFunc {
 
 		id, err := opts.Store.CreateChannelGroup(c.Request.Context(), name, req.Description, status, priceMult, maxAttempts)
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建失败（可能分组已存在）"})
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建失败（可能渠道组已存在）"})
 			return
 		}
 		if err := opts.Store.AddChannelGroupMemberGroup(c.Request.Context(), parentID, id, 0, false); err != nil {
@@ -578,7 +578,7 @@ func adminAddChannelGroupChannelMemberHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "channel 不存在"})
 			return
 		}
-		if err := opts.Store.AddChannelGroupMemberChannel(c.Request.Context(), parentID, req.ChannelID, ch.Priority, ch.Promotion); err != nil {
+		if err := opts.Store.AddChannelGroupMemberChannel(c.Request.Context(), parentID, req.ChannelID, 0, ch.Promotion); err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 			return
 		}
@@ -837,7 +837,7 @@ func adminUpsertChannelGroupPointerHandler(opts Options) gin.HandlerFunc {
 				return
 			}
 			if !inGroup {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel 不属于该分组"})
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel 不属于该渠道组"})
 				return
 			}
 			if opts.Sched != nil {

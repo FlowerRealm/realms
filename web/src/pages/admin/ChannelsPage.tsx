@@ -2,7 +2,6 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSPr
 
 import {
   DndContext,
-  DragOverlay,
   MouseSensor,
   TouchSensor,
   closestCenter,
@@ -19,6 +18,7 @@ import { CSS } from '@dnd-kit/utilities';
 
 import { BootstrapModal } from '../../components/BootstrapModal';
 import { closeModalById } from '../../components/modal';
+import { PortalDragOverlay } from '../../components/PortalDragOverlay';
 import { formatIntComma } from '../../format/int';
 import {
   createChannel,
@@ -1062,7 +1062,7 @@ export function ChannelsPage() {
   return (
     <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
       <div className="fade-in-up">
-        <DragOverlay modifiers={[restrictToVerticalAxisModifier]}>
+        <PortalDragOverlay modifiers={[restrictToVerticalAxisModifier]} zIndex={2000}>
           {dragOverlayChannel ? (
             <div className="rlm-channel-dnd-overlay" style={{ width: dragOverlayWidth || undefined }}>
               <table className="table table-hover align-middle mb-0" style={{ tableLayout: 'fixed', width: '100%' }}>
@@ -1103,7 +1103,7 @@ export function ChannelsPage() {
                           ) : null}
                           <div className="d-flex align-items-center">
                             {dragOverlayChannel.base_url ? <span className="text-secondary">·</span> : null}
-                            <span className={`${dragOverlayChannel.base_url ? 'ms-2 ' : ''}me-1`}>组:</span>
+                            <span className={`${dragOverlayChannel.base_url ? 'ms-2 ' : ''}me-1`}>渠道组:</span>
                             <span className="text-secondary font-monospace user-select-all">{(dragOverlayChannel.groups || '').trim() || '-'}</span>
                           </div>
                         </div>
@@ -1130,7 +1130,7 @@ export function ChannelsPage() {
               </table>
             </div>
           ) : null}
-        </DragOverlay>
+        </PortalDragOverlay>
 
       <div className="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-3">
         <div>
@@ -1328,7 +1328,7 @@ export function ChannelsPage() {
 		                                ) : null}
                                 <div className="d-flex align-items-center">
                                   {ch.base_url ? <span className="text-secondary">·</span> : null}
-		                                  <span className={`${ch.base_url ? 'ms-2 ' : ''}me-1`}>组:</span>
+			                                  <span className={`${ch.base_url ? 'ms-2 ' : ''}me-1`}>渠道组:</span>
 		                                  <span className="text-secondary font-monospace user-select-all">
 		                                    {(ch.groups || '').trim() || '-'}
 		                                  </span>
@@ -1893,7 +1893,7 @@ export function ChannelsPage() {
             <input className="form-control" value={createPriority} onChange={(e) => setCreatePriority(e.target.value)} inputMode="numeric" placeholder="0" />
           </div>
           <div className="col-md-8">
-            <label className="form-label">分组（groups，逗号分隔）</label>
+	            <label className="form-label">渠道组（groups，逗号分隔）</label>
             <input
               className="form-control font-monospace"
               value={createGroups}
@@ -2104,10 +2104,10 @@ export function ChannelsPage() {
                       </div>
 
                       <div className="col-12">
-                        <label className="form-label fw-medium">分组设置</label>
+	                        <label className="form-label fw-medium">渠道组设置</label>
                         <div className="card p-2" style={{ maxHeight: 260, overflowY: 'auto' }}>
                           {channelGroups.length === 0 ? (
-                            <div className="text-muted small px-2 py-1">暂无分组（请先到“渠道分组”创建）。</div>
+	                            <div className="text-muted small px-2 py-1">暂无渠道组（请先到“渠道组”创建）。</div>
                           ) : (
                             channelGroups.map((g) => {
                               const selected = parseGroupsCSV(editGroups).includes(g.name);
@@ -2757,7 +2757,7 @@ export function ChannelsPage() {
                       <div className="col-md-6">
                         <label className="form-label fw-medium">权重（可选）</label>
                         <input className="form-control" type="number" min={0} value={metaWeight} onChange={(e) => setMetaWeight(e.target.value)} />
-                        <div className="form-text small text-muted">当前不参与调度（Realms 调度以分组/优先级/推荐为准）。</div>
+                        <div className="form-text small text-muted">当前不参与调度（Realms 调度以渠道组/优先级/推荐为准）。</div>
                       </div>
                       <div className="col-md-6">
                         <label className="form-label fw-medium">自动封禁</label>

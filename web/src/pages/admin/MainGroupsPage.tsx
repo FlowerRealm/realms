@@ -54,7 +54,7 @@ export function MainGroupsPage() {
     setLoading(true);
     try {
       const [groupsRes, channelGroupsRes] = await Promise.all([listAdminMainGroups(), listAdminChannelGroups()]);
-      if (!channelGroupsRes.success) throw new Error(channelGroupsRes.message || '加载渠道分组失败');
+      if (!channelGroupsRes.success) throw new Error(channelGroupsRes.message || '加载渠道组失败');
       setChannelGroups(channelGroupsRes.data || []);
       if (!groupsRes.success) throw new Error(groupsRes.message || '加载失败');
       setGroups(groupsRes.data || []);
@@ -132,7 +132,7 @@ export function MainGroupsPage() {
                 </div>
                 <div>
                   <h5 className="mb-1 fw-semibold">用户分组管理</h5>
-                  <p className="mb-0 text-muted small">定义用户所属用户分组（单选），以及该用户分组可绑定的“子组（渠道分组）”。</p>
+                  <p className="mb-0 text-muted small">定义用户所属用户分组（单选），以及该用户分组可绑定的“子组（渠道组）”。</p>
                 </div>
               </div>
               <button type="button" className="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createMainGroupModal">
@@ -373,7 +373,7 @@ export function MainGroupsPage() {
         ) : (
 	          <div>
 	            <div className="d-flex align-items-center justify-content-between mb-3">
-	              <div className="text-muted small">子组是可绑定的“渠道分组”（用于限制 Token 的可选范围）。</div>
+	              <div className="text-muted small">子组是可绑定的“渠道组”（用于限制 Token 的可选范围）。</div>
 	              <button
                 type="button"
                 className="btn btn-primary btn-sm"
@@ -404,7 +404,7 @@ export function MainGroupsPage() {
             <div className="row g-2 mb-3">
               <div className="col-12 col-md-8">
                 <select className="form-select" value={addSubgroup} onChange={(e) => setAddSubgroup(e.target.value)}>
-                  <option value="">选择要添加的渠道分组…</option>
+                  <option value="">选择要添加的渠道组…</option>
                   {selectableChannelGroups.map((g) => (
                     <option key={g.id} value={g.name} disabled={subgroups.includes(g.name)}>
                       {g.name} · x{g.price_multiplier}

@@ -32,8 +32,8 @@ func TestLoadUserGroupMultiplierSnapshot_StacksUserGroups(t *testing.T) {
 	if err := st.SetUserMainGroup(ctx, userID, "ug1"); err != nil {
 		t.Fatalf("SetUserMainGroup: %v", err)
 	}
-	if err := st.ReplaceTokenGroups(ctx, tokID, []string{"vip", "staff"}); err != nil {
-		t.Fatalf("ReplaceTokenGroups: %v", err)
+	if err := st.ReplaceTokenChannelGroups(ctx, tokID, []string{"vip", "staff"}); err != nil {
+		t.Fatalf("ReplaceTokenChannelGroups: %v", err)
 	}
 
 	snap, err := loadTokenGroupMultiplierSnapshot(ctx, st, tokID)
@@ -66,8 +66,8 @@ func TestSubscriptionProviderReserveCommit_MultipliesPlanAndRouteGroup(t *testin
 	if err := st.SetUserMainGroup(ctx, userID, "ug1"); err != nil {
 		t.Fatalf("SetUserMainGroup: %v", err)
 	}
-	if err := st.ReplaceTokenGroups(ctx, tokenID, []string{"vip", "staff"}); err != nil {
-		t.Fatalf("ReplaceTokenGroups: %v", err)
+	if err := st.ReplaceTokenChannelGroups(ctx, tokenID, []string{"vip", "staff"}); err != nil {
+		t.Fatalf("ReplaceTokenChannelGroups: %v", err)
 	}
 
 	modelID := "m1"
@@ -137,7 +137,7 @@ func TestSubscriptionProviderReserveCommit_MultipliesPlanAndRouteGroup(t *testin
 	if err != nil {
 		t.Fatalf("GetUsageEvent(commit): %v", err)
 	}
-	// commit 使用最终成功分组 vip(1.5)：1 × 1.1 × 1.5 = 1.65
+	// commit 使用最终成功渠道组 vip(1.5)：1 × 1.1 × 1.5 = 1.65
 	if got, want := ev.CommittedUSD.StringFixed(6), "1.650000"; got != want {
 		t.Fatalf("committed_usd mismatch: got=%s want=%s", got, want)
 	}
@@ -176,8 +176,8 @@ func TestHybridProviderReserveCommit_AppliesRouteGroupMultiplier(t *testing.T) {
 	if err := st.SetUserMainGroup(ctx, userID, "ug1"); err != nil {
 		t.Fatalf("SetUserMainGroup: %v", err)
 	}
-	if err := st.ReplaceTokenGroups(ctx, tokenID, []string{"vip"}); err != nil {
-		t.Fatalf("ReplaceTokenGroups: %v", err)
+	if err := st.ReplaceTokenChannelGroups(ctx, tokenID, []string{"vip"}); err != nil {
+		t.Fatalf("ReplaceTokenChannelGroups: %v", err)
 	}
 
 	modelID := "m-default-mult"

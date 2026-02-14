@@ -285,8 +285,8 @@ func TestUpdateChannelGroupWithRename_Cascades_SQLite(t *testing.T) {
 	if err := st.ReplaceMainGroupSubgroups(ctx, "team_a", []string{"vip"}); err != nil {
 		t.Fatalf("ReplaceMainGroupSubgroups: %v", err)
 	}
-	if _, err := db.Exec(`INSERT INTO token_groups(token_id, group_name, priority, created_at, updated_at) VALUES(?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, 100, "vip", 1); err != nil {
-		t.Fatalf("insert token_groups: %v", err)
+	if _, err := db.Exec(`INSERT INTO token_channel_groups(token_id, channel_group_name, priority, created_at, updated_at) VALUES(?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, 100, "vip", 1); err != nil {
+		t.Fatalf("insert token_channel_groups: %v", err)
 	}
 
 	planID, err := st.CreateSubscriptionPlan(ctx, store.SubscriptionPlanCreate{
@@ -351,17 +351,17 @@ func TestUpdateChannelGroupWithRename_Cascades_SQLite(t *testing.T) {
 	}
 
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(1) FROM token_groups WHERE token_id=? AND group_name=?`, 100, "vip2").Scan(&n); err != nil {
-		t.Fatalf("query token_groups (vip2): %v", err)
+	if err := db.QueryRow(`SELECT COUNT(1) FROM token_channel_groups WHERE token_id=? AND channel_group_name=?`, 100, "vip2").Scan(&n); err != nil {
+		t.Fatalf("query token_channel_groups (vip2): %v", err)
 	}
 	if n != 1 {
-		t.Fatalf("token_groups vip2 mismatch: got %d want %d", n, 1)
+		t.Fatalf("token_channel_groups vip2 mismatch: got %d want %d", n, 1)
 	}
-	if err := db.QueryRow(`SELECT COUNT(1) FROM token_groups WHERE token_id=? AND group_name=?`, 100, "vip").Scan(&n); err != nil {
-		t.Fatalf("query token_groups (vip): %v", err)
+	if err := db.QueryRow(`SELECT COUNT(1) FROM token_channel_groups WHERE token_id=? AND channel_group_name=?`, 100, "vip").Scan(&n); err != nil {
+		t.Fatalf("query token_channel_groups (vip): %v", err)
 	}
 	if n != 0 {
-		t.Fatalf("token_groups vip should be renamed, got %d", n)
+		t.Fatalf("token_channel_groups vip should be renamed, got %d", n)
 	}
 
 	plan, err := st.GetSubscriptionPlanByID(ctx, planID)

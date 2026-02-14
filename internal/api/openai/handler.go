@@ -115,7 +115,7 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 
 	ags := allowGroupsFromPrincipal(p)
 	if len(ags.Order) == 0 {
-		http.Error(w, "Token 未配置渠道分组", http.StatusBadRequest)
+		http.Error(w, "Token 未配置渠道组", http.StatusBadRequest)
 		return
 	}
 	allowSet := ags.Set

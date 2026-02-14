@@ -37,8 +37,8 @@ func setTokenAPIRoutes(r gin.IRoutes, opts Options) {
 	r.GET("/token/:token_id/reveal", authn, revealUserTokenHandler(opts))
 	r.POST("/token/:token_id/rotate", authn, rotateUserTokenHandler(opts))
 	r.POST("/token/:token_id/revoke", authn, revokeUserTokenHandler(opts))
-	r.GET("/token/:token_id/groups", authn, getUserTokenGroupsHandler(opts))
-	r.PUT("/token/:token_id/groups", authn, replaceUserTokenGroupsHandler(opts))
+	r.GET("/token/:token_id/channel-groups", authn, getUserTokenChannelGroupsHandler(opts))
+	r.PUT("/token/:token_id/channel-groups", authn, replaceUserTokenChannelGroupsHandler(opts))
 	r.DELETE("/token/:token_id", authn, deleteUserTokenHandler(opts))
 }
 
@@ -237,7 +237,7 @@ func deleteUserTokenHandler(opts Options) gin.HandlerFunc {
 	}
 }
 
-type tokenGroupOptionView struct {
+type tokenChannelGroupOptionView struct {
 	Name              string          `json:"name"`
 	Description       *string         `json:"description,omitempty"`
 	Status            int             `json:"status"`
@@ -245,20 +245,20 @@ type tokenGroupOptionView struct {
 	UserGroupPriority int             `json:"user_group_priority"`
 }
 
-type tokenGroupBindingView struct {
-	GroupName string `json:"group_name"`
-	Priority  int    `json:"priority"`
+type tokenChannelGroupBindingView struct {
+	ChannelGroupName string `json:"channel_group_name"`
+	Priority         int    `json:"priority"`
 }
 
-type tokenGroupsView struct {
-	TokenID           int64                   `json:"token_id"`
-	UserGroup         string                  `json:"user_group"`
-	AllowedGroups     []tokenGroupOptionView  `json:"allowed_groups"`
-	Bindings          []tokenGroupBindingView `json:"bindings"`
-	EffectiveBindings []tokenGroupBindingView `json:"effective_bindings"`
+type tokenChannelGroupsView struct {
+	TokenID              int64                        `json:"token_id"`
+	UserGroup            string                       `json:"user_group"`
+	AllowedChannelGroups []tokenChannelGroupOptionView `json:"allowed_channel_groups"`
+	Bindings             []tokenChannelGroupBindingView `json:"bindings"`
+	EffectiveBindings    []tokenChannelGroupBindingView `json:"effective_bindings"`
 }
 
-func getUserTokenGroupsHandler(opts Options) gin.HandlerFunc {
+func getUserTokenChannelGroupsHandler(opts Options) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if opts.Store == nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
@@ -311,7 +311,7 @@ func getUserTokenGroupsHandler(opts Options) gin.HandlerFunc {
 
 		cgs, err := opts.Store.ListChannelGroups(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询分组失败"})
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询渠道组失败"})
 			return
 		}
 		cgByName := make(map[string]store.ChannelGroup, len(cgs))
@@ -319,7 +319,7 @@ func getUserTokenGroupsHandler(opts Options) gin.HandlerFunc {
 			cgByName[strings.TrimSpace(g.Name)] = g
 		}
 
-		allowedViews := make([]tokenGroupOptionView, 0, len(allowedRows)+1)
+		allowedViews := make([]tokenChannelGroupOptionView, 0, len(allowedRows)+1)
 		seenAllowed := make(map[string]struct{}, len(allowedRows)+1)
 		for _, row := range allowedRows {
 			name := strings.TrimSpace(row.Subgroup)
@@ -339,7 +339,7 @@ func getUserTokenGroupsHandler(opts Options) gin.HandlerFunc {
 				status = cg.Status
 				desc = cg.Description
 			}
-			allowedViews = append(allowedViews, tokenGroupOptionView{
+			allowedViews = append(allowedViews, tokenChannelGroupOptionView{
 				Name:              name,
 				Description:       desc,
 				Status:            status,
@@ -348,42 +348,42 @@ func getUserTokenGroupsHandler(opts Options) gin.HandlerFunc {
 			})
 		}
 
-		bindings, err := opts.Store.ListTokenGroupBindings(c.Request.Context(), tokenID)
+		bindings, err := opts.Store.ListTokenChannelGroupBindings(c.Request.Context(), tokenID)
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询 Token 分组失败"})
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询 Token 渠道组失败"})
 			return
 		}
-		effective, err := opts.Store.ListEffectiveTokenGroupBindings(c.Request.Context(), tokenID)
+		effective, err := opts.Store.ListEffectiveTokenChannelGroupBindings(c.Request.Context(), tokenID)
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询 Token 生效分组失败"})
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询 Token 生效渠道组失败"})
 			return
 		}
 
-		toViews := func(rows []store.TokenGroupBinding) []tokenGroupBindingView {
-			out := make([]tokenGroupBindingView, 0, len(rows))
+		toViews := func(rows []store.TokenChannelGroupBinding) []tokenChannelGroupBindingView {
+			out := make([]tokenChannelGroupBindingView, 0, len(rows))
 			for _, row := range rows {
-				name := strings.TrimSpace(row.GroupName)
+				name := strings.TrimSpace(row.ChannelGroupName)
 				if name == "" {
 					continue
 				}
-				out = append(out, tokenGroupBindingView{GroupName: name, Priority: row.Priority})
+				out = append(out, tokenChannelGroupBindingView{ChannelGroupName: name, Priority: row.Priority})
 			}
 			return out
 		}
 
-		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": tokenGroupsView{
-			TokenID:           tokenID,
-			UserGroup:         mainGroup,
-			AllowedGroups:     allowedViews,
-			Bindings:          toViews(bindings),
-			EffectiveBindings: toViews(effective),
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": tokenChannelGroupsView{
+			TokenID:              tokenID,
+			UserGroup:            mainGroup,
+			AllowedChannelGroups: allowedViews,
+			Bindings:             toViews(bindings),
+			EffectiveBindings:    toViews(effective),
 		}})
 	}
 }
 
-func replaceUserTokenGroupsHandler(opts Options) gin.HandlerFunc {
+func replaceUserTokenChannelGroupsHandler(opts Options) gin.HandlerFunc {
 	type reqBody struct {
-		Groups []string `json:"groups"`
+		ChannelGroups []string `json:"channel_groups"`
 	}
 	return func(c *gin.Context) {
 		if opts.Store == nil {
@@ -420,7 +420,7 @@ func replaceUserTokenGroupsHandler(opts Options) gin.HandlerFunc {
 
 		var req reqBody
 		_ = c.ShouldBindJSON(&req)
-		if err := opts.Store.ReplaceTokenGroups(c.Request.Context(), tokenID, req.Groups); err != nil {
+		if err := opts.Store.ReplaceTokenChannelGroups(c.Request.Context(), tokenID, req.ChannelGroups); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "not found"})
 				return

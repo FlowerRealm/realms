@@ -79,14 +79,14 @@ export function ChannelGroupsPage() {
                   <span className="fs-4 material-symbols-rounded">folder</span>
                 </div>
                 <div>
-                  <h5 className="mb-1 fw-semibold">分组</h5>
+                  <h5 className="mb-1 fw-semibold">渠道组</h5>
                   <p className="mb-0 text-muted small">{enabledCount} 启用 / {items.length} 总计 · 用于按用户组筛选可用上游渠道（不是租户）</p>
                 </div>
               </div>
 
               <div className="d-flex gap-2">
                 <button type="button" className="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createChannelGroupModal">
-                  <span className="me-1 material-symbols-rounded">add</span> 新建分组
+                  <span className="me-1 material-symbols-rounded">add</span> 新建渠道组
                 </button>
               </div>
             </div>
@@ -117,7 +117,7 @@ export function ChannelGroupsPage() {
           ) : items.length === 0 ? (
             <div className="text-center py-5 text-muted">
               <span className="fs-1 d-block mb-3 material-symbols-rounded">inbox</span>
-              暂无分组。
+              暂无渠道组。
             </div>
           ) : (
             <div className="card overflow-hidden mb-0">
@@ -192,7 +192,7 @@ export function ChannelGroupsPage() {
                               <button
                                 type="button"
                                 className="btn btn-sm btn-light border text-warning"
-                                title={g.is_default ? '默认分组' : g.status !== 1 ? '禁用分组不可设为默认' : '设为默认'}
+                                title={g.is_default ? '默认渠道组' : g.status !== 1 ? '禁用渠道组不可设为默认' : '设为默认'}
                                 disabled={g.is_default || g.status !== 1}
                                 onClick={async () => {
                                   if (g.is_default || g.status !== 1) return;
@@ -201,7 +201,7 @@ export function ChannelGroupsPage() {
                                   try {
                                     const res = await setAdminDefaultChannelGroup(g.id);
                                     if (!res.success) throw new Error(res.message || '设置失败');
-                                    setNotice(res.message || '已设置默认分组');
+                                    setNotice(res.message || '已设置默认渠道组');
                                     await refresh();
                                   } catch (e) {
                                     setErr(e instanceof Error ? e.message : '设置失败');
@@ -281,7 +281,7 @@ export function ChannelGroupsPage() {
 
       <BootstrapModal
         id="createChannelGroupModal"
-        title="新建分组"
+        title="新建渠道组"
         dialogClassName="modal-dialog-centered"
         onHidden={() => {
           setCreateName('');
@@ -315,7 +315,7 @@ export function ChannelGroupsPage() {
           }}
         >
           <div className="col-12">
-            <label className="form-label">分组名称</label>
+            <label className="form-label">渠道组名称</label>
             <input className="form-control" value={createName} onChange={(e) => setCreateName(e.target.value)} placeholder="例如：vip" required />
             <div className="form-text small text-muted">仅允许字母/数字及 _ -，最多 64 位。</div>
           </div>
@@ -357,12 +357,12 @@ export function ChannelGroupsPage() {
 
       <BootstrapModal
         id="editChannelGroupModal"
-        title={editing ? `编辑分组：${editing.name}` : '编辑分组'}
+        title={editing ? `编辑渠道组：${editing.name}` : '编辑渠道组'}
         dialogClassName="modal-dialog-centered"
         onHidden={() => setEditing(null)}
       >
         {!editing ? (
-          <div className="text-muted">未选择分组。</div>
+          <div className="text-muted">未选择渠道组。</div>
         ) : (
           <form
             className="row g-3"
@@ -391,7 +391,7 @@ export function ChannelGroupsPage() {
             }}
           >
             <div className="col-12">
-              <label className="form-label">分组名称</label>
+              <label className="form-label">渠道组名称</label>
               <input className="form-control" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="例如：vip" required />
               <div className="form-text small text-muted">仅允许字母/数字及 _ -，最多 64 位。</div>
             </div>

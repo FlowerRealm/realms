@@ -36,12 +36,12 @@ type MainGroupSubgroup struct {
 	UpdatedAt time.Time
 }
 
-type TokenGroupBinding struct {
-	TokenID   int64
-	GroupName string
-	Priority  int
-	CreatedAt time.Time
-	UpdatedAt time.Time
+type TokenChannelGroupBinding struct {
+	TokenID           int64
+	ChannelGroupName  string
+	Priority          int
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 type ChannelGroup struct {
