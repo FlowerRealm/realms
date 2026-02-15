@@ -41,3 +41,6 @@ backups/
 
 # Local agent workspace (keep local, do not commit)
 /helloagents/
+
+# oh-my-codex / Codex CLI local state
+.omx/
