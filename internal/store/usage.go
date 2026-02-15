@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -219,6 +220,11 @@ WHERE id=?
 		stream, reqBytes, respBytes, in.UsageEventID)
 	if err != nil {
 		return fmt.Errorf("更新 usage_event 明细失败: %w", err)
+	}
+
+	// 在 finalize 时汇总 rollup：此时 committed_usd/tokens 已写入，且 finalize 只会调用一次（有幂等标记兜底）。
+	if err := s.applyUsageRollupsIfAvailable(ctx, in.UsageEventID); err != nil {
+		return err
 	}
 
 	return nil
@@ -894,6 +900,46 @@ type UsageSumAllWithReservedRangeInput struct {
 }
 
 func (s *Store) SumCommittedAndReservedUSDAllRange(ctx context.Context, in UsageSumAllWithReservedRangeInput) (committedUSD decimal.Decimal, reservedUSD decimal.Decimal, err error) {
+	if shouldUseUsageRollups(in.Since, in.Until) {
+		committed := decimal.Zero
+		rollupOK := true
+		for _, seg := range s.usageHourRollupSegments(in.Since, in.Until) {
+			table := "usage_rollup_global_hour"
+			if seg.Sharded {
+				table = "usage_rollup_global_hour_sharded"
+			}
+
+			var committedSum decimal.NullDecimal
+			if err := s.db.QueryRowContext(ctx, "SELECT SUM(committed_usd) FROM "+table+" WHERE bucket_start >= ? AND bucket_start < ?", seg.Since, seg.Until).Scan(&committedSum); err != nil {
+				if isMissingTableErr(err) {
+					rollupOK = false
+					break
+				}
+				return decimal.Zero, decimal.Zero, fmt.Errorf("汇总 committed rollup 失败: %w", err)
+			}
+			if committedSum.Valid {
+				committed = committed.Add(committedSum.Decimal)
+			}
+		}
+
+		if rollupOK {
+			committedUSD = committed.Truncate(USDScale)
+
+			var reservedSum decimal.NullDecimal
+			if err := s.db.QueryRowContext(ctx, `
+SELECT SUM(reserved_usd)
+FROM usage_events
+WHERE state=? AND reserve_expires_at >= ? AND time >= ? AND time < ?
+`, UsageStateReserved, in.Now, in.Since, in.Until).Scan(&reservedSum); err != nil {
+				return decimal.Zero, decimal.Zero, fmt.Errorf("汇总 reserved 用量失败: %w", err)
+			}
+			if reservedSum.Valid {
+				reservedUSD = reservedSum.Decimal.Truncate(USDScale)
+			}
+			return committedUSD, reservedUSD, nil
+		}
+	}
+
 	var committedSum decimal.NullDecimal
 	var reservedSum decimal.NullDecimal
 	err = s.db.QueryRowContext(ctx, `
@@ -934,6 +980,64 @@ type UsageTopUsersInput struct {
 func (s *Store) ListUsageTopUsers(ctx context.Context, in UsageTopUsersInput) ([]UsageUserSum, error) {
 	if in.Limit <= 0 || in.Limit > 200 {
 		in.Limit = 50
+	}
+
+	if shouldUseUsageRollups(in.Since, in.Until) {
+		startOfUTCDay := func(t time.Time) time.Time {
+			tt := t.UTC()
+			return time.Date(tt.Year(), tt.Month(), tt.Day(), 0, 0, 0, 0, time.UTC)
+		}
+		sinceDay := startOfUTCDay(in.Since)
+		untilDay := startOfUTCDay(in.Until)
+		if !in.Until.Equal(untilDay) {
+			untilDay = untilDay.AddDate(0, 0, 1)
+		}
+
+		rows, err := s.db.QueryContext(ctx, `
+SELECT u.id, u.email, u.role, u.status, x.committed_sum, COALESCE(r.reserved_sum, 0) AS reserved_sum
+FROM (
+  SELECT user_id, SUM(committed_usd) AS committed_sum
+  FROM usage_rollup_user_day
+  WHERE day >= ? AND day < ?
+  GROUP BY user_id
+  ORDER BY committed_sum DESC
+  LIMIT ?
+) x
+JOIN users u ON u.id=x.user_id
+LEFT JOIN (
+  SELECT user_id, SUM(reserved_usd) AS reserved_sum
+  FROM usage_events
+  WHERE state=? AND reserve_expires_at >= ? AND time >= ? AND time < ?
+  GROUP BY user_id
+) r ON r.user_id=x.user_id
+ORDER BY x.committed_sum DESC
+`, sinceDay, untilDay, in.Limit, UsageStateReserved, in.Now, in.Since, in.Until)
+		if err == nil {
+			defer rows.Close()
+
+			var out []UsageUserSum
+			for rows.Next() {
+				var row UsageUserSum
+				var committedSum decimal.NullDecimal
+				var reservedSum decimal.NullDecimal
+				if err := rows.Scan(&row.UserID, &row.Email, &row.Role, &row.Status, &committedSum, &reservedSum); err != nil {
+					return nil, fmt.Errorf("扫描用户用量汇总失败: %w", err)
+				}
+				if committedSum.Valid {
+					row.CommittedUSD = committedSum.Decimal.Truncate(USDScale)
+				}
+				if reservedSum.Valid {
+					row.ReservedUSD = reservedSum.Decimal.Truncate(USDScale)
+				}
+				out = append(out, row)
+			}
+			if err := rows.Err(); err != nil {
+				return nil, fmt.Errorf("遍历用户用量汇总失败: %w", err)
+			}
+			return out, nil
+		} else if !isMissingTableErr(err) {
+			return nil, fmt.Errorf("查询用户 rollup 汇总失败: %w", err)
+		}
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
@@ -1071,6 +1175,108 @@ WHERE time >= ?
 
 func (s *Store) GetGlobalUsageStatsRange(ctx context.Context, since, until time.Time) (GlobalUsageStats, error) {
 	var stats GlobalUsageStats
+
+	if shouldUseUsageRollups(since, until) {
+		var (
+			reqsTotal               int64
+			inputTokensTotal        int64
+			cachedInputTokensTotal  int64
+			outputTokensTotal       int64
+			cachedOutputTokensTotal int64
+			firstTokenLatencyTotal  int64
+			firstTokenSamplesTotal  int64
+			decodeLatencyTotal      int64
+			committedTotal          = decimal.Zero
+		)
+
+		rollupOK := true
+		for _, seg := range s.usageHourRollupSegments(since, until) {
+			table := "usage_rollup_global_hour"
+			if seg.Sharded {
+				table = "usage_rollup_global_hour_sharded"
+			}
+
+			var (
+				reqs                 sql.NullInt64
+				inputTokens          sql.NullInt64
+				cachedInputTokens    sql.NullInt64
+				outputTokens         sql.NullInt64
+				cachedOutputTokens   sql.NullInt64
+				firstTokenLatencySum sql.NullInt64
+				firstTokenSamples    sql.NullInt64
+				decodeLatencySum     sql.NullInt64
+				committedUSD         decimal.NullDecimal
+			)
+			err := s.db.QueryRowContext(ctx, `
+SELECT
+  SUM(requests_total),
+  SUM(input_tokens),
+  SUM(cached_input_tokens),
+  SUM(output_tokens),
+  SUM(cached_output_tokens),
+  SUM(first_token_latency_ms_sum),
+  SUM(first_token_samples),
+  SUM(decode_latency_ms_sum),
+  SUM(committed_usd)
+FROM `+table+`
+WHERE bucket_start >= ? AND bucket_start < ?
+`, seg.Since, seg.Until).Scan(&reqs, &inputTokens, &cachedInputTokens, &outputTokens, &cachedOutputTokens, &firstTokenLatencySum, &firstTokenSamples, &decodeLatencySum, &committedUSD)
+			if err != nil {
+				if isMissingTableErr(err) {
+					rollupOK = false
+					break
+				}
+				return GlobalUsageStats{}, fmt.Errorf("查询全站 rollup 统计失败: %w", err)
+			}
+			if reqs.Valid {
+				reqsTotal += reqs.Int64
+			}
+			if inputTokens.Valid {
+				inputTokensTotal += inputTokens.Int64
+			}
+			if outputTokens.Valid {
+				outputTokensTotal += outputTokens.Int64
+			}
+			if cachedInputTokens.Valid {
+				cachedInputTokensTotal += cachedInputTokens.Int64
+			}
+			if cachedOutputTokens.Valid {
+				cachedOutputTokensTotal += cachedOutputTokens.Int64
+			}
+			if firstTokenLatencySum.Valid {
+				firstTokenLatencyTotal += firstTokenLatencySum.Int64
+			}
+			if firstTokenSamples.Valid {
+				firstTokenSamplesTotal += firstTokenSamples.Int64
+			}
+			if decodeLatencySum.Valid {
+				decodeLatencyTotal += decodeLatencySum.Int64
+			}
+			if committedUSD.Valid {
+				committedTotal = committedTotal.Add(committedUSD.Decimal)
+			}
+		}
+
+		if rollupOK {
+			stats.Requests = reqsTotal
+			stats.InputTokens = inputTokensTotal
+			stats.OutputTokens = outputTokensTotal
+			stats.CachedInputTokens = cachedInputTokensTotal
+			stats.CachedOutputTokens = cachedOutputTokensTotal
+			stats.FirstTokenSamples = firstTokenSamplesTotal
+			stats.Tokens = stats.InputTokens + stats.OutputTokens
+			if stats.Tokens > 0 {
+				stats.CacheRatio = float64(stats.CachedInputTokens+stats.CachedOutputTokens) / float64(stats.Tokens)
+			}
+			if firstTokenSamplesTotal > 0 {
+				stats.AvgFirstTokenMS = float64(firstTokenLatencyTotal) / float64(firstTokenSamplesTotal)
+			}
+			stats.OutputTokensPerSec = computeOutputTokensPerSecond(stats.OutputTokens, decodeLatencyTotal)
+			stats.CostUSD = committedTotal.Truncate(USDScale)
+			return stats, nil
+		}
+	}
+
 	var committedUSD decimal.NullDecimal
 	var inputTokens sql.NullInt64
 	var outputTokens sql.NullInt64
@@ -1163,6 +1369,133 @@ type CredentialUsageStats struct {
 }
 
 func (s *Store) GetUsageStatsByChannelRange(ctx context.Context, since, until time.Time) ([]ChannelUsageStats, error) {
+	if shouldUseUsageRollups(since, until) {
+		type chAgg struct {
+			committedUSD       decimal.Decimal
+			inputTokens        int64
+			outputTokens       int64
+			cachedInputTokens  int64
+			cachedOutputTokens int64
+			firstLatencySum    int64
+			firstTokenSamples  int64
+			decodeLatencyMSSum int64
+		}
+
+		acc := make(map[int64]*chAgg)
+		rollupOK := true
+		for _, seg := range s.usageHourRollupSegments(since, until) {
+			table := "usage_rollup_channel_hour"
+			if seg.Sharded {
+				table = "usage_rollup_channel_hour_sharded"
+			}
+			rows, err := s.db.QueryContext(ctx, `
+SELECT
+  upstream_channel_id,
+  SUM(committed_usd),
+  SUM(input_tokens),
+  SUM(output_tokens),
+  SUM(cached_input_tokens),
+  SUM(cached_output_tokens),
+  SUM(first_token_latency_ms_sum),
+  SUM(first_token_samples),
+  SUM(decode_latency_ms_sum)
+FROM `+table+`
+WHERE bucket_start >= ? AND bucket_start < ?
+GROUP BY upstream_channel_id
+`, seg.Since, seg.Until)
+			if err != nil {
+				if isMissingTableErr(err) {
+					rollupOK = false
+					break
+				}
+				return nil, fmt.Errorf("按渠道查询 rollup 失败: %w", err)
+			}
+			for rows.Next() {
+				var (
+					channelID          int64
+					committedUSD       decimal.NullDecimal
+					inputTokens        sql.NullInt64
+					outputTokens       sql.NullInt64
+					cachedInputTokens  sql.NullInt64
+					cachedOutputTokens sql.NullInt64
+					firstLatencySum    sql.NullInt64
+					firstTokenSamples  sql.NullInt64
+					decodeLatencyMS    sql.NullInt64
+				)
+				if err := rows.Scan(&channelID, &committedUSD, &inputTokens, &outputTokens, &cachedInputTokens, &cachedOutputTokens, &firstLatencySum, &firstTokenSamples, &decodeLatencyMS); err != nil {
+					_ = rows.Close()
+					return nil, fmt.Errorf("扫描渠道 rollup 用量失败: %w", err)
+				}
+				agg, ok := acc[channelID]
+				if !ok {
+					agg = &chAgg{committedUSD: decimal.Zero}
+					acc[channelID] = agg
+				}
+				if committedUSD.Valid {
+					agg.committedUSD = agg.committedUSD.Add(committedUSD.Decimal)
+				}
+				if inputTokens.Valid {
+					agg.inputTokens += inputTokens.Int64
+				}
+				if outputTokens.Valid {
+					agg.outputTokens += outputTokens.Int64
+				}
+				if cachedInputTokens.Valid {
+					agg.cachedInputTokens += cachedInputTokens.Int64
+				}
+				if cachedOutputTokens.Valid {
+					agg.cachedOutputTokens += cachedOutputTokens.Int64
+				}
+				if firstLatencySum.Valid {
+					agg.firstLatencySum += firstLatencySum.Int64
+				}
+				if firstTokenSamples.Valid {
+					agg.firstTokenSamples += firstTokenSamples.Int64
+				}
+				if decodeLatencyMS.Valid {
+					agg.decodeLatencyMSSum += decodeLatencyMS.Int64
+				}
+			}
+			if err := rows.Err(); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("遍历渠道 rollup 用量失败: %w", err)
+			}
+			_ = rows.Close()
+		}
+
+		if rollupOK {
+			ids := make([]int64, 0, len(acc))
+			for id := range acc {
+				ids = append(ids, id)
+			}
+			sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+			out := make([]ChannelUsageStats, 0, len(ids))
+			for _, id := range ids {
+				agg := acc[id]
+				row := ChannelUsageStats{
+					ChannelID:          id,
+					CommittedUSD:       agg.committedUSD.Truncate(USDScale),
+					InputTokens:        agg.inputTokens,
+					OutputTokens:       agg.outputTokens,
+					CachedInputTokens:  agg.cachedInputTokens,
+					CachedOutputTokens: agg.cachedOutputTokens,
+					FirstTokenSamples:  agg.firstTokenSamples,
+				}
+				row.Tokens = row.InputTokens + row.OutputTokens
+				if row.Tokens > 0 {
+					row.CacheRatio = float64(row.CachedInputTokens+row.CachedOutputTokens) / float64(row.Tokens)
+				}
+				if agg.firstTokenSamples > 0 {
+					row.AvgFirstTokenMS = float64(agg.firstLatencySum) / float64(agg.firstTokenSamples)
+				}
+				row.OutputTokensPerSec = computeOutputTokensPerSecond(row.OutputTokens, agg.decodeLatencyMSSum)
+				out = append(out, row)
+			}
+			return out, nil
+		}
+	}
+
 	rows, err := s.db.QueryContext(ctx, `
 SELECT
   upstream_channel_id,
@@ -1305,6 +1638,103 @@ type UsageTokenStats struct {
 	CachedInputTokens  int64
 	CachedOutputTokens int64
 	CacheRatio         float64
+}
+
+// BackfillUsageRollupsBefore 对“未 rollup 的历史 usage_events”做小批量补算。
+// 用于上线 rollup 后的平滑迁移：先补齐 rollup_applied_at，再配合 retention 清理明细。
+func (s *Store) BackfillUsageRollupsBefore(ctx context.Context, before time.Time, limit int) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, errors.New("store 未初始化")
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 5000 {
+		limit = 5000
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id
+FROM usage_events
+WHERE rollup_applied_at IS NULL AND state<>? AND time < ?
+ORDER BY id ASC
+LIMIT ?
+`, UsageStateReserved, before, limit)
+	if err != nil {
+		if isMissingTableErr(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("查询待补算 usage_events 失败: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return 0, fmt.Errorf("扫描待补算 usage_events 失败: %w", err)
+		}
+		if id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("遍历待补算 usage_events 失败: %w", err)
+	}
+
+	n := 0
+	for _, id := range ids {
+		if err := s.applyUsageRollupsIfAvailable(ctx, id); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+// DeleteUsageEventsBefore 批量删除已 rollup 的历史明细，控制 usage_events 表体积。
+func (s *Store) DeleteUsageEventsBefore(ctx context.Context, before time.Time, batchSize int) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, errors.New("store 未初始化")
+	}
+	if batchSize <= 0 {
+		batchSize = 2000
+	}
+	if batchSize > 20000 {
+		batchSize = 20000
+	}
+
+	var (
+		res sql.Result
+		err error
+	)
+	if s.dialect == DialectSQLite {
+		res, err = s.db.ExecContext(ctx, `
+DELETE FROM usage_events
+WHERE id IN (
+  SELECT id
+  FROM usage_events
+  WHERE time < ? AND rollup_applied_at IS NOT NULL AND state<>?
+  ORDER BY id ASC
+  LIMIT ?
+)
+`, before, UsageStateReserved, batchSize)
+	} else {
+		res, err = s.db.ExecContext(ctx, `
+DELETE FROM usage_events
+WHERE time < ? AND rollup_applied_at IS NOT NULL AND state<>?
+ORDER BY id ASC
+LIMIT ?
+`, before, UsageStateReserved, batchSize)
+	}
+	if err != nil {
+		if isMissingTableErr(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("删除历史 usage_events 失败: %w", err)
+	}
+	aff, _ := res.RowsAffected()
+	return aff, nil
 }
 
 type ModelUsageStats struct {
@@ -1519,6 +1949,162 @@ ORDER BY hr ASC
 }
 
 func (s *Store) GetGlobalUsageTimeSeriesRange(ctx context.Context, since, until time.Time, granularity string) ([]ChannelTimeSeriesUsageStats, error) {
+	if shouldUseUsageRollups(since, until) {
+		bucketExprMySQL := "bucket_start"
+		bucketExprSQLite := "bucket_start"
+		switch granularity {
+		case "", "hour":
+			granularity = "hour"
+		case "day":
+			bucketExprMySQL = "DATE_FORMAT(bucket_start, '%Y-%m-%d 00:00:00')"
+			bucketExprSQLite = "STRFTIME('%Y-%m-%d 00:00:00', bucket_start)"
+		default:
+			return nil, fmt.Errorf("granularity 不合法")
+		}
+		type seriesAgg struct {
+			requests           int64
+			tokens             int64
+			committedUSD       decimal.Decimal
+			cachedTokens       int64
+			firstLatencySum    int64
+			firstTokenSamples  int64
+			outputTokens       int64
+			decodeLatencyMSSum int64
+		}
+
+		acc := make(map[string]*seriesAgg)
+		rollupOK := true
+		for _, seg := range s.usageHourRollupSegments(since, until) {
+			table := "usage_rollup_global_hour"
+			if seg.Sharded {
+				table = "usage_rollup_global_hour_sharded"
+			}
+
+			query := `
+SELECT
+  ` + bucketExprMySQL + ` as hr,
+  SUM(requests_total),
+  SUM(input_tokens + output_tokens),
+  SUM(committed_usd),
+  SUM(cached_input_tokens + cached_output_tokens),
+  SUM(first_token_latency_ms_sum),
+  SUM(first_token_samples),
+  SUM(output_tokens),
+  SUM(decode_latency_ms_sum)
+FROM ` + table + `
+WHERE bucket_start >= ? AND bucket_start < ?
+GROUP BY hr
+ORDER BY hr ASC
+`
+			if s.dialect == DialectSQLite {
+				query = `
+SELECT
+  ` + bucketExprSQLite + ` as hr,
+  SUM(requests_total),
+  SUM(input_tokens + output_tokens),
+  SUM(committed_usd),
+  SUM(cached_input_tokens + cached_output_tokens),
+  SUM(first_token_latency_ms_sum),
+  SUM(first_token_samples),
+  SUM(output_tokens),
+  SUM(decode_latency_ms_sum)
+FROM ` + table + `
+WHERE bucket_start >= ? AND bucket_start < ?
+GROUP BY hr
+ORDER BY hr ASC
+`
+			}
+
+			rows, err := s.db.QueryContext(ctx, query, seg.Since, seg.Until)
+			if err != nil {
+				if isMissingTableErr(err) {
+					rollupOK = false
+					break
+				}
+				return nil, fmt.Errorf("查询全站 rollup 时间序列失败: %w", err)
+			}
+			for rows.Next() {
+				var (
+					hr                string
+					requests          sql.NullInt64
+					tokens            sql.NullInt64
+					committedUSD      decimal.NullDecimal
+					cachedTokens      sql.NullInt64
+					firstLatencySum   sql.NullInt64
+					firstTokenSamples sql.NullInt64
+					outputTokens      sql.NullInt64
+					decodeLatencyMS   sql.NullInt64
+				)
+				if err := rows.Scan(&hr, &requests, &tokens, &committedUSD, &cachedTokens, &firstLatencySum, &firstTokenSamples, &outputTokens, &decodeLatencyMS); err != nil {
+					_ = rows.Close()
+					return nil, fmt.Errorf("扫描全站 rollup 时间序列失败: %w", err)
+				}
+				agg, ok := acc[hr]
+				if !ok {
+					agg = &seriesAgg{committedUSD: decimal.Zero}
+					acc[hr] = agg
+				}
+				if requests.Valid {
+					agg.requests += requests.Int64
+				}
+				if tokens.Valid {
+					agg.tokens += tokens.Int64
+				}
+				if committedUSD.Valid {
+					agg.committedUSD = agg.committedUSD.Add(committedUSD.Decimal)
+				}
+				if cachedTokens.Valid {
+					agg.cachedTokens += cachedTokens.Int64
+				}
+				if firstLatencySum.Valid {
+					agg.firstLatencySum += firstLatencySum.Int64
+				}
+				if firstTokenSamples.Valid {
+					agg.firstTokenSamples += firstTokenSamples.Int64
+				}
+				if outputTokens.Valid {
+					agg.outputTokens += outputTokens.Int64
+				}
+				if decodeLatencyMS.Valid {
+					agg.decodeLatencyMSSum += decodeLatencyMS.Int64
+				}
+			}
+			if err := rows.Err(); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("遍历全站 rollup 时间序列失败: %w", err)
+			}
+			_ = rows.Close()
+		}
+
+		if rollupOK {
+			keys := make([]string, 0, len(acc))
+			for k := range acc {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+
+			out := make([]ChannelTimeSeriesUsageStats, 0, len(keys))
+			for _, hr := range keys {
+				agg := acc[hr]
+				var row ChannelTimeSeriesUsageStats
+				row.Time, _ = time.Parse("2006-01-02 15:04:05", hr)
+				row.Requests = agg.requests
+				row.Tokens = agg.tokens
+				row.CommittedUSD = agg.committedUSD.Truncate(USDScale)
+				if agg.tokens > 0 {
+					row.CacheRatio = float64(agg.cachedTokens) / float64(agg.tokens)
+				}
+				row.FirstTokenSamples = agg.firstTokenSamples
+				if agg.firstTokenSamples > 0 {
+					row.AvgFirstTokenMS = float64(agg.firstLatencySum) / float64(agg.firstTokenSamples)
+				}
+				row.OutputTokensPerSec = computeOutputTokensPerSecond(agg.outputTokens, agg.decodeLatencyMSSum)
+				out = append(out, row)
+			}
+			return out, nil
+		}
+	}
+
 	bucketExprMySQL := "DATE_FORMAT(time, '%Y-%m-%d %H:00:00')"
 	bucketExprSQLite := "STRFTIME('%Y-%m-%d %H:00:00', time)"
 	switch granularity {
@@ -1616,6 +2202,164 @@ func (s *Store) GetChannelUsageTimeSeriesRange(ctx context.Context, channelID in
 	if channelID <= 0 {
 		return nil, fmt.Errorf("channelID 不合法")
 	}
+
+	if shouldUseUsageRollups(since, until) {
+		bucketExprMySQL := "bucket_start"
+		bucketExprSQLite := "bucket_start"
+		switch granularity {
+		case "", "hour":
+			granularity = "hour"
+		case "day":
+			bucketExprMySQL = "DATE_FORMAT(bucket_start, '%Y-%m-%d 00:00:00')"
+			bucketExprSQLite = "STRFTIME('%Y-%m-%d 00:00:00', bucket_start)"
+		default:
+			return nil, fmt.Errorf("granularity 不合法")
+		}
+
+		type seriesAgg struct {
+			requests           int64
+			tokens             int64
+			committedUSD       decimal.Decimal
+			cachedTokens       int64
+			firstLatencySum    int64
+			firstTokenSamples  int64
+			outputTokens       int64
+			decodeLatencyMSSum int64
+		}
+
+		acc := make(map[string]*seriesAgg)
+		rollupOK := true
+		for _, seg := range s.usageHourRollupSegments(since, until) {
+			table := "usage_rollup_channel_hour"
+			if seg.Sharded {
+				table = "usage_rollup_channel_hour_sharded"
+			}
+
+			query := `
+SELECT
+  ` + bucketExprMySQL + ` as hr,
+  SUM(requests_total),
+  SUM(input_tokens + output_tokens),
+  SUM(committed_usd),
+  SUM(cached_input_tokens + cached_output_tokens),
+  SUM(first_token_latency_ms_sum),
+  SUM(first_token_samples),
+  SUM(output_tokens),
+  SUM(decode_latency_ms_sum)
+FROM ` + table + `
+WHERE upstream_channel_id=? AND bucket_start >= ? AND bucket_start < ?
+GROUP BY hr
+ORDER BY hr ASC
+`
+			if s.dialect == DialectSQLite {
+				query = `
+SELECT
+  ` + bucketExprSQLite + ` as hr,
+  SUM(requests_total),
+  SUM(input_tokens + output_tokens),
+  SUM(committed_usd),
+  SUM(cached_input_tokens + cached_output_tokens),
+  SUM(first_token_latency_ms_sum),
+  SUM(first_token_samples),
+  SUM(output_tokens),
+  SUM(decode_latency_ms_sum)
+FROM ` + table + `
+WHERE upstream_channel_id=? AND bucket_start >= ? AND bucket_start < ?
+GROUP BY hr
+ORDER BY hr ASC
+`
+			}
+
+			rows, err := s.db.QueryContext(ctx, query, channelID, seg.Since, seg.Until)
+			if err != nil {
+				if isMissingTableErr(err) {
+					rollupOK = false
+					break
+				}
+				return nil, fmt.Errorf("查询渠道 rollup 时间序列失败: %w", err)
+			}
+			for rows.Next() {
+				var (
+					hr                string
+					requests          sql.NullInt64
+					tokens            sql.NullInt64
+					committedUSD      decimal.NullDecimal
+					cachedTokens      sql.NullInt64
+					firstLatencySum   sql.NullInt64
+					firstTokenSamples sql.NullInt64
+					outputTokens      sql.NullInt64
+					decodeLatencyMS   sql.NullInt64
+				)
+				if err := rows.Scan(&hr, &requests, &tokens, &committedUSD, &cachedTokens, &firstLatencySum, &firstTokenSamples, &outputTokens, &decodeLatencyMS); err != nil {
+					_ = rows.Close()
+					return nil, fmt.Errorf("扫描渠道 rollup 时间序列失败: %w", err)
+				}
+				agg, ok := acc[hr]
+				if !ok {
+					agg = &seriesAgg{committedUSD: decimal.Zero}
+					acc[hr] = agg
+				}
+				if requests.Valid {
+					agg.requests += requests.Int64
+				}
+				if tokens.Valid {
+					agg.tokens += tokens.Int64
+				}
+				if committedUSD.Valid {
+					agg.committedUSD = agg.committedUSD.Add(committedUSD.Decimal)
+				}
+				if cachedTokens.Valid {
+					agg.cachedTokens += cachedTokens.Int64
+				}
+				if firstLatencySum.Valid {
+					agg.firstLatencySum += firstLatencySum.Int64
+				}
+				if firstTokenSamples.Valid {
+					agg.firstTokenSamples += firstTokenSamples.Int64
+				}
+				if outputTokens.Valid {
+					agg.outputTokens += outputTokens.Int64
+				}
+				if decodeLatencyMS.Valid {
+					agg.decodeLatencyMSSum += decodeLatencyMS.Int64
+				}
+			}
+			if err := rows.Err(); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("遍历渠道 rollup 时间序列失败: %w", err)
+			}
+			_ = rows.Close()
+		}
+
+		if rollupOK {
+			keys := make([]string, 0, len(acc))
+			for k := range acc {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+
+			out := make([]ChannelTimeSeriesUsageStats, 0, len(keys))
+			for _, hr := range keys {
+				agg := acc[hr]
+				var row ChannelTimeSeriesUsageStats
+				row.Time, _ = time.Parse("2006-01-02 15:04:05", hr)
+				row.Requests = agg.requests
+				row.Tokens = agg.tokens
+				row.CommittedUSD = agg.committedUSD.Truncate(USDScale)
+				if agg.tokens > 0 {
+					row.CacheRatio = float64(agg.cachedTokens) / float64(agg.tokens)
+				}
+				row.FirstTokenSamples = agg.firstTokenSamples
+				if agg.firstTokenSamples > 0 {
+					row.AvgFirstTokenMS = float64(agg.firstLatencySum) / float64(agg.firstTokenSamples)
+				}
+				row.OutputTokensPerSec = computeOutputTokensPerSecond(agg.outputTokens, agg.decodeLatencyMSSum)
+				out = append(out, row)
+			}
+			return out, nil
+		}
+	}
+
 	bucketExprMySQL := "DATE_FORMAT(time, '%Y-%m-%d %H:00:00')"
 	bucketExprSQLite := "STRFTIME('%Y-%m-%d %H:00:00', time)"
 	switch granularity {

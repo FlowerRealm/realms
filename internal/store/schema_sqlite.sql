@@ -85,6 +85,14 @@ CREATE TABLE IF NOT EXISTS `session_bindings` (
 );
 CREATE INDEX IF NOT EXISTS `idx_session_bindings_expires_at` ON `session_bindings` (`expires_at`);
 
+CREATE TABLE IF NOT EXISTS `cache_invalidation` (
+  `cache_key` TEXT NOT NULL,
+  `version` INTEGER NOT NULL DEFAULT 0,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`cache_key`)
+);
+CREATE INDEX IF NOT EXISTS `idx_cache_invalidation_updated_at` ON `cache_invalidation` (`updated_at`);
+
 CREATE TABLE IF NOT EXISTS `openai_object_refs` (
   `object_type` TEXT NOT NULL,
   `object_id` TEXT NOT NULL,
@@ -164,6 +172,19 @@ CREATE TABLE IF NOT EXISTS `openai_compatible_credentials` (
   `updated_at` DATETIME NOT NULL
 );
 CREATE INDEX IF NOT EXISTS `idx_openai_credentials_endpoint_id` ON `openai_compatible_credentials` (`endpoint_id`);
+
+CREATE TABLE IF NOT EXISTS `anthropic_credentials` (
+  `id` INTEGER PRIMARY KEY AUTOINCREMENT,
+  `endpoint_id` INTEGER NOT NULL,
+  `name` TEXT NULL,
+  `api_key_enc` BLOB NOT NULL,
+  `api_key_hint` TEXT NULL,
+  `status` INTEGER NOT NULL DEFAULT 1,
+  `last_used_at` DATETIME NULL,
+  `created_at` DATETIME NOT NULL,
+  `updated_at` DATETIME NOT NULL
+);
+CREATE INDEX IF NOT EXISTS `idx_anthropic_credentials_endpoint_id` ON `anthropic_credentials` (`endpoint_id`);
 
 CREATE TABLE IF NOT EXISTS `codex_oauth_accounts` (
   `id` INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -266,6 +287,7 @@ CREATE TABLE IF NOT EXISTS `usage_events` (
   `is_stream` INTEGER NOT NULL DEFAULT 0,
   `request_bytes` INTEGER NOT NULL DEFAULT 0,
   `response_bytes` INTEGER NOT NULL DEFAULT 0,
+  `rollup_applied_at` DATETIME NULL,
   `created_at` DATETIME NOT NULL,
   `updated_at` DATETIME NOT NULL
 );
@@ -280,6 +302,101 @@ CREATE INDEX IF NOT EXISTS `idx_usage_events_user_subscription_state_time` ON `u
 CREATE INDEX IF NOT EXISTS `idx_usage_events_state_time_upstream_channel` ON `usage_events` (`state`, `time`, `upstream_channel_id`);
 CREATE INDEX IF NOT EXISTS `idx_usage_events_user_id_id` ON `usage_events` (`user_id`, `id`);
 CREATE INDEX IF NOT EXISTS `idx_usage_events_time_id` ON `usage_events` (`time`, `id`);
+CREATE INDEX IF NOT EXISTS `idx_usage_events_rollup_applied_at` ON `usage_events` (`rollup_applied_at`);
+
+CREATE TABLE IF NOT EXISTS `usage_rollup_global_hour` (
+  `bucket_start` DATETIME NOT NULL,
+  `requests_total` INTEGER NOT NULL DEFAULT 0,
+  `committed_usd` DECIMAL(20,6) NOT NULL DEFAULT 0,
+  `input_tokens` INTEGER NOT NULL DEFAULT 0,
+  `cached_input_tokens` INTEGER NOT NULL DEFAULT 0,
+  `output_tokens` INTEGER NOT NULL DEFAULT 0,
+  `cached_output_tokens` INTEGER NOT NULL DEFAULT 0,
+  `first_token_latency_ms_sum` INTEGER NOT NULL DEFAULT 0,
+  `first_token_samples` INTEGER NOT NULL DEFAULT 0,
+  `decode_latency_ms_sum` INTEGER NOT NULL DEFAULT 0,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`bucket_start`)
+);
+
+CREATE TABLE IF NOT EXISTS `usage_rollup_channel_hour` (
+  `bucket_start` DATETIME NOT NULL,
+  `upstream_channel_id` INTEGER NOT NULL,
+  `requests_total` INTEGER NOT NULL DEFAULT 0,
+  `committed_usd` DECIMAL(20,6) NOT NULL DEFAULT 0,
+  `input_tokens` INTEGER NOT NULL DEFAULT 0,
+  `cached_input_tokens` INTEGER NOT NULL DEFAULT 0,
+  `output_tokens` INTEGER NOT NULL DEFAULT 0,
+  `cached_output_tokens` INTEGER NOT NULL DEFAULT 0,
+  `first_token_latency_ms_sum` INTEGER NOT NULL DEFAULT 0,
+  `first_token_samples` INTEGER NOT NULL DEFAULT 0,
+  `decode_latency_ms_sum` INTEGER NOT NULL DEFAULT 0,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`bucket_start`, `upstream_channel_id`)
+);
+CREATE INDEX IF NOT EXISTS `idx_usage_rollup_channel_hour_channel` ON `usage_rollup_channel_hour` (`upstream_channel_id`, `bucket_start`);
+
+CREATE TABLE IF NOT EXISTS `usage_rollup_global_hour_sharded` (
+  `bucket_start` DATETIME NOT NULL,
+  `shard` INTEGER NOT NULL,
+  `requests_total` INTEGER NOT NULL DEFAULT 0,
+  `committed_usd` DECIMAL(20,6) NOT NULL DEFAULT 0,
+  `input_tokens` INTEGER NOT NULL DEFAULT 0,
+  `cached_input_tokens` INTEGER NOT NULL DEFAULT 0,
+  `output_tokens` INTEGER NOT NULL DEFAULT 0,
+  `cached_output_tokens` INTEGER NOT NULL DEFAULT 0,
+  `first_token_latency_ms_sum` INTEGER NOT NULL DEFAULT 0,
+  `first_token_samples` INTEGER NOT NULL DEFAULT 0,
+  `decode_latency_ms_sum` INTEGER NOT NULL DEFAULT 0,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`bucket_start`, `shard`)
+);
+
+CREATE TABLE IF NOT EXISTS `usage_rollup_channel_hour_sharded` (
+  `bucket_start` DATETIME NOT NULL,
+  `upstream_channel_id` INTEGER NOT NULL,
+  `shard` INTEGER NOT NULL,
+  `requests_total` INTEGER NOT NULL DEFAULT 0,
+  `committed_usd` DECIMAL(20,6) NOT NULL DEFAULT 0,
+  `input_tokens` INTEGER NOT NULL DEFAULT 0,
+  `cached_input_tokens` INTEGER NOT NULL DEFAULT 0,
+  `output_tokens` INTEGER NOT NULL DEFAULT 0,
+  `cached_output_tokens` INTEGER NOT NULL DEFAULT 0,
+  `first_token_latency_ms_sum` INTEGER NOT NULL DEFAULT 0,
+  `first_token_samples` INTEGER NOT NULL DEFAULT 0,
+  `decode_latency_ms_sum` INTEGER NOT NULL DEFAULT 0,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`bucket_start`, `upstream_channel_id`, `shard`)
+);
+CREATE INDEX IF NOT EXISTS `idx_usage_rollup_channel_hour_sharded_channel` ON `usage_rollup_channel_hour_sharded` (`upstream_channel_id`, `bucket_start`);
+
+CREATE TABLE IF NOT EXISTS `usage_rollup_user_day` (
+  `day` DATETIME NOT NULL,
+  `user_id` INTEGER NOT NULL,
+  `requests_total` INTEGER NOT NULL DEFAULT 0,
+  `committed_usd` DECIMAL(20,6) NOT NULL DEFAULT 0,
+  `input_tokens` INTEGER NOT NULL DEFAULT 0,
+  `cached_input_tokens` INTEGER NOT NULL DEFAULT 0,
+  `output_tokens` INTEGER NOT NULL DEFAULT 0,
+  `cached_output_tokens` INTEGER NOT NULL DEFAULT 0,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`day`, `user_id`)
+);
+CREATE INDEX IF NOT EXISTS `idx_usage_rollup_user_day_user` ON `usage_rollup_user_day` (`user_id`, `day`);
+
+CREATE TABLE IF NOT EXISTS `usage_rollup_model_day` (
+  `day` DATETIME NOT NULL,
+  `model` TEXT NOT NULL,
+  `requests_total` INTEGER NOT NULL DEFAULT 0,
+  `committed_usd` DECIMAL(20,6) NOT NULL DEFAULT 0,
+  `input_tokens` INTEGER NOT NULL DEFAULT 0,
+  `cached_input_tokens` INTEGER NOT NULL DEFAULT 0,
+  `output_tokens` INTEGER NOT NULL DEFAULT 0,
+  `cached_output_tokens` INTEGER NOT NULL DEFAULT 0,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`day`, `model`)
+);
+CREATE INDEX IF NOT EXISTS `idx_usage_rollup_model_day_model` ON `usage_rollup_model_day` (`model`, `day`);
 
 CREATE TABLE IF NOT EXISTS `subscription_plans` (
   `id` INTEGER PRIMARY KEY AUTOINCREMENT,
