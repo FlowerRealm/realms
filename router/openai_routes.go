@@ -17,7 +17,7 @@ func setOpenAIRoutes(r *gin.Engine, opts Options) {
 			middleware.RequestID,
 			middleware.AccessLog,
 			middleware.TokenAuth(opts.Store),
-			middleware.BodyCache(0),
+			middleware.BodyCache(opts.OpenAIMaxBodyBytes),
 		))
 	}
 	apiFeatureChain := func(featureKey string, h http.Handler) gin.HandlerFunc {
@@ -26,7 +26,7 @@ func setOpenAIRoutes(r *gin.Engine, opts Options) {
 			middleware.AccessLog,
 			middleware.FeatureGateEffective(opts.Store, selfMode, featureKey),
 			middleware.TokenAuth(opts.Store),
-			middleware.BodyCache(0),
+			middleware.BodyCache(opts.OpenAIMaxBodyBytes),
 		))
 	}
 

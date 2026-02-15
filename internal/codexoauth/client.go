@@ -61,21 +61,22 @@ func cloneDefaultTransport() *http.Transport {
 	return &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
-			Timeout:   0,
+			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   20,
 		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   0,
-		ExpectContinueTimeout: 0,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
 	}
 }
 
 func NewClient(cfg Config) *Client {
 	t := cloneDefaultTransport()
-	// 移除超时限制：Dial/TLS/HTTP 均允许无限等待。
-	t.DialContext = (&net.Dialer{Timeout: 0, KeepAlive: 30 * time.Second}).DialContext
+	t.DialContext = (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 
 	c := &Client{
 		cfg: cfg,

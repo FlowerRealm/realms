@@ -17,6 +17,11 @@ type Options struct {
 	Sched    *scheduler.Scheduler
 	SelfMode bool
 
+	// Body size limits for routes using BodyCache (to avoid OOM on huge requests).
+	// - <= 0 means unlimited.
+	PublicMaxBodyBytes int64
+	OpenAIMaxBodyBytes int64
+
 	AllowOpenRegistration           bool
 	EmailVerificationEnabledDefault bool
 	PublicBaseURLDefault            string

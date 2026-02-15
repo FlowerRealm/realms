@@ -17,6 +17,7 @@ type Config struct {
 	Env        string           `yaml:"env"`
 	SelfMode   SelfModeConfig   `yaml:"self_mode"`
 	Server     ServerConfig     `yaml:"server"`
+	UpstreamHTTP UpstreamHTTPConfig `yaml:"upstream_http"`
 	DB         DBConfig         `yaml:"db"`
 	Security   SecurityConfig   `yaml:"security"`
 	Debug      DebugConfig      `yaml:"debug"`
@@ -56,9 +57,36 @@ type SelfModeConfig struct {
 	Enable bool `yaml:"enable"`
 }
 
+type UpstreamHTTPConfig struct {
+	// DialTimeoutSeconds/TLSHandshakeTimeoutSeconds 为上游连接阶段超时，避免无限 hang。
+	// 设为 0 表示禁用（不建议）。
+	DialTimeoutSeconds         int `yaml:"dial_timeout_seconds"`
+	TLSHandshakeTimeoutSeconds int `yaml:"tls_handshake_timeout_seconds"`
+
+	// 连接池参数（建议在 10k+ 并发下显式设置）。
+	MaxIdleConns        int `yaml:"max_idle_conns"`
+	MaxIdleConnsPerHost int `yaml:"max_idle_conns_per_host"`
+	MaxConnsPerHost     int `yaml:"max_conns_per_host"`
+
+	IdleConnTimeoutSeconds int `yaml:"idle_conn_timeout_seconds"`
+}
+
 type ServerConfig struct {
 	Addr          string `yaml:"addr"`
 	PublicBaseURL string `yaml:"public_base_url"`
+
+	// HTTP 连接硬化：这些参数会直接映射到 net/http 的 http.Server。
+	// 注意：WriteTimeout 必须保持为 0（不设置），以兼容 SSE 等长连接响应。
+	ReadHeaderTimeoutSeconds int `yaml:"read_header_timeout_seconds"`
+	ReadTimeoutSeconds       int `yaml:"read_timeout_seconds"`
+	IdleTimeoutSeconds       int `yaml:"idle_timeout_seconds"`
+	MaxHeaderBytes           int `yaml:"max_header_bytes"`
+
+	// 请求体上限（用于 BodyCache 等需要读取 body 的路径，避免超大请求导致 OOM）。
+	// - <= 0：不限制（不建议在数据面使用）
+	// - 建议：OpenAI 数据面 8MB 起步；public JSON API 1MB 起步。
+	PublicMaxBodyBytes int64 `yaml:"public_max_body_bytes"`
+	OpenAIMaxBodyBytes int64 `yaml:"openai_max_body_bytes"`
 }
 
 type DBConfig struct {
@@ -241,6 +269,22 @@ func defaultConfig() Config {
 		},
 		Server: ServerConfig{
 			Addr: ":8080",
+
+			ReadHeaderTimeoutSeconds: 5,
+			ReadTimeoutSeconds:       30,
+			IdleTimeoutSeconds:       120,
+			MaxHeaderBytes:           1048576,
+
+			PublicMaxBodyBytes: 1 << 20,  // 1MB
+			OpenAIMaxBodyBytes: 8 << 20,  // 8MB
+		},
+		UpstreamHTTP: UpstreamHTTPConfig{
+			DialTimeoutSeconds:         30,
+			TLSHandshakeTimeoutSeconds: 10,
+			MaxIdleConns:               1024,
+			MaxIdleConnsPerHost:        256,
+			MaxConnsPerHost:            0,
+			IdleConnTimeoutSeconds:     90,
 		},
 		Debug: DebugConfig{
 			ProxyLog: ProxyLogConfig{
@@ -289,6 +333,66 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("REALMS_PUBLIC_BASE_URL"); v != "" {
 		cfg.Server.PublicBaseURL = v
+	}
+	if v := os.Getenv("REALMS_SERVER_READ_HEADER_TIMEOUT_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.Server.ReadHeaderTimeoutSeconds = n
+		}
+	}
+	if v := os.Getenv("REALMS_SERVER_READ_TIMEOUT_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.Server.ReadTimeoutSeconds = n
+		}
+	}
+	if v := os.Getenv("REALMS_SERVER_IDLE_TIMEOUT_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.Server.IdleTimeoutSeconds = n
+		}
+	}
+	if v := os.Getenv("REALMS_SERVER_MAX_HEADER_BYTES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.Server.MaxHeaderBytes = n
+		}
+	}
+	if v := os.Getenv("REALMS_PUBLIC_MAX_BODY_BYTES"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			cfg.Server.PublicMaxBodyBytes = n
+		}
+	}
+	if v := os.Getenv("REALMS_OPENAI_MAX_BODY_BYTES"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			cfg.Server.OpenAIMaxBodyBytes = n
+		}
+	}
+	if v := os.Getenv("REALMS_UPSTREAM_HTTP_DIAL_TIMEOUT_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.UpstreamHTTP.DialTimeoutSeconds = n
+		}
+	}
+	if v := os.Getenv("REALMS_UPSTREAM_HTTP_TLS_HANDSHAKE_TIMEOUT_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.UpstreamHTTP.TLSHandshakeTimeoutSeconds = n
+		}
+	}
+	if v := os.Getenv("REALMS_UPSTREAM_HTTP_MAX_IDLE_CONNS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.UpstreamHTTP.MaxIdleConns = n
+		}
+	}
+	if v := os.Getenv("REALMS_UPSTREAM_HTTP_MAX_IDLE_CONNS_PER_HOST"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.UpstreamHTTP.MaxIdleConnsPerHost = n
+		}
+	}
+	if v := os.Getenv("REALMS_UPSTREAM_HTTP_MAX_CONNS_PER_HOST"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.UpstreamHTTP.MaxConnsPerHost = n
+		}
+	}
+	if v := os.Getenv("REALMS_UPSTREAM_HTTP_IDLE_CONN_TIMEOUT_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.UpstreamHTTP.IdleConnTimeoutSeconds = n
+		}
 	}
 	if v := os.Getenv("REALMS_DB_DRIVER"); v != "" {
 		cfg.DB.Driver = v

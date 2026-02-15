@@ -36,6 +36,8 @@ type Executor struct {
 	clients   map[string]*http.Client
 
 	upstreamTimeout time.Duration
+	dialTimeout     time.Duration
+	transportCfg    config.UpstreamHTTPConfig
 
 	refreshMu   sync.Mutex
 	lastRefresh map[int64]time.Time
@@ -51,10 +53,9 @@ type upstreamStore interface {
 }
 
 func NewExecutor(st *store.Store, cfg config.Config) *Executor {
-	transport := defaultTransportWithProxy(http.ProxyFromEnvironment, (&net.Dialer{
-		Timeout:   0,
-		KeepAlive: 30 * time.Second,
-	}).DialContext)
+	dialTimeout := time.Duration(cfg.UpstreamHTTP.DialTimeoutSeconds) * time.Second
+	dialer := &net.Dialer{Timeout: dialTimeout, KeepAlive: 30 * time.Second}
+	transport := defaultTransportWithProxy(http.ProxyFromEnvironment, dialer.DialContext, cfg.UpstreamHTTP)
 	client := &http.Client{
 		Transport: transport,
 		Timeout:   0,
@@ -67,6 +68,8 @@ func NewExecutor(st *store.Store, cfg config.Config) *Executor {
 		client:          client,
 		clients:         make(map[string]*http.Client),
 		upstreamTimeout: 0,
+		dialTimeout:     dialTimeout,
+		transportCfg:    cfg.UpstreamHTTP,
 		lastRefresh:     make(map[int64]time.Time),
 	}
 }
@@ -182,14 +185,21 @@ func (e *Executor) SetCodexOAuthAccountCooldown(ctx context.Context, accountID i
 	return e.st.SetCodexOAuthAccountCooldown(ctx, accountID, until)
 }
 
-func defaultTransportWithProxy(proxyFn func(*http.Request) (*url.URL, error), dialContext func(ctx context.Context, network, addr string) (net.Conn, error)) *http.Transport {
+func defaultTransportWithProxy(proxyFn func(*http.Request) (*url.URL, error), dialContext func(ctx context.Context, network, addr string) (net.Conn, error), cfg config.UpstreamHTTPConfig) *http.Transport {
+	tlsTimeout := time.Duration(cfg.TLSHandshakeTimeoutSeconds) * time.Second
+	idleTimeout := time.Duration(cfg.IdleConnTimeoutSeconds) * time.Second
+	if cfg.IdleConnTimeoutSeconds <= 0 {
+		idleTimeout = 90 * time.Second
+	}
 	return &http.Transport{
 		Proxy:               proxyFn,
 		DialContext:         dialContext,
 		ForceAttemptHTTP2:   true,
-		MaxIdleConns:        100,
-		IdleConnTimeout:     90 * time.Second,
-		TLSHandshakeTimeout: 0,
+		MaxIdleConns:        maxInt(100, cfg.MaxIdleConns),
+		MaxIdleConnsPerHost: maxInt(0, cfg.MaxIdleConnsPerHost),
+		MaxConnsPerHost:     maxInt(0, cfg.MaxConnsPerHost),
+		IdleConnTimeout:     idleTimeout,
+		TLSHandshakeTimeout: tlsTimeout,
 		// 对 SSE/长连接类请求，不使用 header timeout（由上层 timeout/idle 控制）。
 		ResponseHeaderTimeout: 0,
 		ExpectContinueTimeout: 1 * time.Second,
@@ -204,8 +214,8 @@ func (e *Executor) clientForSelection(sel scheduler.Selection) *http.Client {
 	// 显式禁用代理：对齐 new-api 的“按渠道设置 proxy”的语义，同时保留 env 代理默认值。
 	if strings.EqualFold(raw, "direct") || strings.EqualFold(raw, "none") {
 		return e.clientForProxyKey("direct", func() (*http.Client, error) {
-			dialer := &net.Dialer{Timeout: 0, KeepAlive: 30 * time.Second}
-			tr := defaultTransportWithProxy(nil, dialer.DialContext)
+			dialer := &net.Dialer{Timeout: e.dialTimeout, KeepAlive: 30 * time.Second}
+			tr := defaultTransportWithProxy(nil, dialer.DialContext, e.transportCfg)
 			return &http.Client{
 				Transport: tr,
 				Timeout:   0,
@@ -225,8 +235,8 @@ func (e *Executor) clientForSelection(sel scheduler.Selection) *http.Client {
 	switch strings.ToLower(u.Scheme) {
 	case "http", "https":
 		return e.clientForProxyKey(u.String(), func() (*http.Client, error) {
-			dialer := &net.Dialer{Timeout: 0, KeepAlive: 30 * time.Second}
-			tr := defaultTransportWithProxy(http.ProxyURL(u), dialer.DialContext)
+			dialer := &net.Dialer{Timeout: e.dialTimeout, KeepAlive: 30 * time.Second}
+			tr := defaultTransportWithProxy(http.ProxyURL(u), dialer.DialContext, e.transportCfg)
 			return &http.Client{
 				Transport: tr,
 				Timeout:   0,
@@ -246,7 +256,7 @@ func (e *Executor) clientForSelection(sel scheduler.Selection) *http.Client {
 				pass, _ := u.User.Password()
 				auth = &proxy.Auth{User: u.User.Username(), Password: pass}
 			}
-			baseDialer := &net.Dialer{Timeout: 0, KeepAlive: 30 * time.Second}
+			baseDialer := &net.Dialer{Timeout: e.dialTimeout, KeepAlive: 30 * time.Second}
 			d, err := proxy.SOCKS5("tcp", host, auth, baseDialer)
 			if err != nil {
 				return nil, err
@@ -269,7 +279,7 @@ func (e *Executor) clientForSelection(sel scheduler.Selection) *http.Client {
 					return r.c, r.err
 				}
 			}
-			tr := defaultTransportWithProxy(nil, dialContext)
+			tr := defaultTransportWithProxy(nil, dialContext, e.transportCfg)
 			return &http.Client{
 				Transport: tr,
 				Timeout:   0,
@@ -281,6 +291,13 @@ func (e *Executor) clientForSelection(sel scheduler.Selection) *http.Client {
 	default:
 		return e.client
 	}
+}
+
+func maxInt(min int, v int) int {
+	if v < min {
+		return min
+	}
+	return v
 }
 
 func (e *Executor) clientForProxyKey(key string, factory func() (*http.Client, error)) *http.Client {
