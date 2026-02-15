@@ -39,6 +39,12 @@ type SSEPumpHooks struct {
 
 type SSEPumpResult struct {
 	ErrorClass string
+	// FirstWriteLatency measures time to the first successful downstream write.
+	FirstWriteLatency time.Duration
+	// BytesWritten is the total number of bytes successfully written to downstream.
+	BytesWritten int64
+	// SawDone indicates whether a `data: [DONE]` line was observed.
+	SawDone bool
 }
 
 var (
@@ -70,6 +76,21 @@ func PumpSSE(ctx context.Context, w http.ResponseWriter, upstreamBody io.ReadClo
 		wg       sync.WaitGroup
 		writeMu  sync.Mutex
 	)
+
+	startedAt := time.Now()
+	firstWriteRecorded := false
+	firstWriteLatency := time.Duration(0)
+	bytesWritten := int64(0)
+	sawDone := false
+	recordWrite := func(n int) {
+		if n > 0 {
+			bytesWritten += int64(n)
+		}
+		if !firstWriteRecorded {
+			firstWriteRecorded = true
+			firstWriteLatency = time.Since(startedAt)
+		}
+	}
 	stop := func() {
 		stopOnce.Do(func() {
 			close(stopCh)
@@ -168,8 +189,9 @@ func PumpSSE(ctx context.Context, w http.ResponseWriter, upstreamBody io.ReadClo
 				select {
 				case <-t.C:
 					writeMu.Lock()
-					_, werr := io.WriteString(w, ": ping\n\n")
+					n, werr := io.WriteString(w, ": ping\n\n")
 					if werr == nil {
+						recordWrite(n)
 						flusher.Flush()
 					}
 					writeMu.Unlock()
@@ -208,6 +230,11 @@ func PumpSSE(ctx context.Context, w http.ResponseWriter, upstreamBody io.ReadClo
 		res      SSEPumpResult
 		retError error
 	)
+	finish := func() {
+		res.FirstWriteLatency = firstWriteLatency
+		res.BytesWritten = bytesWritten
+		res.SawDone = sawDone
+	}
 
 	// SSE 事件允许多行 data:，规范要求将多行按 "\n" 连接后视为一个事件 payload。
 	// 这里按事件边界（空行）聚合，避免上游把 JSON 拆成多行导致下游解析/计费统计丢失。
@@ -256,8 +283,10 @@ func PumpSSE(ctx context.Context, w http.ResponseWriter, upstreamBody io.ReadClo
 					if hooks.OnData != nil {
 						hooks.OnData(out)
 					}
-					if _, werr := io.WriteString(w, "data: "+out+"\n\n"); werr != nil {
+					if n, werr := io.WriteString(w, "data: "+out+"\n\n"); werr != nil {
 						return werr
+					} else {
+						recordWrite(n)
 					}
 					flusher.Flush()
 				}
@@ -273,8 +302,10 @@ func PumpSSE(ctx context.Context, w http.ResponseWriter, upstreamBody io.ReadClo
 		writeMu.Lock()
 		defer writeMu.Unlock()
 		for _, l := range eventLines {
-			if _, werr := io.WriteString(w, l+"\n"); werr != nil {
+			if n, werr := io.WriteString(w, l+"\n"); werr != nil {
 				return werr
+			} else {
+				recordWrite(n)
 			}
 		}
 		flusher.Flush()
@@ -293,6 +324,7 @@ func PumpSSE(ctx context.Context, w http.ResponseWriter, upstreamBody io.ReadClo
 			retError = ctx.Err()
 			stop()
 			wg.Wait()
+			finish()
 			return res, retError
 		case line, ok := <-lineCh:
 			if !ok {
@@ -303,17 +335,20 @@ func PumpSSE(ctx context.Context, w http.ResponseWriter, upstreamBody io.ReadClo
 							res.ErrorClass = "client_disconnect"
 							stop()
 							wg.Wait()
+							finish()
 							return res, werr
 						}
 					}
 					stop()
 					wg.Wait()
+					finish()
 					return res, nil
 				}
 				if errors.Is(err, bufio.ErrTooLong) {
 					res.ErrorClass = "stream_event_too_large"
 					stop()
 					wg.Wait()
+					finish()
 					return res, errSSEEventTooLong
 				}
 				if ctx.Err() != nil {
@@ -324,11 +359,13 @@ func PumpSSE(ctx context.Context, w http.ResponseWriter, upstreamBody io.ReadClo
 					}
 					stop()
 					wg.Wait()
+					finish()
 					return res, ctx.Err()
 				}
 				if errors.Is(err, errSSEIdleTimeout) || errors.Is(err, errSSEEventTooLong) {
 					stop()
 					wg.Wait()
+					finish()
 					return res, err
 				}
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -336,16 +373,19 @@ func PumpSSE(ctx context.Context, w http.ResponseWriter, upstreamBody io.ReadClo
 					res.ErrorClass = "client_disconnect"
 					stop()
 					wg.Wait()
+					finish()
 					return res, err
 				}
 				if strings.TrimSpace(err.Error()) == "stopped" {
 					stop()
 					wg.Wait()
+					finish()
 					return res, nil
 				}
 				res.ErrorClass = "stream_read_error"
 				stop()
 				wg.Wait()
+				finish()
 				return res, fmt.Errorf("读取上游流式响应失败: %w", err)
 			}
 			resetIdle()
@@ -355,18 +395,23 @@ func PumpSSE(ctx context.Context, w http.ResponseWriter, upstreamBody io.ReadClo
 			if !isTransformSafeLine(data) {
 				hasNonDataLine = true
 			}
-			if v := parseSSEDataLine(data); v != "" && v != "[DONE]" {
-				if hasData {
-					eventData.WriteByte('\n')
+			if v := parseSSEDataLine(data); v != "" {
+				if v == "[DONE]" {
+					sawDone = true
+				} else {
+					if hasData {
+						eventData.WriteByte('\n')
+					}
+					eventData.WriteString(v)
+					hasData = true
 				}
-				eventData.WriteString(v)
-				hasData = true
 			}
 			if strings.TrimSpace(data) == "" {
 				if werr := flushEvent(); werr != nil {
 					res.ErrorClass = "client_disconnect"
 					stop()
 					wg.Wait()
+					finish()
 					return res, werr
 				}
 			}
@@ -374,9 +419,11 @@ func PumpSSE(ctx context.Context, w http.ResponseWriter, upstreamBody io.ReadClo
 			res.ErrorClass = "stream_idle_timeout"
 			stop()
 			wg.Wait()
+			finish()
 			return res, errSSEIdleTimeout
 		case <-stopCh:
 			wg.Wait()
+			finish()
 			return res, nil
 		}
 	}

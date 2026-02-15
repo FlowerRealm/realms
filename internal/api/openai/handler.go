@@ -15,6 +15,7 @@ import (
 
 	"realms/internal/auth"
 	"realms/internal/middleware"
+	"realms/internal/obs"
 	"realms/internal/proxylog"
 	"realms/internal/quota"
 	"realms/internal/scheduler"
@@ -524,7 +525,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 
 	// 失败分支：根据状态码决定是否 failover。
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bodyBytes, _ := readLimited(resp.Body, 0)
+		bodyBytes := readPrefixBestEffort(resp.Body, upstreamErrorBodyMaxBytes)
 		retriableByCodexExhausted := isCodexUsageLimitReached(sel, resp.StatusCode, bodyBytes)
 		retriable := isRetriableStatus(resp.StatusCode) || retriableByCodexExhausted
 		errorClass := "upstream_status"
@@ -663,7 +664,12 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			hooks.TransformData = newThinkingToContentTransformer()
 		}
 
+		doneSSE := obs.TrackSSEConnection()
+		defer doneSSE()
 		pumpRes, _ := upstream.PumpSSE(r.Context(), cw, resp.Body, h.sseOpts, hooks)
+		obs.RecordSSEFirstWriteLatency(pumpRes.FirstWriteLatency)
+		obs.RecordSSEBytesStreamed(pumpRes.BytesWritten)
+		obs.RecordSSEPumpResult(pumpRes.ErrorClass, pumpRes.SawDone)
 		h.touchBindingFromRouteKey(p.UserID, sel, responseRouteKey)
 
 		if usageID != 0 && h.quota != nil {
@@ -713,32 +719,53 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		return proxyAttemptDone
 	}
 
-	// 非流式：完整转发并尝试提取 usage。
-	bodyBytes, err := readLimited(resp.Body, 0)
-	if err != nil {
-		h.sched.Report(sel, scheduler.Result{Success: false, Retriable: true, ErrorClass: "read_upstream"})
-		h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, 0, "read_upstream", time.Since(attemptStart))
-		return proxyAttemptRetrySameSelection
-	}
-	if recordCreatedObject {
-		switch recordCreatedObjectType {
-		case openAIObjectTypeResponse:
-			if id := extractResponseIDFromJSONBytes(bodyBytes); id != "" {
-				h.recordOpenAIObjectRef(r.Context(), recordCreatedObjectType, id, p, sel)
-			}
-		case openAIObjectTypeChatCompletion:
-			if id := extractChatCompletionIDFromJSONBytes(bodyBytes); id != "" {
-				h.recordOpenAIObjectRef(r.Context(), recordCreatedObjectType, id, p, sel)
-			}
-		default:
-		}
-	}
-	h.touchBindingFromRouteKey(p.UserID, sel, extractRouteKeyFromRawBody(bodyBytes))
-	copyResponseHeaders(w.Header(), resp.Header)
-	w.WriteHeader(resp.StatusCode)
-	respBytes, _ := w.Write(bodyBytes)
+	// 非流式：流式转发以避免超大响应导致 OOM，同时仅缓冲有限前缀用于提取 usage。
+	var capBuf limitedPrefixBuffer
+	capBuf.maxBytes = upstreamNonStreamExtractMaxBytes
 
-	inTok, outTok, cachedInTok, cachedOutTok := extractUsageTokens(bodyBytes)
+	cw := &countingResponseWriter{ResponseWriter: w}
+	copyResponseHeaders(cw.Header(), resp.Header)
+	cw.WriteHeader(resp.StatusCode)
+
+	_, copyErr := io.Copy(cw, io.TeeReader(resp.Body, &capBuf))
+	respBytes := cw.bytes
+	if copyErr != nil {
+		if h.sched != nil {
+			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: false, StatusCode: resp.StatusCode, ErrorClass: "proxy_copy"})
+		}
+		if usageID != 0 && h.quota != nil {
+			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = h.quota.Void(bookCtx, usageID)
+			cancel()
+		}
+		h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, "proxy_copy", time.Since(attemptStart))
+		h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, resp.StatusCode, "proxy_copy", copyErr.Error(), time.Since(attemptStart), false)
+		h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "proxy_copy", "", time.Since(reqStart), 0, false, reqBytes, respBytes)
+		return proxyAttemptDone
+	}
+
+	var (
+		inTok, outTok, cachedInTok, cachedOutTok *int64
+	)
+	if !capBuf.exceeded {
+		bodyBytes := capBuf.buf.Bytes()
+		if recordCreatedObject {
+			switch recordCreatedObjectType {
+			case openAIObjectTypeResponse:
+				if id := extractResponseIDFromJSONBytes(bodyBytes); id != "" {
+					h.recordOpenAIObjectRef(r.Context(), recordCreatedObjectType, id, p, sel)
+				}
+			case openAIObjectTypeChatCompletion:
+				if id := extractChatCompletionIDFromJSONBytes(bodyBytes); id != "" {
+					h.recordOpenAIObjectRef(r.Context(), recordCreatedObjectType, id, p, sel)
+				}
+			default:
+			}
+		}
+		h.touchBindingFromRouteKey(p.UserID, sel, extractRouteKeyFromRawBody(bodyBytes))
+		inTok, outTok, cachedInTok, cachedOutTok = extractUsageTokens(bodyBytes)
+	}
+
 	if usageID != 0 && h.quota != nil {
 		bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = h.quota.Commit(bookCtx, quota.CommitInput{
@@ -770,9 +797,9 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		if total > 0 {
 			h.sched.RecordTokens(sel.CredentialKey(), int(total))
 		}
+		h.sched.Report(sel, scheduler.Result{Success: true})
 	}
-	h.sched.Report(sel, scheduler.Result{Success: true})
-	h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "", "", time.Since(reqStart), 0, false, reqBytes, int64(respBytes))
+	h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "", "", time.Since(reqStart), 0, false, reqBytes, respBytes)
 	return proxyAttemptDone
 }
 
@@ -1075,6 +1102,55 @@ func readLimited(r io.Reader, max int64) ([]byte, error) {
 		return nil, errors.New("响应体过大")
 	}
 	return buf.Bytes(), nil
+}
+
+const (
+	upstreamErrorBodyMaxBytes        = 64 << 10
+	upstreamNonStreamExtractMaxBytes = 2 << 20
+)
+
+func readPrefixBestEffort(r io.Reader, max int64) []byte {
+	if r == nil {
+		return nil
+	}
+	if max <= 0 {
+		b, _ := io.ReadAll(r)
+		return b
+	}
+	lr := &io.LimitedReader{R: r, N: max + 1}
+	b, _ := io.ReadAll(lr)
+	if int64(len(b)) > max {
+		return b[:max]
+	}
+	return b
+}
+
+type limitedPrefixBuffer struct {
+	buf      bytes.Buffer
+	maxBytes int64
+	exceeded bool
+}
+
+func (b *limitedPrefixBuffer) Write(p []byte) (int, error) {
+	if b == nil || len(p) == 0 {
+		return len(p), nil
+	}
+	if b.maxBytes <= 0 {
+		b.exceeded = true
+		return len(p), nil
+	}
+	remaining := b.maxBytes - int64(b.buf.Len())
+	if remaining <= 0 {
+		b.exceeded = true
+		return len(p), nil
+	}
+	if int64(len(p)) > remaining {
+		_, _ = b.buf.Write(p[:remaining])
+		b.exceeded = true
+		return len(p), nil
+	}
+	_, _ = b.buf.Write(p)
+	return len(p), nil
 }
 
 func copyResponseHeaders(dst, src http.Header) {

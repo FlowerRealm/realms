@@ -11,6 +11,7 @@ import (
 
 	"realms/internal/auth"
 	"realms/internal/middleware"
+	"realms/internal/obs"
 	"realms/internal/scheduler"
 	"realms/internal/upstream"
 )
@@ -118,6 +119,8 @@ func (h *Handler) proxyFixedSelection(w http.ResponseWriter, r *http.Request, p 
 		}
 		cw.WriteHeader(downstreamStatus)
 
+		doneSSE := obs.TrackSSEConnection()
+		defer doneSSE()
 		pumpRes, _ := upstream.PumpSSE(r.Context(), cw, resp.Body, h.sseOpts, upstream.SSEPumpHooks{
 			OnData: func(data string) {
 				if routeKey != "" || !strings.Contains(data, "session") && !strings.Contains(data, "conversation") && !strings.Contains(data, "previous_response_id") {
@@ -130,6 +133,9 @@ func (h *Handler) proxyFixedSelection(w http.ResponseWriter, r *http.Request, p 
 				routeKey = extractRouteKeyFromStructuredData(evt)
 			},
 		})
+		obs.RecordSSEFirstWriteLatency(pumpRes.FirstWriteLatency)
+		obs.RecordSSEBytesStreamed(pumpRes.BytesWritten)
+		obs.RecordSSEPumpResult(pumpRes.ErrorClass, pumpRes.SawDone)
 		h.touchBindingFromRouteKey(p.UserID, sel, routeKey)
 
 		if h.sched != nil {

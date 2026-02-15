@@ -19,6 +19,8 @@ nav:
   - API 手册: api.md
   - 架构: arch.md
   - 数据: data.md
+  - SSE 运维: ops-sse.md
+  - MySQL 采证: mysql-rollup-evidence.md
   - 版本与更新: versioning.md
 
 markdown_extensions:

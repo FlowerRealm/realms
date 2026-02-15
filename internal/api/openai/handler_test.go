@@ -2236,6 +2236,120 @@ func TestResponses_QuotaCommitIgnoresUpstreamCostFields(t *testing.T) {
 	}
 }
 
+func TestResponses_Non2xxErrorBodyIsTruncated(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	huge := strings.Repeat("x", int(upstreamErrorBodyMaxBytes)+1024)
+	sched := scheduler.New(fs)
+	doer := statusDoer{status: http.StatusBadRequest, body: huge}
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected status: %d body_len=%d", rr.Code, rr.Body.Len())
+	}
+	if rr.Body.Len() != int(upstreamErrorBodyMaxBytes) {
+		t.Fatalf("expected truncated body len=%d, got=%d", upstreamErrorBodyMaxBytes, rr.Body.Len())
+	}
+	if !strings.HasPrefix(huge, rr.Body.String()) {
+		t.Fatalf("unexpected body prefix mismatch")
+	}
+}
+
+func TestResponses_NonStreamLargeBodySkipsExtractionButStillProxies(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	hugeText := strings.Repeat("a", int(upstreamNonStreamExtractMaxBytes)+1024)
+	body := `{"id":"ok","output_text":"` + hugeText + `","usage":{"input_tokens":1,"output_tokens":2}}`
+	doer := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}, nil
+	})
+	sched := scheduler.New(fs)
+	q := &fakeQuota{}
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, q, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body_len=%d", rr.Code, rr.Body.Len())
+	}
+	if rr.Body.Len() != len(body) {
+		t.Fatalf("expected body to be fully proxied, want_len=%d got=%d", len(body), rr.Body.Len())
+	}
+	if len(q.commitCalls) != 1 {
+		t.Fatalf("expected exactly 1 commit call, got=%d", len(q.commitCalls))
+	}
+	call := q.commitCalls[0]
+	if call.InputTokens != nil || call.OutputTokens != nil || call.CachedInputTokens != nil || call.CachedOutputTokens != nil {
+		t.Fatalf("expected all token fields to be nil due to buffer exceed, got input=%v cached_in=%v output=%v cached_out=%v", call.InputTokens, call.CachedInputTokens, call.OutputTokens, call.CachedOutputTokens)
+	}
+}
+
 func TestResponses_GroupConstraintFiltersChannels(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
