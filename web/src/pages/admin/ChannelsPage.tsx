@@ -806,33 +806,46 @@ export function ChannelsPage() {
     if (!ChartCtor || !expandedChannelID) return;
     const channel = channels.find((c) => c.id === expandedChannelID);
     if (!channel) return;
-    const ctx = detailTimeLineRef.current?.getContext('2d');
+    const canvas = detailTimeLineRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
+    const css = getComputedStyle(canvas);
+    const rgb = (varName: string, fallback: string) => (css.getPropertyValue(varName).trim() || fallback).trim();
+    const color = (rgbValue: string, alpha: number) => `rgba(${rgbValue}, ${alpha})`;
+    const palette = {
+      success: rgb('--bs-success-rgb', '47, 107, 75'),
+      warning: rgb('--bs-warning-rgb', '122, 98, 50'),
+      danger: rgb('--bs-danger-rgb', '122, 52, 52'),
+      primary: rgb('--bs-primary-rgb', '46, 74, 58'),
+      secondary: rgb('--bs-secondary-rgb', '99, 116, 107'),
+    };
 
     const fieldMeta: Record<string, { label: string; color: string; read: (p: ChannelTimeSeriesPoint) => number }> = {
       committed_usd: {
         label: '消耗 (USD)',
-        color: 'rgba(99, 102, 241, 0.95)',
+        color: color(palette.primary, 0.95),
         read: (p) => p.committed_usd,
       },
       tokens: {
         label: 'Token',
-        color: 'rgba(16, 185, 129, 0.95)',
+        color: color(palette.success, 0.95),
         read: (p) => p.tokens,
       },
       cache_ratio: {
         label: '缓存率 (%)',
-        color: 'rgba(245, 158, 11, 0.95)',
+        color: color(palette.warning, 0.95),
         read: (p) => p.cache_ratio,
       },
       avg_first_token_latency: {
         label: '首字延迟 (ms)',
-        color: 'rgba(239, 68, 68, 0.95)',
+        color: color(palette.danger, 0.95),
         read: (p) => p.avg_first_token_latency,
       },
       tokens_per_second: {
         label: 'Tokens/s',
-        color: 'rgba(14, 165, 233, 0.95)',
+        color: color(palette.secondary, 0.95),
         read: (p) => p.tokens_per_second,
       },
     };
@@ -875,7 +888,7 @@ export function ChannelsPage() {
 	          y: {
 	            beginAtZero: true,
 	            suggestedMax: detailField === 'cache_ratio' ? 100 : undefined,
-	            grid: { color: 'rgba(148, 163, 184, 0.18)' },
+	            grid: { color: color(palette.secondary, 0.18) },
 	            ...(detailField === 'tokens' ? { ticks: { callback: (value: string | number) => formatIntComma(value) } } : {}),
 	          },
 	        },
