@@ -286,6 +286,7 @@ func adminUpdateChannelGroupHandler(opts Options) gin.HandlerFunc {
 		}
 		// best-effort: refresh updated_at for response message consistency.
 		_, _ = opts.Store.GetChannelGroupByID(c.Request.Context(), g.ID)
+		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
 	}
@@ -332,6 +333,7 @@ func adminDeleteChannelGroupHandler(opts Options) gin.HandlerFunc {
 			}
 			msg += "）"
 		}
+		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": msg})
 	}
 }
@@ -595,6 +597,7 @@ func adminAddChannelGroupChannelMemberHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 			return
 		}
+		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已添加"})
 	}
 }
@@ -643,6 +646,7 @@ func adminDeleteChannelGroupChannelMemberHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "删除失败"})
 			return
 		}
+		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已移除"})
 	}
 }
@@ -669,6 +673,7 @@ func adminReorderChannelGroupMembersHandler(opts Options) gin.HandlerFunc {
 				return
 			}
 		}
+		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
 	}
 }

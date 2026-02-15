@@ -891,7 +891,7 @@ WHERE id=?
 
 func (s *Store) ListOpenAICompatibleCredentialsByEndpoint(ctx context.Context, endpointID int64) ([]OpenAICompatibleCredential, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, endpoint_id, name, api_key_enc, api_key_hint, status,
+SELECT id, endpoint_id, name, CAST('' AS BLOB) AS api_key_enc, api_key_hint, status,
        last_used_at, created_at, updated_at
 FROM openai_compatible_credentials
 WHERE endpoint_id=?
@@ -971,11 +971,43 @@ WHERE id=?
 }
 
 func (s *Store) TouchOpenAICompatibleCredential(ctx context.Context, credentialID int64) {
-	_, _ = s.db.ExecContext(ctx, `UPDATE openai_compatible_credentials SET last_used_at=CURRENT_TIMESTAMP, updated_at=updated_at WHERE id=?`, credentialID)
+	if credentialID <= 0 {
+		return
+	}
+	switch s.dialect {
+	case DialectSQLite:
+		_, _ = s.db.ExecContext(ctx, `
+UPDATE openai_compatible_credentials
+SET last_used_at=CURRENT_TIMESTAMP, updated_at=updated_at
+WHERE id=? AND (last_used_at IS NULL OR last_used_at < datetime('now','-5 minutes'))
+`, credentialID)
+	default:
+		_, _ = s.db.ExecContext(ctx, `
+UPDATE openai_compatible_credentials
+SET last_used_at=CURRENT_TIMESTAMP, updated_at=updated_at
+WHERE id=? AND (last_used_at IS NULL OR last_used_at < (CURRENT_TIMESTAMP - INTERVAL 5 MINUTE))
+`, credentialID)
+	}
 }
 
 func (s *Store) TouchCodexOAuthAccount(ctx context.Context, accountID int64) {
-	_, _ = s.db.ExecContext(ctx, `UPDATE codex_oauth_accounts SET last_used_at=CURRENT_TIMESTAMP, updated_at=updated_at WHERE id=?`, accountID)
+	if accountID <= 0 {
+		return
+	}
+	switch s.dialect {
+	case DialectSQLite:
+		_, _ = s.db.ExecContext(ctx, `
+UPDATE codex_oauth_accounts
+SET last_used_at=CURRENT_TIMESTAMP, updated_at=updated_at
+WHERE id=? AND (last_used_at IS NULL OR last_used_at < datetime('now','-5 minutes'))
+`, accountID)
+	default:
+		_, _ = s.db.ExecContext(ctx, `
+UPDATE codex_oauth_accounts
+SET last_used_at=CURRENT_TIMESTAMP, updated_at=updated_at
+WHERE id=? AND (last_used_at IS NULL OR last_used_at < (CURRENT_TIMESTAMP - INTERVAL 5 MINUTE))
+`, accountID)
+	}
 }
 
 func (s *Store) CreateCodexOAuthPending(ctx context.Context, state string, endpointID, actorUserID int64, codeVerifier string, createdAt time.Time) error {
@@ -1029,7 +1061,10 @@ func (s *Store) DeleteCodexOAuthPendingBefore(ctx context.Context, cutoff time.T
 
 func (s *Store) ListCodexOAuthAccountsByEndpoint(ctx context.Context, endpointID int64) ([]CodexOAuthAccount, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, endpoint_id, account_id, email, access_token_enc, refresh_token_enc, id_token_enc,
+SELECT id, endpoint_id, account_id, email,
+       CAST('' AS BLOB) AS access_token_enc,
+       CAST('' AS BLOB) AS refresh_token_enc,
+       CAST('' AS BLOB) AS id_token_enc,
        expires_at, last_refresh_at, status,
        cooldown_until, last_used_at,
        balance_total_granted_usd, balance_total_used_usd, balance_total_available_usd,
@@ -1530,7 +1565,7 @@ func (s *Store) CreateAnthropicCredential(ctx context.Context, endpointID int64,
 	hint := tokenHint(apiKey)
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO anthropic_credentials(endpoint_id, name, api_key_enc, api_key_hint, status, created_at, updated_at)
-VALUES(?, ?, ?, ?, 1, NOW(), NOW())
+VALUES(?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `, endpointID, name, enc, hint)
 	if err != nil {
 		return 0, nil, fmt.Errorf("创建 anthropic_credential 失败: %w", err)

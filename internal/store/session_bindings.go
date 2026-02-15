@@ -95,3 +95,38 @@ func (s *Store) DeleteSessionBinding(ctx context.Context, userID int64, routeKey
 	}
 	return nil
 }
+
+func (s *Store) DeleteExpiredSessionBindings(ctx context.Context, now time.Time, limit int) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, errors.New("store 未初始化")
+	}
+	if limit <= 0 || limit > 10000 {
+		limit = 2000
+	}
+	cutoff := now.UTC()
+
+	if s.dialect == DialectSQLite {
+		res, err := s.db.ExecContext(ctx, `
+DELETE FROM session_bindings
+WHERE rowid IN (
+  SELECT rowid
+  FROM session_bindings
+  WHERE expires_at <= ?
+  ORDER BY expires_at ASC
+  LIMIT ?
+)
+`, cutoff, limit)
+		if err != nil {
+			return 0, fmt.Errorf("清理 session_bindings 失败: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		return n, nil
+	}
+
+	res, err := s.db.ExecContext(ctx, `DELETE FROM session_bindings WHERE expires_at <= ? LIMIT ?`, cutoff, limit)
+	if err != nil {
+		return 0, fmt.Errorf("清理 session_bindings 失败: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}

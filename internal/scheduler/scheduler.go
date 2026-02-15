@@ -129,13 +129,13 @@ const (
 
 func New(st UpstreamStore) *Scheduler {
 	s := &Scheduler{
-		st:            st,
-		state:         NewState(),
-		affinityTTL:   30 * time.Minute,
-		bindingTTL:    1 * time.Hour,
-		rpmWindow:     60 * time.Second,
-		cooldownBase:  30 * time.Second,
-		probeClaimTTL: 30 * time.Second,
+		st:                      st,
+		state:                   NewState(),
+		affinityTTL:             30 * time.Minute,
+		bindingTTL:              1 * time.Hour,
+		rpmWindow:               60 * time.Second,
+		cooldownBase:            30 * time.Second,
+		probeClaimTTL:           30 * time.Second,
 		groupPointerPersistLast: make(map[int64]groupPointerPersistState),
 		groupPointerSync:        make(map[int64]groupPointerSyncState),
 	}
@@ -154,6 +154,19 @@ func (s *Scheduler) SetGroupPointerStore(ps ChannelGroupPointerStore) {
 		return
 	}
 	s.groupPointers = ps
+}
+
+// InvalidateUpstreamSnapshot 清空上游配置快照缓存（若启用）。
+func (s *Scheduler) InvalidateUpstreamSnapshot() {
+	if s == nil || s.st == nil {
+		return
+	}
+	type invalidator interface {
+		InvalidateAll()
+	}
+	if inv, ok := s.st.(invalidator); ok {
+		inv.InvalidateAll()
+	}
 }
 
 type groupPointerPersistState struct {
@@ -470,6 +483,11 @@ func (s *Scheduler) setBinding(ctx context.Context, userID int64, routeKeyHash s
 	s.state.SetBinding(userID, routeKeyHash, sel, expiresAt)
 	s.state.RecordBindingSet(source, refreshed)
 	if s.bindingStore == nil {
+		return
+	}
+	// 热路径优化：会话命中时的 touch 不需要每次都写入 bindingStore（高并发下会形成写热点）。
+	// 允许 store 绑定过期仅影响跨实例粘性/亲和，不影响正确性。
+	if source == bindingSetSourceTouch && refreshed {
 		return
 	}
 	raw, err := json.Marshal(sel)
@@ -811,6 +829,15 @@ func (s *Scheduler) RecordTokens(credentialKey string, tokens int) {
 		return
 	}
 	s.state.RecordTokens(credentialKey, time.Now(), tokens)
+}
+
+func (s *Scheduler) Sweep(now time.Time) {
+	if s == nil || s.state == nil {
+		return
+	}
+	// Keep token history bounded even if nobody reads it.
+	const tokenWindow = 10 * time.Minute
+	s.state.Sweep(now, s.rpmWindow, tokenWindow)
 }
 
 func orderChannels(chs []store.UpstreamChannel, affinityChannelID int64, affinityOK bool, isProbePending func(channelID int64) bool, failScore func(channelID int64) int) []store.UpstreamChannel {

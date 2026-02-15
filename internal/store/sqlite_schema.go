@@ -38,6 +38,9 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 		if err := ensureSQLiteUpstreamChannelBodyFilterColumns(db); err != nil {
 			return err
 		}
+		if err := ensureSQLiteAnthropicCredentialsTable(db); err != nil {
+			return err
+		}
 		if err := ensureSQLiteUsageEventDetailsRemoved(db); err != nil {
 			return err
 		}
@@ -45,6 +48,12 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 			return err
 		}
 		if err := ensureSQLiteUsageEventsPriceMultiplierColumns(db); err != nil {
+			return err
+		}
+		if err := ensureSQLiteUsageRollups(db); err != nil {
+			return err
+		}
+		if err := ensureSQLiteCacheInvalidationTable(db); err != nil {
 			return err
 		}
 		if err := ensureSQLiteSubscriptionPlansPriceMultiplierColumn(db); err != nil {
@@ -106,10 +115,19 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 	if err := ensureSQLiteTokenChannelGroupsTable(db); err != nil {
 		return err
 	}
+	if err := ensureSQLiteAnthropicCredentialsTable(db); err != nil {
+		return err
+	}
 	if err := ensureSQLiteManagedModelGroupNameColumn(db); err != nil {
 		return err
 	}
 	if err := ensureSQLiteUsageEventsPriceMultiplierColumns(db); err != nil {
+		return err
+	}
+	if err := ensureSQLiteUsageRollups(db); err != nil {
+		return err
+	}
+	if err := ensureSQLiteCacheInvalidationTable(db); err != nil {
 		return err
 	}
 	if err := ensureSQLiteSubscriptionPlansPriceMultiplierColumn(db); err != nil {

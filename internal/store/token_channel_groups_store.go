@@ -188,6 +188,10 @@ VALUES(?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("提交事务失败: %w", err)
 	}
+	if s != nil && s.tokenAuthCache != nil {
+		s.tokenAuthCache.purgeTokenID(tokenID)
+	}
+	_ = s.BumpCacheInvalidation(ctx, CacheInvalidationKeyTokenAuth)
 	return nil
 }
 
@@ -196,62 +200,71 @@ func (s *Store) ListEffectiveTokenChannelGroupBindings(ctx context.Context, toke
 		return nil, errors.New("token_id 不合法")
 	}
 
-	var mainGroup sql.NullString
-	if err := s.db.QueryRowContext(ctx, `
-SELECT u.main_group
+	rows, err := s.db.QueryContext(ctx, `
+SELECT
+  t.id AS token_id,
+  eb.channel_group_name,
+  eb.priority,
+  eb.created_at,
+  eb.updated_at
 FROM user_tokens t
 JOIN users u ON u.id=t.user_id
+LEFT JOIN (
+  SELECT
+    tcg.token_id,
+    TRIM(tcg.channel_group_name) AS channel_group_name,
+    tcg.priority,
+    tcg.created_at,
+    tcg.updated_at,
+    mgs.main_group
+  FROM token_channel_groups tcg
+  JOIN channel_groups cg ON cg.name=TRIM(tcg.channel_group_name) AND cg.status=1
+  JOIN main_group_subgroups mgs ON mgs.subgroup=TRIM(tcg.channel_group_name)
+) eb ON eb.token_id=t.id AND eb.main_group=u.main_group
 WHERE t.id=?
-LIMIT 1
-	`, tokenID).Scan(&mainGroup); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, sql.ErrNoRows
-		}
-		return nil, fmt.Errorf("查询 token 用户分组失败: %w", err)
-	}
-
-	mainGroupName := ""
-	if mainGroup.Valid {
-		mainGroupName = strings.TrimSpace(mainGroup.String)
-	}
-	allowedSet := make(map[string]struct{})
-	if mainGroupName != "" {
-		allowed, err := s.ListMainGroupSubgroups(ctx, mainGroupName)
-		if err != nil {
-			return nil, err
-		}
-		allowedSet = make(map[string]struct{}, len(allowed))
-		for _, row := range allowed {
-			name := strings.TrimSpace(row.Subgroup)
-			if name == "" {
-				continue
-			}
-			allowedSet[name] = struct{}{}
-		}
-	}
-
-	bindings, err := s.ListTokenChannelGroupBindings(ctx, tokenID)
+ORDER BY eb.priority DESC, eb.channel_group_name ASC
+`, tokenID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("查询有效 token_channel_groups 失败: %w", err)
 	}
+	defer rows.Close()
 
-	out := make([]TokenChannelGroupBinding, 0, len(bindings))
-	for _, b := range bindings {
-		name := strings.TrimSpace(b.ChannelGroupName)
-		if name == "" {
+	var out []TokenChannelGroupBinding
+	foundToken := false
+	for rows.Next() {
+		foundToken = true
+
+		var tokID int64
+		var name sql.NullString
+		var prio sql.NullInt64
+		var createdAt sql.NullTime
+		var updatedAt sql.NullTime
+		if err := rows.Scan(&tokID, &name, &prio, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("扫描有效 token_channel_groups 失败: %w", err)
+		}
+		if !name.Valid {
 			continue
 		}
-		if _, ok := allowedSet[name]; !ok {
+		n := strings.TrimSpace(name.String)
+		if n == "" {
 			continue
 		}
-		g, err := s.GetChannelGroupByName(ctx, name)
-		if err != nil {
+		if !prio.Valid || !createdAt.Valid || !updatedAt.Valid {
 			continue
 		}
-		if g.Status != 1 {
-			continue
-		}
-		out = append(out, b)
+		out = append(out, TokenChannelGroupBinding{
+			TokenID:          tokID,
+			ChannelGroupName: n,
+			Priority:         int(prio.Int64),
+			CreatedAt:        createdAt.Time,
+			UpdatedAt:        updatedAt.Time,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历有效 token_channel_groups 失败: %w", err)
+	}
+	if !foundToken {
+		return nil, sql.ErrNoRows
 	}
 	return out, nil
 }

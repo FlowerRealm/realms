@@ -44,6 +44,8 @@ WHERE id=?
 	if err != nil {
 		return fmt.Errorf("更新用户角色失败: %w", err)
 	}
+	s.PurgeTokenAuthCacheAll()
+	_ = s.BumpCacheInvalidation(ctx, CacheInvalidationKeyTokenAuth)
 	return nil
 }
 
@@ -56,6 +58,8 @@ WHERE id=?
 	if err != nil {
 		return fmt.Errorf("更新用户状态失败: %w", err)
 	}
+	s.PurgeTokenAuthCacheAll()
+	_ = s.BumpCacheInvalidation(ctx, CacheInvalidationKeyTokenAuth)
 	return nil
 }
 
@@ -92,6 +96,8 @@ WHERE id=?
 	if n, _ := res.RowsAffected(); n == 0 {
 		return sql.ErrNoRows
 	}
+	s.PurgeTokenAuthCacheAll()
+	_ = s.BumpCacheInvalidation(ctx, CacheInvalidationKeyTokenAuth)
 	return nil
 }
 
@@ -149,5 +155,7 @@ WHERE user_id=?
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("提交事务失败: %w", err)
 	}
+	s.PurgeTokenAuthCacheAll()
+	_ = s.BumpCacheInvalidation(ctx, CacheInvalidationKeyTokenAuth)
 	return nil
 }

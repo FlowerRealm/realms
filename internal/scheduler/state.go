@@ -46,6 +46,115 @@ type State struct {
 	channelProbeClaimUntil map[int64]time.Time
 }
 
+func (s *State) Sweep(now time.Time, rpmWindow, tokenWindow time.Duration) {
+	if s == nil {
+		return
+	}
+	if rpmWindow <= 0 {
+		rpmWindow = 60 * time.Second
+	}
+	if tokenWindow <= 0 {
+		tokenWindow = 10 * time.Minute
+	}
+	const maxTokenEventsPerKey = 2000
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Expired session bindings.
+	for key, e := range s.binding {
+		if now.After(e.expiresAt) {
+			s.decCredentialSessionsLocked(e.sel.CredentialKey())
+			delete(s.binding, key)
+			s.bStats.Clears++
+			s.bStats.ClearExpired++
+		}
+	}
+
+	// Expired affinity.
+	for key, e := range s.affinity {
+		if now.After(e.expiresAt) {
+			delete(s.affinity, key)
+		}
+	}
+
+	// RPM window trimming (delete empty keys).
+	rpmCutoff := now.Add(-rpmWindow)
+	for key, events := range s.rpm {
+		if len(events) == 0 {
+			delete(s.rpm, key)
+			continue
+		}
+		kept := events[:0]
+		for _, t := range events {
+			if t.After(rpmCutoff) {
+				kept = append(kept, t)
+			}
+		}
+		if len(kept) == 0 {
+			delete(s.rpm, key)
+			continue
+		}
+		// Avoid holding on to a large backing array after trimming.
+		if len(kept) != len(events) {
+			cpy := make([]time.Time, len(kept))
+			copy(cpy, kept)
+			s.rpm[key] = cpy
+		} else {
+			s.rpm[key] = kept
+		}
+	}
+
+	// Token window trimming + per-key cap (delete empty keys).
+	tokenCutoff := now.Add(-tokenWindow)
+	for key, events := range s.tokens {
+		if len(events) == 0 {
+			delete(s.tokens, key)
+			continue
+		}
+		kept := events[:0]
+		for _, ev := range events {
+			if ev.time.After(tokenCutoff) {
+				kept = append(kept, ev)
+			}
+		}
+		if len(kept) == 0 {
+			delete(s.tokens, key)
+			continue
+		}
+		if len(kept) > maxTokenEventsPerKey {
+			kept = kept[len(kept)-maxTokenEventsPerKey:]
+		}
+		// Avoid holding on to a large backing array after trimming/capping.
+		cpy := make([]tokenEvent, len(kept))
+		copy(cpy, kept)
+		s.tokens[key] = cpy
+	}
+
+	// Expired credential cooldown.
+	for key, until := range s.credentialCooldown {
+		if now.After(until) {
+			delete(s.credentialCooldown, key)
+		}
+	}
+
+	// Expired channel bans + probe claims.
+	for channelID, until := range s.channelBanUntil {
+		if now.After(until) {
+			delete(s.channelBanUntil, channelID)
+			if _, ok := s.channelProbeDueAt[channelID]; !ok {
+				s.channelProbeDueAt[channelID] = now
+			}
+			delete(s.channelProbeClaimUntil, channelID)
+		}
+	}
+	for channelID, until := range s.channelProbeClaimUntil {
+		if now.After(until) {
+			delete(s.channelProbeClaimUntil, channelID)
+		}
+	}
+}
+
 func NewState() *State {
 	return &State{
 		binding:                make(map[string]bindingEntry),
@@ -256,6 +365,10 @@ func (s *State) RPM(credentialKey string, now time.Time, window time.Duration) i
 		if t.After(cutoff) {
 			kept = append(kept, t)
 		}
+	}
+	if len(kept) == 0 {
+		delete(s.rpm, credentialKey)
+		return 0
 	}
 	s.rpm[credentialKey] = kept
 	return len(kept)

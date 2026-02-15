@@ -29,12 +29,21 @@ type Store struct {
 
 	appSettingsDefaults    config.AppSettingsDefaultsConfig
 	hasAppSettingsDefaults bool
+
+	tokenAuthCache *tokenAuthCache
+
+	usageRollupShards          int
+	usageRollupShardsCutoverAt time.Time
 }
 
 func New(db *sql.DB) *Store {
+	shards, cutoverAt := usageRollupShardsFromEnv()
 	return &Store{
-		db:      db,
-		dialect: DialectMySQL,
+		db:                         db,
+		dialect:                    DialectMySQL,
+		tokenAuthCache:             newTokenAuthCacheFromEnv(),
+		usageRollupShards:          shards,
+		usageRollupShardsCutoverAt: cutoverAt,
 	}
 }
 
@@ -205,6 +214,10 @@ WHERE id=? AND user_id=?
 	if n, _ := res.RowsAffected(); n == 0 {
 		return sql.ErrNoRows
 	}
+	if s != nil && s.tokenAuthCache != nil {
+		s.tokenAuthCache.purgeTokenID(tokenID)
+	}
+	_ = s.BumpCacheInvalidation(ctx, CacheInvalidationKeyTokenAuth)
 	return nil
 }
 
@@ -277,7 +290,12 @@ WHERE id=? AND user_id=? AND status=1
 	if err != nil {
 		return fmt.Errorf("撤销 Token 失败: %w", err)
 	}
-	_, _ = res.RowsAffected()
+	if n, _ := res.RowsAffected(); n > 0 {
+		if s != nil && s.tokenAuthCache != nil {
+			s.tokenAuthCache.purgeTokenID(tokenID)
+		}
+		_ = s.BumpCacheInvalidation(ctx, CacheInvalidationKeyTokenAuth)
+	}
 	return nil
 }
 
@@ -295,6 +313,10 @@ func (s *Store) DeleteUserToken(ctx context.Context, userID, tokenID int64) erro
 	if n, _ := res.RowsAffected(); n == 0 {
 		return sql.ErrNoRows
 	}
+	if s != nil && s.tokenAuthCache != nil {
+		s.tokenAuthCache.purgeTokenID(tokenID)
+	}
+	_ = s.BumpCacheInvalidation(ctx, CacheInvalidationKeyTokenAuth)
 	return nil
 }
 
@@ -306,6 +328,23 @@ func (s *Store) RevokeActiveUserTokensByName(ctx context.Context, userID int64, 
 	if name == "" {
 		return errors.New("name 不能为空")
 	}
+	var tokenIDs []int64
+	if s.tokenAuthCache != nil {
+		rows, err := s.db.QueryContext(ctx, `
+SELECT id
+FROM user_tokens
+WHERE user_id=? AND name=? AND status=1
+`, userID, name)
+		if err == nil {
+			for rows.Next() {
+				var id int64
+				if err := rows.Scan(&id); err == nil && id > 0 {
+					tokenIDs = append(tokenIDs, id)
+				}
+			}
+			_ = rows.Close()
+		}
+	}
 	_, err := s.db.ExecContext(ctx, `
 UPDATE user_tokens
 SET status=0, revoked_at=CURRENT_TIMESTAMP
@@ -314,7 +353,18 @@ WHERE user_id=? AND name=? AND status=1
 	if err != nil {
 		return fmt.Errorf("撤销 Token 失败: %w", err)
 	}
+	for _, id := range tokenIDs {
+		s.tokenAuthCache.purgeTokenID(id)
+	}
+	_ = s.BumpCacheInvalidation(ctx, CacheInvalidationKeyTokenAuth)
 	return nil
+}
+
+func (s *Store) PurgeTokenAuthCacheAll() {
+	if s == nil || s.tokenAuthCache == nil {
+		return
+	}
+	s.tokenAuthCache.purgeAll()
 }
 
 type TokenAuth struct {
@@ -330,6 +380,33 @@ func (s *Store) GetTokenAuthByRawToken(ctx context.Context, rawToken string) (To
 }
 
 func (s *Store) GetTokenAuthByTokenHash(ctx context.Context, tokenHash []byte) (TokenAuth, error) {
+	now := time.Now()
+	if key, ok := tokenHashKey(tokenHash); ok {
+		if s != nil && s.tokenAuthCache != nil {
+			if cached, lastUsedWriteAt, ok := s.tokenAuthCache.get(now, key); ok {
+				// 避免每请求写入 last_used_at：只在间隔较长时补写一次即可（不影响鉴权正确性）。
+				if lastUsedWriteAt.IsZero() || now.Sub(lastUsedWriteAt) >= 5*time.Minute {
+					switch s.dialect {
+					case DialectSQLite:
+						_, _ = s.db.ExecContext(ctx, `
+UPDATE user_tokens
+SET last_used_at=CURRENT_TIMESTAMP
+WHERE id=? AND (last_used_at IS NULL OR last_used_at < datetime('now','-5 minutes'))
+`, cached.TokenID)
+					default:
+						_, _ = s.db.ExecContext(ctx, `
+UPDATE user_tokens
+SET last_used_at=CURRENT_TIMESTAMP
+WHERE id=? AND (last_used_at IS NULL OR last_used_at < (CURRENT_TIMESTAMP - INTERVAL 5 MINUTE))
+`, cached.TokenID)
+					}
+					s.tokenAuthCache.touchLastUsedWriteAt(key, now)
+				}
+				return cached, nil
+			}
+		}
+	}
+
 	var auth TokenAuth
 	err := s.db.QueryRowContext(ctx, `
 SELECT
@@ -344,8 +421,30 @@ WHERE t.token_hash=? AND t.status=1 AND u.status=1
 		}
 		return TokenAuth{}, fmt.Errorf("查询 Token 鉴权失败: %w", err)
 	}
-		auth.Groups, _ = s.ListEffectiveTokenChannelGroups(ctx, auth.TokenID)
-	_, _ = s.db.ExecContext(ctx, `UPDATE user_tokens SET last_used_at=CURRENT_TIMESTAMP WHERE id=?`, auth.TokenID)
+	auth.Groups, _ = s.ListEffectiveTokenChannelGroups(ctx, auth.TokenID)
+
+	// 避免数据面高并发下每请求写入 last_used_at：同一 token 在短时间内只更新一次即可。
+	// 这不影响鉴权正确性，仅影响“最近使用时间”的统计精度。
+	switch s.dialect {
+	case DialectSQLite:
+		_, _ = s.db.ExecContext(ctx, `
+UPDATE user_tokens
+SET last_used_at=CURRENT_TIMESTAMP
+WHERE id=? AND (last_used_at IS NULL OR last_used_at < datetime('now','-5 minutes'))
+`, auth.TokenID)
+	default:
+		_, _ = s.db.ExecContext(ctx, `
+UPDATE user_tokens
+SET last_used_at=CURRENT_TIMESTAMP
+WHERE id=? AND (last_used_at IS NULL OR last_used_at < (CURRENT_TIMESTAMP - INTERVAL 5 MINUTE))
+`, auth.TokenID)
+	}
+
+	if key, ok := tokenHashKey(tokenHash); ok {
+		if s != nil && s.tokenAuthCache != nil {
+			s.tokenAuthCache.set(now, key, auth, now)
+		}
+	}
 	return auth, nil
 }
 

@@ -3,13 +3,14 @@ package server
 
 import (
 	"context"
-	"crypto/rand"
+	cryptorand "crypto/rand"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -26,6 +27,7 @@ import (
 	"realms/internal/assets"
 	"realms/internal/codexoauth"
 	"realms/internal/config"
+	"realms/internal/obs"
 	"realms/internal/proxylog"
 	"realms/internal/quota"
 	"realms/internal/scheduler"
@@ -60,7 +62,21 @@ func NewApp(opts AppOptions) (*App, error) {
 	st.SetDialect(store.Dialect(opts.Config.DB.Driver))
 	st.SetAppSettingsDefaults(opts.Config.AppSettingsDefaults)
 
-	sched := scheduler.New(st)
+	// Upstream 配置快照缓存：减少数据面每请求读取 channels/endpoints/credentials 的 DB QPS。
+	// - 0/未设置：禁用（保持旧行为）
+	// - 建议：1000–5000ms（运维侧可按“配置变更频率 vs DB 压力”调整）
+	upstreamSnapshotTTL := 0 * time.Millisecond
+	if raw := strings.TrimSpace(os.Getenv("REALMS_UPSTREAM_SNAPSHOT_TTL_MILLIS")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			upstreamSnapshotTTL = time.Duration(n) * time.Millisecond
+		}
+	}
+	upstreamStore := scheduler.UpstreamStore(st)
+	if upstreamSnapshotTTL > 0 {
+		upstreamStore = scheduler.NewCachedUpstreamStore(st, upstreamSnapshotTTL)
+	}
+
+	sched := scheduler.New(upstreamStore)
 	sched.SetBindingStore(st)
 	sched.SetGroupPointerStore(st)
 	exec := upstream.NewExecutor(st, opts.Config)
@@ -83,8 +99,19 @@ func NewApp(opts AppOptions) (*App, error) {
 		Dir:    opts.Config.Debug.ProxyLog.Dir,
 	})
 	qp := quotaProvider(st, opts.Config)
+	maxSSELineBytes := 1 << 20 // 1MiB: bound per-connection memory on malformed upstream SSE
+	if raw := strings.TrimSpace(os.Getenv("REALMS_SSE_MAX_LINE_BYTES")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			if n <= 0 {
+				maxSSELineBytes = 0 // allow disabling the limit explicitly
+			} else {
+				maxSSELineBytes = n
+			}
+		}
+	}
 	openaiHandler := openaiapi.NewHandler(st, st, sched, exec, proxyLog, st, opts.Config.SelfMode.Enable, qp, st, st, st, upstream.SSEPumpOptions{
 		InitialLineBytes: 64 << 10,
+		MaxLineBytes:     maxSSELineBytes,
 	})
 
 	app := &App{
@@ -138,6 +165,8 @@ func NewApp(opts AppOptions) (*App, error) {
 		BillingDefault:                  opts.Config.Billing,
 		SMTPDefault:                     opts.Config.SMTP,
 		TicketStorage:                   ticketStorage,
+		PublicMaxBodyBytes:              opts.Config.Server.PublicMaxBodyBytes,
+		OpenAIMaxBodyBytes:              opts.Config.Server.OpenAIMaxBodyBytes,
 		FrontendBaseURL:                 frontendBaseURL,
 		FrontendDistDir:                 frontendDistDir,
 		FrontendIndexPage:               frontendIndexPage,
@@ -197,7 +226,7 @@ func randomSecret(n int) string {
 		return ""
 	}
 	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
+	if _, err := cryptorand.Read(b); err != nil {
 		return strconv.FormatInt(time.Now().UnixNano(), 10)
 	}
 	return base64.RawURLEncoding.EncodeToString(b)
@@ -312,11 +341,108 @@ func (a *App) handleFaviconICO(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) bootstrap() error {
 	go a.usageCleanupLoop()
+	go a.usageRetentionLoop()
+	go a.sessionBindingsCleanupLoop()
 	go a.codexBalanceRefreshLoop()
+	go a.schedulerStateSweepLoop()
+	go a.cacheInvalidationPollerLoop()
 	if !a.cfg.SelfMode.Enable {
 		go a.ticketAttachmentsCleanupLoop()
 	}
 	return nil
+}
+
+func (a *App) cacheInvalidationPollerLoop() {
+	if a.store == nil {
+		return
+	}
+
+	interval := 1 * time.Second
+	if raw := strings.TrimSpace(os.Getenv("REALMS_CACHE_INVALIDATION_POLL_MILLIS")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			if n <= 0 {
+				return
+			}
+			interval = time.Duration(n) * time.Millisecond
+		}
+	}
+	if interval <= 0 {
+		return
+	}
+
+	var (
+		lastUpstreamSnapshotVersion int64
+		hasUpstreamSnapshotVersion  bool
+		lastTokenAuthVersion        int64
+		hasTokenAuthVersion         bool
+	)
+
+	runOnce := func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		vers, ok, err := a.store.GetCacheInvalidationVersions(ctx, []string{
+			store.CacheInvalidationKeyUpstreamSnapshot,
+			store.CacheInvalidationKeyTokenAuth,
+		})
+		if err != nil {
+			obs.RecordCacheInvalidationPollError()
+			obs.RecordCacheInvalidationPollTick(false)
+			return false
+		}
+		if !ok {
+			// Older DB without cache_invalidation table.
+			obs.RecordCacheInvalidationPollTick(true)
+			return true
+		}
+
+		if a.sched != nil {
+			if v, ok := vers[store.CacheInvalidationKeyUpstreamSnapshot]; ok {
+				prev := lastUpstreamSnapshotVersion
+				if !hasUpstreamSnapshotVersion {
+					prev = 0
+				}
+				if v != prev {
+					a.sched.InvalidateUpstreamSnapshot()
+				}
+				lastUpstreamSnapshotVersion = v
+				hasUpstreamSnapshotVersion = true
+				obs.SetCacheInvalidationVersion(store.CacheInvalidationKeyUpstreamSnapshot, v)
+			}
+		}
+
+		if v, ok := vers[store.CacheInvalidationKeyTokenAuth]; ok {
+			prev := lastTokenAuthVersion
+			if !hasTokenAuthVersion {
+				prev = 0
+			}
+			if v != prev {
+				a.store.PurgeTokenAuthCacheAll()
+			}
+			lastTokenAuthVersion = v
+			hasTokenAuthVersion = true
+			obs.SetCacheInvalidationVersion(store.CacheInvalidationKeyTokenAuth, v)
+		}
+		obs.RecordCacheInvalidationPollTick(true)
+		return true
+	}
+
+	runOnce()
+
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	jitterMax := interval / 5 // 0-20%
+	for {
+		delay := interval
+		if jitterMax > 0 {
+			delta := time.Duration(rng.Int63n(int64(jitterMax)*2+1)) - jitterMax
+			delay += delta
+		}
+		if delay < 0 {
+			delay = 0
+		}
+		time.Sleep(delay)
+		runOnce()
+	}
 }
 
 func (a *App) usageCleanupLoop() {
@@ -326,6 +452,88 @@ func (a *App) usageCleanupLoop() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		_, _ = a.store.ExpireReservedUsage(ctx, time.Now())
 		cancel()
+	}
+}
+
+func (a *App) usageRetentionLoop() {
+	if a.store == nil {
+		return
+	}
+	raw := strings.TrimSpace(os.Getenv("REALMS_USAGE_EVENTS_RETENTION_DAYS"))
+	if raw == "" {
+		return
+	}
+	days, err := strconv.Atoi(raw)
+	if err != nil || days <= 0 {
+		return
+	}
+
+	const (
+		interval      = 10 * time.Minute
+		deleteBatch   = 5000
+		backfillBatch = 200
+		maxBackfill   = 10 // per tick
+	)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		cutoff := time.Now().UTC().AddDate(0, 0, -days)
+
+		// 先补算，避免删除未 rollup 的明细导致统计缺失。
+		for i := 0; i < maxBackfill; i++ {
+			n, err := a.store.BackfillUsageRollupsBefore(ctx, cutoff, backfillBatch)
+			if err != nil || n < backfillBatch {
+				break
+			}
+		}
+
+		for {
+			n, _ := a.store.DeleteUsageEventsBefore(ctx, cutoff, deleteBatch)
+			if n < deleteBatch {
+				break
+			}
+		}
+		cancel()
+	}
+}
+
+func (a *App) sessionBindingsCleanupLoop() {
+	if a.store == nil {
+		return
+	}
+	const (
+		interval  = 3 * time.Minute
+		batchSize = 2000
+	)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		now := time.Now()
+		for {
+			n, _ := a.store.DeleteExpiredSessionBindings(ctx, now, batchSize)
+			if n < batchSize {
+				break
+			}
+		}
+		cancel()
+	}
+}
+
+func (a *App) schedulerStateSweepLoop() {
+	if a.sched == nil {
+		return
+	}
+
+	// Run once on startup, then periodically.
+	a.sched.Sweep(time.Now())
+
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		a.sched.Sweep(time.Now())
 	}
 }
 
