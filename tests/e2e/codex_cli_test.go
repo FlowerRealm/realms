@@ -315,6 +315,10 @@ func main() {
 }
 
 func TestCodexCLI_E2E(t *testing.T) {
+	if strings.TrimSpace(os.Getenv("REALMS_CI_ENFORCE_E2E")) == "" {
+		t.Skip("未设置 REALMS_CI_ENFORCE_E2E，跳过 E2E")
+	}
+
 	upstreamBaseURL := requiredEnvOrSkip(t, "REALMS_CI_UPSTREAM_BASE_URL", "BASE_URL", "UPSTREAM_BASE_URL")
 	upstreamAPIKey := requiredEnvOrSkip(t, "REALMS_CI_UPSTREAM_API_KEY", "API_KEY", "UPSTREAM_API_KEY")
 	model := requiredEnvOrSkip(t, "REALMS_CI_MODEL", "MODEL", "UPSTREAM_MODEL")
