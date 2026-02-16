@@ -33,6 +33,27 @@ need_env REALMS_CI_UPSTREAM_BASE_URL
 need_env REALMS_CI_UPSTREAM_API_KEY
 need_env REALMS_CI_MODEL
 
+retry() {
+  local max_attempts="$1"
+  local base_sleep_secs="$2"
+  shift 2
+
+  local attempt=1
+  while true; do
+    if "$@"; then
+      return 0
+    fi
+    local rc="$?"
+    if [[ "${attempt}" -ge "${max_attempts}" ]]; then
+      return "${rc}"
+    fi
+    local sleep_secs="$(( base_sleep_secs * attempt ))"
+    log "retry ${attempt}/${max_attempts} failed (rc=${rc}), sleeping ${sleep_secs}s: $*"
+    sleep "${sleep_secs}"
+    attempt="$(( attempt + 1 ))"
+  done
+}
+
 log "go test ./..."
 go test ./...
 
@@ -42,7 +63,7 @@ log "codex e2e (concurrency regression, fake upstream SSE)"
 go test ./tests/e2e -run TestCodexE2E_ConcurrentWindows_ProbeDueSSE -count=1
 
 log "codex e2e (real upstream)"
-go test ./tests/e2e -run TestCodexCLI_E2E -count=1
+retry 3 30 go test ./tests/e2e -run TestCodexCLI_E2E -count=1
 
 log "web e2e (seed + real upstream)"
 npm --prefix web ci
@@ -52,10 +73,10 @@ else
   (cd web && npx playwright install chromium)
 fi
 npm --prefix web run build
-REALMS_E2E_ENFORCE_REAL_UPSTREAM=1 \
-REALMS_E2E_UPSTREAM_BASE_URL="${REALMS_CI_UPSTREAM_BASE_URL}" \
-REALMS_E2E_UPSTREAM_API_KEY="${REALMS_CI_UPSTREAM_API_KEY}" \
-REALMS_E2E_BILLING_MODEL="${REALMS_CI_MODEL}" \
-npm --prefix web run test:e2e:ci
+export REALMS_E2E_ENFORCE_REAL_UPSTREAM="1"
+export REALMS_E2E_UPSTREAM_BASE_URL="${REALMS_CI_UPSTREAM_BASE_URL}"
+export REALMS_E2E_UPSTREAM_API_KEY="${REALMS_CI_UPSTREAM_API_KEY}"
+export REALMS_E2E_BILLING_MODEL="${REALMS_CI_MODEL}"
+retry 2 60 npm --prefix web run test:e2e:ci
 
 log "OK"
