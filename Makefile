@@ -5,14 +5,15 @@ ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 TOOLS_BIN := $(ROOT_DIR)/.tmp/bin
 AIR := $(TOOLS_BIN)/air
 
-.PHONY: help tools dev test ci fmt tidy release-artifacts deb
+.PHONY: help tools dev test ci ci-real fmt tidy release-artifacts deb
 
 help:
 	@echo "Targets:"
 	@echo "  make tools   安装开发工具（air，安装到 .tmp/bin）"
 	@echo "  make dev     开发热重载（后端 air + 前端 dist watch；本地:8080；不自动启动 Docker）"
 	@echo "  make test    运行测试"
-	@echo "  make ci      运行 CI 检查集（本地/CI 同口径）"
+	@echo "  make ci      运行 CI 检查集（本地/CI 同口径；如设置 REALMS_CI_* 则默认跑 real upstream）"
+	@echo "  make ci-real 运行真实上游集成回归（需要 REALMS_CI_*）"
 	@echo "  make fmt     gofmt（按包目录）"
 	@echo "  make tidy    go mod tidy"
 	@echo "  make release-artifacts VERSION=vX.Y.Z   构建发布产物（dist/）"
@@ -33,6 +34,9 @@ test:
 
 ci:
 	bash "./scripts/ci.sh"
+
+ci-real:
+	bash "./scripts/ci-real.sh"
 
 fmt:
 	gofmt -w $$(go list -f '{{.Dir}}' ./...)

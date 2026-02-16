@@ -25,6 +25,27 @@ need_cmd node
 need_cmd npm
 need_cmd codex
 
+has_real_env_any() {
+  [[ "${REALMS_CI_UPSTREAM_BASE_URL:-}" != "" || "${REALMS_CI_UPSTREAM_API_KEY:-}" != "" || "${REALMS_CI_MODEL:-}" != "" ]]
+}
+
+has_real_env_all() {
+  [[ "${REALMS_CI_UPSTREAM_BASE_URL:-}" != "" && "${REALMS_CI_UPSTREAM_API_KEY:-}" != "" && "${REALMS_CI_MODEL:-}" != "" ]]
+}
+
+if has_real_env_any && ! has_real_env_all; then
+  echo "REALMS_CI_* 环境变量已部分设置，但不完整（需要同时提供）:" >&2
+  echo "  - REALMS_CI_UPSTREAM_BASE_URL" >&2
+  echo "  - REALMS_CI_UPSTREAM_API_KEY" >&2
+  echo "  - REALMS_CI_MODEL" >&2
+  exit 2
+fi
+
+if has_real_env_all; then
+  log "detected REALMS_CI_* env, running real-upstream check set"
+  exec bash "./scripts/ci-real.sh"
+fi
+
 log "go test ./..."
 go test ./...
 

@@ -78,3 +78,5 @@ npm run test:e2e:ci
 ```bash
 make ci
 ```
+
+若你已配置 `REALMS_CI_UPSTREAM_BASE_URL/REALMS_CI_UPSTREAM_API_KEY/REALMS_CI_MODEL`，则 `make ci` 会默认跑真实上游集成回归（等价于 `make ci-real`）。

@@ -280,9 +280,14 @@ bash "./scripts/smoke-codex.sh"
 - E2E（Codex CLI，可用性 / fake upstream）：`go test ./tests/e2e -run TestCodexCLI_E2E_FakeUpstream_Cache -count=1`
 - E2E（Playwright Web，seed）：`npm --prefix web run test:e2e:ci`（由 `scripts/ci.sh` 负责安装依赖、构建 `web/dist`、安装 chromium）
 
+当同时设置以下环境变量时，`make ci` / `scripts/ci.sh` **默认改为跑真实上游集成回归**（等价于执行 `scripts/ci-real.sh`）：
+- `REALMS_CI_UPSTREAM_BASE_URL`
+- `REALMS_CI_UPSTREAM_API_KEY`
+- `REALMS_CI_MODEL`
+
 说明：
-- 默认 CI **不依赖**真实上游 Secrets（fork/无 secrets 环境也能跑通）
-- 真实上游集成回归通过单独工作流执行（见下方 `ci-real`）
+- 未配置上述变量时：默认走 seed/fake upstream（fork/无 secrets 环境也能跑通）
+- 配置上述变量后：默认走 real upstream（会产生上游调用成本）
 
 #### 可选：真实上游集成回归（ci-real）
 

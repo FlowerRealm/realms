@@ -6,6 +6,10 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    env:
+      REALMS_CI_UPSTREAM_BASE_URL: ${{ secrets.REALMS_CI_UPSTREAM_BASE_URL }}
+      REALMS_CI_UPSTREAM_API_KEY: ${{ secrets.REALMS_CI_UPSTREAM_API_KEY }}
+      REALMS_CI_MODEL: ${{ secrets.REALMS_CI_MODEL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
