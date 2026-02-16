@@ -67,12 +67,8 @@ func main() {
 	}
 
 	httpServer := &http.Server{
-		Addr:              cfg.Server.Addr,
-		Handler:           app.Handler(),
-		ReadHeaderTimeout: time.Duration(cfg.Server.ReadHeaderTimeoutSeconds) * time.Second,
-		ReadTimeout:       time.Duration(cfg.Server.ReadTimeoutSeconds) * time.Second,
-		IdleTimeout:       time.Duration(cfg.Server.IdleTimeoutSeconds) * time.Second,
-		MaxHeaderBytes:    cfg.Server.MaxHeaderBytes,
+		Addr:    cfg.Server.Addr,
+		Handler: app.Handler(),
 	}
 
 	serverErr := make(chan error, 1)

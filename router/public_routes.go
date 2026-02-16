@@ -16,7 +16,7 @@ func setAuthAndPublicRoutes(r *gin.Engine, opts Options) {
 		return wrapHTTP(middleware.Chain(h,
 			middleware.RequestID,
 			middleware.AccessLog,
-			middleware.BodyCache(opts.PublicMaxBodyBytes),
+			middleware.BodyCache(0),
 		))
 	}
 
@@ -25,7 +25,7 @@ func setAuthAndPublicRoutes(r *gin.Engine, opts Options) {
 			middleware.RequestID,
 			middleware.AccessLog,
 			middleware.FeatureGateEffective(opts.Store, selfMode, featureKey),
-			middleware.BodyCache(opts.PublicMaxBodyBytes),
+			middleware.BodyCache(0),
 		))
 	}
 
