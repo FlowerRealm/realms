@@ -81,7 +81,6 @@ type Scheduler struct {
 	bindingTTL    time.Duration
 	rpmWindow     time.Duration
 	cooldownBase  time.Duration
-	probeClaimTTL time.Duration
 
 	groupPointerPersistMu   sync.Mutex
 	groupPointerPersistLast map[int64]groupPointerPersistState
@@ -121,10 +120,9 @@ const (
 	bindingSetSourceTouch       = "touch"
 	bindingSetSourceStoreWarmup = "store_restore"
 
-	bindingClearReasonManual       = "manual"
-	bindingClearReasonIneligible   = "ineligible"
-	bindingClearReasonProbePending = "probe_pending"
-	bindingClearReasonParseError   = "parse_error"
+	bindingClearReasonManual     = "manual"
+	bindingClearReasonIneligible = "ineligible"
+	bindingClearReasonParseError = "parse_error"
 )
 
 func New(st UpstreamStore) *Scheduler {
@@ -135,7 +133,6 @@ func New(st UpstreamStore) *Scheduler {
 		bindingTTL:              1 * time.Hour,
 		rpmWindow:               60 * time.Second,
 		cooldownBase:            30 * time.Second,
-		probeClaimTTL:           30 * time.Second,
 		groupPointerPersistLast: make(map[int64]groupPointerPersistState),
 		groupPointerSync:        make(map[int64]groupPointerSyncState),
 	}
@@ -327,16 +324,10 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 				!s.state.IsChannelBanned(sel.ChannelID, now) &&
 				!s.state.IsCredentialCooling(credKey, now) &&
 				s.state.ChannelFailScore(sel.ChannelID) == 0 {
-				// 若该 channel 处于“封禁到期待探测”，先抢占 probe，避免并发探测风暴。
-				if s.state.IsChannelProbeDue(sel.ChannelID) && !s.state.TryClaimChannelProbe(sel.ChannelID, now, s.probeClaimTTL) {
-					// 已绑定但不可用：清理绑定，避免 session 永久占用导致 limits 失真。
-					s.clearBinding(ctx, userID, routeKeyHash, bindingClearReasonProbePending)
-				} else {
-					// 命中成功后 touch 续期（TTL）。
-					s.setBinding(ctx, userID, routeKeyHash, sel, bindingSetSourceTouch)
-					s.state.RecordRPM(credKey, now)
-					return sel, nil
-				}
+				// 命中成功后 touch 续期（TTL）。
+				s.setBinding(ctx, userID, routeKeyHash, sel, bindingSetSourceTouch)
+				s.state.RecordRPM(credKey, now)
+				return sel, nil
 			}
 			// 已绑定但不可用：清理绑定，避免 session 永久占用导致 limits 失真。
 			s.clearBinding(ctx, userID, routeKeyHash, bindingClearReasonIneligible)
@@ -389,18 +380,8 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 
 	// 3) 选择 endpoint + credential
 	for _, ch := range ordered {
-		claimedProbe := false
-		if s.state.IsChannelProbeDue(ch.ID) {
-			if !s.state.TryClaimChannelProbe(ch.ID, now, s.probeClaimTTL) {
-				continue
-			}
-			claimedProbe = true
-		}
 		endpoints, err := s.st.ListUpstreamEndpointsByChannel(ctx, ch.ID)
 		if err != nil {
-			if claimedProbe {
-				s.state.ReleaseChannelProbeClaim(ch.ID)
-			}
 			return Selection{}, err
 		}
 		var eps []store.UpstreamEndpoint
@@ -419,9 +400,6 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 		for _, ep := range eps {
 			sel, ok, err := s.selectCredential(ctx, ch, ep, now)
 			if err != nil {
-				if claimedProbe {
-					s.state.ReleaseChannelProbeClaim(ch.ID)
-				}
 				return Selection{}, err
 			}
 			if ok {
@@ -432,9 +410,6 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 				s.state.SetAffinity(userID, ch.ID, now.Add(s.affinityTTL))
 				return sel, nil
 			}
-		}
-		if claimedProbe {
-			s.state.ReleaseChannelProbeClaim(ch.ID)
 		}
 	}
 	return Selection{}, errors.New("未找到可用上游 credential/account")

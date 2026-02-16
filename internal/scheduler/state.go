@@ -42,8 +42,7 @@ type State struct {
 	channelBanUntil  map[int64]time.Time
 	channelBanStreak map[int64]int
 
-	channelProbeDueAt      map[int64]time.Time
-	channelProbeClaimUntil map[int64]time.Time
+	channelProbeDueAt map[int64]time.Time
 }
 
 func (s *State) Sweep(now time.Time, rpmWindow, tokenWindow time.Duration) {
@@ -138,37 +137,30 @@ func (s *State) Sweep(now time.Time, rpmWindow, tokenWindow time.Duration) {
 		}
 	}
 
-	// Expired channel bans + probe claims.
+	// Expired channel bans（到期后标记 probe_due）。
 	for channelID, until := range s.channelBanUntil {
 		if now.After(until) {
 			delete(s.channelBanUntil, channelID)
 			if _, ok := s.channelProbeDueAt[channelID]; !ok {
 				s.channelProbeDueAt[channelID] = now
 			}
-			delete(s.channelProbeClaimUntil, channelID)
-		}
-	}
-	for channelID, until := range s.channelProbeClaimUntil {
-		if now.After(until) {
-			delete(s.channelProbeClaimUntil, channelID)
 		}
 	}
 }
 
 func NewState() *State {
 	return &State{
-		binding:                make(map[string]bindingEntry),
-		affinity:               make(map[string]affinityEntry),
-		rpm:                    make(map[string][]time.Time),
-		tokens:                 make(map[string][]tokenEvent),
-		credentialSessions:     make(map[string]int),
-		credentialCooldown:     make(map[string]time.Time),
-		channelFails:           make(map[int64]int),
-		credFails:              make(map[string]int),
-		channelBanUntil:        make(map[int64]time.Time),
-		channelBanStreak:       make(map[int64]int),
-		channelProbeDueAt:      make(map[int64]time.Time),
-		channelProbeClaimUntil: make(map[int64]time.Time),
+		binding:            make(map[string]bindingEntry),
+		affinity:           make(map[string]affinityEntry),
+		rpm:                make(map[string][]time.Time),
+		tokens:             make(map[string][]tokenEvent),
+		credentialSessions: make(map[string]int),
+		credentialCooldown: make(map[string]time.Time),
+		channelFails:       make(map[int64]int),
+		credFails:          make(map[string]int),
+		channelBanUntil:    make(map[int64]time.Time),
+		channelBanStreak:   make(map[int64]int),
+		channelProbeDueAt:  make(map[int64]time.Time),
 	}
 }
 
@@ -461,7 +453,6 @@ func (s *State) IsChannelBanned(channelID int64, now time.Time) bool {
 		if _, ok := s.channelProbeDueAt[channelID]; !ok {
 			s.channelProbeDueAt[channelID] = now
 		}
-		delete(s.channelProbeClaimUntil, channelID)
 		return false
 	}
 	return true
@@ -476,7 +467,6 @@ func (s *State) ClearChannelBan(channelID int64) {
 	delete(s.channelBanUntil, channelID)
 	delete(s.channelBanStreak, channelID)
 	delete(s.channelProbeDueAt, channelID)
-	delete(s.channelProbeClaimUntil, channelID)
 }
 
 func (s *State) BanChannel(channelID int64, now time.Time, base time.Duration) time.Time {
@@ -550,19 +540,11 @@ func (s *State) IsChannelProbePending(channelID int64, now time.Time) bool {
 	if s == nil || channelID == 0 {
 		return false
 	}
+	_ = now
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.channelProbeDueAt[channelID]; !ok {
-		return false
-	}
-	if until, ok := s.channelProbeClaimUntil[channelID]; ok {
-		if now.After(until) {
-			delete(s.channelProbeClaimUntil, channelID)
-		} else {
-			return false
-		}
-	}
-	return true
+	_, ok := s.channelProbeDueAt[channelID]
+	return ok
 }
 
 func (s *State) IsChannelProbeDue(channelID int64) bool {
@@ -575,42 +557,6 @@ func (s *State) IsChannelProbeDue(channelID int64) bool {
 	return ok
 }
 
-func (s *State) TryClaimChannelProbe(channelID int64, now time.Time, ttl time.Duration) bool {
-	if s == nil || channelID == 0 {
-		return false
-	}
-	if ttl <= 0 {
-		ttl = 30 * time.Second
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.channelProbeDueAt[channelID]; !ok {
-		return false
-	}
-	if until, ok := s.channelProbeClaimUntil[channelID]; ok {
-		if now.After(until) {
-			delete(s.channelProbeClaimUntil, channelID)
-		} else {
-			return false
-		}
-	}
-	until := now.Add(ttl)
-	if until.Before(now) {
-		until = now.Add(30 * time.Second)
-	}
-	s.channelProbeClaimUntil[channelID] = until
-	return true
-}
-
-func (s *State) ReleaseChannelProbeClaim(channelID int64) {
-	if s == nil || channelID == 0 {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.channelProbeClaimUntil, channelID)
-}
-
 func (s *State) ClearChannelProbe(channelID int64) {
 	if s == nil || channelID == 0 {
 		return
@@ -618,7 +564,6 @@ func (s *State) ClearChannelProbe(channelID int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.channelProbeDueAt, channelID)
-	delete(s.channelProbeClaimUntil, channelID)
 }
 
 func (s *State) ResetChannelFailScore(channelID int64) {
@@ -642,7 +587,6 @@ func (s *State) SweepExpiredChannelBans(now time.Time) {
 			if _, ok := s.channelProbeDueAt[channelID]; !ok {
 				s.channelProbeDueAt[channelID] = now
 			}
-			delete(s.channelProbeClaimUntil, channelID)
 		}
 	}
 }

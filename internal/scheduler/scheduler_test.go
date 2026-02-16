@@ -216,7 +216,7 @@ func TestState_BanChannelClampedToTenMinutes(t *testing.T) {
 	}
 }
 
-func TestSelect_ProbeChannelBeatsPromotionAndIsSingleFlight(t *testing.T) {
+func TestSelect_ProbeChannelBeatsPromotionAndIsNotSingleFlight(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
 			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0, Promotion: false},
@@ -257,8 +257,8 @@ func TestSelect_ProbeChannelBeatsPromotionAndIsSingleFlight(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Select err: %v", err)
 	}
-	if second.ChannelID != 2 {
-		t.Fatalf("expected second select to skip claimed probe and pick channel=2, got=%d", second.ChannelID)
+	if second.ChannelID != 1 {
+		t.Fatalf("expected second select to still pick probe channel=1 (no single-flight), got=%d", second.ChannelID)
 	}
 }
 
@@ -268,7 +268,6 @@ func TestReport_SuccessResetsChannelFailScoreAndClearsProbe(t *testing.T) {
 
 	s.state.mu.Lock()
 	s.state.channelProbeDueAt[1] = time.Now()
-	s.state.channelProbeClaimUntil[1] = time.Now().Add(1 * time.Minute)
 	s.state.mu.Unlock()
 
 	s.Report(sel, Result{Success: false, Retriable: false})

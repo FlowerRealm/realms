@@ -54,7 +54,6 @@ func (s *Scheduler) RuntimeChannelStats(channelID int64) RuntimeChannelStats {
 			if _, probeOK := st.channelProbeDueAt[channelID]; !probeOK {
 				st.channelProbeDueAt[channelID] = now
 			}
-			delete(st.channelProbeClaimUntil, channelID)
 		} else {
 			u := until
 			out.BannedUntil = &u
