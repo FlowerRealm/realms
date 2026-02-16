@@ -36,9 +36,12 @@ need_env REALMS_CI_MODEL
 log "go test ./..."
 go test ./...
 
-log "codex e2e (real upstream)"
 export REALMS_CI_ENFORCE_E2E="1"
+
+log "codex e2e (concurrency regression, fake upstream SSE)"
 go test ./tests/e2e -run TestCodexE2E_ConcurrentWindows_ProbeDueSSE -count=1
+
+log "codex e2e (real upstream)"
 go test ./tests/e2e -run TestCodexCLI_E2E -count=1
 
 log "web e2e (seed + real upstream)"
