@@ -258,8 +258,6 @@ func (s *Store) DeleteMainGroup(ctx context.Context, name string) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("提交事务失败: %w", err)
 	}
-	s.PurgeTokenAuthCacheAll()
-	_ = s.BumpCacheInvalidation(ctx, CacheInvalidationKeyTokenAuth)
 	return nil
 }
 

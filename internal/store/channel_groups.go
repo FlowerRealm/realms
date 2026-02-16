@@ -238,9 +238,6 @@ WHERE id=?
 		if err != nil {
 			return "", fmt.Errorf("更新 channel_group 失败: %w", err)
 		}
-		s.PurgeTokenAuthCacheAll()
-		_ = s.BumpCacheInvalidation(ctx, CacheInvalidationKeyTokenAuth)
-		_ = s.BumpCacheInvalidation(ctx, CacheInvalidationKeyUpstreamSnapshot)
 		return oldName, nil
 	}
 
@@ -267,9 +264,6 @@ WHERE id=?
 		if err := tx.Commit(); err != nil {
 			return "", fmt.Errorf("提交事务失败: %w", err)
 		}
-		s.PurgeTokenAuthCacheAll()
-		_ = s.BumpCacheInvalidation(ctx, CacheInvalidationKeyTokenAuth)
-		_ = s.BumpCacheInvalidation(ctx, CacheInvalidationKeyUpstreamSnapshot)
 		return oldName, nil
 	}
 
@@ -418,9 +412,6 @@ WHERE subgroup=?
 	if err := tx.Commit(); err != nil {
 		return "", fmt.Errorf("提交事务失败: %w", err)
 	}
-	s.PurgeTokenAuthCacheAll()
-	_ = s.BumpCacheInvalidation(ctx, CacheInvalidationKeyTokenAuth)
-	_ = s.BumpCacheInvalidation(ctx, CacheInvalidationKeyUpstreamSnapshot)
 	return renameTo, nil
 }
 
@@ -609,9 +600,6 @@ func (s *Store) ForceDeleteChannelGroup(ctx context.Context, id int64) (ChannelG
 	if err := tx.Commit(); err != nil {
 		return ChannelGroupDeleteSummary{}, fmt.Errorf("提交事务失败: %w", err)
 	}
-	s.PurgeTokenAuthCacheAll()
-	_ = s.BumpCacheInvalidation(ctx, CacheInvalidationKeyTokenAuth)
-	_ = s.BumpCacheInvalidation(ctx, CacheInvalidationKeyUpstreamSnapshot)
 	return sum, nil
 }
 

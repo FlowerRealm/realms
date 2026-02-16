@@ -109,16 +109,6 @@ func setChannelAPIRoutes(r gin.IRoutes, opts Options) {
 	r.GET("/channel/test/:channel_id", admin, testChannelHandler(opts))
 }
 
-func invalidateUpstreamSnapshot(ctx context.Context, opts Options) {
-	if opts.Sched == nil {
-		return
-	}
-	opts.Sched.InvalidateUpstreamSnapshot()
-	if opts.Store != nil {
-		_ = opts.Store.BumpCacheInvalidation(ctx, store.CacheInvalidationKeyUpstreamSnapshot)
-	}
-}
-
 func listChannelsHandler(opts Options) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if opts.Store == nil {
@@ -647,7 +637,6 @@ func createChannelHandler(opts Options) gin.HandlerFunc {
 				}
 			}
 		}
-		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"id": id}})
 	}
 }
@@ -779,7 +768,6 @@ func updateChannelHandler(opts Options) gin.HandlerFunc {
 			}
 		}
 
-		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
 	}
 }
@@ -1029,7 +1017,6 @@ func completeChannelCodexOAuthHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": codexoauth.UserMessage(err)})
 			return
 		}
-		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已完成授权"})
 	}
 }
@@ -1114,7 +1101,6 @@ func createChannelCodexAccountHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建账号失败"})
 			return
 		}
-		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已添加账号", "data": gin.H{"id": id}})
 	}
 }
@@ -1144,7 +1130,6 @@ func refreshChannelCodexAccountsHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "刷新失败"})
 			return
 		}
-		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已刷新"})
 	}
 }
@@ -1188,7 +1173,6 @@ func refreshChannelCodexAccountHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "刷新失败"})
 			return
 		}
-		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已刷新"})
 	}
 }
@@ -1226,7 +1210,6 @@ func deleteChannelCodexAccountHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "删除失败"})
 			return
 		}
-		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已删除"})
 	}
 }
@@ -1357,7 +1340,6 @@ func createChannelCredentialHandler(opts Options) gin.HandlerFunc {
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建失败"})
 				return
 			}
-			invalidateUpstreamSnapshot(c.Request.Context(), opts)
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "已添加", "data": gin.H{"id": id, "api_key_hint": hint}})
 		case store.UpstreamTypeAnthropic:
 			id, hint, err := opts.Store.CreateAnthropicCredential(c.Request.Context(), ep.ID, name, apiKey)
@@ -1365,7 +1347,6 @@ func createChannelCredentialHandler(opts Options) gin.HandlerFunc {
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建失败"})
 				return
 			}
-			invalidateUpstreamSnapshot(c.Request.Context(), opts)
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "已添加", "data": gin.H{"id": id, "api_key_hint": hint}})
 		default:
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "不支持的渠道类型"})
@@ -1443,7 +1424,6 @@ func deleteChannelCredentialHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
-		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已删除"})
 	}
 }
@@ -1512,7 +1492,6 @@ func updateChannelMetaHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 			return
 		}
-		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
 	}
 }
@@ -1587,7 +1566,6 @@ func updateChannelSettingHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
 			return
 		}
-		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
 	}
 }
@@ -1628,7 +1606,6 @@ func updateChannelParamOverrideHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 			return
 		}
-		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
 	}
 }
@@ -1669,7 +1646,6 @@ func updateChannelHeaderOverrideHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 			return
 		}
-		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
 	}
 }
@@ -1710,7 +1686,6 @@ func updateChannelModelSuffixPreserveHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 			return
 		}
-		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
 	}
 }
@@ -1751,7 +1726,6 @@ func updateChannelRequestBodyWhitelistHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 			return
 		}
-		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
 	}
 }
@@ -1792,7 +1766,6 @@ func updateChannelRequestBodyBlacklistHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 			return
 		}
-		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
 	}
 }
@@ -1833,7 +1806,6 @@ func updateChannelStatusCodeMappingHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 			return
 		}
-		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
 	}
 }
@@ -1862,7 +1834,6 @@ func deleteChannelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "删除失败"})
 			return
 		}
-		invalidateUpstreamSnapshot(c.Request.Context(), opts)
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
 	}
 }
