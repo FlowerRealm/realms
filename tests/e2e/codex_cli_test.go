@@ -29,16 +29,95 @@ import (
 )
 
 func TestCodexE2E_ConcurrentWindows_ProbeDueSSE(t *testing.T) {
-	upstreamBaseURL := requiredEnvOrSkip(t, "REALMS_CI_UPSTREAM_BASE_URL", "BASE_URL", "UPSTREAM_BASE_URL")
-	upstreamAPIKey := requiredEnvOrSkip(t, "REALMS_CI_UPSTREAM_API_KEY", "API_KEY", "UPSTREAM_API_KEY")
-	model := requiredEnvOrSkip(t, "REALMS_CI_MODEL", "MODEL", "UPSTREAM_MODEL")
+	if strings.TrimSpace(os.Getenv("REALMS_CI_ENFORCE_E2E")) == "" {
+		t.Skip("未设置 REALMS_CI_ENFORCE_E2E，跳过 E2E")
+	}
 
 	if _, err := exec.LookPath("codex"); err != nil {
-		if strings.TrimSpace(os.Getenv("REALMS_CI_ENFORCE_E2E")) != "" {
-			t.Fatalf("codex 未安装或不在 PATH 中（err=%v）", err)
-		}
-		t.Skipf("codex 未安装或不在 PATH 中（err=%v）", err)
+		t.Fatalf("codex 未安装或不在 PATH 中（err=%v）", err)
 	}
+
+	model := strings.TrimSpace(os.Getenv("REALMS_CI_MODEL"))
+	if model == "" {
+		model = "gpt-5.2"
+	}
+
+	upstreamAPIKey := "sk-test"
+	var upstreamCalls atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/responses" {
+			http.NotFound(w, r)
+			return
+		}
+
+		_, _ = io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		_ = r.Body.Close()
+
+		// 该并发用例主要验证 SSE 场景下的 probe_due 并发调度，不依赖真实上游；
+		// 为避免 Codex CLI 在不同版本/模式下切换非流式响应，这里强制用 SSE 返回。
+		stream := true
+		n := upstreamCalls.Add(1)
+		respID := fmt.Sprintf("resp_pw_concurrency_%d", n)
+		msgID := fmt.Sprintf("msg_pw_concurrency_%d", n)
+
+		code := `package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("REALMS_CI_OK")
+}
+`
+
+		usage := map[string]any{
+			"input_tokens":  int64(100),
+			"output_tokens": int64(20),
+			"total_tokens":  int64(120),
+		}
+		resp := map[string]any{
+			"id":      respID,
+			"object":  "response",
+			"created": 0,
+			"model":   model,
+			"output": []any{
+				map[string]any{
+					"id":   msgID,
+					"type": "message",
+					"role": "assistant",
+					"content": []any{
+						map[string]any{"type": "output_text", "text": code},
+					},
+				},
+			},
+			"usage":  usage,
+			"status": "completed",
+		}
+
+		if stream {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			w.WriteHeader(http.StatusOK)
+
+			_ = writeSSEData(w, map[string]any{
+				"type":          "response.output_text.delta",
+				"response_id":   resp["id"],
+				"output_index":  0,
+				"content_index": 0,
+				"delta":         code,
+			})
+			_ = writeSSEData(w, map[string]any{
+				"type":     "response.completed",
+				"response": resp,
+			})
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer upstream.Close()
 
 	dir := t.TempDir()
 
@@ -73,7 +152,7 @@ func TestCodexE2E_ConcurrentWindows_ProbeDueSSE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel: %v", err)
 	}
-	upstreamBaseURL = strings.TrimRight(strings.TrimSpace(upstreamBaseURL), "/")
+	upstreamBaseURL := strings.TrimRight(strings.TrimSpace(upstream.URL), "/") + "/v1"
 	epID, err := st.CreateUpstreamEndpoint(ctx, channelID, upstreamBaseURL, 0)
 	if err != nil {
 		t.Fatalf("CreateUpstreamEndpoint: %v", err)
