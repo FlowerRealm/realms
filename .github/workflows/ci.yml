@@ -45,6 +45,9 @@ jobs:
       - name: Install Codex CLI
         run: npm install -g @openai/codex
 
+      - name: E2E (Codex CLI -> Realms -> Real Upstream) concurrent windows (stream)
+        run: go test ./tests/e2e -run TestCodexE2E_ConcurrentWindows_ProbeDueSSE -count=1
+
       - name: E2E (Codex CLI -> Realms -> Upstream)
         run: go test ./tests/e2e -run TestCodexCLI_E2E -count=1
 

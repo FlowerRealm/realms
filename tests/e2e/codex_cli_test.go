@@ -10,19 +10,230 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/shopspring/decimal"
 
 	"realms/internal/auth"
 	"realms/internal/config"
+	"realms/internal/scheduler"
 	"realms/internal/server"
 	"realms/internal/store"
 	"realms/internal/version"
 )
+
+func TestCodexE2E_ConcurrentWindows_ProbeDueSSE(t *testing.T) {
+	upstreamBaseURL := requiredEnvOrSkip(t, "REALMS_CI_UPSTREAM_BASE_URL", "BASE_URL", "UPSTREAM_BASE_URL")
+	upstreamAPIKey := requiredEnvOrSkip(t, "REALMS_CI_UPSTREAM_API_KEY", "API_KEY", "UPSTREAM_API_KEY")
+	model := requiredEnvOrSkip(t, "REALMS_CI_MODEL", "MODEL", "UPSTREAM_MODEL")
+
+	if _, err := exec.LookPath("codex"); err != nil {
+		if strings.TrimSpace(os.Getenv("REALMS_CI_ENFORCE_E2E")) != "" {
+			t.Fatalf("codex 未安装或不在 PATH 中（err=%v）", err)
+		}
+		t.Skipf("codex 未安装或不在 PATH 中（err=%v）", err)
+	}
+
+	dir := t.TempDir()
+
+	dbPath := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	ctx := context.Background()
+
+	const userGroup = "ug1"
+	const routeGroup = "rg1"
+	if _, err := st.CreateChannelGroup(ctx, routeGroup, nil, 1, store.DefaultGroupPriceMultiplier, 5); err != nil {
+		t.Fatalf("CreateChannelGroup: %v", err)
+	}
+	if err := st.CreateMainGroup(ctx, userGroup, nil, 1); err != nil {
+		t.Fatalf("CreateMainGroup: %v", err)
+	}
+	if err := st.ReplaceMainGroupSubgroups(ctx, userGroup, []string{routeGroup}); err != nil {
+		t.Fatalf("ReplaceMainGroupSubgroups: %v", err)
+	}
+
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ci-upstream", routeGroup, 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel: %v", err)
+	}
+	upstreamBaseURL = strings.TrimRight(strings.TrimSpace(upstreamBaseURL), "/")
+	epID, err := st.CreateUpstreamEndpoint(ctx, channelID, upstreamBaseURL, 0)
+	if err != nil {
+		t.Fatalf("CreateUpstreamEndpoint: %v", err)
+	}
+	if _, _, err := st.CreateOpenAICompatibleCredential(ctx, epID, strPtr("ci"), strings.TrimSpace(upstreamAPIKey)); err != nil {
+		t.Fatalf("CreateOpenAICompatibleCredential: %v", err)
+	}
+
+	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
+		PublicID:            model,
+		GroupName:           routeGroup,
+		OwnedBy:             strPtr("upstream"),
+		InputUSDPer1M:       decimal.Zero,
+		OutputUSDPer1M:      decimal.Zero,
+		CacheInputUSDPer1M:  decimal.Zero,
+		CacheOutputUSDPer1M: decimal.Zero,
+		Status:              1,
+	}); err != nil {
+		t.Fatalf("CreateManagedModel: %v", err)
+	}
+	if _, err := st.CreateChannelModel(ctx, store.ChannelModelCreate{
+		ChannelID:     channelID,
+		PublicID:      model,
+		UpstreamModel: model,
+		Status:        1,
+	}); err != nil {
+		t.Fatalf("CreateChannelModel: %v", err)
+	}
+
+	userID, err := st.CreateUser(ctx, "ci-user@example.com", "ciuser", []byte("x"), store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if err := st.SetUserMainGroup(ctx, userID, userGroup); err != nil {
+		t.Fatalf("SetUserMainGroup: %v", err)
+	}
+	if _, err := st.AddUserBalanceUSD(ctx, userID, decimal.NewFromInt(1)); err != nil {
+		t.Fatalf("AddUserBalanceUSD: %v", err)
+	}
+	rawToken, err := auth.NewRandomToken("sk_", 32)
+	if err != nil {
+		t.Fatalf("NewRandomToken: %v", err)
+	}
+	tokenID, _, err := st.CreateUserToken(ctx, userID, strPtr("ci-token"), rawToken)
+	if err != nil {
+		t.Fatalf("CreateUserToken: %v", err)
+	}
+	if err := st.ReplaceTokenChannelGroups(ctx, tokenID, []string{routeGroup}); err != nil {
+		t.Fatalf("ReplaceTokenChannelGroups: %v", err)
+	}
+
+	// e2e 测试应当与外部环境变量解耦：清空可能影响 Load() 的配置项。
+	t.Setenv("REALMS_DB_DRIVER", "")
+	t.Setenv("REALMS_DB_DSN", "")
+	t.Setenv("REALMS_SQLITE_PATH", "")
+
+	appCfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	appCfg.Env = "dev"
+	appCfg.DB.Driver = "sqlite"
+	appCfg.DB.DSN = ""
+	appCfg.DB.SQLitePath = dbPath
+	appCfg.Security.AllowOpenRegistration = false
+
+	app, err := server.NewApp(server.AppOptions{
+		Config:  appCfg,
+		DB:      db,
+		Version: version.Info(),
+	})
+	if err != nil {
+		t.Fatalf("NewApp: %v", err)
+	}
+	ts := httptest.NewServer(app.Handler())
+	defer ts.Close()
+
+	const conns = 2
+	testCtx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	defer cancel()
+
+	baseURL := strings.TrimRight(ts.URL, "/") + "/v1"
+
+	// 强制维持 probe_due：旧实现的 probe claim 单飞会把并发请求错误变成“上游不可用”（仅 1 个能成功）。
+	stopProbe := maintainChannelProbeDueForTest(t, app, channelID)
+	defer stopProbe()
+
+	prompt := "Write a minimal Go program (package main) that prints REALMS_CI_OK. Output only the code."
+
+	homeDirs := make([]string, 0, conns)
+	workDirs := make([]string, 0, conns)
+	for i := 0; i < conns; i++ {
+		homeDir := filepath.Join(dir, fmt.Sprintf("home-%d", i))
+		if err := writeCodexConfig(homeDir, model, baseURL); err != nil {
+			t.Fatalf("writeCodexConfig(%d): %v", i, err)
+		}
+		workDir := filepath.Join(dir, fmt.Sprintf("work-%d", i))
+		if err := os.MkdirAll(workDir, 0o755); err != nil {
+			t.Fatalf("MkdirAll(work-%d): %v", i, err)
+		}
+		homeDirs = append(homeDirs, homeDir)
+		workDirs = append(workDirs, workDir)
+	}
+
+	start := make(chan struct{})
+	errCh := make(chan error, conns)
+	var wg sync.WaitGroup
+
+	for i := 0; i < conns; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+
+			cmd := exec.CommandContext(testCtx, "codex", "exec", "--skip-git-repo-check", prompt)
+			cmd.Dir = workDirs[i]
+			cmd.Env = append(os.Environ(),
+				"HOME="+homeDirs[i],
+				"OPENAI_API_KEY="+rawToken,
+				// 防止 codex 在缺失配置时走默认 OpenAI/Codex 登录流。
+				"CODEX_API_KEY=",
+			)
+			out, err := cmd.CombinedOutput()
+			safeOut := redact(string(out), upstreamAPIKey, rawToken)
+			if err != nil {
+				errCh <- fmt.Errorf("codex[%d] exec 失败: %v\n%s", i, err, safeOut)
+				return
+			}
+			if !strings.Contains(safeOut, "package main") || !strings.Contains(safeOut, "REALMS_CI_OK") {
+				errCh <- fmt.Errorf("codex[%d] 输出不包含预期片段（package main / REALMS_CI_OK）:\n%s", i, safeOut)
+				return
+			}
+			errCh <- nil
+		}(i)
+	}
+
+	close(start)
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("并发 codex 失败: %v", err)
+		}
+	}
+
+	usageEvents := waitUsageEventsByUser(t, st, testCtx, userID, conns)
+	streamOK := 0
+	for _, ev := range usageEvents {
+		if ev.Endpoint == nil || strings.TrimSpace(*ev.Endpoint) != "/v1/responses" {
+			continue
+		}
+		if ev.StatusCode >= 200 && ev.StatusCode < 300 && ev.IsStream {
+			streamOK++
+		}
+	}
+	if streamOK < conns {
+		t.Fatalf("real stream usage_events 不符合预期（应>=并发窗口数）: got=%d want>=%d", streamOK, conns)
+	}
+}
 
 func TestCodexCLI_E2E(t *testing.T) {
 	upstreamBaseURL := requiredEnvOrSkip(t, "REALMS_CI_UPSTREAM_BASE_URL", "BASE_URL", "UPSTREAM_BASE_URL")
@@ -499,6 +710,80 @@ func writeSSEData(w io.Writer, v any) error {
 	}
 	_, err = io.WriteString(w, "data: "+string(b)+"\n\n")
 	return err
+}
+
+func maintainChannelProbeDueForTest(t *testing.T, app *server.App, channelID int64) func() {
+	t.Helper()
+	if app == nil || channelID <= 0 {
+		t.Fatalf("invalid probe_due target (app_nil=%v channel_id=%d)", app == nil, channelID)
+	}
+
+	sched := unexportedField(t, app, "sched").Interface().(*scheduler.Scheduler)
+	st := unexportedField(t, sched, "state").Interface().(*scheduler.State)
+
+	mu := unexportedField(t, st, "mu").Addr().Interface().(*sync.Mutex)
+	probes := unexportedField(t, st, "channelProbeDueAt").Interface().(map[int64]time.Time)
+
+	stopCh := make(chan struct{})
+	doneCh := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopCh:
+				close(doneCh)
+				return
+			case <-ticker.C:
+				mu.Lock()
+				probes[channelID] = time.Now()
+				mu.Unlock()
+			}
+		}
+	}()
+
+	mu.Lock()
+	probes[channelID] = time.Now()
+	mu.Unlock()
+
+	return func() {
+		close(stopCh)
+		<-doneCh
+	}
+}
+
+func setChannelProbeDueForTest(t *testing.T, app *server.App, channelID int64, dueAt time.Time) {
+	t.Helper()
+	if app == nil || channelID <= 0 || dueAt.IsZero() {
+		t.Fatalf("invalid probe due input (app_nil=%v channel_id=%d due_at=%v)", app == nil, channelID, dueAt)
+	}
+
+	sched := unexportedField(t, app, "sched").Interface().(*scheduler.Scheduler)
+	st := unexportedField(t, sched, "state").Interface().(*scheduler.State)
+
+	mu := unexportedField(t, st, "mu").Addr().Interface().(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
+
+	probes := unexportedField(t, st, "channelProbeDueAt").Interface().(map[int64]time.Time)
+	probes[channelID] = dueAt
+}
+
+func unexportedField(t *testing.T, ptr any, field string) reflect.Value {
+	t.Helper()
+	v := reflect.ValueOf(ptr)
+	if v.Kind() != reflect.Ptr || v.IsNil() {
+		t.Fatalf("unexportedField expects pointer, got %T", ptr)
+	}
+	e := v.Elem()
+	f := e.FieldByName(field)
+	if !f.IsValid() {
+		t.Fatalf("field %q not found on %T", field, ptr)
+	}
+	if !f.CanAddr() {
+		t.Fatalf("field %q on %T is not addressable", field, ptr)
+	}
+	return reflect.NewAt(f.Type(), unsafe.Pointer(f.UnsafeAddr())).Elem()
 }
 
 func buildTwoStepPrompts() (string, string) {
