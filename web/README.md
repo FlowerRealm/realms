@@ -36,6 +36,8 @@ npm run build
 
 ## E2E（Playwright）
 
+本仓库约定：前端相关测试统一使用 Playwright（组件级交互与跨页面流程都以 E2E 方式覆盖，见 `web/e2e/`）。
+
 默认（seed 模式，自动启动 `cmd/realms-e2e`，使用内置种子数据）：
 
 ```bash
@@ -69,4 +71,10 @@ REALMS_E2E_UPSTREAM_API_KEY=sk-*** \
 REALMS_E2E_BILLING_MODEL=gpt-5.2 \
 REALMS_E2E_ENFORCE_REAL_UPSTREAM=1 \
 npm run test:e2e:ci
+```
+
+从仓库根目录执行统一检查集（推荐，本地/CI 同口径）：
+
+```bash
+make ci
 ```

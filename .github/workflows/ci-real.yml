@@ -1,11 +1,18 @@
-name: ci
+name: ci-real
 
 on:
-  push:
+  workflow_dispatch:
+  # 可选：定时跑真实上游集成回归（注意会产生上游调用成本）
+  # schedule:
+  #   - cron: "0 3 * * 1"
 
 jobs:
-  ci:
+  ci-real:
     runs-on: ubuntu-latest
+    env:
+      REALMS_CI_UPSTREAM_BASE_URL: ${{ secrets.REALMS_CI_UPSTREAM_BASE_URL }}
+      REALMS_CI_UPSTREAM_API_KEY: ${{ secrets.REALMS_CI_UPSTREAM_API_KEY }}
+      REALMS_CI_MODEL: ${{ secrets.REALMS_CI_MODEL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,8 +33,8 @@ jobs:
       - name: Install Codex CLI
         run: npm install -g @openai/codex
 
-      - name: CI (Go + Codex E2E(fake) + Playwright E2E(seed))
-        run: make ci
+      - name: CI Real Upstream (Codex + Playwright)
+        run: bash "./scripts/ci-real.sh"
 
       - name: Upload Playwright report (on failure)
         if: failure()

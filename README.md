@@ -266,30 +266,50 @@ make dev
 go test ./...
 ```
 
+快速冒烟（Codex CLI 可用性，seed）：
+
+```bash
+npm install -g @openai/codex
+bash "./scripts/smoke-codex.sh"
+```
+
 ### CI（GitHub Actions）
 
-本仓库包含一个会在每次 push 时触发的 CI（见 `.github/workflows/ci.yml`）：
-- 单测：`go test ./...`
-- E2E（Codex CLI）：Codex CLI → Realms → 上游（需要配置 GitHub Secrets），用于验证真实链路与用量统计落库
-- E2E（Playwright Web）：Playwright → `cmd/realms-e2e`（seed 数据）→ 真实上游（同一套 Secrets）
+本仓库 CI 的统一入口是 `scripts/ci.sh`（对应 `.github/workflows/ci.yml`），本地与 CI 使用同一套检查集：
+- Go：`go test ./...`
+- E2E（Codex CLI，可用性 / fake upstream）：`go test ./tests/e2e -run TestCodexCLI_E2E_FakeUpstream_Cache -count=1`
+- E2E（Playwright Web，seed）：`npm --prefix web run test:e2e:ci`（由 `scripts/ci.sh` 负责安装依赖、构建 `web/dist`、安装 chromium）
+
+说明：
+- 默认 CI **不依赖**真实上游 Secrets（fork/无 secrets 环境也能跑通）
+- 真实上游集成回归通过单独工作流执行（见下方 `ci-real`）
+
+#### 可选：真实上游集成回归（ci-real）
+
+`.github/workflows/ci-real.yml` 提供 `workflow_dispatch` 入口（可选 schedule），用于：
+- E2E（Codex CLI → Realms → Real Upstream）
+- E2E（Playwright Web seed → Real Upstream）
 
 需要在仓库 Secrets 中配置（占位名，勿提交真实密钥到仓库）：
 - `REALMS_CI_UPSTREAM_BASE_URL`：上游 OpenAI 兼容 `base_url`（例如 `https://api.openai.com` 或 `https://api.openai.com/v1`）
 - `REALMS_CI_UPSTREAM_API_KEY`：上游 API Key（例如 `sk-***`）
 - `REALMS_CI_MODEL`：用于 E2E 的模型名（例如 `gpt-5.2`）
 
-> 说明：E2E 同时包含一个“fake upstream”的用例，用于更稳定地覆盖 `cached_tokens` 的解析与落库；真实上游用例也会执行两次请求并要求第二次命中缓存（`cached_input_tokens > 0`）。
->
-> `e2e-web` 任务已启用 `REALMS_E2E_ENFORCE_REAL_UPSTREAM=1`，若未注入 `REALMS_CI_UPSTREAM_BASE_URL/REALMS_CI_UPSTREAM_API_KEY` 会直接失败，避免误用 mock upstream。
+在本地复现（默认检查集）：
 
-在本地复现 E2E（可选）：
+```bash
+npm install -g @openai/codex
+make ci
+```
+
+在本地复现（真实上游集成回归）：
 
 ```bash
 npm install -g @openai/codex
 export REALMS_CI_UPSTREAM_BASE_URL="https://api.openai.com"
 export REALMS_CI_UPSTREAM_API_KEY="sk-***"
 export REALMS_CI_MODEL="gpt-5.2"
-go test ./tests/e2e -run TestCodexCLI_E2E -count=1
+bash "./scripts/ci-real.sh"
 ```
 
 ## 7) 版本号

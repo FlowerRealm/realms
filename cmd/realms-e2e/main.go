@@ -193,6 +193,7 @@ func main() {
 
 			var payload map[string]any
 			_ = json.Unmarshal(rawBody, &payload)
+			stream := strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/event-stream") || requestWantsStream(rawBody)
 			if input, ok := payload["input"].(string); ok && strings.TrimSpace(input) == "__pw_fail__" {
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				w.WriteHeader(http.StatusBadRequest)
@@ -206,11 +207,13 @@ func main() {
 			}
 
 			resp := map[string]any{
-				"id":     "resp_pw_e2e_1",
-				"object": "response",
-				"model":  e2eModelPublicID,
+				"id":      "resp_pw_e2e_1",
+				"object":  "response",
+				"created": 0,
+				"model":   e2eModelPublicID,
 				"output": []any{
 					map[string]any{
+						"id":   "msg_pw_e2e_1",
 						"type": "message",
 						"role": "assistant",
 						"content": []any{
@@ -221,9 +224,35 @@ func main() {
 				"usage": map[string]any{
 					"input_tokens":  1000,
 					"output_tokens": 1,
+					"total_tokens":  1001,
 				},
 				"status": "completed",
 			}
+			if stream {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.Header().Set("Cache-Control", "no-cache")
+				w.Header().Set("Connection", "keep-alive")
+				w.WriteHeader(http.StatusOK)
+
+				// 最小可用的 Responses SSE：delta + completed + DONE（用于 Codex CLI smoke）。
+				_ = writeSSEData(w, map[string]any{
+					"type":          "response.output_text.delta",
+					"response_id":   resp["id"],
+					"output_index":  0,
+					"content_index": 0,
+					"delta":         "OK",
+				})
+				_ = writeSSEData(w, map[string]any{
+					"type":     "response.completed",
+					"response": resp,
+				})
+				_, _ = io.WriteString(w, "data: [DONE]\n\n")
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
+				}
+				return
+			}
+
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			_ = json.NewEncoder(w).Encode(resp)
 		}))
@@ -430,9 +459,9 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 	if err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 e2e 用户 token 失败: %w", err)
 	}
-		if err := st.ReplaceTokenChannelGroups(ctx, e2eTokID, []string{e2eChannelGroup}); err != nil {
-			return e2eSeedResult{}, fmt.Errorf("绑定 e2e 用户 token 渠道组失败: %w", err)
-		}
+	if err := st.ReplaceTokenChannelGroups(ctx, e2eTokID, []string{e2eChannelGroup}); err != nil {
+		return e2eSeedResult{}, fmt.Errorf("绑定 e2e 用户 token 渠道组失败: %w", err)
+	}
 
 	poorUserID, err := st.CreateUser(ctx, e2ePoorUserEmail, e2ePoorUserUsername, userHash, store.UserRoleUser)
 	if err != nil {
@@ -448,9 +477,9 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 	if err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 poor 用户 token 失败: %w", err)
 	}
-		if err := st.ReplaceTokenChannelGroups(ctx, poorTokID, []string{e2eChannelGroup}); err != nil {
-			return e2eSeedResult{}, fmt.Errorf("绑定 poor 用户 token 渠道组失败: %w", err)
-		}
+	if err := st.ReplaceTokenChannelGroups(ctx, poorTokID, []string{e2eChannelGroup}); err != nil {
+		return e2eSeedResult{}, fmt.Errorf("绑定 poor 用户 token 渠道组失败: %w", err)
+	}
 
 	announcementID, err := st.CreateAnnouncement(ctx, e2eAnnouncementTitle, e2eAnnouncementBody, store.AnnouncementStatusPublished)
 	if err != nil {
@@ -521,4 +550,32 @@ func strPtr(s string) *string {
 		return nil
 	}
 	return &v
+}
+
+func requestWantsStream(body []byte) bool {
+	if len(body) == 0 {
+		return false
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false
+	}
+	switch v := payload["stream"].(type) {
+	case bool:
+		return v
+	case string:
+		v = strings.TrimSpace(v)
+		return v == "1" || strings.EqualFold(v, "true")
+	default:
+		return false
+	}
+}
+
+func writeSSEData(w io.Writer, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	_, err = io.WriteString(w, "data: "+string(b)+"\n\n")
+	return err
 }
