@@ -14,17 +14,17 @@ import (
 )
 
 type Config struct {
-	Env        string           `yaml:"env"`
-	SelfMode   SelfModeConfig   `yaml:"self_mode"`
-	Server     ServerConfig     `yaml:"server"`
+	Env          string             `yaml:"env"`
+	SelfMode     SelfModeConfig     `yaml:"self_mode"`
+	Server       ServerConfig       `yaml:"server"`
 	UpstreamHTTP UpstreamHTTPConfig `yaml:"upstream_http"`
-	DB         DBConfig         `yaml:"db"`
-	Security   SecurityConfig   `yaml:"security"`
-	Debug      DebugConfig      `yaml:"debug"`
-	Billing    BillingConfig    `yaml:"billing"`
-	SMTP       SMTPConfig       `yaml:"smtp"`
-	EmailVerif EmailVerifConfig `yaml:"email_verification"`
-	Tickets    TicketsConfig    `yaml:"tickets"`
+	DB           DBConfig           `yaml:"db"`
+	Security     SecurityConfig     `yaml:"security"`
+	Debug        DebugConfig        `yaml:"debug"`
+	Billing      BillingConfig      `yaml:"billing"`
+	SMTP         SMTPConfig         `yaml:"smtp"`
+	EmailVerif   EmailVerifConfig   `yaml:"email_verification"`
+	Tickets      TicketsConfig      `yaml:"tickets"`
 
 	// AppSettingsDefaults 提供管理后台“系统设置”（app_settings）的配置文件默认值。
 	// 仅当数据库未配置对应 app_settings 键时才会生效（app_settings 仍优先）。
@@ -66,7 +66,6 @@ type UpstreamHTTPConfig struct {
 	// 连接池参数（建议在 10k+ 并发下显式设置）。
 	MaxIdleConns        int `yaml:"max_idle_conns"`
 	MaxIdleConnsPerHost int `yaml:"max_idle_conns_per_host"`
-	MaxConnsPerHost     int `yaml:"max_conns_per_host"`
 
 	IdleConnTimeoutSeconds int `yaml:"idle_conn_timeout_seconds"`
 }
@@ -275,15 +274,14 @@ func defaultConfig() Config {
 			IdleTimeoutSeconds:       120,
 			MaxHeaderBytes:           1048576,
 
-			PublicMaxBodyBytes: 1 << 20,  // 1MB
-			OpenAIMaxBodyBytes: 8 << 20,  // 8MB
+			PublicMaxBodyBytes: 1 << 20, // 1MB
+			OpenAIMaxBodyBytes: 8 << 20, // 8MB
 		},
 		UpstreamHTTP: UpstreamHTTPConfig{
 			DialTimeoutSeconds:         30,
 			TLSHandshakeTimeoutSeconds: 10,
 			MaxIdleConns:               1024,
 			MaxIdleConnsPerHost:        256,
-			MaxConnsPerHost:            0,
 			IdleConnTimeoutSeconds:     90,
 		},
 		Debug: DebugConfig{
@@ -382,11 +380,6 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("REALMS_UPSTREAM_HTTP_MAX_IDLE_CONNS_PER_HOST"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			cfg.UpstreamHTTP.MaxIdleConnsPerHost = n
-		}
-	}
-	if v := os.Getenv("REALMS_UPSTREAM_HTTP_MAX_CONNS_PER_HOST"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			cfg.UpstreamHTTP.MaxConnsPerHost = n
 		}
 	}
 	if v := os.Getenv("REALMS_UPSTREAM_HTTP_IDLE_CONN_TIMEOUT_SECONDS"); v != "" {

@@ -197,7 +197,6 @@ func defaultTransportWithProxy(proxyFn func(*http.Request) (*url.URL, error), di
 		ForceAttemptHTTP2:   true,
 		MaxIdleConns:        maxInt(100, cfg.MaxIdleConns),
 		MaxIdleConnsPerHost: maxInt(0, cfg.MaxIdleConnsPerHost),
-		MaxConnsPerHost:     maxInt(0, cfg.MaxConnsPerHost),
 		IdleConnTimeout:     idleTimeout,
 		TLSHandshakeTimeout: tlsTimeout,
 		// 对 SSE/长连接类请求，不使用 header timeout（由上层 timeout/idle 控制）。
