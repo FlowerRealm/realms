@@ -188,11 +188,12 @@ type channelAdminListItem struct {
 }
 
 type channelsPageResponse struct {
-	AdminTimeZone string                   `json:"admin_time_zone"`
-	Start         string                   `json:"start"`
-	End           string                   `json:"end"`
-	Overview      channelUsageOverviewView `json:"overview"`
-	Channels      []channelAdminListItem   `json:"channels"`
+	AdminTimeZone    string                   `json:"admin_time_zone"`
+	Start            string                   `json:"start"`
+	End              string                   `json:"end"`
+	CLITestAvailable bool                     `json:"cli_test_available"`
+	Overview         channelUsageOverviewView `json:"overview"`
+	Channels         []channelAdminListItem   `json:"channels"`
 }
 
 type channelTimeSeriesPointView struct {
@@ -372,9 +373,10 @@ func channelsPageHandler(opts Options) gin.HandlerFunc {
 			"success": true,
 			"message": "",
 			"data": channelsPageResponse{
-				AdminTimeZone: tzName,
-				Start:         startStr,
-				End:           endStr,
+				AdminTimeZone:    tzName,
+				Start:            startStr,
+				End:              endStr,
+				CLITestAvailable: opts.ChannelTestCLIRunnerURL != "",
 				Overview: channelUsageOverviewView{
 					Requests:             overviewStats.Requests,
 					Tokens:               overviewStats.Tokens,
@@ -1907,6 +1909,10 @@ type channelTestResult struct {
 
 func testAllChannelsHandler(opts Options) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if opts.ChannelTestCLIRunnerURL != "" {
+			c.JSON(http.StatusMethodNotAllowed, gin.H{"success": false, "message": "CLI 测试模式下不支持批量测试"})
+			return
+		}
 		if opts.Store == nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
@@ -1937,6 +1943,11 @@ func testChannelHandler(opts Options) gin.HandlerFunc {
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
 		if err != nil || channelID <= 0 {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
+			return
+		}
+		// CLI runner 模式：委派给 CLI runner，结果仅通过 SSE 返回前端
+		if opts.ChannelTestCLIRunnerURL != "" {
+			streamChannelCLITestHandler(c, opts, channelID)
 			return
 		}
 		if wantProbeStream(c) {
@@ -2141,6 +2152,209 @@ func streamChannelTestHandler(c *gin.Context, st *store.Store, channelID int64) 
 		return
 	}
 	_ = writeEvent("summary", buildChannelTestResponse(okResult, latencyMS, msg, probe))
+}
+
+// ---------------------------------------------------------------------------
+// CLI Runner 委派（结果仅通过 SSE 返回前端，不写数据库、不影响调度）
+// ---------------------------------------------------------------------------
+
+func channelTypeToCLIType(chType string) string {
+	switch chType {
+	case store.UpstreamTypeOpenAICompatible:
+		return "codex"
+	case store.UpstreamTypeAnthropic:
+		return "claude"
+	default:
+		return ""
+	}
+}
+
+func streamChannelCLITestHandler(c *gin.Context, opts Options, channelID int64) {
+	st := opts.Store
+
+	ch, err := st.GetUpstreamChannelByID(c.Request.Context(), channelID)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel 不存在"})
+		return
+	}
+
+	cliType := channelTypeToCLIType(ch.Type)
+	if cliType == "" {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": fmt.Sprintf("渠道类型 %s 暂不支持 CLI 测试", ch.Type)})
+		return
+	}
+
+	ep, err := st.GetUpstreamEndpointByChannelID(c.Request.Context(), ch.ID)
+	if err != nil || ep.ID <= 0 {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "endpoint 不存在"})
+		return
+	}
+
+	// 取第一个可用凭证的 API key
+	apiKey := ""
+	switch ch.Type {
+	case store.UpstreamTypeOpenAICompatible:
+		if creds, err := st.ListOpenAICompatibleCredentialsByEndpoint(c.Request.Context(), ep.ID); err == nil && len(creds) > 0 {
+			if sec, err := st.GetOpenAICompatibleCredentialSecret(c.Request.Context(), creds[0].ID); err == nil {
+				apiKey = sec.APIKey
+			}
+		}
+	case store.UpstreamTypeAnthropic:
+		if creds, err := st.ListAnthropicCredentialsByEndpoint(c.Request.Context(), ep.ID); err == nil && len(creds) > 0 {
+			if sec, err := st.GetAnthropicCredentialSecret(c.Request.Context(), creds[0].ID); err == nil {
+				apiKey = sec.APIKey
+			}
+		}
+	}
+	if apiKey == "" {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "未找到可用凭证"})
+		return
+	}
+
+	// 取第一个绑定模型
+	model := ""
+	if ch.TestModel != nil && strings.TrimSpace(*ch.TestModel) != "" {
+		model = strings.TrimSpace(*ch.TestModel)
+	} else {
+		if bindings, err := st.ListChannelModelsByChannelID(c.Request.Context(), ch.ID); err == nil && len(bindings) > 0 {
+			for _, b := range bindings {
+				if b.Status != 1 {
+					continue
+				}
+				m := strings.TrimSpace(b.UpstreamModel)
+				if m == "" {
+					m = strings.TrimSpace(b.PublicID)
+				}
+				if m != "" {
+					model = m
+					break
+				}
+			}
+		}
+	}
+
+	// SSE setup
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "当前连接不支持流式输出"})
+		return
+	}
+	header := c.Writer.Header()
+	header.Set("Content-Type", "text/event-stream")
+	header.Set("Cache-Control", "no-cache, no-transform")
+	header.Set("Connection", "keep-alive")
+	header.Set("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
+	flusher.Flush()
+
+	writeEvent := func(name string, payload any) {
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return
+		}
+		_, _ = c.Writer.Write([]byte("event: " + name + "\ndata: " + string(b) + "\n\n"))
+		flusher.Flush()
+	}
+
+	modelLabel := model
+	if modelLabel == "" {
+		modelLabel = "(default)"
+	}
+	writeEvent("start", channelProbeProgressEvent{
+		Type:   "start",
+		Source: "cli_runner",
+		Total:  1,
+		Models: []string{modelLabel},
+	})
+
+	// 构建 CLI runner 请求
+	runnerReq := struct {
+		CLIType        string `json:"cli_type"`
+		BaseURL        string `json:"base_url,omitempty"`
+		APIKey         string `json:"api_key"`
+		Model          string `json:"model,omitempty"`
+		Prompt         string `json:"prompt"`
+		TimeoutSeconds int    `json:"timeout_seconds"`
+	}{
+		CLIType:        cliType,
+		BaseURL:        ep.BaseURL,
+		APIKey:         apiKey,
+		Model:          model,
+		Prompt:         "Reply with exactly: OK",
+		TimeoutSeconds: 30,
+	}
+	body, _ := json.Marshal(runnerReq)
+
+	runnerURL := strings.TrimRight(opts.ChannelTestCLIRunnerURL, "/") + "/v1/test"
+	httpReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, runnerURL, bytes.NewReader(body))
+	if err != nil {
+		writeEvent("summary", buildChannelTestResponse(false, 0, "构建 CLI runner 请求失败", channelProbeSummary{
+			OK: false, Message: "构建 CLI runner 请求失败", Source: "cli_runner", Results: []channelModelProbeResult{},
+		}))
+		return
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		writeEvent("summary", buildChannelTestResponse(false, 0, "CLI runner 不可达: "+err.Error(), channelProbeSummary{
+			OK: false, Message: "CLI runner 不可达: " + err.Error(), Source: "cli_runner", Results: []channelModelProbeResult{},
+		}))
+		return
+	}
+	defer resp.Body.Close()
+
+	var runnerResp struct {
+		OK        bool   `json:"ok"`
+		LatencyMS int    `json:"latency_ms"`
+		Output    string `json:"output"`
+		Error     string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&runnerResp); err != nil {
+		writeEvent("summary", buildChannelTestResponse(false, 0, "CLI runner 响应解析失败", channelProbeSummary{
+			OK: false, Message: "CLI runner 响应解析失败", Source: "cli_runner", Results: []channelModelProbeResult{},
+		}))
+		return
+	}
+
+	msg := runnerResp.Output
+	if !runnerResp.OK {
+		msg = runnerResp.Error
+	}
+
+	result := channelModelProbeResult{
+		Model:   modelLabel,
+		OK:      runnerResp.OK,
+		Message: msg,
+		TTFTMS:  runnerResp.LatencyMS,
+		Sample:  runnerResp.Output,
+	}
+	writeEvent("model_done", channelProbeProgressEvent{
+		Type:   "model_done",
+		Source: "cli_runner",
+		Index:  1,
+		Total:  1,
+		Model:  modelLabel,
+		Result: &result,
+	})
+
+	summary := channelProbeSummary{
+		OK:        runnerResp.OK,
+		Message:   msg,
+		Source:    "cli_runner",
+		Total:     1,
+		Success:   0,
+		LatencyMS: runnerResp.LatencyMS,
+		Sample:    runnerResp.Output,
+		Results:   []channelModelProbeResult{result},
+	}
+	if runnerResp.OK {
+		summary.Success = 1
+	}
+
+	// CRITICAL: 不调用 UpdateUpstreamChannelTest，不调用 scheduler.Report
+	writeEvent("summary", buildChannelTestResponse(runnerResp.OK, runnerResp.LatencyMS, msg, summary))
 }
 
 type channelProbePlan struct {

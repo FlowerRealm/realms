@@ -25,7 +25,11 @@ type Config struct {
 	EmailVerif EmailVerifConfig `yaml:"email_verification"`
 	Tickets    TicketsConfig    `yaml:"tickets"`
 
-	// AppSettingsDefaults 提供管理后台“系统设置”（app_settings）的配置文件默认值。
+	// ChannelTestCLIRunnerURL 是可选的 CLI Runner 服务地址（如 http://cli-runner:3100）。
+	// 配置后启用基于 CLI（Codex/Claude/Gemini）的渠道测试功能。
+	ChannelTestCLIRunnerURL string `yaml:"channel_test_cli_runner_url"`
+
+	// AppSettingsDefaults 提供管理后台"系统设置"（app_settings）的配置文件默认值。
 	// 仅当数据库未配置对应 app_settings 键时才会生效（app_settings 仍优先）。
 	AppSettingsDefaults AppSettingsDefaultsConfig `yaml:"app_settings_defaults"`
 }
@@ -438,6 +442,10 @@ func applyEnvOverrides(cfg *Config) {
 
 	if v := os.Getenv("REALMS_TICKETS_ATTACHMENTS_DIR"); v != "" {
 		cfg.Tickets.AttachmentsDir = v
+	}
+
+	if v := os.Getenv("REALMS_CHANNEL_TEST_CLI_RUNNER_URL"); v != "" {
+		cfg.ChannelTestCLIRunnerURL = v
 	}
 }
 

@@ -81,6 +81,7 @@ type ChannelsPageResponse = {
   admin_time_zone: string;
   start: string;
   end: string;
+  cli_test_available: boolean;
   overview: ChannelUsageOverview;
   channels: ChannelAdminItem[];
 };

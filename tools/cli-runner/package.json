@@ -1,0 +1,13 @@
+{
+  "name": "realms-cli-runner",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lightweight HTTP runner for channel testing via Codex/Claude/Gemini CLI",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

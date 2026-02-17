@@ -144,6 +144,7 @@ func NewApp(opts AppOptions) (*App, error) {
 		FrontendFS:                      frontendFS,
 		OpenAI:                          openaiHandler,
 		Sched:                           sched,
+		ChannelTestCLIRunnerURL:         opts.Config.ChannelTestCLIRunnerURL,
 
 		CodexOAuthHandler: func() http.Handler {
 			return oauthFlow.Handler()

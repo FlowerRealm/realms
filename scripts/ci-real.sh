@@ -65,6 +65,13 @@ go test ./tests/e2e -run TestCodexE2E_ConcurrentWindows_ProbeDueSSE -count=1
 log "codex e2e (real upstream)"
 retry 3 30 go test ./tests/e2e -run TestCodexCLI_E2E -count=1
 
+if [[ "${REALMS_CI_CLI_RUNNER_URL:-}" != "" ]]; then
+  log "cli channel test e2e (real upstream + real CLI runner)"
+  retry 2 30 go test ./tests/e2e -run TestCLIChannelTest_RealUpstream_E2E -count=1 -timeout=120s
+else
+  log "skip: cli channel test e2e (REALMS_CI_CLI_RUNNER_URL not set)"
+fi
+
 log "web e2e (seed + real upstream)"
 npm --prefix web ci
 if [[ "${CI:-}" != "" ]]; then

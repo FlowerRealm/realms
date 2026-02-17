@@ -32,6 +32,9 @@ type Options struct {
 	FrontendIndexPage []byte // optional; when empty, SPA routes read dist/index.html at request time.
 	FrontendFS        fs.FS  // optional; when set, static assets are served from this FS (typically go:embed).
 
+	// ChannelTestCLIRunnerURL 为 CLI Runner 服务地址；非空时启用 CLI 渠道测试。
+	ChannelTestCLIRunnerURL string
+
 	OpenAI *openaiapi.Handler
 
 	// Optional.
