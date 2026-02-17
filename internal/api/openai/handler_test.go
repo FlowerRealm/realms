@@ -2087,6 +2087,70 @@ func TestResponses_CodexOAuth_UsageLimitNoFallbackReturnsUpstreamUnavailable(t *
 	}
 }
 
+func TestResponses_UpstreamUnavailableFinalizesUsageWithUpstreamChannelID(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+		groupByName: map[string]store.ChannelGroup{
+			store.DefaultGroupName: {
+				ID:              1,
+				Name:            store.DefaultGroupName,
+				PriceMultiplier: store.DefaultGroupPriceMultiplier,
+				MaxAttempts:     1,
+				Status:          1,
+			},
+		},
+		groupNameByID: map[int64]string{
+			1: store.DefaultGroupName,
+		},
+	}
+
+	sched := scheduler.New(fs)
+	doer := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		return nil, errors.New("network down")
+	})
+	q := &fakeQuota{}
+	u := &recordingUsage{}
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, q, fakeAudit{}, u, nil, upstream.SSEPumpOptions{})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(u.calls) != 1 {
+		t.Fatalf("expected 1 finalize call, got=%d", len(u.calls))
+	}
+	if u.calls[0].UpstreamChannelID == nil || *u.calls[0].UpstreamChannelID != 1 {
+		t.Fatalf("expected upstream_channel_id=1, got=%+v", u.calls[0].UpstreamChannelID)
+	}
+}
+
 func TestResponses_QuotaCommitIncludesUpstreamChannelID(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{

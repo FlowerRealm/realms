@@ -697,7 +697,13 @@ export function UsageAdminPage() {
                               ) : null}
                             </td>
                             <td className="text-center text-nowrap">
-                              {e.upstream_channel_name ? <span className="badge bg-light text-dark border fw-normal">{e.upstream_channel_name}</span> : <span className="text-muted">-</span>}
+                              {e.upstream_channel_name ? (
+                                <span className="badge bg-light text-dark border fw-normal">{e.upstream_channel_name}</span>
+                              ) : e.upstream_channel_id && e.upstream_channel_id !== '-' ? (
+                                <span className="badge bg-light text-dark border fw-normal">#{e.upstream_channel_id}</span>
+                              ) : (
+                                <span className="text-muted">-</span>
+                              )}
                             </td>
                             <td className="pe-4 font-monospace text-muted small user-select-all" style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }} title={e.request_id}>
                               {e.request_id}

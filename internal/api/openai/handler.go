@@ -427,12 +427,15 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	}
 
 	router := scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, routeKeyHash, cons)
+	var lastSel *scheduler.Selection
 	const absoluteMaxAttempts = 1000
 	for i := 0; i < absoluteMaxAttempts; i++ {
 		sel, err := router.Next(r.Context())
 		if err != nil {
 			break
 		}
+		selCopy := sel
+		lastSel = &selCopy
 		rewritten, err := rewriteBody(sel)
 		if err != nil {
 			if usageID != 0 && h.quota != nil {
@@ -455,11 +458,11 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		_ = h.quota.Void(bookCtx, usageID)
 		cancel()
 	}
-	h.auditUpstreamError(r.Context(), r.URL.Path, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", 0)
+	h.auditUpstreamError(r.Context(), r.URL.Path, p, lastSel, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", 0)
 	cw := &countingResponseWriter{ResponseWriter: w}
 	http.Error(cw, "上游不可用", http.StatusBadGateway)
-	h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream)
-	h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
+	h.maybeLogProxyFailure(r.Context(), r, p, lastSel, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream)
+	h.finalizeUsageEvent(r, usageID, lastSel, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
 }
 
 type proxyAttemptDecision int
