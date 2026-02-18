@@ -23,6 +23,9 @@
 - **[admin/usage]**: 上游不可用时，仍记录并展示最后一次尝试的渠道（渠道名缺失时回退显示 `#channel_id`）
   - 类型: 微调（无方案包）
   - 文件: internal/api/openai/handler.go, internal/api/openai/handler_test.go, web/src/pages/admin/UsageAdminPage.tsx
+- **[admin/usage]**: 上游不可用时，记录并展示“最后一次失败原因”（状态码/上游错误摘要/网络错误）；用户侧 `/usage` 仍仅展示“上游不可用”
+  - 类型: 微调（无方案包）
+  - 文件: internal/api/openai/handler.go, router/usage_api_routes.go
 
 ### 增强
 - **[admin/channels]**: 渠道"测试连接"改为可选的 CLI Runner 模式（Codex/Claude/Gemini CLI），测试结果仅在前端展示、不写数据库、不影响渠道可用性调度
@@ -38,10 +41,17 @@
   - 类型: 微调（无方案包）
   - 文件: web/e2e/usage.spec.ts, web/src/pages/usage/UsageEventsCard.tsx
 
+### 测试
+- **[e2e]**: 增加回归：`upstream_unavailable` 在管理后台展示“最后一次失败原因”，用户侧仍保持“上游不可用”
+  - 文件: web/e2e/upstream-unavailable-details.spec.ts, cmd/realms-e2e/main.go
+
 ### 发布
 - **[release]**: 推送 `master` 并发布 tag `0.11.3`
   - ⚠️ EHRB: 发布 `master` + 推送 tag `0.11.3` - 用户已确认风险
   - 检测依据: `master(分支)`、tag 发布
+- **[git]**: 提交并推送本次变更到 `master`
+  - ⚠️ EHRB: 推送到 `master` - 用户已确认风险
+  - 检测依据: `master(分支)`
 
 ## [0.10.10] - 2026-02-16
 

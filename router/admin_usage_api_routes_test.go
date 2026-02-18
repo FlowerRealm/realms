@@ -242,6 +242,154 @@ func TestAdminUsagePage_EventIncludesFirstTokenLatencyAndTokensPerSecond(t *test
 	}
 }
 
+func TestAdminUsagePage_UpstreamUnavailable_ShowsDetailedErrorMessage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	userID, err := st.CreateUser(ctx, "root2@example.com", "root2", pwHash, store.UserRoleRoot)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	tokenID, _, err := st.CreateUserToken(ctx, userID, nil, "tok_admin_usage_2")
+	if err != nil {
+		t.Fatalf("CreateUserToken: %v", err)
+	}
+
+	usageID, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
+		RequestID:        "req_admin_usage_2",
+		UserID:           userID,
+		TokenID:          tokenID,
+		ReservedUSD:      decimal.Zero,
+		ReserveExpiresAt: time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("ReserveUsage: %v", err)
+	}
+
+	inTokens := int64(1)
+	outTokens := int64(2)
+	if err := st.CommitUsage(ctx, store.CommitUsageInput{
+		UsageEventID: usageID,
+		InputTokens:  &inTokens,
+		OutputTokens: &outTokens,
+		CommittedUSD: decimal.Zero,
+	}); err != nil {
+		t.Fatalf("CommitUsage: %v", err)
+	}
+
+	errClass := "upstream_unavailable"
+	errMsg := "上游不可用；最后一次失败: upstream_status 429 Too Many Requests"
+	if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
+		UsageEventID:  usageID,
+		Endpoint:      "/v1/responses",
+		Method:        "POST",
+		StatusCode:    502,
+		LatencyMS:     321,
+		ErrorClass:    &errClass,
+		ErrorMessage:  &errMsg,
+		RequestBytes:  10,
+		ResponseBytes: 20,
+	}); err != nil {
+		t.Fatalf("FinalizeUsageEvent: %v", err)
+	}
+
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+	cookieName := "realms_session"
+	sessionStore := cookie.NewStore([]byte("test-secret"))
+	sessionStore.Options(sessions.Options{
+		Path:     "/",
+		MaxAge:   2592000,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	engine.Use(sessions.Sessions(cookieName, sessionStore))
+
+	SetRouter(engine, Options{
+		Store:             st,
+		SelfMode:          false,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
+
+	loginBody, _ := json.Marshal(map[string]any{
+		"login":    "root2@example.com",
+		"password": "password123",
+	})
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/user/login", bytes.NewReader(loginBody))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	sessionCookie := ""
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == cookieName {
+			sessionCookie = c.String()
+			break
+		}
+	}
+	if sessionCookie == "" {
+		t.Fatalf("expected session cookie %q", cookieName)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("admin usage status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Events []struct {
+				ErrorClass   string `json:"error_class"`
+				ErrorMessage string `json:"error_message"`
+			} `json:"events"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal admin usage: %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("admin usage expected success, got message=%q", got.Message)
+	}
+	if len(got.Data.Events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(got.Data.Events))
+	}
+	ev := got.Data.Events[0]
+	if ev.ErrorClass != "upstream_unavailable" {
+		t.Fatalf("expected error_class=upstream_unavailable, got %q", ev.ErrorClass)
+	}
+	if ev.ErrorMessage != errMsg {
+		t.Fatalf("expected error_message=%q, got %q", errMsg, ev.ErrorMessage)
+	}
+}
+
 func TestAdminUsagePage_CodexOAuthUsesAccountInModelField(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

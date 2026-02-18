@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -191,10 +192,21 @@ func main() {
 			rawBody, _ := io.ReadAll(r.Body)
 			_ = r.Body.Close()
 
-			var payload map[string]any
-			_ = json.Unmarshal(rawBody, &payload)
-			stream := strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/event-stream") || requestWantsStream(rawBody)
-			if input, ok := payload["input"].(string); ok && strings.TrimSpace(input) == "__pw_fail__" {
+			// Playwright E2E: 固定错误触发器（支持 New API 的结构化 input）
+			// - __pw_fail__: 返回非重试错误（400），用于验证上游错误透传
+			// - __pw_unavailable__: 返回重试错误（429），用于触发 Realms 最终的 upstream_unavailable 收敛
+			if bytes.Contains(rawBody, []byte("__pw_unavailable__")) {
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"error": map[string]any{
+						"message": "rate limited for e2e",
+					},
+					"upstream_channel": "pw-e2e-upstream",
+				})
+				return
+			}
+			if bytes.Contains(rawBody, []byte("__pw_fail__")) {
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				w.WriteHeader(http.StatusBadRequest)
 				_ = json.NewEncoder(w).Encode(map[string]any{
@@ -205,6 +217,10 @@ func main() {
 				})
 				return
 			}
+
+			var payload map[string]any
+			_ = json.Unmarshal(rawBody, &payload)
+			stream := strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/event-stream") || requestWantsStream(rawBody)
 
 			resp := map[string]any{
 				"id":      "resp_pw_e2e_1",

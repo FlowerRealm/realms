@@ -91,12 +91,16 @@ func TestUsageEvents_UserResponse_HidesUpstreamChannel(t *testing.T) {
 		t.Fatalf("CommitUsage: %v", err)
 	}
 
+	errClass := "upstream_unavailable"
+	errMsg := "上游不可用；最后一次失败: upstream_exhausted 400 The usage limit has been reached"
 	if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
 		UsageEventID:       usageEventID,
 		Endpoint:           "/v1/chat/completions",
 		Method:             "POST",
-		StatusCode:         200,
+		StatusCode:         502,
 		LatencyMS:          123,
+		ErrorClass:         &errClass,
+		ErrorMessage:       &errMsg,
 		UpstreamChannelID:  &upstreamChannelID,
 		UpstreamEndpointID: &upstreamEndpointID,
 		UpstreamCredID:     &upstreamCredID,
@@ -189,6 +193,12 @@ func TestUsageEvents_UserResponse_HidesUpstreamChannel(t *testing.T) {
 	}
 	if _, ok := ev["upstream_credential_id"]; ok {
 		t.Fatalf("expected upstream_credential_id to be hidden for user usage events")
+	}
+	if v, ok := ev["error_class"]; !ok || v != "upstream_unavailable" {
+		t.Fatalf("expected error_class=upstream_unavailable, got=%v (present=%v)", v, ok)
+	}
+	if v, ok := ev["error_message"]; !ok || v != "上游不可用" {
+		t.Fatalf("expected error_message to be masked as %q, got=%v (present=%v)", "上游不可用", v, ok)
 	}
 }
 

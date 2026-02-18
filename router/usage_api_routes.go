@@ -270,6 +270,11 @@ func usageEventsHandler(opts Options) gin.HandlerFunc {
 				errClass = nil
 				errMsg = nil
 			}
+			// 用户侧不暴露“上游不可用”背后的具体失败信息（管理员侧在 /admin/usage 中可见）。
+			if errClass != nil && strings.TrimSpace(*errClass) == "upstream_unavailable" {
+				m := "上游不可用"
+				errMsg = &m
+			}
 
 			resp.Events = append(resp.Events, usageEventAPI{
 				ID:                 e.ID,
