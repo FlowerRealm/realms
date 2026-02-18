@@ -26,6 +26,9 @@
 - **[admin/usage]**: 上游不可用时，记录并展示“最后一次失败原因”（状态码/上游错误摘要/网络错误）；用户侧 `/usage` 仍仅展示“上游不可用”
   - 类型: 微调（无方案包）
   - 文件: internal/api/openai/handler.go, router/usage_api_routes.go
+- **[admin/usage]**: 用量明细展开区的 `Error Message` 改为整行展示并支持换行，避免横向滚动才能看清错误
+  - 类型: 微调（无方案包）
+  - 文件: web/src/pages/admin/UsageAdminPage.tsx
 
 ### 增强
 - **[admin/channels]**: 渠道"测试连接"改为可选的 CLI Runner 模式（Codex/Claude/Gemini CLI），测试结果仅在前端展示、不写数据库、不影响渠道可用性调度

@@ -724,9 +724,9 @@ export function UsageAdminPage() {
                                         <div className="text-muted smaller">Error Class</div>
                                         <div className="font-monospace">{e.error_class || '-'}</div>
                                       </div>
-                                      <div className="col-12 col-lg-4">
+                                      <div className="col-12">
                                         <div className="text-muted smaller">Error Message</div>
-                                        <div className="font-monospace">{e.error_message || '-'}</div>
+                                        <div className="font-monospace text-break">{e.error_message || '-'}</div>
                                       </div>
 
                                       {detailByEventID[e.id]?.pricing_breakdown ? (
