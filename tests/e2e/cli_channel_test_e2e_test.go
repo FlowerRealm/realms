@@ -26,10 +26,8 @@ import (
 
 // TestCLIChannelTest_E2E validates the full CLI channel test flow through the
 // HTTP stack:
-//  1. GET /api/channel/page returns cli_test_available=true when runner is configured
-//  2. GET /api/channel/test/:id?stream=1 delegates to the CLI runner and returns SSE events
-//  3. last_test_at is NOT updated in the database (result isolation)
-//  4. GET /api/channel/test (batch) returns 405 in CLI mode
+//  1. GET /api/channel/test/:id?stream=1 delegates to the CLI runner and returns SSE events
+//  2. last_test_at is NOT updated in the database (result isolation)
 func TestCLIChannelTest_E2E(t *testing.T) {
 	const model = "gpt-test"
 
@@ -177,43 +175,7 @@ func TestCLIChannelTest_E2E(t *testing.T) {
 	sessionCookie := loginAsRoot(t, ts.URL, client, rootUserID)
 
 	// ---------------------------------------------------------------
-	// Test 1: GET /api/channel/page — cli_test_available should be true.
-	// ---------------------------------------------------------------
-	t.Run("channel_page_cli_test_available", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/channel/page", nil)
-		req.Header.Set("Cookie", sessionCookie)
-		req.Header.Set("Realms-User", strconv.FormatInt(rootUserID, 10))
-
-		resp, err := client.Do(req)
-		if err != nil {
-			t.Fatalf("channel page request: %v", err)
-		}
-		defer resp.Body.Close()
-		body, _ := io.ReadAll(resp.Body)
-
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(body))
-		}
-
-		var result struct {
-			Success bool `json:"success"`
-			Data    struct {
-				CLITestAvailable bool `json:"cli_test_available"`
-			} `json:"data"`
-		}
-		if err := json.Unmarshal(body, &result); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
-		if !result.Success {
-			t.Fatalf("expected success=true, body=%s", string(body))
-		}
-		if !result.Data.CLITestAvailable {
-			t.Error("expected cli_test_available=true")
-		}
-	})
-
-	// ---------------------------------------------------------------
-	// Test 2: GET /api/channel/test/:id?stream=1 — SSE stream from CLI runner.
+	// Test 1: GET /api/channel/test/:id?stream=1 — SSE stream from CLI runner.
 	// ---------------------------------------------------------------
 	t.Run("cli_test_sse_delegation", func(t *testing.T) {
 		url := fmt.Sprintf("%s/api/channel/test/%d?stream=1", ts.URL, channelID)
@@ -270,7 +232,7 @@ func TestCLIChannelTest_E2E(t *testing.T) {
 	})
 
 	// ---------------------------------------------------------------
-	// Test 3: Verify result isolation — last_test_at NOT updated.
+	// Test 2: Verify result isolation — last_test_at NOT updated.
 	// ---------------------------------------------------------------
 	t.Run("result_isolation_no_db_write", func(t *testing.T) {
 		chAfter, err := st.GetUpstreamChannelByID(ctx, channelID)
@@ -282,26 +244,6 @@ func TestCLIChannelTest_E2E(t *testing.T) {
 		}
 		if chBefore.LastTestAt != nil && chAfter.LastTestAt != nil && !chBefore.LastTestAt.Equal(*chAfter.LastTestAt) {
 			t.Errorf("expected last_test_at unchanged, before=%v after=%v", chBefore.LastTestAt, chAfter.LastTestAt)
-		}
-	})
-
-	// ---------------------------------------------------------------
-	// Test 4: GET /api/channel/test (batch) — 405 in CLI mode.
-	// ---------------------------------------------------------------
-	t.Run("batch_test_disabled", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/channel/test", nil)
-		req.Header.Set("Cookie", sessionCookie)
-		req.Header.Set("Realms-User", strconv.FormatInt(rootUserID, 10))
-
-		resp, err := client.Do(req)
-		if err != nil {
-			t.Fatalf("batch test request: %v", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusMethodNotAllowed {
-			body, _ := io.ReadAll(resp.Body)
-			t.Errorf("expected 405, got %d: %s", resp.StatusCode, string(body))
 		}
 	})
 }

@@ -7,10 +7,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+
+	"realms/internal/store"
 )
 
 // TestChannelTypeToCLIType verifies the mapping from channel type to CLI runner cli_type.
@@ -129,87 +132,36 @@ func TestCLITestDelegation(t *testing.T) {
 	}
 }
 
-// TestChannelsPage_CLITestAvailable verifies that the channel page response
-// includes cli_test_available=true when runner URL is configured,
-// and cli_test_available=false when not.
-func TestChannelsPage_CLITestAvailable(t *testing.T) {
+// TestCLITestRunnerURLEmpty verifies that streamChannelCLITestHandler returns
+// an error JSON when ChannelTestCLIRunnerURL is empty.
+func TestCLITestRunnerURLEmpty(t *testing.T) {
 	st := openTestStore(t)
 	ctx := context.Background()
+	channelID := createOpenAIChannelWithCredential(t, ctx, st, "https://api.example.com")
 
-	_ = createOpenAIChannelWithCredential(t, ctx, st, "https://api.example.com")
-
-	// Test with CLI runner configured.
 	opts := Options{
 		Store:                   st,
-		ChannelTestCLIRunnerURL: "http://localhost:3100",
+		ChannelTestCLIRunnerURL: "",
 	}
-	handler := channelsPageHandler(opts)
 
 	w := httptest.NewRecorder()
 	c, _ := newTestGinContext(w)
-	handler(c)
+	c.Params = gin.Params{{Key: "channel_id", Value: fmt.Sprintf("%d", channelID)}}
+
+	streamChannelCLITestHandler(c, opts, channelID)
 
 	var result struct {
-		Success bool `json:"success"`
-		Data    struct {
-			CLITestAvailable bool `json:"cli_test_available"`
-		} `json:"data"`
+		Success bool   `json:"success"`
+		Message string `json:"message"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if !result.Success {
-		t.Fatal("expected success=true")
+	if result.Success {
+		t.Error("expected success=false when runner URL is empty")
 	}
-	if !result.Data.CLITestAvailable {
-		t.Error("expected cli_test_available=true when runner URL is configured")
-	}
-
-	// Test without CLI runner.
-	opts2 := Options{
-		Store:                   st,
-		ChannelTestCLIRunnerURL: "",
-	}
-	handler2 := channelsPageHandler(opts2)
-
-	w2 := httptest.NewRecorder()
-	c2, _ := newTestGinContext(w2)
-	handler2(c2)
-
-	var result2 struct {
-		Success bool `json:"success"`
-		Data    struct {
-			CLITestAvailable bool `json:"cli_test_available"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(w2.Body).Decode(&result2); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if !result2.Success {
-		t.Fatal("expected success=true")
-	}
-	if result2.Data.CLITestAvailable {
-		t.Error("expected cli_test_available=false when runner URL is empty")
-	}
-}
-
-// TestTestAllChannelsHandler_DisabledInCLIMode verifies that testAllChannelsHandler
-// returns 405 when CLI runner is configured.
-func TestTestAllChannelsHandler_DisabledInCLIMode(t *testing.T) {
-	st := openTestStore(t)
-
-	opts := Options{
-		Store:                   st,
-		ChannelTestCLIRunnerURL: "http://localhost:3100",
-	}
-	handler := testAllChannelsHandler(opts)
-
-	w := httptest.NewRecorder()
-	c, _ := newTestGinContext(w)
-	handler(c)
-
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected 405, got %d", w.Code)
+	if !strings.Contains(result.Message, "CLI runner") {
+		t.Errorf("expected error message to mention CLI runner, got: %s", result.Message)
 	}
 }
 
@@ -222,4 +174,39 @@ func newTestGinContext(w *httptest.ResponseRecorder) (*gin.Context, *gin.Engine)
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
 	return c, nil
+}
+
+func openTestStore(t *testing.T) *store.Store {
+	t.Helper()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+	return st
+}
+
+func createOpenAIChannelWithCredential(t *testing.T, ctx context.Context, st *store.Store, baseURL string) int64 {
+	t.Helper()
+
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "test-channel", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel: %v", err)
+	}
+	endpointID, err := st.CreateUpstreamEndpoint(ctx, channelID, baseURL, 0)
+	if err != nil {
+		t.Fatalf("CreateUpstreamEndpoint: %v", err)
+	}
+	if _, _, err := st.CreateOpenAICompatibleCredential(ctx, endpointID, nil, "sk-test"); err != nil {
+		t.Fatalf("CreateOpenAICompatibleCredential: %v", err)
+	}
+	return channelID
 }
