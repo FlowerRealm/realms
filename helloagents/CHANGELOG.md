@@ -61,9 +61,6 @@
   - ⚠️ EHRB: 推送到 `master` - 用户已确认风险
   - 检测依据: `master(分支)`
   - 文件: helloagents/CHANGELOG.md, web/src/index.css, web/e2e/theme-colors.spec.ts
-- **[git]**: 提交并推送本次变更到 `master`
-  - ⚠️ EHRB: 推送到 `master` - 用户已确认风险
-  - 检测依据: `master(分支)`
 
 ## [0.10.10] - 2026-02-16
 
