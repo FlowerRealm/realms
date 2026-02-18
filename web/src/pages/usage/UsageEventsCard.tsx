@@ -103,6 +103,7 @@ export function UsageEventsCard({
                   <>
                     <tr
                       key={e.id}
+                      className="rlm-usage-row"
                       role="button"
                       onClick={() => {
                         const next = expandedID === e.id ? null : e.id;
@@ -171,7 +172,7 @@ export function UsageEventsCard({
                       </td>
                     </tr>
                     {expandedID === e.id ? (
-                      <tr key={`${e.id}-detail`}>
+                      <tr key={`${e.id}-detail`} className="rlm-usage-detail-row">
                         <td colSpan={12} className="p-0 border-0">
                           <div className="bg-light border-top px-4 py-3">
                             {detailLoadingID === e.id ? <div className="text-muted small">加载详情中…</div> : null}
