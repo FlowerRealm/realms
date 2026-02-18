@@ -800,6 +800,12 @@ h6,
   border-bottom: 1px solid rgba(var(--bs-dark-rgb), 0.12) !important;
 }
 
+/* Bootstrap 会在 `.nav-pills` 本身定义激活态变量（默认蓝色），因此需要在同一元素上覆盖。 */
+.simple-header .nav-pills {
+  --bs-nav-pills-link-active-bg: var(--bs-primary);
+  --bs-nav-pills-link-active-color: #fff;
+}
+
 .uppercase {
   text-transform: uppercase;
 }

@@ -20,6 +20,9 @@
 - **[web]**: `/usage` 页面 1:1 对齐 `/admin/usage`（版式 + 文案 + 字段/表头；补齐"消费排行用户"与明细列；用户侧明细列将"渠道"替换为"Key"）
   - 类型: 微调（无方案包）
   - 文件: web/src/pages/UsagePage.tsx, web/src/pages/usage/*, web/src/index.css
+- **[web]**: 登录/注册页右上角导航（nav-pills）激活态从默认蓝色改为主题绿色
+  - 类型: 微调（无方案包）
+  - 文件: web/src/index.css
 - **[admin/usage]**: 上游不可用时，仍记录并展示最后一次尝试的渠道（渠道名缺失时回退显示 `#channel_id`）
   - 类型: 微调（无方案包）
   - 文件: internal/api/openai/handler.go, internal/api/openai/handler_test.go, web/src/pages/admin/UsageAdminPage.tsx
@@ -47,11 +50,17 @@
 ### 测试
 - **[e2e]**: 增加回归：`upstream_unavailable` 在管理后台展示“最后一次失败原因”，用户侧仍保持“上游不可用”
   - 文件: web/e2e/upstream-unavailable-details.spec.ts, cmd/realms-e2e/main.go
+- **[e2e]**: 增加回归：登录页右上角导航（nav-pills）激活态不使用默认亮蓝色，且命中主题主色
+  - 文件: web/e2e/theme-colors.spec.ts
 
 ### 发布
 - **[release]**: 推送 `master` 并发布 tag `0.11.3`
   - ⚠️ EHRB: 发布 `master` + 推送 tag `0.11.3` - 用户已确认风险
   - 检测依据: `master(分支)`、tag 发布
+- **[git]**: 提交并推送本次变更到 `master`
+  - ⚠️ EHRB: 推送到 `master` - 用户已确认风险
+  - 检测依据: `master(分支)`
+  - 文件: helloagents/CHANGELOG.md, web/src/index.css, web/e2e/theme-colors.spec.ts
 - **[git]**: 提交并推送本次变更到 `master`
   - ⚠️ EHRB: 推送到 `master` - 用户已确认风险
   - 检测依据: `master(分支)`
