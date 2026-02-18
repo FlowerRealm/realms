@@ -117,7 +117,7 @@ type ChannelPointerTarget = {
 export function ChannelsPage() {
   const [channels, setChannels] = useState<ChannelAdminItem[]>([]);
   const channelsRef = useRef<ChannelAdminItem[]>([]);
-  const [cliTestAvailable, setCliTestAvailable] = useState(false);
+
   const [managedModelIDs, setManagedModelIDs] = useState<string[]>([]);
   const [channelGroups, setChannelGroups] = useState<AdminChannelGroup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -395,7 +395,6 @@ export function ChannelsPage() {
       const pageChannels = pageRes.data?.channels || [];
       const normalizedChannels = normalizeChannelSections(pageChannels);
       channelsRef.current = normalizedChannels;
-      setCliTestAvailable(!!pageRes.data?.cli_test_available);
       setUsageStart(pageRes.data?.start || '');
       setUsageEnd(pageRes.data?.end || '');
       setChannels(normalizedChannels);
@@ -972,20 +971,20 @@ export function ChannelsPage() {
               <tr>
                 <th className="ps-4">渠道详情</th>
                 <th>状态</th>
-                {cliTestAvailable ? <th>健康状况</th> : null}
+
                 <th className="text-end pe-4">操作</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={cliTestAvailable ? 4 : 3} className="text-center py-5 text-muted">
+                  <td colSpan={3} className="text-center py-5 text-muted">
                     加载中…
                   </td>
                 </tr>
               ) : channels.length === 0 ? (
                 <tr>
-                  <td colSpan={cliTestAvailable ? 4 : 3} className="text-center py-5 text-muted">
+                  <td colSpan={3} className="text-center py-5 text-muted">
                     <span className="fs-1 d-block mb-3 material-symbols-rounded">inbox</span>
                     暂无渠道。
                   </td>
@@ -1020,7 +1019,7 @@ export function ChannelsPage() {
                         <Fragment key={ch.id}>
                           {idx === firstDisabledIndex ? (
                             <tr className="table-light">
-                              <td colSpan={cliTestAvailable ? 4 : 3} className="px-4 py-2">
+                              <td colSpan={3} className="px-4 py-2">
                                 <span className="text-muted small">
                                   <i className="ri-forbid-2-line me-1"></i>已禁用渠道（{disabledCount}）已固定在底部分区
                                 </span>
@@ -1087,23 +1086,8 @@ export function ChannelsPage() {
                               </div>
                             ) : null}
                           </td>
-                          {cliTestAvailable ? (
-                          <td>
-                            <div className="d-flex flex-column">
-		                              <span className={hb.cls} title={hb.hint}>
-		                                {hb.label}
-		                              </span>
-		                              {checkedAt ? (
-		                                <small className="text-muted mt-1 smaller" title={ch.last_test_at || undefined}>
-		                                  {checkedAt} 已检查
-		                                </small>
-		                              ) : null}
-		                            </div>
-		                          </td>
-                          ) : null}
                           <td className="text-end pe-4 text-nowrap">
                             <div className="d-flex gap-1 justify-content-end">
-                              {cliTestAvailable ? (
                               <button
                                 className="btn btn-sm btn-light border text-primary"
                                 type="button"
@@ -1203,7 +1187,6 @@ export function ChannelsPage() {
                                 )}
                                 {testRunning ? '测试中' : '测试'}
                               </button>
-                              ) : null}
 
                               <button
                                 className={`btn btn-sm ${ch.status === 1 ? 'btn-light border text-warning' : 'btn-light border text-success'}`}
@@ -1283,7 +1266,7 @@ export function ChannelsPage() {
                         </tr>
                         {panelOpen ? (
                           <tr className={`${channelDisabled ? 'table-secondary opacity-75' : 'bg-light-subtle'} rlm-channel-detail-row`}>
-                            <td colSpan={cliTestAvailable ? 4 : 3} className="px-4 py-3">
+                            <td colSpan={3} className="px-4 py-3">
                               <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
                                 <button
                                   type="button"
