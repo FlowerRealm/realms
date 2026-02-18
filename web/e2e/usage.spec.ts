@@ -44,14 +44,14 @@ test.describe('usage', () => {
       const url = new URL(r.url());
       return url.pathname.endsWith('/api/token');
     });
-    const modelsDetailRespPromise = page.waitForResponse((r) => {
+    const usageWindowsRespPromise = page.waitForResponse((r) => {
       if (r.request().method() !== 'GET') return false;
       const url = new URL(r.url());
-      return url.pathname.endsWith('/api/user/models/detail');
+      return url.pathname.endsWith('/api/usage/windows');
     });
     await page.goto('/usage', { waitUntil: 'commit' });
     await tokensRespPromise;
-    await modelsDetailRespPromise;
+    await usageWindowsRespPromise;
     await expect(page.getByRole('heading', { name: /用量统计/ }).first()).toBeVisible();
 
     const now = new Date();
