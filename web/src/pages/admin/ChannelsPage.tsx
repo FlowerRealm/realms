@@ -54,20 +54,6 @@ function statusBadge(status: number): { cls: string; label: string } {
   return { cls: 'badge bg-secondary bg-opacity-10 text-secondary border', label: '禁用' };
 }
 
-function healthBadge(ch: Channel): { cls: string; label: string; hint?: string } {
-  if (ch.type === 'codex_oauth') {
-    return { cls: 'badge bg-light text-secondary border', label: '不支持测试' };
-  }
-  if (!ch.last_test_at) {
-    return { cls: 'badge bg-light text-secondary border', label: '未测试' };
-  }
-  const latency = Number.isFinite(ch.last_test_latency_ms) ? `${formatIntComma(ch.last_test_latency_ms)}ms` : '-';
-  if (ch.last_test_ok) {
-    return { cls: 'badge bg-success bg-opacity-10 text-success border border-success-subtle', label: `正常 · ${latency}` };
-  }
-  return { cls: 'badge bg-danger bg-opacity-10 text-danger border border-danger-subtle', label: `异常 · ${latency}` };
-}
-
 function compactProbeMessage(raw: string): string {
   let msg = raw.trim();
   if (!msg) return '';
@@ -258,12 +244,6 @@ export function ChannelsPage() {
     return [...enabled, ...disabled];
   }
 
-  function fmtHHMM(iso?: string | null): string {
-    if (!iso) return '';
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return '';
-    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
-  }
 
   function fmtDateTime(iso?: string | null): string {
     if (!iso) return '-';
@@ -993,12 +973,10 @@ export function ChannelsPage() {
                 <>
                   {channels.map((ch, idx) => {
                       const st = statusBadge(ch.status);
-                      const hb = healthBadge(ch);
                       const channelDisabled = ch.status !== 1;
                       const runtime = ch.runtime;
                       const usage = ch.usage;
                       const testPanel = testPanels[ch.id];
-                      const checkedAt = fmtHHMM(ch.last_test_at);
                       const panelOpen = expandedChannelID === ch.id;
                       const testRunning = testingChannelID === ch.id;
                       const anyTesting = testingChannelID !== null;
