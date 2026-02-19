@@ -835,23 +835,6 @@ func maintainChannelProbeDueForTest(t *testing.T, app *server.App, channelID int
 	}
 }
 
-func setChannelProbeDueForTest(t *testing.T, app *server.App, channelID int64, dueAt time.Time) {
-	t.Helper()
-	if app == nil || channelID <= 0 || dueAt.IsZero() {
-		t.Fatalf("invalid probe due input (app_nil=%v channel_id=%d due_at=%v)", app == nil, channelID, dueAt)
-	}
-
-	sched := unexportedField(t, app, "sched").Interface().(*scheduler.Scheduler)
-	st := unexportedField(t, sched, "state").Interface().(*scheduler.State)
-
-	mu := unexportedField(t, st, "mu").Addr().Interface().(*sync.Mutex)
-	mu.Lock()
-	defer mu.Unlock()
-
-	probes := unexportedField(t, st, "channelProbeDueAt").Interface().(map[int64]time.Time)
-	probes[channelID] = dueAt
-}
-
 func unexportedField(t *testing.T, ptr any, field string) reflect.Value {
 	t.Helper()
 	v := reflect.ValueOf(ptr)

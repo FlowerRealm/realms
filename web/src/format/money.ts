@@ -34,10 +34,3 @@ export function formatUSDPlain(v: string | number | null | undefined): string {
   if (cleaned === '0') return '0';
   return `${sign}${cleaned}`;
 }
-
-export function formatUSD(v: string | number | null | undefined): string {
-  const { sign, value } = normalizeDecimalString(v == null ? '' : String(v));
-  const cleaned = trimTrailingZeros(value);
-  if (sign) return '-$' + cleaned;
-  return '$' + cleaned;
-}

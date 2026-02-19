@@ -1163,21 +1163,6 @@ func trimSummary(s string) string {
 	return s
 }
 
-func readLimited(r io.Reader, max int64) ([]byte, error) {
-	if max <= 0 {
-		return io.ReadAll(r)
-	}
-	var buf bytes.Buffer
-	_, err := io.CopyN(&buf, r, max+1)
-	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, err
-	}
-	if int64(buf.Len()) > max {
-		return nil, errors.New("响应体过大")
-	}
-	return buf.Bytes(), nil
-}
-
 const (
 	upstreamErrorBodyMaxBytes        = 64 << 10
 	upstreamNonStreamExtractMaxBytes = 2 << 20

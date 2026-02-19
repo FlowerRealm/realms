@@ -15,6 +15,12 @@
   - 移除: `channelsPageResponse.CLITestAvailable` 字段及前端 `cli_test_available` 类型
   - 变更: `testChannelHandler` 始终委派 `streamChannelCLITestHandler`，未配置 runner URL 时返回明确错误
   - 测试: 删除 `channels_api_routes_probe_test.go`，更新 CLI 单测和 E2E 测试
+- **[cleanup]**: 清理未使用代码与前端模板资产
+  - 移除: `internal/api/openai/handler.go` 中未使用的 `readLimited`
+  - 移除: `tests/e2e/codex_cli_test.go` 中未使用的 `setChannelProbeDueForTest`
+  - 移除: `web/src/api/admin/channelGroups.ts` 中未使用的 `listAdminChannelGroupPointerCandidates`
+  - 移除: `web/src/format/money.ts` 中未使用的 `formatUSD`
+  - 删除: `web/public/vite.svg`、`web/src/assets/react.svg`
 
 ### 微调
 - **[web]**: `/usage` 页面 1:1 对齐 `/admin/usage`（版式 + 文案 + 字段/表头；补齐"消费排行用户"与明细列；用户侧明细列将"渠道"替换为"Key"）

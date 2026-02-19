@@ -86,11 +86,6 @@ export async function getAdminChannelGroupPointer(groupID: number) {
   return res.data;
 }
 
-export async function listAdminChannelGroupPointerCandidates(groupID: number) {
-  const res = await api.get<APIResponse<AdminChannelRef[]>>(`/api/admin/channel-groups/${groupID}/pointer/candidates`);
-  return res.data;
-}
-
 export async function upsertAdminChannelGroupPointer(groupID: number, req: { channel_id: number; pinned?: boolean }) {
   const res = await api.put<APIResponse<void>>(`/api/admin/channel-groups/${groupID}/pointer`, req);
   return res.data;
