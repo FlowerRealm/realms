@@ -2,6 +2,17 @@ import { test, expect, type Page } from '@playwright/test';
 
 import { E2E_SEED } from './seed';
 
+type APIResponse<T> = {
+  success: boolean;
+  message?: string;
+  data?: T;
+};
+
+type UserManagedModel = {
+  public_id: string;
+  group_name?: string | null;
+};
+
 async function login(page: Page) {
   await page.locator('input[name="login"]').fill(E2E_SEED.root.username);
   await page.locator('input[name="password"]').fill(E2E_SEED.root.password);
@@ -90,6 +101,49 @@ test.describe('app routes', () => {
 
   test('GET /models', async ({ page }) => {
     await gotoAuthedAndExpectHeading(page, '/models', /可用模型列表/);
+
+    // 等待页面完成首屏加载（避免在 loading 状态下抓取 DOM）。
+    await expect(page.getByText(/加载中/)).toHaveCount(0);
+
+    // “配置了的模型”以 API 返回为准：这同时覆盖 seed profile 和 external server 场景。
+    const apiRes = await page.request.get('/api/user/models/detail');
+    expect(apiRes.ok()).toBeTruthy();
+    const apiBody = (await apiRes.json()) as APIResponse<UserManagedModel[]>;
+    expect(apiBody.success).toBeTruthy();
+    const expectedModels = (apiBody.data || [])
+      .map((m) => ({
+        public_id: (m.public_id || '').trim(),
+        group_name: (m.group_name || '').trim(),
+      }))
+      .filter((m) => m.public_id);
+
+    if (expectedModels.length === 0) {
+      await expect(page.getByText(/暂无可用模型/)).toBeVisible();
+      return;
+    }
+
+    const expectedIDs = Array.from(new Set(expectedModels.map((m) => m.public_id))).sort((a, b) => a.localeCompare(b, 'en-US'));
+
+    const groupButtons = page.locator('button.rlm-models-group-item');
+    await expect(groupButtons.first()).toBeVisible();
+
+    const seen = new Set<string>();
+    const groupCount = await groupButtons.count();
+    for (let i = 0; i < groupCount; i++) {
+      const btn = groupButtons.nth(i);
+      await btn.click();
+      await expect(btn).toHaveClass(/active/);
+
+      const ids = (await page.locator('.rlm-models-main span.font-monospace.fw-bold.text-dark.fs-6').allTextContents())
+        .map((s) => s.trim())
+        .filter((s) => s);
+      for (const id of ids) {
+        seen.add(id);
+      }
+    }
+
+    const actualIDs = Array.from(seen).sort((a, b) => a.localeCompare(b, 'en-US'));
+    expect(actualIDs).toEqual(expectedIDs);
   });
 
   test('GET /usage', async ({ page }) => {

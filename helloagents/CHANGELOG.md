@@ -52,6 +52,14 @@
   - 文件: web/e2e/upstream-unavailable-details.spec.ts, cmd/realms-e2e/main.go
 - **[e2e]**: 增加回归：登录页右上角导航（nav-pills）激活态不使用默认亮蓝色，且命中主题主色
   - 文件: web/e2e/theme-colors.spec.ts
+- **[e2e]**: `/models` 用例改为校验“所有已配置的可见模型”都能在模型列表页展示（按 `/api/user/models/detail` 返回为准）；`cmd/realms-e2e` 支持通过 `REALMS_E2E_BILLING_MODELS` 一次 seed 多个模型
+  - 文件: web/e2e/routes.spec.ts, cmd/realms-e2e/main.go, web/README.md
+
+### 开发体验
+- **[dev]**: `make dev` 默认尝试拉起 docker compose `cli-runner` 并设置 `REALMS_CHANNEL_TEST_CLI_RUNNER_URL`，保证管理后台“CLI 渠道测试”本地可用
+  - 文件: scripts/dev.sh, scripts/dev-cli-runner.sh, Makefile, README.md
+- **[admin/channels]**: “CLI 渠道测试”从只测试第一个绑定模型改为测试该渠道下所有已启用的绑定模型（`test_model` 仍会优先作为首项）
+  - 文件: router/channels_api_routes.go
 
 ### 发布
 - **[release]**: 推送 `master` 并发布 tag `0.11.3`
@@ -61,6 +69,10 @@
   - ⚠️ EHRB: 推送到 `master` - 用户已确认风险
   - 检测依据: `master(分支)`
   - 文件: helloagents/CHANGELOG.md, web/src/index.css, web/e2e/theme-colors.spec.ts
+- **[git]**: 提交并推送本次变更到 `master`
+  - ⚠️ EHRB: 推送到 `master` - 用户已确认风险
+  - 检测依据: `master(分支)`
+  - 文件: Makefile, README.md, cmd/realms-e2e/main.go, router/channels_api_routes.go, router/channels_api_routes_cli_test.go, scripts/dev.sh, scripts/dev-cli-runner.sh, web/README.md, web/e2e/routes.spec.ts, helloagents/CHANGELOG.md
 
 ## [0.10.10] - 2026-02-16
 

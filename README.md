@@ -50,7 +50,8 @@ Realms 是一个 Go 单体服务（Gin），对外提供 **OpenAI 兼容** 的 A
 - `REALMS_DB_DSN=...`（设置该值即可推断使用 MySQL；也可以显式设置 `REALMS_DB_DRIVER=mysql`）
 
 `make dev` 仅启动本地（正常模式）：`http://127.0.0.1:8080/`（air 热重载）。  
-`make dev` 不会自动启动 Docker / MySQL；如你选择使用 MySQL，请先自行启动 MySQL（本机或 docker compose）。
+`make dev` 会尝试自动启动 Docker 的 `cli-runner`（用于管理后台的“CLI 渠道测试”功能）；但不会自动启动 MySQL。  
+如你不需要该功能，可设置 `REALMS_DEV_CLI_RUNNER=0` 禁用自动启动（并自行管理 `REALMS_CHANNEL_TEST_CLI_RUNNER_URL`）。
 默认会同时启动前端 `web/dist` 的 watch 构建（`npm run build -- --watch`），保证 `/login`、`/admin/*` 等同源页面在开发中实时更新。
 
 如需用 docker compose 启动 MySQL（可选）：

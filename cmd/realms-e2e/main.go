@@ -92,6 +92,30 @@ func firstNonEmptyEnv(keys ...string) string {
 	return ""
 }
 
+func splitCSVTrimmedUniq(s string) []string {
+	raw := strings.TrimSpace(s)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\r'
+	})
+	seen := make(map[string]struct{}, len(parts))
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		v := strings.TrimSpace(part)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
+}
+
 func ensureSQLiteQuery(path string) string {
 	if strings.Contains(path, "?") || path == ":memory:" || strings.HasPrefix(path, "file::memory:") {
 		return path
@@ -160,8 +184,22 @@ func main() {
 
 	skipSeed := envBool("REALMS_E2E_SKIP_SEED")
 	seedModel := strings.TrimSpace(firstNonEmptyEnv("REALMS_E2E_BILLING_MODEL", "REALMS_CI_MODEL"))
+	seedModels := splitCSVTrimmedUniq(firstNonEmptyEnv("REALMS_E2E_BILLING_MODELS", "REALMS_CI_MODELS"))
+	if len(seedModels) == 0 && seedModel != "" {
+		seedModels = []string{seedModel}
+	}
+	if seedModel == "" && len(seedModels) > 0 {
+		seedModel = seedModels[0]
+	}
 	if seedModel == "" {
 		seedModel = e2eModelPublicID
+	}
+	if len(seedModels) == 0 {
+		seedModels = []string{seedModel}
+	}
+	if seedModel != "" {
+		seedModels = append([]string{seedModel}, seedModels...)
+		seedModels = splitCSVTrimmedUniq(strings.Join(seedModels, ","))
 	}
 	realUpstreamBaseURL := strings.TrimRight(strings.TrimSpace(firstNonEmptyEnv("REALMS_E2E_UPSTREAM_BASE_URL", "REALMS_CI_UPSTREAM_BASE_URL")), "/")
 	realUpstreamAPIKey := strings.TrimSpace(firstNonEmptyEnv("REALMS_E2E_UPSTREAM_API_KEY", "REALMS_CI_UPSTREAM_API_KEY"))
@@ -181,7 +219,8 @@ func main() {
 
 	if !skipSeed {
 		seedCfg := e2eSeedConfig{
-			BillingModel: seedModel,
+			BillingModel:  seedModel,
+			BillingModels: seedModels,
 		}
 
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -370,6 +409,7 @@ type e2eSeedConfig struct {
 	UpstreamBaseURL string
 	UpstreamAPIKey  string
 	BillingModel    string
+	BillingModels   []string
 }
 
 func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCfg e2eSeedConfig) (e2eSeedResult, error) {
@@ -388,6 +428,20 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 	if billingModel == "" {
 		billingModel = e2eModelPublicID
 	}
+	billingModels := make([]string, 0, len(seedCfg.BillingModels)+1)
+	for _, m := range seedCfg.BillingModels {
+		v := strings.TrimSpace(m)
+		if v == "" {
+			continue
+		}
+		billingModels = append(billingModels, v)
+	}
+	if len(billingModels) == 0 {
+		billingModels = []string{billingModel}
+	}
+	// 确保 billingModel 一定被 seed，且优先级最高（兼容历史用例）。
+	billingModels = append([]string{billingModel}, billingModels...)
+	billingModels = splitCSVTrimmedUniq(strings.Join(billingModels, ","))
 
 	// 三层分组（E2E 最小可运行集）：
 	// - 用户分组：限制用户可选的渠道组（小分组）
@@ -436,25 +490,27 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 		return e2eSeedResult{}, fmt.Errorf("创建 upstream_credential 失败: %w", err)
 	}
 
-	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
-		PublicID:            billingModel,
-		GroupName:           e2eChannelGroup,
-		OwnedBy:             strPtr("upstream"),
-		InputUSDPer1M:       decimal.RequireFromString("10"),
-		OutputUSDPer1M:      decimal.Zero,
-		CacheInputUSDPer1M:  decimal.Zero,
-		CacheOutputUSDPer1M: decimal.Zero,
-		Status:              1,
-	}); err != nil {
-		return e2eSeedResult{}, fmt.Errorf("创建 managed_model 失败: %w", err)
-	}
-	if _, err := st.CreateChannelModel(ctx, store.ChannelModelCreate{
-		ChannelID:     channelID,
-		PublicID:      billingModel,
-		UpstreamModel: billingModel,
-		Status:        1,
-	}); err != nil {
-		return e2eSeedResult{}, fmt.Errorf("创建 channel_model 失败: %w", err)
+	for _, modelID := range billingModels {
+		if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
+			PublicID:            modelID,
+			GroupName:           e2eChannelGroup,
+			OwnedBy:             strPtr("upstream"),
+			InputUSDPer1M:       decimal.RequireFromString("10"),
+			OutputUSDPer1M:      decimal.Zero,
+			CacheInputUSDPer1M:  decimal.Zero,
+			CacheOutputUSDPer1M: decimal.Zero,
+			Status:              1,
+		}); err != nil {
+			return e2eSeedResult{}, fmt.Errorf("创建 managed_model 失败: %w", err)
+		}
+		if _, err := st.CreateChannelModel(ctx, store.ChannelModelCreate{
+			ChannelID:     channelID,
+			PublicID:      modelID,
+			UpstreamModel: modelID,
+			Status:        1,
+		}); err != nil {
+			return e2eSeedResult{}, fmt.Errorf("创建 channel_model 失败: %w", err)
+		}
 	}
 
 	userHash, err := auth.HashPassword("pw-e2e-user-123")

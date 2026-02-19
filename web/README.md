@@ -73,6 +73,13 @@ REALMS_E2E_ENFORCE_REAL_UPSTREAM=1 \
 npm run test:e2e:ci
 ```
 
+若你希望在前端“模型列表”相关用例中覆盖多个模型，可在 seed 模式下用逗号分隔一次性 seed 多个模型：
+
+```bash
+REALMS_E2E_BILLING_MODELS=gpt-5.2,gpt-5.2-mini,gpt-5.2-nano \
+npm run test:e2e:ci
+```
+
 从仓库根目录执行统一检查集（推荐，本地/CI 同口径）：
 
 ```bash

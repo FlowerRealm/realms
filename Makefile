@@ -10,7 +10,7 @@ AIR := $(TOOLS_BIN)/air
 help:
 	@echo "Targets:"
 	@echo "  make tools   安装开发工具（air，安装到 .tmp/bin）"
-	@echo "  make dev     开发热重载（后端 air + 前端 dist watch；本地:8080；不自动启动 Docker）"
+	@echo "  make dev     开发热重载（后端 air + 前端 dist watch；本地:8080；自动启动 docker cli-runner；不自动启动 MySQL）"
 	@echo "  make test    运行测试"
 	@echo "  make ci      运行 CI 检查集（本地/CI 同口径；如设置 REALMS_CI_* 则默认跑 real upstream）"
 	@echo "  make ci-real 运行真实上游集成回归（需要 REALMS_CI_*）"

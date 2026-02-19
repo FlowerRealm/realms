@@ -73,6 +73,14 @@ if [[ -f "./.env" ]]; then
 fi
 set +a
 
+# dev：默认启用 CLI 渠道测试，并尽力拉起本地 cli-runner（docker compose）。
+if [[ ! "${REALMS_DEV_CLI_RUNNER:-}" =~ ^(0|false|no|off|skip)$ ]]; then
+  if [[ -z "${REALMS_CHANNEL_TEST_CLI_RUNNER_URL:-}" ]]; then
+    export REALMS_CHANNEL_TEST_CLI_RUNNER_URL="http://127.0.0.1:${CLI_RUNNER_PORT:-3100}"
+  fi
+  bash "./scripts/dev-cli-runner.sh"
+fi
+
 # dev 默认需要前端构建产物（web/dist）；否则后端静态资源会缺失
 FRONTEND_DIST_DIR="${FRONTEND_DIST_DIR:-./web/dist}"
 if [[ "${FRONTEND_DIST_DIR}" == "./web/dist" || "${FRONTEND_DIST_DIR}" == "web/dist" ]]; then

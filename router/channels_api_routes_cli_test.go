@@ -133,7 +133,7 @@ func TestCLITestDelegation(t *testing.T) {
 }
 
 // TestCLITestRunnerURLEmpty verifies that streamChannelCLITestHandler returns
-// an error JSON when ChannelTestCLIRunnerURL is empty.
+// an error summary when ChannelTestCLIRunnerURL is empty.
 func TestCLITestRunnerURLEmpty(t *testing.T) {
 	st := openTestStore(t)
 	ctx := context.Background()
@@ -150,18 +150,12 @@ func TestCLITestRunnerURLEmpty(t *testing.T) {
 
 	streamChannelCLITestHandler(c, opts, channelID)
 
-	var result struct {
-		Success bool   `json:"success"`
-		Message string `json:"message"`
+	body := w.Body.String()
+	if !strings.Contains(body, "event: summary") {
+		t.Fatalf("expected SSE summary event, got: %s", body)
 	}
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if result.Success {
-		t.Error("expected success=false when runner URL is empty")
-	}
-	if !strings.Contains(result.Message, "CLI runner") {
-		t.Errorf("expected error message to mention CLI runner, got: %s", result.Message)
+	if !strings.Contains(body, "CLI runner") {
+		t.Fatalf("expected error message to mention CLI runner, got: %s", body)
 	}
 }
 
