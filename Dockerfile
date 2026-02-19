@@ -21,7 +21,7 @@ COPY --from=build-backend /out/realms /realms
 EXPOSE 8080
 ENTRYPOINT ["/realms"]
 
-FROM node:20-alpine AS web-build
+FROM --platform=$BUILDPLATFORM node:20-alpine AS web-build
 WORKDIR /build/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci

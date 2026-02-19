@@ -64,6 +64,10 @@
 - **[admin/channels]**: “CLI 渠道测试”从只测试第一个绑定模型改为测试该渠道下所有已启用的绑定模型（`test_model` 仍会优先作为首项）
   - 文件: router/channels_api_routes.go
 
+### CI
+- **[actions/docker]**: Docker 多架构打包提速：将 `web-build` 固定为 `BUILDPLATFORM` 避免 arm64 下 Node/QEMU；移除 QEMU 初始化；后端镜像构建仅导入缓存以减少重复缓存导出
+  - 文件: Dockerfile, .github/workflows/docker.yml
+
 ### 发布
 - **[release]**: 推送 `master` 并发布 tag `0.11.3`
   - ⚠️ EHRB: 发布 `master` + 推送 tag `0.11.3` - 用户已确认风险
@@ -83,6 +87,10 @@
   - ⚠️ EHRB: 推送到 `master` - 用户已确认风险
   - 检测依据: `master(分支)`
   - 文件: Makefile, README.md, cmd/realms-e2e/main.go, router/channels_api_routes.go, router/channels_api_routes_cli_test.go, scripts/dev.sh, scripts/dev-cli-runner.sh, web/README.md, web/e2e/routes.spec.ts, helloagents/CHANGELOG.md
+- **[git]**: 提交并推送“Docker 多架构构建提速”到 `master`
+  - ⚠️ EHRB: 推送到 `master` - 用户已确认风险
+  - 检测依据: `master(分支)`
+  - 文件: Dockerfile, .github/workflows/docker.yml, helloagents/CHANGELOG.md
 
 ## [0.10.10] - 2026-02-16
 
