@@ -2,19 +2,19 @@
   --bs-font-sans-serif: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --bs-font-monospace: 'JetBrains Mono', SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
 
-  /* Tone C — 矿物苔绿（低饱和、无渐变） */
-  --bs-primary: #2e4a3a;
-  --bs-primary-rgb: 46, 74, 58;
-  --rlm-primary-600: #263d31;
-  --rlm-primary-700: #1f3228;
-  --rlm-primary-700-rgb: 31, 50, 40;
-  --rlm-primary-800: #182a22;
+  /* Tone D — 轻薄草绿（低饱和、无渐变） */
+  --bs-primary: #3c8a61;
+  --bs-primary-rgb: 60, 138, 97;
+  --rlm-primary-600: #327856;
+  --rlm-primary-700: #2a674a;
+  --rlm-primary-700-rgb: 42, 103, 74;
+  --rlm-primary-800: #22543d;
 
   --bs-secondary: #63746b;
   --bs-secondary-rgb: 99, 116, 107;
 
-  --bs-body-bg: #f6f8f6;
-  --bs-body-bg-rgb: 246, 248, 246;
+  --bs-body-bg: #f1f7f3;
+  --bs-body-bg-rgb: 241, 247, 243;
   --bs-body-color: #203027;
   --bs-body-color-rgb: 32, 48, 39;
 
@@ -24,9 +24,9 @@
   --rlm-heading-color: #0e1712;
   --rlm-muted: #4a5b52;
   --rlm-surface-1: #ffffff;
-  --rlm-surface-2: #edf2ee;
-  --rlm-surface-3: #e3eae4;
-  --rlm-surface-3-hover: #dbe3dc;
+  --rlm-surface-2: #e8f1ec;
+  --rlm-surface-3: #dfeae3;
+  --rlm-surface-3-hover: #d7e4dc;
 
   --rlm-shadow-xs: 0 1px 2px rgba(14, 23, 18, 0.06);
   --rlm-shadow-sm: 0 1px 0 rgba(14, 23, 18, 0.06), 0 10px 22px rgba(14, 23, 18, 0.08);
@@ -75,8 +75,8 @@
   --bs-danger-border-subtle: rgba(122, 52, 52, 0.22);
 
   --bs-primary-text-emphasis: var(--rlm-primary-800);
-  --bs-primary-bg-subtle: rgba(46, 74, 58, 0.12);
-  --bs-primary-border-subtle: rgba(46, 74, 58, 0.22);
+  --bs-primary-bg-subtle: rgba(var(--bs-primary-rgb), 0.12);
+  --bs-primary-border-subtle: rgba(var(--bs-primary-rgb), 0.22);
 
   --sidebar-width: 244px;
   --top-header-height: 64px;
@@ -115,6 +115,17 @@ body {
 }
 .admin-html a:hover {
   color: var(--rlm-primary-600);
+}
+
+/* Bootstrap defaults may fall back to bright-blue for pills; enforce theme primary globally. */
+.nav-pills {
+  --bs-nav-pills-link-active-bg: var(--bs-primary);
+  --bs-nav-pills-link-active-color: #fff;
+}
+.nav-pills .nav-link.active,
+.nav-pills .show > .nav-link {
+  background-color: var(--bs-primary);
+  color: #fff;
 }
 .app-shell {
   height: 100%;
@@ -463,6 +474,19 @@ h6,
 .form-select:focus {
   border-color: var(--bs-primary);
   box-shadow: 0 0 0 3px rgba(var(--bs-primary-rgb), 0.15);
+}
+
+/* Checks & Switches */
+.form-check-input:focus {
+  border-color: var(--bs-primary);
+  box-shadow: 0 0 0 3px rgba(var(--bs-primary-rgb), 0.15);
+}
+.form-check-input:checked {
+  background-color: var(--bs-primary);
+  border-color: var(--bs-primary);
+}
+.form-check-input:checked:focus {
+  box-shadow: 0 0 0 3px rgba(var(--bs-primary-rgb), 0.22);
 }
 
 /* Input Groups */

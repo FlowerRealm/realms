@@ -43,6 +43,9 @@
   - 安全: 批量测试在 CLI 模式下禁用（405）
 
 ### 修复
+- **[web]**: 全局覆盖 `nav-pills`/`form-switch` 等状态色并调整主题主色为浅绿色，修复 `/admin/settings` tabs/开关仍呈现默认亮蓝色
+  - 方案: [202602190938_light-green-theme](archive/2026-02/202602190938_light-green-theme/)
+  - 决策: light-green-theme#D001(全局覆盖 `nav-pills` 激活态以避免默认亮蓝色)
 - **[e2e]**: 修复 usage Playwright 测试：等待已移除的 `/api/user/models/detail` 改为 `/api/usage/windows`；补回 `rlm-usage-row` / `rlm-usage-detail-row` 类名
   - 类型: 微调（无方案包）
   - 文件: web/e2e/usage.spec.ts, web/src/pages/usage/UsageEventsCard.tsx
@@ -65,6 +68,10 @@
 - **[release]**: 推送 `master` 并发布 tag `0.11.3`
   - ⚠️ EHRB: 发布 `master` + 推送 tag `0.11.3` - 用户已确认风险
   - 检测依据: `master(分支)`、tag 发布
+- **[git]**: 提交并推送“主题浅绿化（tabs/开关去亮蓝）”到 `master`
+  - ⚠️ EHRB: 推送到 `master` - 用户已确认风险
+  - 检测依据: `master(分支)`
+  - 文件: web/src/index.css, web/e2e/theme-colors.spec.ts, web/src/pages/DashboardPage.tsx, web/src/pages/admin/AdminHomePage.tsx, web/src/pages/admin/ChannelsPage.tsx, web/src/pages/admin/UsageAdminPage.tsx, web/src/pages/usage/UsageTimeSeriesCard.tsx, helloagents/CHANGELOG.md
 - **[git]**: 提交并推送本次变更到 `master`
   - ⚠️ EHRB: 推送到 `master` - 用户已确认风险
   - 检测依据: `master(分支)`

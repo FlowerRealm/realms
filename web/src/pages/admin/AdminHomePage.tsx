@@ -109,7 +109,7 @@ export function AdminHomePage() {
       success: rgb('--bs-success-rgb', '47, 107, 75'),
       warning: rgb('--bs-warning-rgb', '122, 98, 50'),
       danger: rgb('--bs-danger-rgb', '122, 52, 52'),
-      primary: rgb('--bs-primary-rgb', '46, 74, 58'),
+      primary: rgb('--bs-primary-rgb', '60, 138, 97'),
       secondary: rgb('--bs-secondary-rgb', '99, 116, 107'),
     };
 
