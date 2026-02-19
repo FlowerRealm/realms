@@ -67,6 +67,10 @@
 ### CI
 - **[actions/docker]**: Docker 多架构打包提速：将 `web-build` 固定为 `BUILDPLATFORM` 避免 arm64 下 Node/QEMU；移除 QEMU 初始化；后端镜像构建仅导入缓存以减少重复缓存导出
   - 文件: Dockerfile, .github/workflows/docker.yml
+- **[actions]**: 移除 GitHub Actions 的 release 三端打包与 GitHub Pages 文档发布工作流
+  - 文件: .github/workflows/release.yml, .github/workflows/pages.yml, README.md, docs/versioning.md, docs/USAGE.md
+- **[release]**: 移除本仓库的三端打包/安装包构建脚本与 Debian 打包资源（仅保留 Docker 推镜像链路）
+  - 文件: scripts/build-release.sh, scripts/build-deb.sh, packaging/debian/*
 
 ### 发布
 - **[release]**: 推送 `master` 并发布 tag `0.11.3`
@@ -91,6 +95,10 @@
   - ⚠️ EHRB: 推送到 `master` - 用户已确认风险
   - 检测依据: `master(分支)`
   - 文件: Dockerfile, .github/workflows/docker.yml, helloagents/CHANGELOG.md
+- **[git]**: 提交并推送“移除 Actions 的 release/pages 发布链路与本地安装包打包脚本”到 `master`
+  - ⚠️ EHRB: 推送到 `master` - 用户已确认风险
+  - 检测依据: `master(分支)`
+  - 文件: .github/workflows/release.yml, .github/workflows/pages.yml, .github/workflows/docker.yml, Makefile, README.md, docs/USAGE.md, docs/versioning.md, scripts/build-release.sh, scripts/build-deb.sh, helloagents/CHANGELOG.md
 
 ## [0.10.10] - 2026-02-16
 

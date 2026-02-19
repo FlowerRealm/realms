@@ -5,7 +5,7 @@ ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 TOOLS_BIN := $(ROOT_DIR)/.tmp/bin
 AIR := $(TOOLS_BIN)/air
 
-.PHONY: help tools dev test ci ci-real fmt tidy release-artifacts deb
+.PHONY: help tools dev test ci ci-real fmt tidy
 
 help:
 	@echo "Targets:"
@@ -16,8 +16,6 @@ help:
 	@echo "  make ci-real 运行真实上游集成回归（需要 REALMS_CI_*）"
 	@echo "  make fmt     gofmt（按包目录）"
 	@echo "  make tidy    go mod tidy"
-	@echo "  make release-artifacts VERSION=vX.Y.Z   构建发布产物（dist/）"
-	@echo "  make deb VERSION=vX.Y.Z ARCH=amd64      构建 .deb（dist/）"
 
 tools: $(AIR)
 
@@ -43,9 +41,3 @@ fmt:
 
 tidy:
 	go mod tidy
-
-release-artifacts:
-	bash "./scripts/build-release.sh" "$(VERSION)" "dist"
-
-deb:
-	bash "./scripts/build-deb.sh" "$(VERSION)" "$(ARCH)" "dist"

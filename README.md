@@ -15,7 +15,7 @@ Realms 是一个 Go 单体服务（Gin），对外提供 **OpenAI 兼容** 的 A
 
 ## 文档
 
-- 在线文档（GitHub Pages）：https://flowerrealm.github.io/realms/
+- 文档站点：使用 MkDocs 本地预览（`mkdocs serve`）或构建静态站点（`mkdocs build`，可自行部署）
 - 环境变量示例：[`.env.example`](.env.example)
 - 贡献指南：[`CONTRIBUTING.md`](CONTRIBUTING.md)
 - 安全政策：[`SECURITY.md`](SECURITY.md)
@@ -24,9 +24,7 @@ Realms 是一个 Go 单体服务（Gin），对外提供 **OpenAI 兼容** 的 A
 
 ## 安装方式（非 Docker）
 
-- **Debian/Ubuntu（.deb）**：从 GitHub Releases 下载 `realms_<TAG>_linux_amd64.deb`（或 `arm64`），安装后默认以 systemd 服务启动（配置：`/etc/realms/realms.env`；数据：`/var/lib/realms`）。
-- **Windows（.zip 内含 realms.exe）**：从 GitHub Releases 下载 `realms_<TAG>_windows_amd64.zip`，解压后将 `.env.example` 复制为 `.env` 并运行 `realms.exe`。
-- **macOS（.tar.gz）**：从 GitHub Releases 下载 `realms_<TAG>_darwin_arm64.tar.gz`（Apple Silicon）或 `realms_<TAG>_darwin_amd64.tar.gz`（Intel），解压后将 `realms` 放到 PATH（例如 `/usr/local/bin`）并运行。
+- **从源码构建**：`go build ./cmd/realms`（或按需修改 `-ldflags -X` 注入版本信息）。
 
 更完整的部署命令见：`docs/USAGE.md`（Docker Compose 依然是推荐方式）。
 
@@ -323,5 +321,5 @@ bash "./scripts/ci-real.sh"
 - 运行时构建信息（公开）：
   - 健康检查（含版本/DB 状态）：`GET /healthz`
 - release 构建建议通过 `-ldflags -X` 注入版本信息（Docker 发布链路已支持 `REALMS_VERSION/REALMS_BUILD_DATE`）。
-- 最新发布版本（latest）由 GitHub Pages 提供（`version.json` / `version.txt`），用于外部查询与升级提示（见 `.github/workflows/pages.yml`）。
+- latest 版本建议以 Git tag / Docker 镜像 tag 为准（仓库不再自动发布 GitHub Pages 的 `version.json` / `version.txt`）。
 - Web 控制台与管理后台默认不在页脚展示版本信息（如需排障，请使用 `/healthz`）。
