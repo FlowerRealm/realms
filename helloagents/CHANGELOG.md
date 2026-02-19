@@ -68,6 +68,9 @@
 - **[release]**: 推送 `master` 并发布 tag `0.11.3`
   - ⚠️ EHRB: 发布 `master` + 推送 tag `0.11.3` - 用户已确认风险
   - 检测依据: `master(分支)`、tag 发布
+- **[release]**: 推送 `master` 并发布 tag `v0.12.1`
+  - ⚠️ EHRB: 发布 `master` + 推送 tag `v0.12.1` - 用户已确认风险
+  - 检测依据: `master(分支)`、tag 发布
 - **[git]**: 提交并推送“主题浅绿化（tabs/开关去亮蓝）”到 `master`
   - ⚠️ EHRB: 推送到 `master` - 用户已确认风险
   - 检测依据: `master(分支)`
