@@ -21,6 +21,7 @@
   - 移除: `web/src/api/admin/channelGroups.ts` 中未使用的 `listAdminChannelGroupPointerCandidates`
   - 移除: `web/src/format/money.ts` 中未使用的 `formatUSD`
   - 删除: `web/public/vite.svg`、`web/src/assets/react.svg`
+  - ⚠️ EHRB: 推送到 `master` - 用户已确认风险（检测依据: `master(分支)`）
 
 ### 微调
 - **[web]**: `/usage` 页面 1:1 对齐 `/admin/usage`（版式 + 文案 + 字段/表头；补齐"消费排行用户"与明细列；用户侧明细列将"渠道"替换为"Key"）
