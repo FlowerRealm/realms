@@ -123,6 +123,10 @@
   - ⚠️ EHRB: 推送到 `master` - 用户已确认风险
   - 检测依据: `master(分支)`
   - 文件: .github/workflows/release.yml, .github/workflows/pages.yml, .github/workflows/docker.yml, Makefile, README.md, docs/USAGE.md, docs/versioning.md, scripts/build-release.sh, scripts/build-deb.sh, helloagents/CHANGELOG.md
+- **[git]**: 提交并推送“多 key/多账号误伤修复 + Codex OAuth 多账号 failover 标记 + 虚拟上游回归”到 `master`
+  - ⚠️ EHRB: 推送到 `master` - 用户已确认风险
+  - 检测依据: `master(分支)`
+  - 提交: `53c50c5`
 
 ## [0.10.10] - 2026-02-16
 
