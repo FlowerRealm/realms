@@ -48,7 +48,7 @@ func TestBilling_InsufficientBalanceReturnsPaymentRequired_E2E(t *testing.T) {
 
 	const userGroup = "ug1"
 	const routeGroup = "rg1"
-	if _, err := st.CreateChannelGroup(ctx, routeGroup, nil, 1, store.DefaultGroupPriceMultiplier, 5); err != nil {
+	if _, err := st.CreateChannelGroup(ctx, routeGroup, nil, 1, store.DefaultGroupPriceMultiplier); err != nil {
 		t.Fatalf("CreateChannelGroup: %v", err)
 	}
 	if err := st.CreateMainGroup(ctx, userGroup, nil, 1); err != nil {

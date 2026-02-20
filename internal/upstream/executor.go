@@ -48,6 +48,7 @@ type upstreamStore interface {
 	UpdateCodexOAuthAccountTokens(ctx context.Context, accountID int64, accessToken, refreshToken string, idToken *string, expiresAt *time.Time) error
 	SetCodexOAuthAccountStatus(ctx context.Context, accountID int64, status int) error
 	SetCodexOAuthAccountCooldown(ctx context.Context, accountID int64, until time.Time) error
+	SetCodexOAuthAccountQuotaError(ctx context.Context, accountID int64, msg *string) error
 }
 
 func NewExecutor(st *store.Store, cfg config.Config) *Executor {
@@ -180,6 +181,20 @@ func (e *Executor) SetCodexOAuthAccountCooldown(ctx context.Context, accountID i
 		return nil
 	}
 	return e.st.SetCodexOAuthAccountCooldown(ctx, accountID, until)
+}
+
+func (e *Executor) SetCodexOAuthAccountStatus(ctx context.Context, accountID int64, status int) error {
+	if e == nil || e.st == nil || accountID <= 0 {
+		return nil
+	}
+	return e.st.SetCodexOAuthAccountStatus(ctx, accountID, status)
+}
+
+func (e *Executor) SetCodexOAuthAccountQuotaError(ctx context.Context, accountID int64, msg *string) error {
+	if e == nil || e.st == nil || accountID <= 0 {
+		return nil
+	}
+	return e.st.SetCodexOAuthAccountQuotaError(ctx, accountID, msg)
 }
 
 func defaultTransportWithProxy(proxyFn func(*http.Request) (*url.URL, error), dialContext func(ctx context.Context, network, addr string) (net.Conn, error)) *http.Transport {

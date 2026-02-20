@@ -26,14 +26,12 @@ export function ChannelGroupsPage() {
   const [createName, setCreateName] = useState('');
   const [createDesc, setCreateDesc] = useState('');
   const [createMultiplier, setCreateMultiplier] = useState('1');
-  const [createMaxAttempts, setCreateMaxAttempts] = useState('5');
   const [createStatus, setCreateStatus] = useState(1);
 
   const [editing, setEditing] = useState<AdminChannelGroup | null>(null);
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [editMultiplier, setEditMultiplier] = useState('1');
-  const [editMaxAttempts, setEditMaxAttempts] = useState('5');
 
   const enabledCount = useMemo(() => items.filter((x) => x.status === 1).length, [items]);
 
@@ -61,7 +59,6 @@ export function ChannelGroupsPage() {
     setEditName(editing.name || '');
     setEditDesc(editing.description || '');
     setEditMultiplier(editing.price_multiplier || '1');
-    setEditMaxAttempts(String(editing.max_attempts || 5));
   }, [editing]);
 
   return (
@@ -274,7 +271,6 @@ export function ChannelGroupsPage() {
           setCreateName('');
           setCreateDesc('');
           setCreateMultiplier('1');
-          setCreateMaxAttempts('5');
           setCreateStatus(1);
         }}
       >
@@ -289,7 +285,6 @@ export function ChannelGroupsPage() {
                 name: createName.trim(),
                 description: createDesc.trim() || null,
                 price_multiplier: createMultiplier.trim() || undefined,
-                max_attempts: Number.parseInt(createMaxAttempts, 10) || undefined,
                 status: createStatus,
               });
               if (!res.success) throw new Error(res.message || '创建失败');
@@ -318,11 +313,6 @@ export function ChannelGroupsPage() {
               <input className="form-control" value={createMultiplier} onChange={(e) => setCreateMultiplier(e.target.value)} inputMode="decimal" placeholder="1" />
             </div>
             <div className="form-text small text-muted">最终计费 = 模型单价 × 倍率（最多 6 位小数）。</div>
-          </div>
-          <div className="col-12">
-            <label className="form-label">组内最大尝试次数</label>
-            <input className="form-control" value={createMaxAttempts} onChange={(e) => setCreateMaxAttempts(e.target.value)} inputMode="numeric" placeholder="5" />
-            <div className="form-text small text-muted">failover 尝试上限。</div>
           </div>
           <div className="col-12">
             <label className="form-label">状态</label>
@@ -365,7 +355,6 @@ export function ChannelGroupsPage() {
                   name: newName && newName !== oldName ? newName : undefined,
                   description: editDesc.trim() || null,
                   price_multiplier: editMultiplier.trim() || undefined,
-                  max_attempts: Number.parseInt(editMaxAttempts, 10) || undefined,
                   status: editing.status,
                 });
                 if (!res.success) throw new Error(res.message || '保存失败');
@@ -393,10 +382,6 @@ export function ChannelGroupsPage() {
                 <input className="form-control" value={editMultiplier} onChange={(e) => setEditMultiplier(e.target.value)} inputMode="decimal" />
               </div>
               <div className="form-text small text-muted">最终计费 = 模型单价 × 倍率（最多 6 位小数）。</div>
-            </div>
-            <div className="col-12">
-              <label className="form-label">组内最大尝试次数</label>
-              <input className="form-control" value={editMaxAttempts} onChange={(e) => setEditMaxAttempts(e.target.value)} inputMode="numeric" />
             </div>
             <div className="modal-footer border-top-0 px-0 pb-0">
               <button type="button" className="btn btn-light" data-bs-dismiss="modal">

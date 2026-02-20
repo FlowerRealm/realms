@@ -67,7 +67,7 @@ func TestChannels_PageAndInUse_RootFlow(t *testing.T) {
 		t.Fatalf("CreateUpstreamChannel ch2: %v", err)
 	}
 
-	groupID, err := st.CreateChannelGroup(ctx, "g1", nil, 1, store.DefaultGroupPriceMultiplier, 5)
+	groupID, err := st.CreateChannelGroup(ctx, "g1", nil, 1, store.DefaultGroupPriceMultiplier)
 	if err != nil {
 		t.Fatalf("CreateChannelGroup: %v", err)
 	}

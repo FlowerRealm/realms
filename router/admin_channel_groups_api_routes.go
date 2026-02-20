@@ -19,7 +19,6 @@ type adminChannelGroupView struct {
 	Name               string  `json:"name"`
 	Description        *string `json:"description,omitempty"`
 	PriceMultiplier    string  `json:"price_multiplier"`
-	MaxAttempts        int     `json:"max_attempts"`
 	Status             int     `json:"status"`
 	CreatedAt          string  `json:"created_at"`
 	UpdatedAt          string  `json:"updated_at"`
@@ -96,7 +95,6 @@ func adminListChannelGroupsHandler(opts Options) gin.HandlerFunc {
 				Name:               g.Name,
 				Description:        g.Description,
 				PriceMultiplier:    formatDecimalPlain(g.PriceMultiplier, store.PriceMultiplierScale),
-				MaxAttempts:        g.MaxAttempts,
 				Status:             g.Status,
 				CreatedAt:          g.CreatedAt.Format("2006-01-02 15:04"),
 				UpdatedAt:          g.UpdatedAt.Format("2006-01-02 15:04"),
@@ -139,7 +137,6 @@ func adminGetChannelGroupHandler(opts Options) gin.HandlerFunc {
 				Name:            g.Name,
 				Description:     g.Description,
 				PriceMultiplier: formatDecimalPlain(g.PriceMultiplier, store.PriceMultiplierScale),
-				MaxAttempts:     g.MaxAttempts,
 				Status:          g.Status,
 				CreatedAt:       g.CreatedAt.Format("2006-01-02 15:04"),
 				UpdatedAt:       g.UpdatedAt.Format("2006-01-02 15:04"),
@@ -173,7 +170,6 @@ func adminCreateChannelGroupHandler(opts Options) gin.HandlerFunc {
 		Name            string  `json:"name"`
 		Description     *string `json:"description,omitempty"`
 		PriceMultiplier string  `json:"price_multiplier"`
-		MaxAttempts     int     `json:"max_attempts"`
 		Status          int     `json:"status"`
 	}
 	return func(c *gin.Context) {
@@ -207,12 +203,7 @@ func adminCreateChannelGroupHandler(opts Options) gin.HandlerFunc {
 		if status != 0 && status != 1 {
 			status = 1
 		}
-		maxAttempts := req.MaxAttempts
-		if maxAttempts <= 0 {
-			maxAttempts = 5
-		}
-
-		id, err := opts.Store.CreateChannelGroup(c.Request.Context(), name, req.Description, status, priceMult, maxAttempts)
+		id, err := opts.Store.CreateChannelGroup(c.Request.Context(), name, req.Description, status, priceMult)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建失败（可能渠道组已存在）"})
 			return
@@ -227,7 +218,6 @@ func adminUpdateChannelGroupHandler(opts Options) gin.HandlerFunc {
 		Name            *string `json:"name,omitempty"`
 		Description     *string `json:"description,omitempty"`
 		PriceMultiplier string  `json:"price_multiplier"`
-		MaxAttempts     int     `json:"max_attempts"`
 		Status          int     `json:"status"`
 	}
 	return func(c *gin.Context) {
@@ -270,13 +260,7 @@ func adminUpdateChannelGroupHandler(opts Options) gin.HandlerFunc {
 			}
 			priceMult = m
 		}
-
-		maxAttempts := req.MaxAttempts
-		if maxAttempts <= 0 {
-			maxAttempts = g.MaxAttempts
-		}
-
-		if _, err := opts.Store.UpdateChannelGroupWithRename(c.Request.Context(), g.ID, req.Name, req.Description, status, priceMult, maxAttempts); err != nil {
+		if _, err := opts.Store.UpdateChannelGroupWithRename(c.Request.Context(), g.ID, req.Name, req.Description, status, priceMult); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Not Found"})
 				return
@@ -381,7 +365,6 @@ type adminChannelGroupMemberView struct {
 	MemberGroupID          *int64  `json:"member_group_id,omitempty"`
 	MemberGroupName        *string `json:"member_group_name,omitempty"`
 	MemberGroupStatus      *int    `json:"member_group_status,omitempty"`
-	MemberGroupMaxAttempts *int    `json:"member_group_max_attempts,omitempty"`
 
 	MemberChannelID     *int64  `json:"member_channel_id,omitempty"`
 	MemberChannelName   *string `json:"member_channel_name,omitempty"`
@@ -453,7 +436,6 @@ func adminGetChannelGroupDetailHandler(opts Options) gin.HandlerFunc {
 				Name:            g.Name,
 				Description:     g.Description,
 				PriceMultiplier: formatDecimalPlain(g.PriceMultiplier, store.PriceMultiplierScale),
-				MaxAttempts:     g.MaxAttempts,
 				Status:          g.Status,
 				CreatedAt:       g.CreatedAt.Format("2006-01-02 15:04"),
 				UpdatedAt:       g.UpdatedAt.Format("2006-01-02 15:04"),
@@ -471,7 +453,6 @@ func adminGetChannelGroupDetailHandler(opts Options) gin.HandlerFunc {
 				MemberGroupID:          m.MemberGroupID,
 				MemberGroupName:        m.MemberGroupName,
 				MemberGroupStatus:      m.MemberGroupStatus,
-				MemberGroupMaxAttempts: m.MemberGroupMaxAttempts,
 
 				MemberChannelID:     m.MemberChannelID,
 				MemberChannelName:   m.MemberChannelName,
@@ -501,7 +482,6 @@ func adminCreateChildChannelGroupHandler(opts Options) gin.HandlerFunc {
 		Name            string  `json:"name"`
 		Description     *string `json:"description,omitempty"`
 		PriceMultiplier string  `json:"price_multiplier"`
-		MaxAttempts     int     `json:"max_attempts"`
 		Status          int     `json:"status"`
 	}
 
@@ -543,12 +523,7 @@ func adminCreateChildChannelGroupHandler(opts Options) gin.HandlerFunc {
 		if status != 0 && status != 1 {
 			status = 1
 		}
-		maxAttempts := req.MaxAttempts
-		if maxAttempts <= 0 {
-			maxAttempts = 5
-		}
-
-		id, err := opts.Store.CreateChannelGroup(c.Request.Context(), name, req.Description, status, priceMult, maxAttempts)
+		id, err := opts.Store.CreateChannelGroup(c.Request.Context(), name, req.Description, status, priceMult)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建失败（可能渠道组已存在）"})
 			return
@@ -705,7 +680,6 @@ func channelGroupBreadcrumb(ctx context.Context, st *store.Store, groupID int64)
 			Name:            g.Name,
 			Description:     g.Description,
 			PriceMultiplier: formatDecimalPlain(g.PriceMultiplier, store.PriceMultiplierScale),
-			MaxAttempts:     g.MaxAttempts,
 			Status:          g.Status,
 			CreatedAt:       g.CreatedAt.Format("2006-01-02 15:04"),
 			UpdatedAt:       g.UpdatedAt.Format("2006-01-02 15:04"),

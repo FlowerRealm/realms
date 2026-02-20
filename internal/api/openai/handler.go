@@ -62,6 +62,14 @@ type CodexCooldownSetter interface {
 	SetCodexOAuthAccountCooldown(ctx context.Context, accountID int64, until time.Time) error
 }
 
+type CodexStatusSetter interface {
+	SetCodexOAuthAccountStatus(ctx context.Context, accountID int64, status int) error
+}
+
+type CodexQuotaErrorSetter interface {
+	SetCodexOAuthAccountQuotaError(ctx context.Context, accountID int64, msg *string) error
+}
+
 type AuditSink interface {
 	InsertAuditEvent(ctx context.Context, in store.AuditEventInput) error
 }
@@ -591,15 +599,24 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 	// 失败分支：根据状态码决定是否 failover。
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes := readPrefixBestEffort(resp.Body, upstreamErrorBodyMaxBytes)
-		retriableByCodexExhausted := isCodexUsageLimitReached(sel, resp.StatusCode, bodyBytes)
-		retriable := isRetriableStatus(resp.StatusCode) || retriableByCodexExhausted
+		codexErr := classifyCodexOAuthUpstreamError(sel, resp.StatusCode, bodyBytes)
+		retriable := isRetriableStatus(resp.StatusCode) || codexErr.retriable()
 		errorClass := "upstream_status"
 		var cooldownUntil *time.Time
-		if retriableByCodexExhausted {
-			errorClass = "upstream_exhausted"
-			until := codexUsageLimitCooldownUntil(time.Now(), bodyBytes)
-			cooldownUntil = &until
-			h.setCodexCredentialCooldown(r.Context(), sel, until)
+		if codexErr.Kind != codexOAuthErrNone {
+			if cls := codexErr.errorClass(); cls != "" {
+				errorClass = cls
+			}
+			if codexErr.DisableAccount {
+				h.setCodexCredentialDisabled(r.Context(), sel)
+			}
+			if codexErr.MarkBalanceDepleted {
+				h.setCodexCredentialQuotaError(r.Context(), sel, "余额用尽")
+			}
+			if until := codexErr.cooldownUntil(time.Now(), bodyBytes); until != nil {
+				cooldownUntil = until
+				h.setCodexCredentialCooldown(r.Context(), sel, *until)
+			}
 		}
 		if retriable {
 			failMsg := summarizeUpstreamErrorBody(bodyBytes)
@@ -744,7 +761,6 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		obs.RecordSSEFirstWriteLatency(pumpRes.FirstWriteLatency)
 		obs.RecordSSEBytesStreamed(pumpRes.BytesWritten)
 		obs.RecordSSEPumpResult(pumpRes.ErrorClass, pumpRes.SawDone)
-		h.touchBindingFromRouteKey(p.UserID, sel, responseRouteKey)
 
 		if usageID != 0 && h.quota != nil {
 			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -836,7 +852,6 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			default:
 			}
 		}
-		h.touchBindingFromRouteKey(p.UserID, sel, extractRouteKeyFromRawBody(bodyBytes))
 		inTok, outTok, cachedInTok, cachedOutTok = extractUsageTokens(bodyBytes)
 	}
 
@@ -1061,6 +1076,13 @@ func codexUsageLimitCooldownUntil(now time.Time, body []byte) time.Time {
 	return now.Add(5 * time.Minute)
 }
 
+func codexRateLimitCooldownUntil(now time.Time, body []byte) time.Time {
+	if resetAt := parseCodexUsageLimitResetAt(now, body); resetAt != nil && resetAt.After(now) {
+		return *resetAt
+	}
+	return now.Add(30 * time.Second)
+}
+
 func parseCodexUsageLimitResetAt(now time.Time, body []byte) *time.Time {
 	if len(body) == 0 {
 		return nil
@@ -1123,6 +1145,138 @@ func (h *Handler) setCodexCredentialCooldown(ctx context.Context, sel scheduler.
 		return
 	}
 	_ = setter.SetCodexOAuthAccountCooldown(ctx, sel.CredentialID, until)
+}
+
+func (h *Handler) setCodexCredentialDisabled(ctx context.Context, sel scheduler.Selection) {
+	if h == nil || h.exec == nil {
+		return
+	}
+	if sel.CredentialType != scheduler.CredentialTypeCodex || sel.CredentialID <= 0 {
+		return
+	}
+	setter, ok := h.exec.(CodexStatusSetter)
+	if !ok {
+		return
+	}
+	_ = setter.SetCodexOAuthAccountStatus(ctx, sel.CredentialID, 0)
+}
+
+func (h *Handler) setCodexCredentialQuotaError(ctx context.Context, sel scheduler.Selection, msg string) {
+	if h == nil || h.exec == nil {
+		return
+	}
+	if sel.CredentialType != scheduler.CredentialTypeCodex || sel.CredentialID <= 0 {
+		return
+	}
+	setter, ok := h.exec.(CodexQuotaErrorSetter)
+	if !ok {
+		return
+	}
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return
+	}
+	_ = setter.SetCodexOAuthAccountQuotaError(ctx, sel.CredentialID, &msg)
+}
+
+type codexOAuthErrKind int
+
+const (
+	codexOAuthErrNone codexOAuthErrKind = iota
+	codexOAuthErrRateLimited
+	codexOAuthErrBalanceDepleted
+	codexOAuthErrCredentialInvalid
+)
+
+type codexOAuthUpstreamErr struct {
+	Kind                codexOAuthErrKind
+	DisableAccount      bool
+	MarkBalanceDepleted bool
+}
+
+func (e codexOAuthUpstreamErr) retriable() bool {
+	return e.Kind != codexOAuthErrNone
+}
+
+func (e codexOAuthUpstreamErr) errorClass() string {
+	switch e.Kind {
+	case codexOAuthErrRateLimited:
+		return "upstream_throttled"
+	case codexOAuthErrBalanceDepleted:
+		return "upstream_exhausted"
+	case codexOAuthErrCredentialInvalid:
+		return "upstream_credential_invalid"
+	default:
+		return ""
+	}
+}
+
+func (e codexOAuthUpstreamErr) cooldownUntil(now time.Time, body []byte) *time.Time {
+	switch e.Kind {
+	case codexOAuthErrRateLimited:
+		until := codexRateLimitCooldownUntil(now, body)
+		return &until
+	case codexOAuthErrBalanceDepleted:
+		until := codexUsageLimitCooldownUntil(now, body)
+		return &until
+	default:
+		return nil
+	}
+}
+
+func classifyCodexOAuthUpstreamError(sel scheduler.Selection, statusCode int, body []byte) codexOAuthUpstreamErr {
+	if sel.CredentialType != scheduler.CredentialTypeCodex {
+		return codexOAuthUpstreamErr{}
+	}
+	code, typ := extractUpstreamErrorCodeAndType(body)
+	code = strings.ToLower(strings.TrimSpace(code))
+	typ = strings.ToLower(strings.TrimSpace(typ))
+	msg := strings.ToLower(summarizeUpstreamErrorBody(body))
+
+	isUsageLimit := typ == "usage_limit_reached" || code == "usage_limit_reached"
+	isUsageLimit = isUsageLimit || typ == "insufficient_quota" || code == "insufficient_quota"
+	isUsageLimit = isUsageLimit || typ == "billing_hard_limit_reached" || code == "billing_hard_limit_reached"
+	if statusCode == http.StatusPaymentRequired {
+		isUsageLimit = true
+	}
+
+	if isUsageLimit {
+		return codexOAuthUpstreamErr{
+			Kind:                codexOAuthErrBalanceDepleted,
+			MarkBalanceDepleted: true,
+		}
+	}
+
+	// rate_limit_exceeded / 429：优先视为限流（短冷却），避免把限流误判为“余额用尽”。
+	if typ == "rate_limit_exceeded" || code == "rate_limit_exceeded" || statusCode == http.StatusTooManyRequests {
+		return codexOAuthUpstreamErr{Kind: codexOAuthErrRateLimited}
+	}
+
+	// 401/403 常见为 token 被撤销/账号被封禁：高置信才禁用，避免误伤。
+	if statusCode == http.StatusUnauthorized {
+		if typ == "invalid_authentication" || code == "invalid_authentication" ||
+			typ == "invalid_api_key" || code == "invalid_api_key" ||
+			typ == "invalid_token" || code == "invalid_token" ||
+			typ == "token_expired" || code == "token_expired" ||
+			(strings.Contains(msg, "invalid") && strings.Contains(msg, "token")) {
+			return codexOAuthUpstreamErr{
+				Kind:           codexOAuthErrCredentialInvalid,
+				DisableAccount: true,
+			}
+		}
+	}
+	if statusCode == http.StatusForbidden {
+		if typ == "account_deactivated" || code == "account_deactivated" ||
+			strings.Contains(msg, "suspended") || strings.Contains(msg, "banned") ||
+			strings.Contains(msg, "disabled") || strings.Contains(msg, "deactivated") {
+			return codexOAuthUpstreamErr{
+				Kind:           codexOAuthErrCredentialInvalid,
+				DisableAccount: true,
+			}
+		}
+	}
+
+	return codexOAuthUpstreamErr{}
 }
 
 func extractUpstreamErrorCodeAndType(body []byte) (string, string) {

@@ -43,7 +43,7 @@ test.describe('admin channel groups pointer', () => {
     const defaultGroupName = `pw-e2e-default-pointer-${Date.now()}`;
     const createResp = await page.request.post('/api/admin/channel-groups', {
       headers: { 'Realms-User': realmsUser },
-      data: { name: defaultGroupName, price_multiplier: '1', max_attempts: 5, status: 1 },
+      data: { name: defaultGroupName, price_multiplier: '1', status: 1 },
     });
     expect(createResp.ok()).toBeTruthy();
     const createJson = (await createResp.json()) as { success: boolean; message?: string; data?: { id?: number } };

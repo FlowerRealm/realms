@@ -108,7 +108,6 @@ func (h *Handler) recordOpenAIObjectRef(ctx context.Context, objectType string, 
 		TokenID:       tokenID,
 		SelectionJSON: string(rawSel),
 	})
-	h.touchBindingFromRouteKey(p.UserID, sel, objectID)
 }
 
 func (h *Handler) ownedSelection(ctx context.Context, p auth.Principal, objectType string, objectID string) (scheduler.Selection, bool) {
@@ -126,7 +125,6 @@ func (h *Handler) ownedSelection(ctx context.Context, p auth.Principal, objectTy
 	if err := json.Unmarshal([]byte(ref.SelectionJSON), &sel); err != nil {
 		return scheduler.Selection{}, false
 	}
-	h.touchBindingFromRouteKey(p.UserID, sel, objectID)
 	return sel, true
 }
 

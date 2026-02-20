@@ -173,7 +173,6 @@ type channelUsageOverviewView struct {
 	CacheRatio           string             `json:"cache_ratio"`
 	AvgFirstTokenLatency string             `json:"avg_first_token_latency"`
 	TokensPerSecond      string             `json:"tokens_per_second"`
-	BindingRuntime       bindingRuntimeInfo `json:"binding_runtime"`
 }
 
 type channelAdminListItem struct {
@@ -378,7 +377,6 @@ func channelsPageHandler(opts Options) gin.HandlerFunc {
 					CacheRatio:           fmt.Sprintf("%.1f%%", overviewStats.CacheRatio*100),
 					AvgFirstTokenLatency: formatAvgFirstTokenLatency(overviewStats.AvgFirstTokenMS, overviewStats.FirstTokenSamples),
 					TokensPerSecond:      formatTokensPerSecond(overviewStats.OutputTokensPerSec),
-					BindingRuntime:       bindingRuntimeForAPI(opts),
 				},
 				Channels: out,
 			},

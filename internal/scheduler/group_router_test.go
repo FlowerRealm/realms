@@ -70,12 +70,11 @@ func TestGroupRouter_Next_AllowsOneRetryThenSwitchesChannel(t *testing.T) {
 	s := New(fs)
 
 	g0 := store.ChannelGroup{
-		ID:          1,
-		Name:        "g0",
-		MaxAttempts: 10,
-		Status:      1,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:        1,
+		Name:      "g0",
+		Status:    1,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 	gs := &fakeGroupStore{
 		groupsByID:   map[int64]store.ChannelGroup{1: g0},
@@ -166,28 +165,25 @@ func TestGroupRouter_Next_OrderedGroupsHonorsPriorityAndSetsRouteGroup(t *testin
 	s := New(fs)
 
 	root := store.ChannelGroup{
-		ID:          1,
-		Name:        store.DefaultGroupName,
-		MaxAttempts: 10,
-		Status:      1,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:        1,
+		Name:      store.DefaultGroupName,
+		Status:    1,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 	g1 := store.ChannelGroup{
-		ID:          2,
-		Name:        "g1",
-		MaxAttempts: 1,
-		Status:      1,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:        2,
+		Name:      "g1",
+		Status:    1,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 	g2 := store.ChannelGroup{
-		ID:          3,
-		Name:        "g2",
-		MaxAttempts: 1,
-		Status:      1,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:        3,
+		Name:      "g2",
+		Status:    1,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 	gs := &fakeGroupStore{
 		groupsByID: map[int64]store.ChannelGroup{
@@ -250,6 +246,9 @@ func TestGroupRouter_Next_OrderedGroupsHonorsPriorityAndSetsRouteGroup(t *testin
 		t.Fatalf("expected first route_group=g1, got=%q", first.RouteGroup)
 	}
 
+	// 模拟 g1 变为不可用（例如渠道被 ban / 所有 key 冷却），此时应按 AllowGroupOrder failover 到 g2。
+	s.state.BanChannelImmediate(1, time.Now(), time.Minute)
+
 	second, err := router.Next(context.Background())
 	if err != nil {
 		t.Fatalf("Next err: %v", err)
@@ -290,12 +289,11 @@ func TestGroupRouter_Next_GroupPointerPinnedOverridesPriorityWithinGroup(t *test
 	s.SetGroupPointerStore(ps)
 
 	g0 := store.ChannelGroup{
-		ID:          1,
-		Name:        "g0",
-		MaxAttempts: 10,
-		Status:      1,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:        1,
+		Name:      "g0",
+		Status:    1,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 	gs := &fakeGroupStore{
 		groupsByID:   map[int64]store.ChannelGroup{g0.ID: g0},
@@ -375,8 +373,8 @@ func TestGroupRouter_Next_GroupPointerDoesNotBypassAllowGroupOrder(t *testing.T)
 	ps := &fakeGroupPointerStore{}
 	s.SetGroupPointerStore(ps)
 
-	g1 := store.ChannelGroup{ID: 1, Name: "g1", MaxAttempts: 10, Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
-	g2 := store.ChannelGroup{ID: 2, Name: "g2", MaxAttempts: 10, Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	g1 := store.ChannelGroup{ID: 1, Name: "g1", Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	g2 := store.ChannelGroup{ID: 2, Name: "g2", Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	gs := &fakeGroupStore{
 		groupsByID: map[int64]store.ChannelGroup{
 			g1.ID: g1,
@@ -463,7 +461,7 @@ func TestGroupRouter_Next_GroupPointerRotatesOnBan(t *testing.T) {
 	ps := &fakeGroupPointerStore{}
 	s.SetGroupPointerStore(ps)
 
-	g0 := store.ChannelGroup{ID: 1, Name: "g0", MaxAttempts: 10, Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	g0 := store.ChannelGroup{ID: 1, Name: "g0", Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	gs := &fakeGroupStore{
 		groupsByID:   map[int64]store.ChannelGroup{g0.ID: g0},
 		groupsByName: map[string]store.ChannelGroup{g0.Name: g0},
@@ -551,7 +549,7 @@ func TestGroupRouter_Next_GroupPointerInvalidFallsBackToRingStart(t *testing.T) 
 	ps := &fakeGroupPointerStore{}
 	s.SetGroupPointerStore(ps)
 
-	g0 := store.ChannelGroup{ID: 1, Name: "g0", MaxAttempts: 10, Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	g0 := store.ChannelGroup{ID: 1, Name: "g0", Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	gs := &fakeGroupStore{
 		groupsByID:   map[int64]store.ChannelGroup{g0.ID: g0},
 		groupsByName: map[string]store.ChannelGroup{g0.Name: g0},

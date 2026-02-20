@@ -30,7 +30,7 @@ func TestEnsureSQLiteSchema_BackfillsChannelGroupMembers(t *testing.T) {
 	st.SetDialect(store.DialectSQLite)
 
 	ctx := context.Background()
-	vipID, err := st.CreateChannelGroup(ctx, "vip", nil, 1, store.DefaultGroupPriceMultiplier, 5)
+	vipID, err := st.CreateChannelGroup(ctx, "vip", nil, 1, store.DefaultGroupPriceMultiplier)
 	if err != nil {
 		t.Fatalf("CreateChannelGroup: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestForceDeleteChannelGroup_SQLite(t *testing.T) {
 	st.SetDialect(store.DialectSQLite)
 
 	ctx := context.Background()
-	groupID, err := st.CreateChannelGroup(ctx, "vip", nil, 1, store.DefaultGroupPriceMultiplier, 5)
+	groupID, err := st.CreateChannelGroup(ctx, "vip", nil, 1, store.DefaultGroupPriceMultiplier)
 	if err != nil {
 		t.Fatalf("CreateChannelGroup: %v", err)
 	}
@@ -133,14 +133,14 @@ func TestListEnabledManagedModelsWithBindingsForGroup_SQLite(t *testing.T) {
 	st.SetDialect(store.DialectSQLite)
 
 	ctx := context.Background()
-	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, store.DefaultGroupPriceMultiplier, 5); err != nil {
+	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, store.DefaultGroupPriceMultiplier); err != nil {
 		t.Fatalf("CreateChannelGroup: %v", err)
 	}
 	vipChannelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch-vip", "vip", 0, false, false, false, false)
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel: %v", err)
 	}
-	if _, err := st.CreateChannelGroup(ctx, "admin", nil, 1, store.DefaultGroupPriceMultiplier, 5); err != nil {
+	if _, err := st.CreateChannelGroup(ctx, "admin", nil, 1, store.DefaultGroupPriceMultiplier); err != nil {
 		t.Fatalf("CreateChannelGroup(admin): %v", err)
 	}
 	adminChannelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch-admin", "admin", 0, false, false, false, false)
@@ -275,7 +275,7 @@ func TestUpdateChannelGroupWithRename_Cascades_SQLite(t *testing.T) {
 
 	ctx := context.Background()
 
-	vipID, err := st.CreateChannelGroup(ctx, "vip", nil, 1, store.DefaultGroupPriceMultiplier, 5)
+	vipID, err := st.CreateChannelGroup(ctx, "vip", nil, 1, store.DefaultGroupPriceMultiplier)
 	if err != nil {
 		t.Fatalf("CreateChannelGroup: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestUpdateChannelGroupWithRename_Cascades_SQLite(t *testing.T) {
 	}
 
 	newName := "vip2"
-	if _, err := st.UpdateChannelGroupWithRename(ctx, vipID, &newName, old.Description, old.Status, old.PriceMultiplier, old.MaxAttempts); err != nil {
+	if _, err := st.UpdateChannelGroupWithRename(ctx, vipID, &newName, old.Description, old.Status, old.PriceMultiplier); err != nil {
 		t.Fatalf("UpdateChannelGroupWithRename: %v", err)
 	}
 
@@ -407,11 +407,11 @@ func TestDefaultChannelGroup_CanDisableAndDelete_ClearsSetting_SQLite(t *testing
 
 	ctx := context.Background()
 
-	g1ID, err := st.CreateChannelGroup(ctx, "g1", nil, 1, store.DefaultGroupPriceMultiplier, 5)
+	g1ID, err := st.CreateChannelGroup(ctx, "g1", nil, 1, store.DefaultGroupPriceMultiplier)
 	if err != nil {
 		t.Fatalf("CreateChannelGroup(g1): %v", err)
 	}
-	g2ID, err := st.CreateChannelGroup(ctx, "g2", nil, 1, store.DefaultGroupPriceMultiplier, 5)
+	g2ID, err := st.CreateChannelGroup(ctx, "g2", nil, 1, store.DefaultGroupPriceMultiplier)
 	if err != nil {
 		t.Fatalf("CreateChannelGroup(g2): %v", err)
 	}
@@ -425,7 +425,7 @@ func TestDefaultChannelGroup_CanDisableAndDelete_ClearsSetting_SQLite(t *testing
 		t.Fatalf("GetChannelGroupByID(g1): %v", err)
 	}
 
-	if _, err := st.UpdateChannelGroupWithRename(ctx, g1ID, nil, g1.Description, 0, g1.PriceMultiplier, g1.MaxAttempts); err != nil {
+	if _, err := st.UpdateChannelGroupWithRename(ctx, g1ID, nil, g1.Description, 0, g1.PriceMultiplier); err != nil {
 		t.Fatalf("disable default group should succeed: %v", err)
 	}
 	if id, ok, err := st.GetDefaultChannelGroupID(ctx); err != nil || ok || id != 0 {

@@ -12,7 +12,7 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-const AdminConfigExportVersion = 6
+const AdminConfigExportVersion = 7
 
 type AdminConfigExport struct {
 	Version    int       `json:"version"`
@@ -32,7 +32,6 @@ type AdminConfigChannelGroup struct {
 	Name            string          `json:"name"`
 	Description     *string         `json:"description,omitempty"`
 	PriceMultiplier decimal.Decimal `json:"price_multiplier"`
-	MaxAttempts     int             `json:"max_attempts"`
 	Status          int             `json:"status"`
 }
 
@@ -135,7 +134,6 @@ func (s *Store) ExportAdminConfig(ctx context.Context) (AdminConfigExport, error
 			Name:            strings.TrimSpace(g.Name),
 			Description:     g.Description,
 			PriceMultiplier: g.PriceMultiplier,
-			MaxAttempts:     g.MaxAttempts,
 			Status:          g.Status,
 		})
 	}
@@ -334,23 +332,21 @@ func (s *Store) ImportAdminConfig(ctx context.Context, in AdminConfigExport) (Ad
 	}
 
 	stmtUpsertGroup := `
-INSERT INTO channel_groups(name, description, price_multiplier, max_attempts, status, created_at, updated_at)
-VALUES(?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+INSERT INTO channel_groups(name, description, price_multiplier, status, created_at, updated_at)
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 ON DUPLICATE KEY UPDATE
   description=VALUES(description),
   price_multiplier=VALUES(price_multiplier),
-  max_attempts=VALUES(max_attempts),
   status=VALUES(status),
   updated_at=CURRENT_TIMESTAMP
 `
 	if s.dialect == DialectSQLite {
 		stmtUpsertGroup = `
-INSERT INTO channel_groups(name, description, price_multiplier, max_attempts, status, created_at, updated_at)
-VALUES(?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+INSERT INTO channel_groups(name, description, price_multiplier, status, created_at, updated_at)
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 ON CONFLICT(name) DO UPDATE SET
   description=excluded.description,
   price_multiplier=excluded.price_multiplier,
-  max_attempts=excluded.max_attempts,
   status=excluded.status,
   updated_at=CURRENT_TIMESTAMP
 `
@@ -373,16 +369,12 @@ ON CONFLICT(name) DO UPDATE SET
 		if pm.IsNegative() {
 			pm = DefaultGroupPriceMultiplier
 		}
-		maxAttempts := g.MaxAttempts
-		if maxAttempts <= 0 {
-			maxAttempts = 5
-		}
 		status := g.Status
 		if status != 0 && status != 1 {
 			status = 1
 		}
 
-		if _, err := tx.ExecContext(ctx, stmtUpsertGroup, name, desc, pm, maxAttempts, status); err != nil {
+		if _, err := tx.ExecContext(ctx, stmtUpsertGroup, name, desc, pm, status); err != nil {
 			return AdminConfigImportReport{}, fmt.Errorf("导入 channel_groups 失败: %w", err)
 		}
 	}

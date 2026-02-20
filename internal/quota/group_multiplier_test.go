@@ -17,10 +17,10 @@ func TestLoadUserGroupMultiplierSnapshot_StacksUserGroups(t *testing.T) {
 
 	userID, tokID := createQuotaTestUser(t, st, ctx, "alice@example.com", "alice")
 
-	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, decimal.RequireFromString("1.5"), 5); err != nil {
+	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, decimal.RequireFromString("1.5")); err != nil {
 		t.Fatalf("CreateChannelGroup(vip): %v", err)
 	}
-	if _, err := st.CreateChannelGroup(ctx, "staff", nil, 1, decimal.RequireFromString("0.8"), 5); err != nil {
+	if _, err := st.CreateChannelGroup(ctx, "staff", nil, 1, decimal.RequireFromString("0.8")); err != nil {
 		t.Fatalf("CreateChannelGroup(staff): %v", err)
 	}
 	if err := st.CreateMainGroup(ctx, "ug1", nil, 1); err != nil {
@@ -51,10 +51,10 @@ func TestSubscriptionProviderReserveCommit_MultipliesPlanAndRouteGroup(t *testin
 
 	userID, tokenID := createQuotaTestUser(t, st, ctx, "bob@example.com", "bob")
 
-	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, decimal.RequireFromString("1.5"), 5); err != nil {
+	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, decimal.RequireFromString("1.5")); err != nil {
 		t.Fatalf("CreateChannelGroup(vip): %v", err)
 	}
-	if _, err := st.CreateChannelGroup(ctx, "staff", nil, 1, decimal.RequireFromString("2"), 5); err != nil {
+	if _, err := st.CreateChannelGroup(ctx, "staff", nil, 1, decimal.RequireFromString("2")); err != nil {
 		t.Fatalf("CreateChannelGroup(staff): %v", err)
 	}
 	if err := st.CreateMainGroup(ctx, "ug1", nil, 1); err != nil {
@@ -164,7 +164,7 @@ func TestHybridProviderReserveCommit_AppliesRouteGroupMultiplier(t *testing.T) {
 		t.Fatalf("AddUserBalanceUSD: %v", err)
 	}
 
-	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, decimal.RequireFromString("1.5"), 5); err != nil {
+	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, decimal.RequireFromString("1.5")); err != nil {
 		t.Fatalf("CreateChannelGroup(vip): %v", err)
 	}
 	if err := st.CreateMainGroup(ctx, "ug1", nil, 1); err != nil {

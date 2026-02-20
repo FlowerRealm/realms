@@ -53,6 +53,16 @@
   - 安全: 批量测试在 CLI 模式下禁用（405）
 
 ### 修复
+- **[scheduler/channel-groups]**: 删除 `channel_groups.max_attempts` 与组内 failover 上限，避免多 key/多账号在组路由中被误伤
+  - MySQL: 新增迁移 `internal/store/migrations/0061_drop_channel_groups_max_attempts.sql`
+  - SQLite: `internal/store/schema_sqlite.sql` 同步移除字段
+- **[scheduler]**: 移除 session binding/sticky 逻辑与相关运行态输出，修复多账号“不轮询/不分配使用”与误伤问题
+  - 影响范围: `internal/scheduler/*`、`router/channel_runtime_api.go`、`internal/api/openai/*`
+- **[codex_oauth]**: 多账号失败分类与标记：区分“余额用尽 / 限流 / 账号不可用”，并在切换到下一个账号前写入持久标记
+  - 余额用尽: 写入 `quota_error=余额用尽` + `cooldown_until`（按上游 `resets_at`/`resets_in_seconds`）
+  - 限流: 标记 `upstream_throttled` 并短冷却，避免把限流误判为余额耗尽
+  - 账号不可用: 401/403 高置信禁用账号（`status=0`）
+  - 调度保护: `upstream_exhausted`/`upstream_throttled` 不触发 channel auto-ban
 - **[web]**: 全局覆盖 `nav-pills`/`form-switch` 等状态色并调整主题主色为浅绿色，修复 `/admin/settings` tabs/开关仍呈现默认亮蓝色
   - 方案: [202602190938_light-green-theme](archive/2026-02/202602190938_light-green-theme/)
   - 决策: light-green-theme#D001(全局覆盖 `nav-pills` 激活态以避免默认亮蓝色)
@@ -61,6 +71,10 @@
   - 文件: web/e2e/usage.spec.ts, web/src/pages/usage/UsageEventsCard.tsx
 
 ### 测试
+- **[e2e/codex_oauth]**: 增加虚拟上游回归：多账号在 `usage_limit_reached`/`invalid_token` 下的标记与 failover（余额用尽/禁用账号）
+  - 文件: tests/e2e/codex_oauth_multi_account_test.go
+- **[playwright/codex_oauth]**: 增加 UI 回归：触发 codex_oauth 多账号 failover 后，`/admin/channels` 账号统计面板展示“余额用尽/已禁用”
+  - 文件: web/e2e/codex-oauth-multi-account.spec.ts
 - **[e2e]**: 增加回归：`upstream_unavailable` 在管理后台展示“最后一次失败原因”，用户侧仍保持“上游不可用”
   - 文件: web/e2e/upstream-unavailable-details.spec.ts, cmd/realms-e2e/main.go
 - **[e2e]**: 增加回归：登录页右上角导航（nav-pills）激活态不使用默认亮蓝色，且命中主题主色

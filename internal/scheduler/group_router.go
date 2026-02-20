@@ -40,9 +40,6 @@ type groupCursor struct {
 
 	loaded  bool
 	members []store.ChannelGroupMemberDetail
-
-	// attemptsUsed 统计该组已经返回给上层的“叶子选择”次数；达到 MaxAttempts 后视为耗尽。
-	attemptsUsed int
 }
 
 func NewGroupRouter(st ChannelGroupStore, sched *Scheduler, userID int64, routeKeyHash string, cons Constraints) *GroupRouter {
@@ -149,14 +146,6 @@ func (r *GroupRouter) nextFromGroup(ctx context.Context, groupID int64) (Selecti
 		return Selection{}, errGroupExhausted
 	}
 
-	maxAttempts := c.group.MaxAttempts
-	if maxAttempts <= 0 {
-		maxAttempts = 5
-	}
-	if c.attemptsUsed >= maxAttempts {
-		return Selection{}, errGroupExhausted
-	}
-
 	cands := make(map[int64]channelCandidate)
 	if err := r.collectCandidates(ctx, groupID, cands); err != nil {
 		return Selection{}, err
@@ -227,15 +216,6 @@ func (r *GroupRouter) nextFromGroup(ctx context.Context, groupID int64) (Selecti
 					if err != nil {
 						r.excludedChannels[chID] = struct{}{}
 						return Selection{}, false
-					}
-
-					c.attemptsUsed++
-					if cand, ok := cands[chID]; ok {
-						if cand.SourceGroupID != 0 && cand.SourceGroupID != groupID {
-							if sc, err := r.cursorForGroup(ctx, cand.SourceGroupID); err == nil {
-								sc.attemptsUsed++
-							}
-						}
 					}
 
 					if chID == r.lastSelectedChannelID {
@@ -310,12 +290,6 @@ func (r *GroupRouter) nextFromGroup(ctx context.Context, groupID int64) (Selecti
 			r.excludedChannels[cand.ChannelID] = struct{}{}
 			continue
 		}
-		c.attemptsUsed++
-		if cand.SourceGroupID != 0 && cand.SourceGroupID != groupID {
-			if sc, err := r.cursorForGroup(ctx, cand.SourceGroupID); err == nil {
-				sc.attemptsUsed++
-			}
-		}
 		if cand.ChannelID == r.lastSelectedChannelID {
 			r.lastSelectedStreak++
 		} else {
@@ -352,13 +326,6 @@ func (r *GroupRouter) collectCandidates(ctx context.Context, groupID int64, out 
 		return err
 	}
 	if c.group.Status != 1 {
-		return nil
-	}
-	maxAttempts := c.group.MaxAttempts
-	if maxAttempts <= 0 {
-		maxAttempts = 5
-	}
-	if c.attemptsUsed >= maxAttempts {
 		return nil
 	}
 	if err := r.loadMembers(ctx, c); err != nil {

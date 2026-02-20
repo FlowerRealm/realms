@@ -219,12 +219,14 @@ func main() {
 
 	if !skipSeed {
 		seedCfg := e2eSeedConfig{
-			BillingModel:  seedModel,
-			BillingModels: seedModels,
+			BillingModel:   seedModel,
+			BillingModels:  seedModels,
+			SeedCodexOAuth: !useRealUpstream,
 		}
 
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodPost || r.URL.Path != "/v1/responses" {
+			isResponses := r.Method == http.MethodPost && (r.URL.Path == "/v1/responses" || r.URL.Path == "/backend-api/codex/v1/responses")
+			if !isResponses {
 				http.NotFound(w, r)
 				return
 			}
@@ -257,15 +259,54 @@ func main() {
 				return
 			}
 
+			// Codex OAuth 虚拟上游：按账号返回固定错误，便于验证“多账号 failover + 持久标记”逻辑。
+			if r.URL.Path == "/backend-api/codex/v1/responses" {
+				accountID := strings.TrimSpace(r.Header.Get("Chatgpt-Account-Id"))
+				switch accountID {
+				case "acc_exhausted":
+					w.Header().Set("Content-Type", "application/json; charset=utf-8")
+					w.WriteHeader(http.StatusBadRequest)
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"error": map[string]any{
+							"message":           "The usage limit has been reached",
+							"type":              "usage_limit_reached",
+							"code":              "usage_limit_reached",
+							"resets_in_seconds": 120,
+						},
+					})
+					return
+				case "acc_invalid":
+					w.Header().Set("Content-Type", "application/json; charset=utf-8")
+					w.WriteHeader(http.StatusUnauthorized)
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"error": map[string]any{
+							"message": "invalid token",
+							"type":    "invalid_token",
+							"code":    "invalid_token",
+						},
+					})
+					return
+				default:
+				}
+			}
+
 			var payload map[string]any
 			_ = json.Unmarshal(rawBody, &payload)
 			stream := strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/event-stream") || requestWantsStream(rawBody)
+
+			model := ""
+			if v, ok := payload["model"].(string); ok {
+				model = strings.TrimSpace(v)
+			}
+			if model == "" {
+				model = e2eModelPublicID
+			}
 
 			resp := map[string]any{
 				"id":      "resp_pw_e2e_1",
 				"object":  "response",
 				"created": 0,
-				"model":   e2eModelPublicID,
+				"model":   model,
 				"output": []any{
 					map[string]any{
 						"id":   "msg_pw_e2e_1",
@@ -315,6 +356,7 @@ func main() {
 			upstream.Close()
 			seedCfg.UpstreamBaseURL = realUpstreamBaseURL
 			seedCfg.UpstreamAPIKey = realUpstreamAPIKey
+			seedCfg.SeedCodexOAuth = false
 			slog.Info("e2e seed 使用真实上游",
 				"upstream_base_url", seedCfg.UpstreamBaseURL,
 				"model", seedCfg.BillingModel,
@@ -410,6 +452,7 @@ type e2eSeedConfig struct {
 	UpstreamAPIKey  string
 	BillingModel    string
 	BillingModels   []string
+	SeedCodexOAuth  bool
 }
 
 func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCfg e2eSeedConfig) (e2eSeedResult, error) {
@@ -448,7 +491,7 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 	// - 渠道组：Token 绑定并按顺序 failover；同时也是模型的 group_name
 	const e2eUserGroup = "pw-e2e-users"
 	const e2eChannelGroup = "pw-e2e"
-	if _, err := st.CreateChannelGroup(ctx, e2eChannelGroup, strPtr("Playwright E2E channel group"), 1, store.DefaultGroupPriceMultiplier, 5); err != nil {
+	if _, err := st.CreateChannelGroup(ctx, e2eChannelGroup, strPtr("Playwright E2E channel group"), 1, store.DefaultGroupPriceMultiplier); err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 channel_group 失败: %w", err)
 	}
 	if err := st.CreateMainGroup(ctx, e2eUserGroup, strPtr("Playwright E2E user group"), 1); err != nil {
@@ -510,6 +553,76 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 			Status:        1,
 		}); err != nil {
 			return e2eSeedResult{}, fmt.Errorf("创建 channel_model 失败: %w", err)
+		}
+	}
+
+	if seedCfg.SeedCodexOAuth {
+		base := strings.TrimRight(upstreamBaseURL, "/")
+		if strings.HasSuffix(base, "/v1") {
+			base = strings.TrimSuffix(base, "/v1")
+		}
+		codexBaseURL := strings.TrimRight(base, "/") + "/backend-api/codex"
+
+		codexExhaustModel := billingModel + "-codex-exhaust"
+		codexInvalidModel := billingModel + "-codex-invalid"
+
+		type codexAccountSeed struct {
+			accountID string
+			email     string
+		}
+		seedCodexChannel := func(name, modelID string, accounts []codexAccountSeed) error {
+			chID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeCodexOAuth, name, e2eChannelGroup, 0, false, false, false, false)
+			if err != nil {
+				return fmt.Errorf("创建 codex_oauth upstream_channel 失败: %w", err)
+			}
+			epID, err := st.CreateUpstreamEndpoint(ctx, chID, codexBaseURL, 0)
+			if err != nil {
+				return fmt.Errorf("创建 codex_oauth upstream_endpoint 失败: %w", err)
+			}
+			expiresAt := time.Now().Add(24 * time.Hour)
+			for _, a := range accounts {
+				if _, err := st.CreateCodexOAuthAccount(ctx, epID, a.accountID, strPtr(a.email), "at_"+a.accountID, "rt_"+a.accountID, nil, &expiresAt); err != nil {
+					return fmt.Errorf("创建 codex_oauth account 失败: %w", err)
+				}
+			}
+
+			if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
+				PublicID:            modelID,
+				GroupName:           e2eChannelGroup,
+				OwnedBy:             strPtr("upstream"),
+				InputUSDPer1M:       decimal.RequireFromString("10"),
+				OutputUSDPer1M:      decimal.Zero,
+				CacheInputUSDPer1M:  decimal.Zero,
+				CacheOutputUSDPer1M: decimal.Zero,
+				Status:              1,
+			}); err != nil {
+				return fmt.Errorf("创建 codex managed_model 失败: %w", err)
+			}
+			if _, err := st.CreateChannelModel(ctx, store.ChannelModelCreate{
+				ChannelID:     chID,
+				PublicID:      modelID,
+				UpstreamModel: modelID,
+				Status:        1,
+			}); err != nil {
+				return fmt.Errorf("创建 codex channel_model 失败: %w", err)
+			}
+			return nil
+		}
+
+		// exhausted：确保 acc_exhausted 首先被选择（后创建 id 更大）。
+		if err := seedCodexChannel("pw-e2e-codex-exhaust", codexExhaustModel, []codexAccountSeed{
+			{accountID: "acc_ok", email: "ok@example.com"},
+			{accountID: "acc_exhausted", email: "ex@example.com"},
+		}); err != nil {
+			return e2eSeedResult{}, err
+		}
+
+		// invalid：确保 acc_invalid 首先被选择（后创建 id 更大）。
+		if err := seedCodexChannel("pw-e2e-codex-invalid", codexInvalidModel, []codexAccountSeed{
+			{accountID: "acc_ok", email: "ok@example.com"},
+			{accountID: "acc_invalid", email: "inv@example.com"},
+		}); err != nil {
+			return e2eSeedResult{}, err
 		}
 	}
 

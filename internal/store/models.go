@@ -49,7 +49,6 @@ type ChannelGroup struct {
 	Name            string
 	Description     *string
 	PriceMultiplier decimal.Decimal
-	MaxAttempts     int
 	Status          int
 	CreatedAt       time.Time
 	UpdatedAt       time.Time

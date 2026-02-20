@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -75,10 +74,8 @@ type Scheduler struct {
 	st UpstreamStore
 
 	state         *State
-	bindingStore  BindingStore
 	groupPointers ChannelGroupPointerStore
 	affinityTTL   time.Duration
-	bindingTTL    time.Duration
 	rpmWindow     time.Duration
 	cooldownBase  time.Duration
 	probeClaimTTL time.Duration
@@ -105,48 +102,23 @@ type UpstreamStore interface {
 	ListCodexOAuthAccountsByEndpoint(ctx context.Context, endpointID int64) ([]store.CodexOAuthAccount, error)
 }
 
-type BindingStore interface {
-	GetSessionBindingPayload(ctx context.Context, userID int64, routeKeyHash string, now time.Time) (string, bool, error)
-	UpsertSessionBindingPayload(ctx context.Context, userID int64, routeKeyHash string, payload string, expiresAt time.Time) error
-	DeleteSessionBinding(ctx context.Context, userID int64, routeKeyHash string) error
-}
-
 type ChannelGroupPointerStore interface {
 	GetChannelGroupPointer(ctx context.Context, groupID int64) (store.ChannelGroupPointer, bool, error)
 	UpsertChannelGroupPointer(ctx context.Context, in store.ChannelGroupPointer) error
 }
 
-const (
-	bindingSetSourceSelect      = "select"
-	bindingSetSourceTouch       = "touch"
-	bindingSetSourceStoreWarmup = "store_restore"
-
-	bindingClearReasonManual       = "manual"
-	bindingClearReasonIneligible   = "ineligible"
-	bindingClearReasonProbePending = "probe_pending"
-	bindingClearReasonParseError   = "parse_error"
-)
-
 func New(st UpstreamStore) *Scheduler {
 	s := &Scheduler{
-		st:            st,
-		state:         NewState(),
-		affinityTTL:   30 * time.Minute,
-		bindingTTL:    1 * time.Hour,
-		rpmWindow:     60 * time.Second,
-		cooldownBase:  30 * time.Second,
-		probeClaimTTL: 30 * time.Second,
+		st:                      st,
+		state:                   NewState(),
+		affinityTTL:             30 * time.Minute,
+		rpmWindow:               60 * time.Second,
+		cooldownBase:            30 * time.Second,
+		probeClaimTTL:           30 * time.Second,
 		groupPointerPersistLast: make(map[int64]groupPointerPersistState),
 		groupPointerSync:        make(map[int64]groupPointerSyncState),
 	}
 	return s
-}
-
-func (s *Scheduler) SetBindingStore(bs BindingStore) {
-	if s == nil {
-		return
-	}
-	s.bindingStore = bs
 }
 
 func (s *Scheduler) SetGroupPointerStore(ps ChannelGroupPointerStore) {
@@ -296,41 +268,10 @@ func (s *Scheduler) RouteKeyHash(routeKey string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (s *Scheduler) TouchBinding(userID int64, routeKeyHash string, sel Selection) {
-	if routeKeyHash == "" {
-		return
-	}
-	s.setBinding(context.Background(), userID, routeKeyHash, sel, bindingSetSourceTouch)
-}
-
 func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, routeKeyHash string, cons Constraints) (Selection, error) {
 	now := time.Now()
 
-	// 1) 会话粘性：命中绑定则优先
-	if routeKeyHash != "" {
-		if sel, ok := s.getBinding(ctx, userID, routeKeyHash); ok {
-			credKey := sel.CredentialKey()
-			if selectionMatchesConstraints(sel, cons) &&
-				!s.state.IsChannelBanned(sel.ChannelID, now) &&
-				!s.state.IsCredentialCooling(credKey, now) &&
-				s.state.ChannelFailScore(sel.ChannelID) == 0 {
-				// 若该 channel 处于“封禁到期待探测”，先抢占 probe，避免并发探测风暴。
-				if s.state.IsChannelProbeDue(sel.ChannelID) && !s.state.TryClaimChannelProbe(sel.ChannelID, now, s.probeClaimTTL) {
-					// 已绑定但不可用：清理绑定，避免 session 永久占用导致 limits 失真。
-					s.clearBinding(ctx, userID, routeKeyHash, bindingClearReasonProbePending)
-				} else {
-					// 命中成功后 touch 续期（TTL）。
-					s.setBinding(ctx, userID, routeKeyHash, sel, bindingSetSourceTouch)
-					s.state.RecordRPM(credKey, now)
-					return sel, nil
-				}
-			}
-			// 已绑定但不可用：清理绑定，避免 session 永久占用导致 limits 失真。
-			s.clearBinding(ctx, userID, routeKeyHash, bindingClearReasonIneligible)
-		}
-	}
-
-	// 2) 选择 channel：promotion > affinity > priority > fallback
+	// 1) 选择 channel：promotion > affinity > priority > fallback
 	channels, err := s.st.ListUpstreamChannels(ctx)
 	if err != nil {
 		return Selection{}, err
@@ -374,7 +315,7 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 		return s.state.IsChannelProbePending(channelID, now)
 	}, s.state.ChannelFailScore)
 
-	// 3) 选择 endpoint + credential
+	// 2) 选择 endpoint + credential
 	for _, ch := range ordered {
 		claimedProbe := false
 		if s.state.IsChannelProbeDue(ch.ID) {
@@ -413,9 +354,6 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 			}
 			if ok {
 				s.state.RecordRPM(sel.CredentialKey(), now)
-				if routeKeyHash != "" {
-					s.setBinding(ctx, userID, routeKeyHash, sel, bindingSetSourceSelect)
-				}
 				s.state.SetAffinity(userID, ch.ID, now.Add(s.affinityTTL))
 				return sel, nil
 			}
@@ -425,74 +363,6 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 		}
 	}
 	return Selection{}, errors.New("未找到可用上游 credential/account")
-}
-
-func (s *Scheduler) getBinding(ctx context.Context, userID int64, routeKeyHash string) (Selection, bool) {
-	if routeKeyHash == "" {
-		return Selection{}, false
-	}
-	if sel, ok := s.state.GetBinding(userID, routeKeyHash); ok {
-		s.state.RecordBindingMemoryHit()
-		return sel, true
-	}
-	s.state.RecordBindingMiss()
-	if s.bindingStore == nil {
-		return Selection{}, false
-	}
-	payload, ok, err := s.bindingStore.GetSessionBindingPayload(ctx, userID, routeKeyHash, time.Now())
-	if err != nil {
-		s.state.RecordBindingStoreReadError()
-		return Selection{}, false
-	}
-	if !ok {
-		return Selection{}, false
-	}
-	var sel Selection
-	if err := json.Unmarshal([]byte(payload), &sel); err != nil {
-		s.state.RecordBindingClear(bindingClearReasonParseError)
-		if err := s.bindingStore.DeleteSessionBinding(ctx, userID, routeKeyHash); err != nil {
-			s.state.RecordBindingStoreDeleteError()
-		}
-		return Selection{}, false
-	}
-	s.state.SetBinding(userID, routeKeyHash, sel, time.Now().Add(s.bindingTTL))
-	s.state.RecordBindingStoreHit()
-	s.state.RecordBindingSet(bindingSetSourceStoreWarmup, false)
-	return sel, true
-}
-
-func (s *Scheduler) setBinding(ctx context.Context, userID int64, routeKeyHash string, sel Selection, source string) {
-	if routeKeyHash == "" {
-		return
-	}
-	refreshed := s.state.HasBinding(userID, routeKeyHash, time.Now())
-	expiresAt := time.Now().Add(s.bindingTTL)
-	s.state.SetBinding(userID, routeKeyHash, sel, expiresAt)
-	s.state.RecordBindingSet(source, refreshed)
-	if s.bindingStore == nil {
-		return
-	}
-	raw, err := json.Marshal(sel)
-	if err != nil {
-		return
-	}
-	if err := s.bindingStore.UpsertSessionBindingPayload(ctx, userID, routeKeyHash, string(raw), expiresAt); err != nil {
-		s.state.RecordBindingStoreWriteError()
-	}
-}
-
-func (s *Scheduler) clearBinding(ctx context.Context, userID int64, routeKeyHash string, reason string) {
-	if routeKeyHash == "" {
-		return
-	}
-	s.state.ClearBinding(userID, routeKeyHash)
-	s.state.RecordBindingClear(reason)
-	if s.bindingStore == nil {
-		return
-	}
-	if err := s.bindingStore.DeleteSessionBinding(ctx, userID, routeKeyHash); err != nil {
-		s.state.RecordBindingStoreDeleteError()
-	}
 }
 
 func selectionMatchesConstraints(sel Selection, c Constraints) bool {
@@ -742,8 +612,8 @@ func (s *Scheduler) Report(sel Selection, res Result) {
 			cooldownUntil = *res.CooldownUntil
 		}
 		s.state.SetCredentialCooling(sel.CredentialKey(), cooldownUntil)
-		// usage_limit_reached 属于账号级耗尽，不应牵连整个 channel。
-		if sel.AutoBan && res.ErrorClass != "upstream_exhausted" {
+		// usage_limit_reached / rate_limit_exceeded / credential invalid 属于账号级耗尽/限流/不可用，不应牵连整个 channel。
+		if sel.AutoBan && res.ErrorClass != "upstream_exhausted" && res.ErrorClass != "upstream_throttled" && res.ErrorClass != "upstream_credential_invalid" {
 			if shouldBanChannelImmediately(res) {
 				s.state.BanChannelImmediate(sel.ChannelID, now, cooldown)
 			} else {

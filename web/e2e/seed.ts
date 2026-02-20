@@ -10,6 +10,8 @@ function envInt(key: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+const BILLING_MODEL = envOr('REALMS_E2E_BILLING_MODEL', 'gpt-5.2');
+
 export const E2E_SEED = {
   root: {
     username: envOr('REALMS_E2E_USERNAME', 'root'),
@@ -18,7 +20,7 @@ export const E2E_SEED = {
 
   // cmd/realms-e2e/main.go 固定的按量计费种子（模型/用户/Token）
   billing: {
-    model: envOr('REALMS_E2E_BILLING_MODEL', 'gpt-5.2'),
+    model: BILLING_MODEL,
     user: {
       email: envOr('REALMS_E2E_BILLING_USER_EMAIL', 'e2e-user@example.com'),
       username: envOr('REALMS_E2E_BILLING_USER_USERNAME', 'e2euser'),
@@ -31,6 +33,15 @@ export const E2E_SEED = {
       password: envOr('REALMS_E2E_POOR_USER_PASSWORD', 'pw-e2e-user-123'),
       token: envOr('REALMS_E2E_POOR_USER_TOKEN', 'sk_playwright_e2e_poor_token'),
     },
+  },
+
+  codex: {
+    exhaustModel: envOr('REALMS_E2E_CODEX_EXHAUST_MODEL', `${BILLING_MODEL}-codex-exhaust`),
+    invalidModel: envOr('REALMS_E2E_CODEX_INVALID_MODEL', `${BILLING_MODEL}-codex-invalid`),
+    exhaustChannelName: envOr('REALMS_E2E_CODEX_EXHAUST_CHANNEL_NAME', 'pw-e2e-codex-exhaust'),
+    invalidChannelName: envOr('REALMS_E2E_CODEX_INVALID_CHANNEL_NAME', 'pw-e2e-codex-invalid'),
+    exhaustedEmail: envOr('REALMS_E2E_CODEX_EXHAUSTED_EMAIL', 'ex@example.com'),
+    invalidEmail: envOr('REALMS_E2E_CODEX_INVALID_EMAIL', 'inv@example.com'),
   },
 
   // cmd/realms-e2e/main.go 固定的 OAuth App 种子

@@ -45,7 +45,7 @@ func TestUserModelsDetail_UsesMainGroupSubgroupsAndBasePricing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, decimal.RequireFromString("1.5"), 5); err != nil {
+	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, decimal.RequireFromString("1.5")); err != nil {
 		t.Fatalf("CreateChannelGroup(vip): %v", err)
 	}
 	if err := st.CreateMainGroup(ctx, "ug1", nil, 1); err != nil {

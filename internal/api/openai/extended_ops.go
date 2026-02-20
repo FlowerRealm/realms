@@ -136,7 +136,6 @@ func (h *Handler) proxyFixedSelection(w http.ResponseWriter, r *http.Request, p 
 		obs.RecordSSEFirstWriteLatency(pumpRes.FirstWriteLatency)
 		obs.RecordSSEBytesStreamed(pumpRes.BytesWritten)
 		obs.RecordSSEPumpResult(pumpRes.ErrorClass, pumpRes.SawDone)
-		h.touchBindingFromRouteKey(p.UserID, sel, routeKey)
 
 		if h.sched != nil {
 			if pumpRes.ErrorClass == "" || pumpRes.ErrorClass == "client_disconnect" || pumpRes.ErrorClass == "stream_max_duration" {

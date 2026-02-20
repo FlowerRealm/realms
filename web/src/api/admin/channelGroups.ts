@@ -6,7 +6,6 @@ export type AdminChannelGroup = {
   name: string;
   description?: string | null;
   price_multiplier: string;
-  max_attempts: number;
   status: number;
   created_at: string;
   updated_at: string;
@@ -23,7 +22,6 @@ export type AdminChannelGroupMember = {
   member_group_id?: number | null;
   member_group_name?: string | null;
   member_group_status?: number | null;
-  member_group_max_attempts?: number | null;
 
   member_channel_id?: number | null;
   member_channel_name?: string | null;
@@ -67,7 +65,6 @@ type CreateAdminChannelGroupRequest = {
   name: string;
   description?: string | null;
   price_multiplier?: string;
-  max_attempts?: number;
   status?: number;
 };
 
@@ -95,7 +92,6 @@ type UpdateAdminChannelGroupRequest = {
   name?: string;
   description?: string | null;
   price_multiplier?: string;
-  max_attempts?: number;
   status?: number;
 };
 

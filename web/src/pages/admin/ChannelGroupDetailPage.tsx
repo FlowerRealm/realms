@@ -136,7 +136,6 @@ export function ChannelGroupDetailPage() {
   const [childName, setChildName] = useState('');
   const [childDesc, setChildDesc] = useState('');
   const [childMultiplier, setChildMultiplier] = useState('1');
-  const [childMaxAttempts, setChildMaxAttempts] = useState('5');
   const [childStatus, setChildStatus] = useState(1);
 
   async function refresh() {
@@ -307,7 +306,6 @@ export function ChannelGroupDetailPage() {
                         const showPromotion = draggingMember.promotion;
                         if (typ === 'group') {
                           const name = draggingMember.member_group_name || `group-${draggingMember.member_group_id}`;
-                          const maxAttempts = draggingMember.member_group_max_attempts ?? null;
                           return (
                             <div className="d-flex flex-column">
                               <div className="d-flex flex-wrap align-items-center gap-2">
@@ -318,12 +316,6 @@ export function ChannelGroupDetailPage() {
                                     <i className="ri-fire-line me-1"></i>优先
                                   </span>
                                 ) : null}
-                              </div>
-                              <div className="d-flex flex-wrap align-items-center gap-2 small text-muted mt-1">
-                                <div className="d-flex align-items-center">
-                                  <span className="me-1">max_attempts:</span>
-                                  <span className="text-secondary font-monospace user-select-all">{maxAttempts ?? '-'}</span>
-                                </div>
                               </div>
                             </div>
                           );
@@ -421,8 +413,7 @@ export function ChannelGroupDetailPage() {
           </nav>
           {group ? (
             <div className="text-muted small">
-              名称：<code>{group.name}</code> <span className="mx-2">·</span> max_attempts：<code>{group.max_attempts}</code> <span className="mx-2">·</span> 倍率：
-              <code>{group.price_multiplier}</code>
+              名称：<code>{group.name}</code> <span className="mx-2">·</span> 倍率：<code>{group.price_multiplier}</code>
             </div>
           ) : null}
         </div>
@@ -537,12 +528,6 @@ export function ChannelGroupDetailPage() {
                                               <i className="ri-fire-line me-1"></i>优先
                                             </span>
                                           ) : null}
-                                        </div>
-                                        <div className="d-flex flex-wrap align-items-center gap-2 small text-muted mt-1">
-                                          <div className="d-flex align-items-center">
-                                            <span className="me-1">max_attempts:</span>
-                                            <span className="text-secondary font-monospace user-select-all">{m.member_group_max_attempts ?? '-'}</span>
-                                          </div>
                                         </div>
                                       </div>
                                     ) : typ === 'channel' ? (
@@ -745,7 +730,6 @@ export function ChannelGroupDetailPage() {
           setChildName('');
           setChildDesc('');
           setChildMultiplier('1');
-          setChildMaxAttempts('5');
           setChildStatus(1);
         }}
       >
@@ -760,7 +744,6 @@ export function ChannelGroupDetailPage() {
                 name: childName.trim(),
                 description: childDesc.trim() || null,
                 price_multiplier: childMultiplier.trim() || undefined,
-                max_attempts: Number.parseInt(childMaxAttempts, 10) || undefined,
                 status: childStatus,
               });
               if (!res.success) throw new Error(res.message || '创建失败');
@@ -789,11 +772,6 @@ export function ChannelGroupDetailPage() {
               <input className="form-control" value={childMultiplier} onChange={(e) => setChildMultiplier(e.target.value)} inputMode="decimal" placeholder="1" />
             </div>
             <div className="form-text small text-muted">最终计费 = 模型单价 × 倍率（最多 6 位小数）。</div>
-          </div>
-          <div className="col-12">
-            <label className="form-label">max_attempts</label>
-            <input className="form-control" value={childMaxAttempts} onChange={(e) => setChildMaxAttempts(e.target.value)} inputMode="numeric" placeholder="5" />
-            <div className="form-text small text-muted">组内成员 failover 尝试上限。</div>
           </div>
           <div className="col-12">
             <label className="form-label">状态</label>

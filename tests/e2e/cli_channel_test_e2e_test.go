@@ -84,7 +84,7 @@ func TestCLIChannelTest_E2E(t *testing.T) {
 	ctx := context.Background()
 
 	const routeGroup = "rg1"
-	if _, err := st.CreateChannelGroup(ctx, routeGroup, nil, 1, store.DefaultGroupPriceMultiplier, 5); err != nil {
+	if _, err := st.CreateChannelGroup(ctx, routeGroup, nil, 1, store.DefaultGroupPriceMultiplier); err != nil {
 		t.Fatalf("CreateChannelGroup: %v", err)
 	}
 
@@ -316,7 +316,7 @@ func TestCLIChannelTest_RealUpstream_E2E(t *testing.T) {
 	ctx := context.Background()
 
 	const routeGroup = "rg1"
-	if _, err := st.CreateChannelGroup(ctx, routeGroup, nil, 1, store.DefaultGroupPriceMultiplier, 5); err != nil {
+	if _, err := st.CreateChannelGroup(ctx, routeGroup, nil, 1, store.DefaultGroupPriceMultiplier); err != nil {
 		t.Fatalf("CreateChannelGroup: %v", err)
 	}
 

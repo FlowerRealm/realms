@@ -31,7 +31,7 @@ func TestUpdateMainGroupWithRename_CascadesReferences(t *testing.T) {
 	ctx := context.Background()
 
 	const subgroup = "pw-subgroup"
-	if _, err := st.CreateChannelGroup(ctx, subgroup, nil, 1, store.DefaultGroupPriceMultiplier, 5); err != nil {
+	if _, err := st.CreateChannelGroup(ctx, subgroup, nil, 1, store.DefaultGroupPriceMultiplier); err != nil {
 		t.Fatalf("CreateChannelGroup: %v", err)
 	}
 

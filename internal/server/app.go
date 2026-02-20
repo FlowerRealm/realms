@@ -61,7 +61,6 @@ func NewApp(opts AppOptions) (*App, error) {
 	st.SetAppSettingsDefaults(opts.Config.AppSettingsDefaults)
 
 	sched := scheduler.New(st)
-	sched.SetBindingStore(st)
 	sched.SetGroupPointerStore(st)
 	exec := upstream.NewExecutor(st, opts.Config)
 

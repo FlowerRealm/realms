@@ -16,7 +16,6 @@ type ChannelGroupMemberDetail struct {
 	MemberGroupID          *int64
 	MemberGroupName        *string
 	MemberGroupStatus      *int
-	MemberGroupMaxAttempts *int
 
 	MemberChannelID     *int64
 	MemberChannelName   *string
@@ -36,7 +35,7 @@ func (s *Store) ListChannelGroupMembers(ctx context.Context, parentGroupID int64
 	}
 	rows, err := s.db.QueryContext(ctx,
 		"SELECT\n"+
-			"  m.id, m.parent_group_id, m.member_group_id, cg.name, cg.status, cg.max_attempts,\n"+
+			"  m.id, m.parent_group_id, m.member_group_id, cg.name, cg.status,\n"+
 			"  m.member_channel_id, uc.name, uc.type, uc.`groups`, uc.status,\n"+
 			"  m.priority, m.promotion, m.created_at, m.updated_at\n"+
 			"FROM channel_group_members m\n"+
@@ -57,7 +56,6 @@ func (s *Store) ListChannelGroupMembers(ctx context.Context, parentGroupID int64
 		var memberGroupID sql.NullInt64
 		var memberGroupName sql.NullString
 		var memberGroupStatus sql.NullInt64
-		var memberGroupMaxAttempts sql.NullInt64
 		var memberChannelID sql.NullInt64
 		var memberChannelName sql.NullString
 		var memberChannelType sql.NullString
@@ -70,7 +68,6 @@ func (s *Store) ListChannelGroupMembers(ctx context.Context, parentGroupID int64
 			&memberGroupID,
 			&memberGroupName,
 			&memberGroupStatus,
-			&memberGroupMaxAttempts,
 			&memberChannelID,
 			&memberChannelName,
 			&memberChannelType,
@@ -95,10 +92,6 @@ func (s *Store) ListChannelGroupMembers(ctx context.Context, parentGroupID int64
 		if memberGroupStatus.Valid {
 			v := int(memberGroupStatus.Int64)
 			row.MemberGroupStatus = &v
-		}
-		if memberGroupMaxAttempts.Valid {
-			v := int(memberGroupMaxAttempts.Int64)
-			row.MemberGroupMaxAttempts = &v
 		}
 		if memberChannelID.Valid {
 			v := memberChannelID.Int64

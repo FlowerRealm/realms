@@ -330,7 +330,6 @@ func (f *fakeStore) ensureGroups() {
 		ID:              defaultID,
 		Name:            store.DefaultGroupName,
 		PriceMultiplier: store.DefaultGroupPriceMultiplier,
-		MaxAttempts:     50,
 		Status:          1,
 	}
 	f.groupNameByID[defaultID] = store.DefaultGroupName
@@ -351,7 +350,6 @@ func (f *fakeStore) ensureGroups() {
 			ID:              id,
 			Name:            name,
 			PriceMultiplier: store.DefaultGroupPriceMultiplier,
-			MaxAttempts:     50,
 			Status:          1,
 		}
 		f.groupNameByID[id] = name
@@ -421,14 +419,12 @@ func (f *fakeStore) ListChannelGroupMembers(_ context.Context, parentGroupID int
 			gid := g.ID
 			n := name
 			status := g.Status
-			maxAttempts := g.MaxAttempts
 			out = append(out, store.ChannelGroupMemberDetail{
-				MemberID:               gid,
-				ParentGroupID:          parentGroupID,
-				MemberGroupID:          &gid,
-				MemberGroupName:        &n,
-				MemberGroupStatus:      &status,
-				MemberGroupMaxAttempts: &maxAttempts,
+				MemberID:          gid,
+				ParentGroupID:     parentGroupID,
+				MemberGroupID:     &gid,
+				MemberGroupName:   &n,
+				MemberGroupStatus: &status,
 			})
 		}
 		// default 组内可直接挂载 default 渠道
@@ -641,8 +637,6 @@ func TestResponses_RetrySameSelectionOnNetworkErrorBeforeFailover(t *testing.T) 
 	})
 
 	sched := scheduler.New(fs)
-	bs := newRecordingBindingStore()
-	sched.SetBindingStore(bs)
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
@@ -920,8 +914,6 @@ func TestResponses_MaxTokensAlias_PreservesMaxTokens(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
-	bs := newRecordingBindingStore()
-	sched.SetBindingStore(bs)
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi","max_tokens":123}`)))
@@ -999,8 +991,6 @@ func TestResponses_ChannelParamOverride_MaxTokens_PreservesMaxTokens(t *testing.
 	})
 
 	sched := scheduler.New(fs)
-	bs := newRecordingBindingStore()
-	sched.SetBindingStore(bs)
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
@@ -1068,8 +1058,6 @@ func TestResponses_ModelSuffixEffort_IsPerChannelAttempt(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
-	bs := newRecordingBindingStore()
-	sched.SetBindingStore(bs)
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
@@ -1163,8 +1151,6 @@ func TestResponses_ChannelBodyFilters_ArePerChannelAttempt(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
-	bs := newRecordingBindingStore()
-	sched.SetBindingStore(bs)
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
 	reqBody := `{"model":"m1","input":"hi","metadata":{"trace":"t","keep":"k"},"extra":"x"}`
@@ -1421,8 +1407,6 @@ func TestResponses_RouteKeyPrefersPromptCacheKeyInBody(t *testing.T) {
 	}
 
 	sched := scheduler.New(fs)
-	bs := newRecordingBindingStore()
-	sched.SetBindingStore(bs)
 	doer := &okDoer{}
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
@@ -1439,12 +1423,8 @@ func TestResponses_RouteKeyPrefersPromptCacheKeyInBody(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
-
-	if !bs.Has(p.UserID, sched.RouteKeyHash("rk_body")) {
-		t.Fatalf("expected binding for body route key")
-	}
-	if bs.Has(p.UserID, sched.RouteKeyHash("rk_header")) {
-		t.Fatalf("expected no binding for header route key when body prompt_cache_key exists")
+	if got := rr.Header().Get("X-Realms-Route-Key-Source"); got != "payload" {
+		t.Fatalf("expected route key source to be payload, got=%q", got)
 	}
 }
 
@@ -1474,8 +1454,6 @@ func TestResponses_RouteKeyFallsBackToHeader(t *testing.T) {
 	}
 
 	sched := scheduler.New(fs)
-	bs := newRecordingBindingStore()
-	sched.SetBindingStore(bs)
 	doer := &okDoer{}
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
@@ -1492,9 +1470,8 @@ func TestResponses_RouteKeyFallsBackToHeader(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
-
-	if !bs.Has(p.UserID, sched.RouteKeyHash("rk_header")) {
-		t.Fatalf("expected binding for header route key when body prompt_cache_key missing")
+	if got := rr.Header().Get("X-Realms-Route-Key-Source"); got != "header" {
+		t.Fatalf("expected route key source to be header, got=%q", got)
 	}
 }
 
@@ -1524,8 +1501,6 @@ func TestResponses_RouteKeyFallsBackToHeaderXSessionID(t *testing.T) {
 	}
 
 	sched := scheduler.New(fs)
-	bs := newRecordingBindingStore()
-	sched.SetBindingStore(bs)
 	doer := &okDoer{}
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
@@ -1542,9 +1517,8 @@ func TestResponses_RouteKeyFallsBackToHeaderXSessionID(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
-
-	if !bs.Has(p.UserID, sched.RouteKeyHash("rk_x_session")) {
-		t.Fatalf("expected binding for X-Session-Id route key")
+	if got := rr.Header().Get("X-Realms-Route-Key-Source"); got != "header" {
+		t.Fatalf("expected route key source to be header, got=%q", got)
 	}
 }
 
@@ -1574,8 +1548,6 @@ func TestResponses_RouteKeyFallsBackToBodyMetadataSessionID(t *testing.T) {
 	}
 
 	sched := scheduler.New(fs)
-	bs := newRecordingBindingStore()
-	sched.SetBindingStore(bs)
 	doer := &okDoer{}
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
@@ -1591,9 +1563,8 @@ func TestResponses_RouteKeyFallsBackToBodyMetadataSessionID(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
-
-	if !bs.Has(p.UserID, sched.RouteKeyHash("rk_meta")) {
-		t.Fatalf("expected binding for metadata.session_id route key")
+	if got := rr.Header().Get("X-Realms-Route-Key-Source"); got != "payload" {
+		t.Fatalf("expected route key source to be payload, got=%q", got)
 	}
 }
 
@@ -1635,8 +1606,6 @@ func TestResponses_CodexSessionCompletion_FillsPromptCacheKeyAndSessionHeader(t 
 	})
 
 	sched := scheduler.New(fs)
-	bs := newRecordingBindingStore()
-	sched.SetBindingStore(bs)
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":false}`)))
@@ -1660,114 +1629,6 @@ func TestResponses_CodexSessionCompletion_FillsPromptCacheKeyAndSessionHeader(t 
 	}
 	if promptCacheKey != sessionHeader {
 		t.Fatalf("expected prompt_cache_key and Session_id to be aligned, got body=%q header=%q", promptCacheKey, sessionHeader)
-	}
-	if !bs.Has(p.UserID, sched.RouteKeyHash(promptCacheKey)) {
-		t.Fatalf("expected binding for generated prompt_cache_key")
-	}
-}
-
-func TestResponses_ResponseFeedbackTouchesBinding(t *testing.T) {
-	fs := &fakeStore{
-		channels: []store.UpstreamChannel{
-			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
-		},
-		endpoints: map[int64][]store.UpstreamEndpoint{
-			1: {
-				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
-			},
-		},
-		creds: map[int64][]store.OpenAICompatibleCredential{
-			11: {
-				{ID: 1, EndpointID: 11, Status: 1},
-			},
-		},
-		models: map[string]store.ManagedModel{
-			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
-		},
-		bindings: map[string][]store.ChannelModelBinding{
-			"gpt-5.2": {
-				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
-			},
-		},
-	}
-
-	doer := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","prompt_cache_key":"rk_feedback","usage":{"input_tokens":1,"output_tokens":2}}`))),
-		}, nil
-	})
-
-	sched := scheduler.New(fs)
-	bs := newRecordingBindingStore()
-	sched.SetBindingStore(bs)
-	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
-
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":false}`)))
-	req.Header.Set("Content-Type", "application/json")
-
-	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
-	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
-
-	rr := httptest.NewRecorder()
-	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
-	}
-
-	if !bs.Has(p.UserID, sched.RouteKeyHash("rk_feedback")) {
-		t.Fatalf("expected binding touched by response prompt_cache_key")
-	}
-}
-
-func TestChatCompletions_RouteKeyFallsBackToRawBodySessionID(t *testing.T) {
-	fs := &fakeStore{
-		channels: []store.UpstreamChannel{
-			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
-		},
-		endpoints: map[int64][]store.UpstreamEndpoint{
-			1: {
-				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
-			},
-		},
-		creds: map[int64][]store.OpenAICompatibleCredential{
-			11: {
-				{ID: 1, EndpointID: 11, Status: 1},
-			},
-		},
-		models: map[string]store.ManagedModel{
-			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
-		},
-		bindings: map[string][]store.ChannelModelBinding{
-			"gpt-5.2": {
-				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
-			},
-		},
-	}
-
-	sched := scheduler.New(fs)
-	bs := newRecordingBindingStore()
-	sched.SetBindingStore(bs)
-	doer := &okDoer{}
-	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
-
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/chat/completions", bytes.NewReader([]byte(`{"model":"gpt-5.2","messages":[{"role":"user","content":"hi"}],"stream":false,"session_id":"rk_chat_raw"}`)))
-	req.Header.Set("Content-Type", "application/json")
-
-	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
-	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
-
-	rr := httptest.NewRecorder()
-	middleware.Chain(http.HandlerFunc(h.ChatCompletions), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
-	}
-
-	if !bs.Has(p.UserID, sched.RouteKeyHash("rk_chat_raw")) {
-		t.Fatalf("expected binding for raw body session_id route key")
 	}
 }
 
@@ -2032,6 +1893,89 @@ func TestResponses_CodexOAuth_UsageLimitSetsPersistentCooldown(t *testing.T) {
 	}
 }
 
+type codexQuotaMarkDoer struct {
+	calls     []scheduler.Selection
+	quotaErrs []int64
+	quotaMsg  []*string
+}
+
+func (d *codexQuotaMarkDoer) Do(_ context.Context, sel scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+	d.calls = append(d.calls, sel)
+	if sel.CredentialID == 1002 {
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"The usage limit has been reached","type":"usage_limit_reached","code":"usage_limit_reached"}}`)),
+		}, nil
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"ok-from-openai","usage":{"input_tokens":1,"output_tokens":2}}`)),
+	}, nil
+}
+
+func (d *codexQuotaMarkDoer) SetCodexOAuthAccountQuotaError(_ context.Context, accountID int64, msg *string) error {
+	d.quotaErrs = append(d.quotaErrs, accountID)
+	d.quotaMsg = append(d.quotaMsg, msg)
+	return nil
+}
+
+func TestResponses_CodexOAuth_UsageLimitMarksBalanceDepleted(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeCodexOAuth, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example/backend-api/codex", Status: 1},
+			},
+		},
+		accounts: map[int64][]store.CodexOAuthAccount{
+			11: {
+				{ID: 1002, EndpointID: 11, Status: 1},
+				{ID: 1001, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeCodexOAuth, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+	sched := scheduler.New(fs)
+	doer := &codexQuotaMarkDoer{}
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(doer.quotaErrs) != 1 {
+		t.Fatalf("expected one quota_error mark, got=%d", len(doer.quotaErrs))
+	}
+	if doer.quotaErrs[0] != 1002 {
+		t.Fatalf("expected quota_error mark on exhausted account 1002, got=%d", doer.quotaErrs[0])
+	}
+	if doer.quotaMsg[0] == nil || *doer.quotaMsg[0] != "余额用尽" {
+		got := "<nil>"
+		if doer.quotaMsg[0] != nil {
+			got = *doer.quotaMsg[0]
+		}
+		t.Fatalf("expected quota_error msg to be 余额用尽, got=%q", got)
+	}
+}
+
 func TestResponses_CodexOAuth_UsageLimitNoFallbackReturnsUpstreamUnavailable(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
@@ -2115,7 +2059,6 @@ func TestResponses_UpstreamUnavailableFinalizesUsageWithUpstreamChannelID(t *tes
 				ID:              1,
 				Name:            store.DefaultGroupName,
 				PriceMultiplier: store.DefaultGroupPriceMultiplier,
-				MaxAttempts:     1,
 				Status:          1,
 			},
 		},

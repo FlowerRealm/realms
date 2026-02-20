@@ -438,7 +438,6 @@ CREATE TABLE IF NOT EXISTS `channel_groups` (
   `description` TEXT NULL,
   `price_multiplier` DECIMAL(25,6) NOT NULL DEFAULT 1.000000,
   `status` INTEGER NOT NULL DEFAULT 1,
-  `max_attempts` INTEGER NOT NULL DEFAULT 5,
   `created_at` DATETIME NOT NULL,
   `updated_at` DATETIME NOT NULL
 );

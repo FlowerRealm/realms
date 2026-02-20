@@ -1374,6 +1374,26 @@ func (s *Store) SetCodexOAuthAccountStatus(ctx context.Context, accountID int64,
 	return nil
 }
 
+func (s *Store) SetCodexOAuthAccountQuotaError(ctx context.Context, accountID int64, msg *string) error {
+	var errVal any
+	if msg != nil && strings.TrimSpace(*msg) != "" {
+		m := strings.TrimSpace(*msg)
+		if len(m) > 255 {
+			m = m[:255]
+		}
+		errVal = m
+	}
+	_, err := s.db.ExecContext(ctx, `
+	UPDATE codex_oauth_accounts
+	SET quota_error=?, quota_updated_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+	WHERE id=?
+	`, errVal, accountID)
+	if err != nil {
+		return fmt.Errorf("更新 codex_oauth_account quota_error 失败: %w", err)
+	}
+	return nil
+}
+
 func nullableBytes(b []byte) any {
 	if len(b) == 0 {
 		return nil

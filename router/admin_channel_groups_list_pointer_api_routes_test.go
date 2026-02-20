@@ -34,7 +34,7 @@ func TestAdminChannelGroups_List_IncludesPointerEvenWhenNotPinned(t *testing.T) 
 	engine, sessionCookie, userID := setupRootSession(t, st)
 
 	ctx := context.Background()
-	groupID, err := st.CreateChannelGroup(ctx, "g1", nil, 1, store.DefaultGroupPriceMultiplier, 5)
+	groupID, err := st.CreateChannelGroup(ctx, "g1", nil, 1, store.DefaultGroupPriceMultiplier)
 	if err != nil {
 		t.Fatalf("CreateChannelGroup: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestAdminChannelGroups_List_DefaultPointerWhenMissing(t *testing.T) {
 	engine, sessionCookie, userID := setupRootSession(t, st)
 
 	ctx := context.Background()
-	groupID, err := st.CreateChannelGroup(ctx, "g1", nil, 1, store.DefaultGroupPriceMultiplier, 5)
+	groupID, err := st.CreateChannelGroup(ctx, "g1", nil, 1, store.DefaultGroupPriceMultiplier)
 	if err != nil {
 		t.Fatalf("CreateChannelGroup: %v", err)
 	}
@@ -206,11 +206,11 @@ func TestAdminChannelGroupPointerCandidates_RecursiveIncludesNestedChannels(t *t
 	engine, sessionCookie, userID := setupRootSession(t, st)
 
 	ctx := context.Background()
-	parentID, err := st.CreateChannelGroup(ctx, "g1", nil, 1, store.DefaultGroupPriceMultiplier, 5)
+	parentID, err := st.CreateChannelGroup(ctx, "g1", nil, 1, store.DefaultGroupPriceMultiplier)
 	if err != nil {
 		t.Fatalf("CreateChannelGroup parent: %v", err)
 	}
-	childID, err := st.CreateChannelGroup(ctx, "g1_child", nil, 1, store.DefaultGroupPriceMultiplier, 5)
+	childID, err := st.CreateChannelGroup(ctx, "g1_child", nil, 1, store.DefaultGroupPriceMultiplier)
 	if err != nil {
 		t.Fatalf("CreateChannelGroup child: %v", err)
 	}

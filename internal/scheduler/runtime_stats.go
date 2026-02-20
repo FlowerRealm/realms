@@ -2,29 +2,6 @@ package scheduler
 
 import "time"
 
-type RuntimeBindingStats struct {
-	MemoryHits int64
-	StoreHits  int64
-	Misses     int64
-
-	Sets              int64
-	SetBySelect       int64
-	SetByTouch        int64
-	SetByStoreRestore int64
-	Refreshes         int64
-
-	Clears            int64
-	ClearExpired      int64
-	ClearManual       int64
-	ClearIneligible   int64
-	ClearProbePending int64
-	ClearParseError   int64
-
-	StoreReadErrors   int64
-	StoreWriteErrors  int64
-	StoreDeleteErrors int64
-}
-
 type RuntimeChannelStats struct {
 	FailScore int
 
@@ -62,11 +39,4 @@ func (s *Scheduler) RuntimeChannelStats(channelID int64) RuntimeChannelStats {
 	}
 
 	return out
-}
-
-func (s *Scheduler) RuntimeBindingStats() RuntimeBindingStats {
-	if s == nil || s.state == nil {
-		return RuntimeBindingStats{}
-	}
-	return s.state.BindingStatsSnapshot()
 }

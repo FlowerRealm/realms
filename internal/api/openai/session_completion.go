@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"realms/internal/auth"
-	"realms/internal/scheduler"
 )
 
 const (
@@ -69,17 +68,6 @@ func completeCodexSessionIdentifiers(payload map[string]any, r *http.Request, p 
 		changed = true
 	}
 	return changed, sessionID, generated
-}
-
-func (h *Handler) touchBindingFromRouteKey(userID int64, sel scheduler.Selection, routeKey string) {
-	if h == nil || h.sched == nil || userID <= 0 {
-		return
-	}
-	normalized := normalizeCodexSessionID(routeKey)
-	if normalized == "" {
-		return
-	}
-	h.sched.TouchBinding(userID, h.sched.RouteKeyHash(normalized), sel)
 }
 
 func extractRouteKeyFromStructuredData(v any) string {
