@@ -42,3 +42,7 @@ backups/
 
 # oh-my-codex / Codex CLI local state
 .omx/
+
+# HelloAGENTS local knowledge base (keep locally, don't track in git)
+helloagents/
+helloagent/
