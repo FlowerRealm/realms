@@ -535,6 +535,14 @@ tr:hover .rlm-model-icon {
   border-radius: 999px;
 }
 
+/* Usage detail: 详情区是“网格字段”，不应触发 Row Stack Divider（否则会在 Error Class 等字段上出现多条横线）。 */
+.rlm-usage-detail-row .row > [class~='col-12']:not(:first-child) {
+  margin-top: 0 !important;
+}
+.rlm-usage-detail-row .row > [class~='col-12']:not(:first-child)::before {
+  content: none !important;
+}
+
 /* Interactive Element Transitions */
 .btn,
 .form-control,

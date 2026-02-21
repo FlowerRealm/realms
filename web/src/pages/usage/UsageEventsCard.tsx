@@ -174,7 +174,7 @@ export function UsageEventsCard({
                     {expandedID === e.id ? (
                       <tr key={`${e.id}-detail`} className="rlm-usage-detail-row">
                         <td colSpan={12} className="p-0 border-0">
-                          <div className="bg-light border-top px-4 py-3">
+                          <div className="bg-light px-4 py-3 mt-1">
                             {detailLoadingID === e.id ? <div className="text-muted small">加载详情中…</div> : null}
                             {detailByEventID[e.id] ? (
                               <div className="row g-3 small">
