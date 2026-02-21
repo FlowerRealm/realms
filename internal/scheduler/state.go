@@ -175,6 +175,27 @@ func (s *State) IsChannelBanned(channelID int64, now time.Time) bool {
 	return true
 }
 
+func (s *State) ChannelBanUntil(channelID int64, now time.Time) (time.Time, bool) {
+	if channelID == 0 {
+		return time.Time{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	until, ok := s.channelBanUntil[channelID]
+	if !ok {
+		return time.Time{}, false
+	}
+	if now.After(until) {
+		delete(s.channelBanUntil, channelID)
+		if _, ok := s.channelProbeDueAt[channelID]; !ok {
+			s.channelProbeDueAt[channelID] = now
+		}
+		delete(s.channelProbeClaimUntil, channelID)
+		return time.Time{}, false
+	}
+	return until, true
+}
+
 func (s *State) ClearChannelBan(channelID int64) {
 	if channelID == 0 {
 		return

@@ -269,6 +269,14 @@ func (s *Scheduler) RouteKeyHash(routeKey string) string {
 }
 
 func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, routeKeyHash string, cons Constraints) (Selection, error) {
+	return s.selectWithConstraints(ctx, userID, routeKeyHash, cons, false)
+}
+
+func (s *Scheduler) SelectWithConstraintsAllowBannedRequiredChannel(ctx context.Context, userID int64, routeKeyHash string, cons Constraints) (Selection, error) {
+	return s.selectWithConstraints(ctx, userID, routeKeyHash, cons, true)
+}
+
+func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, routeKeyHash string, cons Constraints, allowBannedRequiredChannel bool) (Selection, error) {
 	now := time.Now()
 
 	// 1) 选择 channel：promotion > affinity > priority > fallback
@@ -279,9 +287,6 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 	var candidates []store.UpstreamChannel
 	for _, ch := range channels {
 		if ch.Status != 1 {
-			continue
-		}
-		if s.state.IsChannelBanned(ch.ID, now) {
 			continue
 		}
 		if ch.Type != store.UpstreamTypeOpenAICompatible && ch.Type != store.UpstreamTypeCodexOAuth && ch.Type != store.UpstreamTypeAnthropic {
@@ -300,6 +305,9 @@ func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, rou
 			if _, ok := cons.AllowChannelIDs[ch.ID]; !ok {
 				continue
 			}
+		}
+		if s.state.IsChannelBanned(ch.ID, now) && !(allowBannedRequiredChannel && cons.RequireChannelID != 0 && ch.ID == cons.RequireChannelID) {
+			continue
 		}
 		candidates = append(candidates, ch)
 	}

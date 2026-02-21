@@ -70,13 +70,22 @@ func (r *GroupRouter) Next(ctx context.Context) (Selection, error) {
 		}
 		return sel, nil
 	}
-		return Selection{}, errors.New("未指定渠道组")
+	return Selection{}, errors.New("未指定渠道组")
 }
 
 func (r *GroupRouter) nextFromOrderedGroups(ctx context.Context) (Selection, error) {
 	if r.st == nil {
 		return Selection{}, errGroupExhausted
 	}
+	now := time.Now()
+	if r.sched != nil && r.sched.state != nil {
+		r.sched.state.SweepExpiredChannelBans(now)
+	}
+
+	bestBannedID := int64(0)
+	bestBannedUntil := time.Time{}
+	bestBannedGroupID := int64(0)
+	bestBannedGroupName := ""
 	for _, raw := range r.cons.AllowGroupOrder {
 		name := strings.TrimSpace(raw)
 		if name == "" {
@@ -95,6 +104,18 @@ func (r *GroupRouter) nextFromOrderedGroups(ctx context.Context) (Selection, err
 		sel, err := r.nextFromGroup(ctx, g.ID)
 		if err != nil {
 			if errors.Is(err, errGroupExhausted) {
+				if r.sched != nil && r.sched.state != nil {
+					if chID, until, ok, e := r.earliestBannedCandidateInGroup(ctx, g.ID, now); e == nil && ok {
+						if bestBannedID == 0 || until.Before(bestBannedUntil) {
+							bestBannedID = chID
+							bestBannedUntil = until
+							bestBannedGroupID = g.ID
+							bestBannedGroupName = name
+						}
+					} else if e != nil {
+						return Selection{}, e
+					}
+				}
 				continue
 			}
 			return Selection{}, err
@@ -102,7 +123,61 @@ func (r *GroupRouter) nextFromOrderedGroups(ctx context.Context) (Selection, err
 		sel.RouteGroup = name
 		return sel, nil
 	}
+
+	// 当所有 group 都 exhausted 且存在被 ban 的渠道时：选择“解禁时间最近”的渠道做一次尝试，
+	// 避免直接返回“上游不可用”导致无法恢复（或在短 ban 窗口内持续失败）。
+	if bestBannedID != 0 && bestBannedGroupID != 0 && r.sched != nil {
+		cons := r.cons
+		cons.RequireChannelID = bestBannedID
+		sel, err := r.sched.SelectWithConstraintsAllowBannedRequiredChannel(ctx, r.userID, r.routeKeyHash, cons)
+		if err == nil {
+			if bestBannedID == r.lastSelectedChannelID {
+				r.lastSelectedStreak++
+			} else {
+				r.lastSelectedChannelID = bestBannedID
+				r.lastSelectedStreak = 1
+			}
+			r.sched.touchChannelGroupPointer(ctx, bestBannedGroupID, bestBannedID, "route")
+			sel.RouteGroup = bestBannedGroupName
+			return sel, nil
+		}
+	}
 	return Selection{}, errGroupExhausted
+}
+
+func (r *GroupRouter) earliestBannedCandidateInGroup(ctx context.Context, groupID int64, now time.Time) (int64, time.Time, bool, error) {
+	if groupID == 0 {
+		return 0, time.Time{}, false, nil
+	}
+	if r.sched == nil || r.sched.state == nil {
+		return 0, time.Time{}, false, nil
+	}
+	cands := make(map[int64]channelCandidate)
+	if err := r.collectCandidates(ctx, groupID, cands); err != nil {
+		return 0, time.Time{}, false, err
+	}
+	bestID := int64(0)
+	bestUntil := time.Time{}
+	for chID := range cands {
+		if chID <= 0 {
+			continue
+		}
+		if _, excluded := r.excludedChannels[chID]; excluded {
+			continue
+		}
+		until, ok := r.sched.state.ChannelBanUntil(chID, now)
+		if !ok {
+			continue
+		}
+		if bestID == 0 || until.Before(bestUntil) {
+			bestID = chID
+			bestUntil = until
+		}
+	}
+	if bestID == 0 {
+		return 0, time.Time{}, false, nil
+	}
+	return bestID, bestUntil, true, nil
 }
 
 func (r *GroupRouter) cursorForGroup(ctx context.Context, groupID int64) (*groupCursor, error) {
@@ -283,6 +358,9 @@ func (r *GroupRouter) nextFromGroup(ctx context.Context, groupID int64) (Selecti
 	}
 
 	for _, cand := range ordered {
+		if r.sched != nil && r.sched.state != nil && r.sched.state.IsChannelBanned(cand.ChannelID, now) {
+			continue
+		}
 		cons := r.cons
 		cons.RequireChannelID = cand.ChannelID
 		sel, err := r.sched.SelectWithConstraints(ctx, r.userID, r.routeKeyHash, cons)
