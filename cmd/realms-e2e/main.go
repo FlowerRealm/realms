@@ -1,6 +1,6 @@
-// realms-e2e 是 Playwright Web E2E 专用的启动器：
+// realms-e2e 是 Web E2E/冒烟专用的启动器：
 // - 启动时自动创建临时 SQLite 并 seed 最小数据集（root 用户/公告/工单/OAuth App/充值订单）
-// - 仅用于 CI/本地 E2E，不用于生产或发布构建
+// - 仅用于 CI/本地验证，不用于生产或发布构建
 package main
 
 import (

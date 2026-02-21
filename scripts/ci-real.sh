@@ -74,7 +74,7 @@ else
 fi
 
 log "web smoke (curl seed + real upstream)"
-PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm --prefix web ci
+npm --prefix web ci
 npm --prefix web run build
 
 BASE_URL="${REALMS_E2E_BASE_URL:-http://127.0.0.1:18181}"

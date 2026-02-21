@@ -34,52 +34,9 @@ npm run build
 
 - `VITE_API_BASE_URL`：API baseURL（默认空字符串，同源）
 
-## E2E（Playwright，可选）
+## Web 冒烟（curl）
 
-Playwright 用于前端的**组件级交互**与**跨页面流程**回归（见 `web/e2e/`）。  
-说明：CI 默认不跑 Playwright（避免浏览器依赖带来的不稳定），CI 的 Web 验证改为 `curl` 冒烟（见下方）。
-
-默认（seed 模式，自动启动 `cmd/realms-e2e`，使用内置种子数据）：
-
-```bash
-npm run test:e2e
-```
-
-真实数据模式（连接你本地已运行的 Realms 服务/数据库，不启动内置 seed 服务）：
-
-```bash
-REALMS_E2E_PROFILE=real \
-REALMS_E2E_EXTERNAL_SERVER=1 \
-REALMS_E2E_BASE_URL=http://127.0.0.1:8080 \
-REALMS_E2E_USERNAME=<root用户名> \
-REALMS_E2E_PASSWORD=<root密码> \
-npm run test:e2e:ci
-```
-
-若你仍想使用 `cmd/realms-e2e` 启动器，但复用已有 SQLite 数据与上游配置（跳过自动 seed）：
-
-```bash
-REALMS_E2E_SKIP_SEED=1 \
-REALMS_E2E_DB_PATH=/path/to/your.sqlite \
-npm run test:e2e:ci
-```
-
-若你想继续使用 `cmd/realms-e2e` 的 seed 数据，但把请求转发到真实上游（CI 推荐）：
-
-```bash
-REALMS_E2E_UPSTREAM_BASE_URL=https://api.openai.com/v1 \
-REALMS_E2E_UPSTREAM_API_KEY=sk-*** \
-REALMS_E2E_BILLING_MODEL=gpt-5.2 \
-REALMS_E2E_ENFORCE_REAL_UPSTREAM=1 \
-npm run test:e2e:ci
-```
-
-若你希望在前端“模型列表”相关用例中覆盖多个模型，可在 seed 模式下用逗号分隔一次性 seed 多个模型：
-
-```bash
-REALMS_E2E_BILLING_MODELS=gpt-5.2,gpt-5.2-mini,gpt-5.2-nano \
-npm run test:e2e:ci
-```
+本仓库的 CI Web 校验默认使用 `curl` 做最小冒烟（构建 `web/dist` + 启动 `cmd/realms-e2e` + 校验关键路由）。
 
 从仓库根目录执行统一检查集（推荐，本地/CI 同口径）：
 
@@ -89,9 +46,29 @@ make ci
 
 若你已配置 `REALMS_CI_UPSTREAM_BASE_URL/REALMS_CI_UPSTREAM_API_KEY/REALMS_CI_MODEL`，则 `make ci` 会默认跑真实上游集成回归（等价于 `make ci-real`）。
 
+你也可以只跑 Web 冒烟（本地）：
+
+```bash
+go run ./cmd/realms-e2e
+curl -fsS "http://127.0.0.1:18181/healthz"
+```
+
+`cmd/realms-e2e` 常用环境变量：
+
+```bash
+REALMS_E2E_BASE_URL="http://127.0.0.1:18181"         # 对外 baseURL（用于脚本/测试）
+REALMS_E2E_ADDR="127.0.0.1:18181"                    # 监听地址（默认同上）
+REALMS_E2E_SKIP_SEED="1"                             # 跳过自动 seed
+REALMS_E2E_DB_PATH="/path/to/your.sqlite"            # 复用 SQLite
+REALMS_E2E_UPSTREAM_BASE_URL="https://api.openai.com/v1"
+REALMS_E2E_UPSTREAM_API_KEY="sk-***"
+REALMS_E2E_BILLING_MODEL="gpt-5.2"
+REALMS_E2E_ENFORCE_REAL_UPSTREAM="1"
+```
+
 ## CI Web 冒烟（curl）
 
-CI 的 Web 部分不跑 Playwright，改为：
+CI 的 Web 部分使用 `curl` 冒烟：
 - 构建 `web/dist`
 - 启动 `cmd/realms-e2e`
 - `curl` 校验：`/healthz`、`/`、`/assets/realms_icon.svg`
@@ -99,3 +76,7 @@ CI 的 Web 部分不跑 Playwright，改为：
 入口：
 - `scripts/ci.sh`（seed/fake upstream）
 - `scripts/ci-real.sh`（seed + real upstream 配置）
+
+## UI E2E（已移除）
+
+历史上仓库曾使用 Playwright 做 UI E2E（`web/e2e` + `@playwright/test`），现已移除以减少 CI 依赖与不稳定因素。

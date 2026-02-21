@@ -8,12 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "check:theme": "node scripts/check-theme-colors.js",
-    "test:e2e": "npm run build && playwright test",
-    "test:e2e:ci": "playwright test",
-    "test:visual": "npm run build && playwright test e2e/visual-routes.spec.ts",
-    "test:visual:update": "npm run build && playwright test e2e/visual-routes.spec.ts --update-snapshots",
-    "test:e2e:ui": "playwright test --ui"
+    "check:theme": "node scripts/check-theme-colors.js"
   },
   "dependencies": {
     "axios": "^1.13.5",
@@ -24,12 +19,8 @@
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.13.0"
   },
-  "knip": {
-    "ignore": ["e2e/**"]
-  },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
-    "@playwright/test": "^1.58.1",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
