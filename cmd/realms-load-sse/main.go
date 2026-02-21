@@ -30,7 +30,7 @@ type stats struct {
 func main() {
 	var (
 		baseURL  = flag.String("base-url", "http://127.0.0.1:19090", "Realms base URL")
-		token    = flag.String("token", "sk_playwright_e2e_user_token", "Bearer token")
+		token    = flag.String("token", "sk_e2e_user_token", "Bearer token")
 		model    = flag.String("model", "gpt-5.2", "model")
 		input    = flag.String("input", "hello", "input")
 		conns    = flag.Int("conns", 100, "concurrent SSE connections")
@@ -160,4 +160,3 @@ func main() {
 func errorsIsEOF(err error) bool {
 	return err == io.EOF || err == context.Canceled || strings.Contains(err.Error(), "use of closed network connection")
 }
-

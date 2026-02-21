@@ -40,29 +40,29 @@ const (
 	e2eRootUsername = "root"
 	e2eRootPassword = "rootpass123"
 
-	e2eOAuthClientID     = "oa_playwright_e2e"
-	e2eOAuthClientSecret = "oas_playwright_e2e_secret"
-	e2eOAuthAppName      = "Playwright E2E App"
+	e2eOAuthClientID     = "oa_e2e"
+	e2eOAuthClientSecret = "oas_e2e_secret"
+	e2eOAuthAppName      = "E2E App"
 	e2eOAuthRedirectURI  = "https://example.com/callback"
 
-	e2eAnnouncementTitle = "Playwright E2E Announcement"
-	e2eAnnouncementBody  = "This is a seeded announcement for Playwright E2E."
+	e2eAnnouncementTitle = "E2E Announcement"
+	e2eAnnouncementBody  = "This is a seeded announcement for E2E."
 
-	e2eTicketOpenSubject   = "Playwright E2E Ticket (Open)"
-	e2eTicketClosedSubject = "Playwright E2E Ticket (Closed)"
+	e2eTicketOpenSubject   = "E2E Ticket (Open)"
+	e2eTicketClosedSubject = "E2E Ticket (Closed)"
 
-	// Billing E2E seed（与 web/e2e/seed.ts 保持一致）
+	// Billing E2E seed
 	e2eModelPublicID = "gpt-5.2"
 
 	e2eUserEmail           = "e2e-user@example.com"
 	e2eUserUsername        = "e2euser"
-	e2eUserTokenPlain      = "sk_playwright_e2e_user_token"
+	e2eUserTokenPlain      = "sk_e2e_user_token"
 	e2eUserInitialBalance  = "1"
 	e2ePoorUserEmail       = "e2e-poor@example.com"
 	e2ePoorUserUsername    = "e2epoor"
-	e2ePoorUserTokenPlain  = "sk_playwright_e2e_poor_token"
+	e2ePoorUserTokenPlain  = "sk_e2e_poor_token"
 	e2ePoorUserInitialBal  = "0.0005" // < 0.001 USD default reserve
-	e2eUpstreamAPIKeyPlain = "sk_upstream_playwright_e2e"
+	e2eUpstreamAPIKeyPlain = "sk_upstream_e2e"
 )
 
 func envOr(key string, fallback string) string {
@@ -233,7 +233,7 @@ func main() {
 			rawBody, _ := io.ReadAll(r.Body)
 			_ = r.Body.Close()
 
-			// Playwright E2E: 固定错误触发器（支持 New API 的结构化 input）
+			// E2E: 固定错误触发器（支持 New API 的结构化 input）
 			// - __pw_fail__: 返回非重试错误（400），用于验证上游错误透传
 			// - __pw_unavailable__: 返回重试错误（429），用于触发 Realms 最终的 upstream_unavailable 收敛
 			if bytes.Contains(rawBody, []byte("__pw_unavailable__")) {
@@ -243,7 +243,7 @@ func main() {
 					"error": map[string]any{
 						"message": "rate limited for e2e",
 					},
-					"upstream_channel": "pw-e2e-upstream",
+					"upstream_channel": "e2e-upstream",
 				})
 				return
 			}
@@ -254,7 +254,7 @@ func main() {
 					"error": map[string]any{
 						"message": "bad request for e2e",
 					},
-					"upstream_channel": "pw-e2e-upstream",
+					"upstream_channel": "e2e-upstream",
 				})
 				return
 			}
@@ -303,13 +303,13 @@ func main() {
 			}
 
 			resp := map[string]any{
-				"id":      "resp_pw_e2e_1",
+				"id":      "resp_e2e_1",
 				"object":  "response",
 				"created": 0,
 				"model":   model,
 				"output": []any{
 					map[string]any{
-						"id":   "msg_pw_e2e_1",
+						"id":   "msg_e2e_1",
 						"type": "message",
 						"role": "assistant",
 						"content": []any{
@@ -489,12 +489,12 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 	// 三层分组（E2E 最小可运行集）：
 	// - 用户分组：限制用户可选的渠道组（小分组）
 	// - 渠道组：Token 绑定并按顺序 failover；同时也是模型的 group_name
-	const e2eUserGroup = "pw-e2e-users"
-	const e2eChannelGroup = "pw-e2e"
-	if _, err := st.CreateChannelGroup(ctx, e2eChannelGroup, strPtr("Playwright E2E channel group"), 1, store.DefaultGroupPriceMultiplier); err != nil {
+	const e2eUserGroup = "e2e-users"
+	const e2eChannelGroup = "e2e"
+	if _, err := st.CreateChannelGroup(ctx, e2eChannelGroup, strPtr("E2E channel group"), 1, store.DefaultGroupPriceMultiplier); err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 channel_group 失败: %w", err)
 	}
-	if err := st.CreateMainGroup(ctx, e2eUserGroup, strPtr("Playwright E2E user group"), 1); err != nil {
+	if err := st.CreateMainGroup(ctx, e2eUserGroup, strPtr("E2E user group"), 1); err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 main_group 失败: %w", err)
 	}
 	if err := st.ReplaceMainGroupSubgroups(ctx, e2eUserGroup, []string{e2eChannelGroup}); err != nil {
@@ -521,7 +521,7 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 		return e2eSeedResult{}, fmt.Errorf("设置 root 用户分组失败: %w", err)
 	}
 
-	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "pw-e2e-upstream", e2eChannelGroup, 0, false, false, false, false)
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "e2e-upstream", e2eChannelGroup, 0, false, false, false, false)
 	if err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 upstream_channel 失败: %w", err)
 	}
@@ -529,7 +529,7 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 	if err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 upstream_endpoint 失败: %w", err)
 	}
-	if _, _, err := st.CreateOpenAICompatibleCredential(ctx, epID, strPtr("pw-e2e"), upstreamAPIKey); err != nil {
+	if _, _, err := st.CreateOpenAICompatibleCredential(ctx, epID, strPtr("e2e"), upstreamAPIKey); err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 upstream_credential 失败: %w", err)
 	}
 
@@ -610,7 +610,7 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 		}
 
 		// exhausted：确保 acc_exhausted 首先被选择（后创建 id 更大）。
-		if err := seedCodexChannel("pw-e2e-codex-exhaust", codexExhaustModel, []codexAccountSeed{
+		if err := seedCodexChannel("e2e-codex-exhaust", codexExhaustModel, []codexAccountSeed{
 			{accountID: "acc_ok", email: "ok@example.com"},
 			{accountID: "acc_exhausted", email: "ex@example.com"},
 		}); err != nil {
@@ -618,7 +618,7 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 		}
 
 		// invalid：确保 acc_invalid 首先被选择（后创建 id 更大）。
-		if err := seedCodexChannel("pw-e2e-codex-invalid", codexInvalidModel, []codexAccountSeed{
+		if err := seedCodexChannel("e2e-codex-invalid", codexInvalidModel, []codexAccountSeed{
 			{accountID: "acc_ok", email: "ok@example.com"},
 			{accountID: "acc_invalid", email: "inv@example.com"},
 		}); err != nil {
@@ -626,7 +626,7 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 		}
 	}
 
-	userHash, err := auth.HashPassword("pw-e2e-user-123")
+	userHash, err := auth.HashPassword("e2e-user-123")
 	if err != nil {
 		return e2eSeedResult{}, fmt.Errorf("生成 e2e 用户密码失败: %w", err)
 	}
@@ -640,7 +640,7 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 	if _, err := st.AddUserBalanceUSD(ctx, e2eUserID, decimal.RequireFromString(e2eUserInitialBalance)); err != nil {
 		return e2eSeedResult{}, fmt.Errorf("写入 e2e 用户余额失败: %w", err)
 	}
-	e2eTokID, _, err := st.CreateUserToken(ctx, e2eUserID, strPtr("pw-e2e-user"), e2eUserTokenPlain)
+	e2eTokID, _, err := st.CreateUserToken(ctx, e2eUserID, strPtr("e2e-user"), e2eUserTokenPlain)
 	if err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 e2e 用户 token 失败: %w", err)
 	}
@@ -658,7 +658,7 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 	if _, err := st.AddUserBalanceUSD(ctx, poorUserID, decimal.RequireFromString(e2ePoorUserInitialBal)); err != nil {
 		return e2eSeedResult{}, fmt.Errorf("写入 poor 用户余额失败: %w", err)
 	}
-	poorTokID, _, err := st.CreateUserToken(ctx, poorUserID, strPtr("pw-e2e-poor"), e2ePoorUserTokenPlain)
+	poorTokID, _, err := st.CreateUserToken(ctx, poorUserID, strPtr("e2e-poor"), e2ePoorUserTokenPlain)
 	if err != nil {
 		return e2eSeedResult{}, fmt.Errorf("创建 poor 用户 token 失败: %w", err)
 	}
@@ -704,7 +704,7 @@ func seedE2EData(ctx context.Context, st *store.Store, cfg config.Config, seedCf
 		return e2eSeedResult{}, fmt.Errorf("创建充值订单失败: %w", err)
 	}
 
-	// 输出常用 seed 常量，便于 Playwright 侧复用（仅日志输出，不写入数据库）。
+	// 输出常用 seed 常量，便于脚本侧复用（仅日志输出，不写入数据库）。
 	slog.Info("e2e seed constants",
 		"root_username", e2eRootUsername,
 		"root_password_len", strconv.Itoa(len(e2eRootPassword)),

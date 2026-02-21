@@ -79,4 +79,4 @@ CI 的 Web 部分使用 `curl` 冒烟：
 
 ## UI E2E（已移除）
 
-历史上仓库曾使用 Playwright 做 UI E2E（`web/e2e` + `@playwright/test`），现已移除以减少 CI 依赖与不稳定因素。
+历史上仓库曾使用浏览器 UI E2E 测试（`web/e2e` + 测试框架），现已移除以减少 CI 依赖与不稳定因素。

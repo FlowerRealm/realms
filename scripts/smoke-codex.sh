@@ -5,7 +5,7 @@ ADDR="${REALMS_SMOKE_ADDR:-127.0.0.1:19090}"
 BASE_URL="http://${ADDR}"
 API_BASE="${BASE_URL}/v1"
 MODEL="${REALMS_SMOKE_MODEL:-gpt-5.2}"
-TOKEN="${REALMS_SMOKE_TOKEN:-sk_playwright_e2e_user_token}"
+TOKEN="${REALMS_SMOKE_TOKEN:-sk_e2e_user_token}"
 
 cleanup() {
   if [[ "${REALMS_E2E_PID:-}" != "" ]]; then
