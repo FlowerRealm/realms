@@ -6,6 +6,9 @@
 - **[web/ui]**: 推送前端主题统一与视觉回归基线更新到 `master`
   - ⚠️ EHRB: 推送到 `master` - 用户已确认风险
   - 检测依据: `master(分支)`
+- **[release]**: 推送 `master` 并发布 tag `v0.13.1`
+  - ⚠️ EHRB: 发布 `master` + 推送 tag `v0.13.1` - 用户已确认风险
+  - 检测依据: 语义判定（发布 tag 属于不可逆发布操作）
 
 ### 回滚
 - **[usability]**: 回滚自 `0.9.3` tag 以来的性能/安全相关提交以恢复可用性（HTTP hardening/body limits、auth cache/invalidation、usage rollup sharding/backfill、probe claim 单飞相关、proxy-aware debug guard 等）
