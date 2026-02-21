@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { BootstrapModal } from '../../components/BootstrapModal';
+import { DividedStack } from '../../components/DividedStack';
+import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { closeModalById } from '../../components/modal';
 import {
   createAdminPaymentChannel,
@@ -84,9 +86,9 @@ export function PaymentChannelsPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="row g-4">
-        <div className="col-12">
-          <div className="card">
+      <SegmentedFrame>
+        <DividedStack>
+          <div className="card mb-0">
             <div className="card-body d-flex flex-column flex-md-row justify-content-between align-items-center">
               <div className="d-flex align-items-center mb-3 mb-md-0">
                 <div
@@ -110,50 +112,44 @@ export function PaymentChannelsPage() {
               </div>
             </div>
           </div>
-        </div>
 
         {notice ? (
-          <div className="col-12">
-            <div className="alert alert-success d-flex align-items-center" role="alert">
-              <span className="me-2 material-symbols-rounded">check_circle</span>
-              <div>{notice}</div>
-            </div>
+          <div className="alert alert-success d-flex align-items-center mb-0" role="alert">
+            <span className="me-2 material-symbols-rounded">check_circle</span>
+            <div>{notice}</div>
           </div>
         ) : null}
 
         {err ? (
-          <div className="col-12">
-            <div className="alert alert-danger d-flex align-items-center" role="alert">
-              <span className="me-2 material-symbols-rounded">warning</span>
-              <div>{err}</div>
-            </div>
+          <div className="alert alert-danger d-flex align-items-center mb-0" role="alert">
+            <span className="me-2 material-symbols-rounded">warning</span>
+            <div>{err}</div>
           </div>
         ) : null}
 
-        <div className="col-12">
-          {loading ? (
-            <div className="text-muted">加载中…</div>
-          ) : items.length === 0 ? (
-            <div className="text-center py-5 text-muted">
-              <span className="fs-1 d-block mb-3 material-symbols-rounded">inbox</span>
-              暂无支付渠道。
-            </div>
-          ) : (
-            <div className="card border-0">
-              <div className="card-body">
-                <h5 className="fw-semibold mb-3">渠道列表</h5>
-                <div className="table-responsive">
-                  <table className="table table-hover align-middle mb-0">
-                    <thead className="table-light">
-                      <tr>
-                        <th className="ps-3">渠道详情</th>
-                        <th>状态</th>
-                        <th>健康/配置</th>
-                        <th>创建时间</th>
-                        <th className="text-end pe-3">操作</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+        {loading ? (
+          <div className="text-muted">加载中…</div>
+        ) : items.length === 0 ? (
+          <div className="text-center py-5 text-muted">
+            <span className="fs-1 d-block mb-3 material-symbols-rounded">inbox</span>
+            暂无支付渠道。
+          </div>
+        ) : (
+          <div className="card border-0 mb-0">
+            <div className="card-body">
+              <h5 className="fw-semibold mb-3">渠道列表</h5>
+              <div className="table-responsive">
+                <table className="table table-hover align-middle mb-0">
+                  <thead className="table-light">
+                    <tr>
+                      <th className="ps-3">渠道详情</th>
+                      <th>状态</th>
+                      <th>健康/配置</th>
+                      <th>创建时间</th>
+                      <th className="text-end pe-3">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
                       {items.map((ch) => {
                         const st = statusBadge(ch.status);
                         const usable = usableBadge(ch.usable);
@@ -219,9 +215,9 @@ export function PaymentChannelsPage() {
                 </div>
               </div>
             </div>
-          )}
-        </div>
-      </div>
+        )}
+        </DividedStack>
+      </SegmentedFrame>
 
       <BootstrapModal
         id="createPaymentChannelModal"

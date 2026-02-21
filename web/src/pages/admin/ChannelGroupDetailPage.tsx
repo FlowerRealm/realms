@@ -18,6 +18,7 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS } from '@dnd-kit/utilities';
 
 import { BootstrapModal } from '../../components/BootstrapModal';
+import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { closeModalById } from '../../components/modal';
 import { PortalDragOverlay } from '../../components/PortalDragOverlay';
 import {
@@ -390,286 +391,290 @@ export function ChannelGroupDetailPage() {
           ) : null}
         </PortalDragOverlay>
 
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <div>
-          <h3 className="mb-1 fw-bold">渠道组</h3>
-          <nav aria-label="breadcrumb">
-            <ol className="breadcrumb breadcrumb-sm mb-1">
-              <li className="breadcrumb-item">
-                <Link to="/admin/channel-groups">渠道组列表</Link>
-              </li>
-              {breadcrumb.map((b) =>
-                b.id === group?.id ? (
-                  <li key={b.id} className="breadcrumb-item active" aria-current="page">
-                    {b.name}
-                  </li>
-                ) : (
-                  <li key={b.id} className="breadcrumb-item">
-                    <Link to={`/admin/channel-groups/${b.id}`}>{b.name}</Link>
-                  </li>
-                ),
-              )}
-            </ol>
-          </nav>
-          {group ? (
-            <div className="text-muted small">
-              名称：<code>{group.name}</code> <span className="mx-2">·</span> 倍率：<code>{group.price_multiplier}</code>
-            </div>
-          ) : null}
-        </div>
-        <div className="d-flex gap-2">
-          <button type="button" className="btn btn-light border" data-bs-toggle="modal" data-bs-target="#addChannelToGroupModal" disabled={!group}>
-            <span className="me-1 material-symbols-rounded">add</span> 添加渠道
-          </button>
-          <button type="button" className="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createChildGroupModal" disabled={!group}>
-            <span className="me-1 material-symbols-rounded">add</span> 新建子组
-          </button>
-        </div>
-      </div>
-
-      {notice ? (
-        <div className="alert alert-success d-flex align-items-center" role="alert">
-          <span className="me-2 material-symbols-rounded">check_circle</span>
-          <div>{notice}</div>
-        </div>
-      ) : null}
-
-      {err ? (
-        <div className="alert alert-danger d-flex align-items-center" role="alert">
-          <span className="me-2 material-symbols-rounded">warning</span>
-          <div>{err}</div>
-        </div>
-      ) : null}
-
-      {loading ? (
-        <div className="text-muted">加载中…</div>
-      ) : !group ? (
-        <div className="alert alert-warning">未找到该渠道组。</div>
-      ) : (
-        <div className="row g-4">
-          <div className="col-12">
-            <div className="card border-0 shadow-sm overflow-hidden mb-0">
-              <div className="bg-primary bg-opacity-10 py-3 px-4 d-flex justify-content-between align-items-center">
-                <div>
-                  <span className="text-primary fw-bold text-uppercase small">成员列表</span>
-                </div>
-                <div className="text-primary text-opacity-75 small">
-                  <i className="ri-drag-move-2-line me-1"></i> 支持拖拽排序
-                </div>
+        <SegmentedFrame>
+          <div>
+            <div className="d-flex justify-content-between align-items-center mb-4">
+              <div>
+                <h3 className="mb-1 fw-bold">渠道组</h3>
+                <nav aria-label="breadcrumb">
+                  <ol className="breadcrumb breadcrumb-sm mb-1">
+                    <li className="breadcrumb-item">
+                      <Link to="/admin/channel-groups">渠道组列表</Link>
+                    </li>
+                    {breadcrumb.map((b) =>
+                      b.id === group?.id ? (
+                        <li key={b.id} className="breadcrumb-item active" aria-current="page">
+                          {b.name}
+                        </li>
+                      ) : (
+                        <li key={b.id} className="breadcrumb-item">
+                          <Link to={`/admin/channel-groups/${b.id}`}>{b.name}</Link>
+                        </li>
+                      ),
+                    )}
+                  </ol>
+                </nav>
+                {group ? (
+                  <div className="text-muted small">
+                    名称：<code>{group.name}</code> <span className="mx-2">·</span> 倍率：<code>{group.price_multiplier}</code>
+                  </div>
+                ) : null}
               </div>
-              <div className="table-responsive">
-                <table className="table table-hover align-middle mb-0">
-                    <thead className="table-light">
-                      <tr>
-                        <th style={{ width: 60 }}></th>
-                        <th className="ps-4">成员详情</th>
-                        <th>类型</th>
-                        <th>状态</th>
-                        <th className="text-end pe-4">操作</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <SortableContext items={memberIDs} strategy={verticalListSortingStrategy}>
-                        {members.map((m) => (
-                          <SortableRow key={m.member_id} id={m.member_id} disabled={{ draggable: loading || reordering, droppable: loading || reordering }}>
-                            {({ attributes, listeners, setRowRef, transform, transition, isDragging, isOver }) => {
-                              const typ = memberType(m);
-                              const st =
-                                typ === 'group'
-                                  ? statusBadge(m.member_group_status ?? 0)
-                                  : typ === 'channel'
-                                    ? statusBadge(m.member_channel_status ?? 0)
-                                    : statusBadge(0);
-                              const isPointerChannel = typ === 'channel' && !!pointer && pointer.pinned && pointer.channel_id === m.member_channel_id;
-                              const dropTarget = draggingID !== null && isOver && !isDragging;
-                              const rowClassName = [
-                                'rlm-channel-row-main',
-                                dropTarget ? 'table-primary rlm-channel-row-drop-target' : isPointerChannel ? 'table-warning' : '',
-                                isDragging ? 'rlm-channel-row-dragging' : '',
-                              ]
-                                .filter((v) => v)
-                                .join(' ');
-                              const style: CSSProperties = {
-                                transform: CSS.Transform.toString(transform ? { ...transform, x: 0, scaleX: 1, scaleY: 1 } : null),
-                                transition: reduceMotion ? undefined : transition ? `${transition}, background-color 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease` : undefined,
-                                cursor: loading || reordering ? 'not-allowed' : isDragging ? 'grabbing' : 'grab',
-                              };
-                              return (
-                                <tr
-                                  ref={setRowRef}
-                                  style={style}
-                                  className={rowClassName || undefined}
-                                  {...attributes}
-                                  {...listeners}
-                                  data-rlm-channel-group-member-row="1"
-                                  data-rlm-member-id={m.member_id}
-                                >
-                                  <td className="text-center text-muted" title={loading || reordering ? '不可拖动' : '拖动排序'}>
-                                    <span
-                                      className="d-inline-flex align-items-center justify-content-center"
-                                      style={{ width: 48, touchAction: loading || reordering ? 'auto' : isDragging ? 'none' : 'auto' }}
-                                      aria-label="拖动排序"
-                                      data-rlm-drag-handle="1"
-                                      onClick={(e) => e.stopPropagation()}
-                                    >
-                                      <i className="ri-drag-move-2-line fs-5"></i>
-                                    </span>
-                                  </td>
-                                  <td className="ps-4" style={{ minWidth: 0 }}>
-                                    {typ === 'group' ? (
-                                      <div className="d-flex flex-column">
-                                        <div className="d-flex flex-wrap align-items-center gap-2">
-                                          <Link className="fw-bold text-dark text-decoration-none" to={`/admin/channel-groups/${m.member_group_id}`}>
-                                            {m.member_group_name || `group-${m.member_group_id}`}
-                                          </Link>
-                                          <span className="text-muted small">(渠道组)</span>
-                                          {m.promotion ? (
-                                            <span className="small text-warning fw-medium">
-                                              <i className="ri-fire-line me-1"></i>优先
-                                            </span>
-                                          ) : null}
+              <div className="d-flex gap-2">
+                <button type="button" className="btn btn-light border" data-bs-toggle="modal" data-bs-target="#addChannelToGroupModal" disabled={!group}>
+                  <span className="me-1 material-symbols-rounded">add</span> 添加渠道
+                </button>
+                <button type="button" className="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createChildGroupModal" disabled={!group}>
+                  <span className="me-1 material-symbols-rounded">add</span> 新建子组
+                </button>
+              </div>
+            </div>
+
+            {notice ? (
+              <div className="alert alert-success d-flex align-items-center mb-3" role="alert">
+                <span className="me-2 material-symbols-rounded">check_circle</span>
+                <div>{notice}</div>
+              </div>
+            ) : null}
+
+            {err ? (
+              <div className="alert alert-danger d-flex align-items-center mb-0" role="alert">
+                <span className="me-2 material-symbols-rounded">warning</span>
+                <div>{err}</div>
+              </div>
+            ) : null}
+          </div>
+
+          {loading ? (
+            <div className="text-muted">加载中…</div>
+          ) : !group ? (
+            <div className="alert alert-warning mb-0">未找到该渠道组。</div>
+          ) : (
+            <div className="row g-4 mb-0">
+              <div className="col-12">
+                <div className="card border-0 shadow-sm overflow-hidden mb-0">
+                  <div className="bg-primary bg-opacity-10 py-3 px-4 d-flex justify-content-between align-items-center">
+                    <div>
+                      <span className="text-primary fw-bold text-uppercase small">成员列表</span>
+                    </div>
+                    <div className="text-primary text-opacity-75 small">
+                      <i className="ri-drag-move-2-line me-1"></i> 支持拖拽排序
+                    </div>
+                  </div>
+                  <div className="table-responsive">
+                    <table className="table table-hover align-middle mb-0">
+                      <thead className="table-light">
+                        <tr>
+                          <th style={{ width: 60 }}></th>
+                          <th className="ps-4">成员详情</th>
+                          <th>类型</th>
+                          <th>状态</th>
+                          <th className="text-end pe-4">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <SortableContext items={memberIDs} strategy={verticalListSortingStrategy}>
+                          {members.map((m) => (
+                            <SortableRow key={m.member_id} id={m.member_id} disabled={{ draggable: loading || reordering, droppable: loading || reordering }}>
+                              {({ attributes, listeners, setRowRef, transform, transition, isDragging, isOver }) => {
+                                const typ = memberType(m);
+                                const st =
+                                  typ === 'group'
+                                    ? statusBadge(m.member_group_status ?? 0)
+                                    : typ === 'channel'
+                                      ? statusBadge(m.member_channel_status ?? 0)
+                                      : statusBadge(0);
+                                const isPointerChannel = typ === 'channel' && !!pointer && pointer.pinned && pointer.channel_id === m.member_channel_id;
+                                const dropTarget = draggingID !== null && isOver && !isDragging;
+                                const rowClassName = [
+                                  'rlm-channel-row-main',
+                                  dropTarget ? 'table-primary rlm-channel-row-drop-target' : isPointerChannel ? 'table-warning' : '',
+                                  isDragging ? 'rlm-channel-row-dragging' : '',
+                                ]
+                                  .filter((v) => v)
+                                  .join(' ');
+                                const style: CSSProperties = {
+                                  transform: CSS.Transform.toString(transform ? { ...transform, x: 0, scaleX: 1, scaleY: 1 } : null),
+                                  transition: reduceMotion ? undefined : transition ? `${transition}, background-color 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease` : undefined,
+                                  cursor: loading || reordering ? 'not-allowed' : isDragging ? 'grabbing' : 'grab',
+                                };
+                                return (
+                                  <tr
+                                    ref={setRowRef}
+                                    style={style}
+                                    className={rowClassName || undefined}
+                                    {...attributes}
+                                    {...listeners}
+                                    data-rlm-channel-group-member-row="1"
+                                    data-rlm-member-id={m.member_id}
+                                  >
+                                    <td className="text-center text-muted" title={loading || reordering ? '不可拖动' : '拖动排序'}>
+                                      <span
+                                        className="d-inline-flex align-items-center justify-content-center"
+                                        style={{ width: 48, touchAction: loading || reordering ? 'auto' : isDragging ? 'none' : 'auto' }}
+                                        aria-label="拖动排序"
+                                        data-rlm-drag-handle="1"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <i className="ri-drag-move-2-line fs-5"></i>
+                                      </span>
+                                    </td>
+                                    <td className="ps-4" style={{ minWidth: 0 }}>
+                                      {typ === 'group' ? (
+                                        <div className="d-flex flex-column">
+                                          <div className="d-flex flex-wrap align-items-center gap-2">
+                                            <Link className="fw-bold text-dark text-decoration-none" to={`/admin/channel-groups/${m.member_group_id}`}>
+                                              {m.member_group_name || `group-${m.member_group_id}`}
+                                            </Link>
+                                            <span className="text-muted small">(渠道组)</span>
+                                            {m.promotion ? (
+                                              <span className="small text-warning fw-medium">
+                                                <i className="ri-fire-line me-1"></i>优先
+                                              </span>
+                                            ) : null}
+                                          </div>
                                         </div>
-                                      </div>
-                                    ) : typ === 'channel' ? (
-                                      (() => {
-                                        const ch = {
-                                          id: m.member_channel_id || 0,
-                                          name: m.member_channel_name,
-                                          type: (m.member_channel_type || '').trim(),
-                                          promotion: m.promotion,
-                                          base_url: '',
-                                          groups: m.member_channel_groups || '',
-                                        };
-                                        return (
-                                          <div className="d-flex flex-column">
-                                            <div className="d-flex flex-wrap align-items-center gap-2">
-                                              <span className="fw-bold text-dark">{ch.name || `渠道 #${ch.id}`}</span>
-                                              <span className="text-muted small">({channelTypeLabel(ch.type)})</span>
-                                              {ch.promotion ? (
-                                                <span className="small text-warning fw-medium">
-                                                  <i className="ri-fire-line me-1"></i>优先
-                                                </span>
-                                              ) : null}
-                                            </div>
-                                            <div className="d-flex flex-wrap align-items-center gap-2 small text-muted mt-1">
-                                              {ch.base_url ? (
-                                                <span
-                                                  className="font-monospace d-inline-block user-select-all"
-                                                  style={{ maxWidth: 360, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
-                                                  title={ch.base_url}
-                                                >
-                                                  {ch.base_url}
-                                                </span>
-                                              ) : null}
-                                              <div className="d-flex align-items-center">
-                                                {ch.base_url ? <span className="text-secondary">·</span> : null}
-                                                <span className={`${ch.base_url ? 'ms-2 ' : ''}me-1`}>渠道组:</span>
-                                                <span className="text-secondary font-monospace user-select-all">{(ch.groups || '').trim() || '-'}</span>
+                                      ) : typ === 'channel' ? (
+                                        (() => {
+                                          const ch = {
+                                            id: m.member_channel_id || 0,
+                                            name: m.member_channel_name,
+                                            type: (m.member_channel_type || '').trim(),
+                                            promotion: m.promotion,
+                                            base_url: '',
+                                            groups: m.member_channel_groups || '',
+                                          };
+                                          return (
+                                            <div className="d-flex flex-column">
+                                              <div className="d-flex flex-wrap align-items-center gap-2">
+                                                <span className="fw-bold text-dark">{ch.name || `渠道 #${ch.id}`}</span>
+                                                <span className="text-muted small">({channelTypeLabel(ch.type)})</span>
+                                                {ch.promotion ? (
+                                                  <span className="small text-warning fw-medium">
+                                                    <i className="ri-fire-line me-1"></i>优先
+                                                  </span>
+                                                ) : null}
+                                              </div>
+                                              <div className="d-flex flex-wrap align-items-center gap-2 small text-muted mt-1">
+                                                {ch.base_url ? (
+                                                  <span
+                                                    className="font-monospace d-inline-block user-select-all"
+                                                    style={{ maxWidth: 360, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                                                    title={ch.base_url}
+                                                  >
+                                                    {ch.base_url}
+                                                  </span>
+                                                ) : null}
+                                                <div className="d-flex align-items-center">
+                                                  {ch.base_url ? <span className="text-secondary">·</span> : null}
+                                                  <span className={`${ch.base_url ? 'ms-2 ' : ''}me-1`}>渠道组:</span>
+                                                  <span className="text-secondary font-monospace user-select-all">{(ch.groups || '').trim() || '-'}</span>
+                                                </div>
                                               </div>
                                             </div>
-                                          </div>
-                                        );
-                                      })()
-                                    ) : (
-                                      <span className="text-muted small fst-italic">-</span>
-                                    )}
-                                  </td>
-                                  <td>
-                                    {typ === 'group' ? (
-                                      <span className="badge rounded-pill bg-primary bg-opacity-10 text-primary px-2">子组</span>
-                                    ) : typ === 'channel' ? (
-                                      <span className="badge rounded-pill bg-success bg-opacity-10 text-success px-2">渠道</span>
-                                    ) : (
-                                      <span className="badge rounded-pill bg-secondary bg-opacity-10 text-secondary px-2">未知</span>
-                                    )}
-                                  </td>
-                                  <td>
-                                    <span className={st.cls}>{st.label}</span>
-                                  </td>
-                                  <td className="text-end pe-4 text-nowrap">
-                                    <div className="d-inline-flex gap-1">
-                                      {typ === 'channel' && typeof m.member_channel_id === 'number' && m.member_channel_id > 0
-                                        ? (() => {
-                                            const channelID = m.member_channel_id;
-                                            return (
-                                              <button
-                                                type="button"
-                                                className="btn btn-sm btn-light border text-warning"
-                                                title="设为指针"
-                                                disabled={isPointerChannel}
-                                                onClick={async () => {
-                                                  if (!window.confirm('确认将该渠道设为该组指针？')) return;
-                                                  setErr('');
-                                                  setNotice('');
-                                                  try {
-                                                    const res = await upsertAdminChannelGroupPointer(groupId, { channel_id: channelID, pinned: true });
-                                                    if (!res.success) throw new Error(res.message || '设置失败');
-                                                    setNotice('已设置指针');
-                                                    await refresh();
-                                                  } catch (e) {
-                                                    setErr(e instanceof Error ? e.message : '设置失败');
-                                                  }
-                                                }}
-                                              >
-                                                <i className="ri-pushpin-2-line"></i>
-                                              </button>
-                                            );
-                                          })()
-                                        : null}
-                                      {typ === 'group' && m.member_group_id ? (
-                                        <Link to={`/admin/channel-groups/${m.member_group_id}`} className="btn btn-sm btn-light border text-secondary" title="进入">
-                                          <i className="ri-folder-open-line"></i>
-                                        </Link>
-                                      ) : null}
-                                      <button
-                                        type="button"
-                                        className="btn btn-sm btn-light border text-danger"
-                                        title="移除"
-                                        onClick={async () => {
-                                          if (!window.confirm('确认从该组移除该成员？')) return;
-                                          setErr('');
-                                          setNotice('');
-                                          try {
-                                            if (typ === 'group' && m.member_group_id) {
-                                              const res = await deleteAdminChannelGroupGroupMember(groupId, m.member_group_id);
-                                              if (!res.success) throw new Error(res.message || '移除失败');
-                                            } else if (typ === 'channel' && m.member_channel_id) {
-                                              const res = await deleteAdminChannelGroupChannelMember(groupId, m.member_channel_id);
-                                              if (!res.success) throw new Error(res.message || '移除失败');
-                                            } else {
-                                              throw new Error('成员类型不合法');
+                                          );
+                                        })()
+                                      ) : (
+                                        <span className="text-muted small fst-italic">-</span>
+                                      )}
+                                    </td>
+                                    <td>
+                                      {typ === 'group' ? (
+                                        <span className="badge rounded-pill bg-primary bg-opacity-10 text-primary px-2">子组</span>
+                                      ) : typ === 'channel' ? (
+                                        <span className="badge rounded-pill bg-success bg-opacity-10 text-success px-2">渠道</span>
+                                      ) : (
+                                        <span className="badge rounded-pill bg-secondary bg-opacity-10 text-secondary px-2">未知</span>
+                                      )}
+                                    </td>
+                                    <td>
+                                      <span className={st.cls}>{st.label}</span>
+                                    </td>
+                                    <td className="text-end pe-4 text-nowrap">
+                                      <div className="d-inline-flex gap-1">
+                                        {typ === 'channel' && typeof m.member_channel_id === 'number' && m.member_channel_id > 0
+                                          ? (() => {
+                                              const channelID = m.member_channel_id;
+                                              return (
+                                                <button
+                                                  type="button"
+                                                  className="btn btn-sm btn-light border text-warning"
+                                                  title="设为指针"
+                                                  disabled={isPointerChannel}
+                                                  onClick={async () => {
+                                                    if (!window.confirm('确认将该渠道设为该组指针？')) return;
+                                                    setErr('');
+                                                    setNotice('');
+                                                    try {
+                                                      const res = await upsertAdminChannelGroupPointer(groupId, { channel_id: channelID, pinned: true });
+                                                      if (!res.success) throw new Error(res.message || '设置失败');
+                                                      setNotice('已设置指针');
+                                                      await refresh();
+                                                    } catch (e) {
+                                                      setErr(e instanceof Error ? e.message : '设置失败');
+                                                    }
+                                                  }}
+                                                >
+                                                  <i className="ri-pushpin-2-line"></i>
+                                                </button>
+                                              );
+                                            })()
+                                          : null}
+                                        {typ === 'group' && m.member_group_id ? (
+                                          <Link to={`/admin/channel-groups/${m.member_group_id}`} className="btn btn-sm btn-light border text-secondary" title="进入">
+                                            <i className="ri-folder-open-line"></i>
+                                          </Link>
+                                        ) : null}
+                                        <button
+                                          type="button"
+                                          className="btn btn-sm btn-light border text-danger"
+                                          title="移除"
+                                          onClick={async () => {
+                                            if (!window.confirm('确认从该组移除该成员？')) return;
+                                            setErr('');
+                                            setNotice('');
+                                            try {
+                                              if (typ === 'group' && m.member_group_id) {
+                                                const res = await deleteAdminChannelGroupGroupMember(groupId, m.member_group_id);
+                                                if (!res.success) throw new Error(res.message || '移除失败');
+                                              } else if (typ === 'channel' && m.member_channel_id) {
+                                                const res = await deleteAdminChannelGroupChannelMember(groupId, m.member_channel_id);
+                                                if (!res.success) throw new Error(res.message || '移除失败');
+                                              } else {
+                                                throw new Error('成员类型不合法');
+                                              }
+                                              setNotice('已移除');
+                                              await refresh();
+                                            } catch (e) {
+                                              setErr(e instanceof Error ? e.message : '移除失败');
                                             }
-                                            setNotice('已移除');
-                                            await refresh();
-                                          } catch (e) {
-                                            setErr(e instanceof Error ? e.message : '移除失败');
-                                          }
-                                        }}
-                                      >
-                                        <i className="ri-delete-bin-line"></i>
-                                      </button>
-                                    </div>
-                                  </td>
-                                </tr>
-                              );
-                            }}
-                          </SortableRow>
-                        ))}
-                        {members.length === 0 ? (
-                          <tr>
-                            <td colSpan={5} className="text-center py-5 text-muted">
-                              暂无成员，请先添加渠道或创建子组。
-                            </td>
-                          </tr>
-                        ) : null}
-                      </SortableContext>
-                    </tbody>
-                  </table>
+                                          }}
+                                        >
+                                          <i className="ri-delete-bin-line"></i>
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              }}
+                            </SortableRow>
+                          ))}
+                          {members.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="text-center py-5 text-muted">
+                                暂无成员，请先添加渠道或创建子组。
+                              </td>
+                            </tr>
+                          ) : null}
+                        </SortableContext>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-      )}
+          )}
+        </SegmentedFrame>
 
       <BootstrapModal
         id="addChannelToGroupModal"

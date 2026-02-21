@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { approveAdminSubscriptionOrder, listAdminSubscriptionOrders, rejectAdminSubscriptionOrder, type AdminSubscriptionOrder } from '../../api/admin/billing';
+import { DividedStack } from '../../components/DividedStack';
+import { SegmentedFrame } from '../../components/SegmentedFrame';
 
 function orderStatusBadge(status: number): string {
   if (status === 1) return 'badge rounded-pill bg-success bg-opacity-10 text-success px-2';
@@ -38,9 +40,9 @@ export function OrdersPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="row g-4">
-        <div className="col-12">
-          <div className="card">
+      <SegmentedFrame>
+        <DividedStack>
+          <div className="card mb-0">
             <div className="card-body d-flex flex-column flex-md-row justify-content-between align-items-center">
               <div className="d-flex align-items-center mb-3 mb-md-0">
                 <div
@@ -56,30 +58,23 @@ export function OrdersPage() {
                   </p>
                 </div>
               </div>
-
             </div>
           </div>
-        </div>
 
         {notice ? (
-          <div className="col-12">
-            <div className="alert alert-success d-flex align-items-center" role="alert">
-              <span className="me-2 material-symbols-rounded">check_circle</span>
-              <div>{notice}</div>
-            </div>
+          <div className="alert alert-success d-flex align-items-center mb-0" role="alert">
+            <span className="me-2 material-symbols-rounded">check_circle</span>
+            <div>{notice}</div>
           </div>
         ) : null}
 
         {err ? (
-          <div className="col-12">
-            <div className="alert alert-danger d-flex align-items-center" role="alert">
-              <span className="me-2 material-symbols-rounded">warning</span>
-              <div>{err}</div>
-            </div>
+          <div className="alert alert-danger d-flex align-items-center mb-0" role="alert">
+            <span className="me-2 material-symbols-rounded">warning</span>
+            <div>{err}</div>
           </div>
         ) : null}
 
-        <div className="col-12">
           {loading ? (
             <div className="text-muted">加载中…</div>
           ) : items.length === 0 ? (
@@ -111,9 +106,7 @@ export function OrdersPage() {
                         <td>
                           <div className="fw-bold text-dark">{o.plan_name}</div>
                           <div>
-                            <span className="badge bg-light text-secondary border fw-normal smaller">
-                              {o.group_name || 'default'}
-                            </span>
+                            <span className="badge bg-light text-secondary border fw-normal smaller">{o.group_name || 'default'}</span>
                           </div>
                         </td>
                         <td className="text-muted small">{o.user_email}</td>
@@ -124,13 +117,13 @@ export function OrdersPage() {
                         <td className="text-muted small" style={{ lineHeight: 1.2 }}>
                           <div title="创建时间">{o.created_at}</div>
                           {o.paid_at ? (
-                            <div className="text-success" title="支付时间">
+                            <div className="text-muted" title="支付时间">
                               <i className="ri-bank-card-line me-1"></i>
                               {o.paid_at}
                             </div>
                           ) : null}
                           {o.approved_at ? (
-                            <div className="text-primary" title="批准时间">
+                            <div className="text-muted" title="批准时间">
                               <i className="ri-check-double-line me-1"></i>
                               {o.approved_at}
                             </div>
@@ -189,8 +182,8 @@ export function OrdersPage() {
               </div>
             </div>
           )}
-        </div>
-      </div>
+        </DividedStack>
+      </SegmentedFrame>
     </div>
   );
 }

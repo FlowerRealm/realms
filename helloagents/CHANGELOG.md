@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### 发布
+- **[web/ui]**: 推送前端主题统一与视觉回归基线更新到 `master`
+  - ⚠️ EHRB: 推送到 `master` - 用户已确认风险
+  - 检测依据: `master(分支)`
+
 ### 回滚
 - **[usability]**: 回滚自 `0.9.3` tag 以来的性能/安全相关提交以恢复可用性（HTTP hardening/body limits、auth cache/invalidation、usage rollup sharding/backfill、probe claim 单飞相关、proxy-aware debug guard 等）
   - 分支: `rollback/0.9.3-usability`
@@ -33,6 +38,48 @@
 - **[web]**: 登录/注册页右上角导航（nav-pills）激活态从默认蓝色改为主题绿色
   - 类型: 微调（无方案包）
   - 文件: web/src/index.css
+- **[web/ui]**: 统一“胶囊/标签”淡边框：`.rounded-pill` 默认带淡边框，补齐非 `.badge` 的 pill/标签，避免“有框/无框”混用
+  - 类型: 微调（无方案包）
+  - 文件: web/src/index.css, web/e2e/visual-routes.spec.ts-snapshots/app-dashboard-linux.png
+- **[web/ui]**: 统一“区域外框/按钮”淡边框：`SegmentedFrame` 外框补齐，按钮默认带淡边框（`.btn-link` 例外）
+  - 类型: 微调（无方案包）
+  - 文件: web/src/index.css, web/e2e/visual-routes.spec.ts-snapshots/*
+- **[web/ui]**: 统一 tabs/下拉/列表的淡边框：`.nav-tabs`、`.dropdown-item`、`.list-group` 保持与全站一致的细边框与中性文字层级
+  - 类型: 微调（无方案包）
+  - 文件: web/src/index.css, web/e2e/visual-routes.spec.ts-snapshots/*
+- **[web/ui]**: 补齐圆形图标与常见信息块的淡边框：`.rounded-circle` 与 `bg-* + rounded-*` 默认带淡边框，减少“无框漂浮”元素
+  - 类型: 微调（无方案包）
+  - 文件: web/src/index.css, web/e2e/visual-routes.spec.ts-snapshots/*
+- **[web/theme]**: 选定 B 主题并将背景/文字/主题/交互/边界等配色角色化为 tokens（保持鼠尾草绿系不变）
+  - 类型: 微调（无方案包）
+  - 文件: web/src/index.css
+- **[web/ui]**: 登录后主内容区背景改为白色；顶栏/侧栏与内容区使用淡实线分隔；侧栏导航文字不再使用绿色
+  - 类型: 微调（无方案包）
+  - 文件: web/src/index.css
+- **[admin/channels]**: “缓存”统计值不再使用绿色（从 `text-success` 改为中性 `text-muted`，避免把缓存误读为成功态）
+  - 类型: 微调（无方案包）
+  - 文件: web/src/pages/admin/ChannelsPage.tsx
+- **[admin/settings]**: 系统设置页移除非必要绿色文本（tabs 文本改为中性灰；PayGo 状态 badge 不再用 `text-success`），并用淡实线分隔 tabs/header 与内容区域
+  - 类型: 微调（无方案包）
+  - 文件: web/src/pages/admin/SettingsAdminPage.tsx, web/src/index.css
+- **[web/ui]**: 全站增强“圆角实线框”：卡片/表格统一使用淡实线边框并统一圆角，用更清晰的区域框线替代大面积底色分隔
+  - 类型: 微调（无方案包）
+  - 文件: web/src/index.css
+- **[web/ui]**: 进一步强化“实线框 + 圆角”一致性（按钮/输入/告警/弹窗/下拉统一圆角；卡片/表格内 `bg-light` 区域回归白底，减少浅绿底色干扰）
+  - 类型: 微调（无方案包）
+  - 文件: web/src/index.css
+- **[web/ui]**: 边框升级为“更明显更粗的圆滑实线框 + 角处留白”（用 4 条线段围出框线，并保留角部空隙；全站卡片/表格/弹窗/告警/常用 bordered 区块统一 적용）
+  - 类型: 微调（无方案包）
+  - 文件: web/src/index.css
+- **[web/ui]**: 区域分隔的淡实线加长（减少 `--rlm-segment-sep-inset`，让分隔线两端留白更小）
+  - 类型: 微调（无方案包）
+  - 文件: web/src/index.css, web/e2e/visual-routes.spec.ts-snapshots/*
+- **[web/ui]**: 区域框线颜色从灰系改为黑色（更清晰、更有距离感；保留角处留白）
+  - 类型: 微调（无方案包）
+  - 文件: web/src/index.css
+- **[web/ui]**: 区域框线进一步“更轻 + 更短 + 角留白更大”（降低黑线透明度；增加角留白间距，使线段更短）
+  - 类型: 微调（无方案包）
+  - 文件: web/src/index.css
 - **[admin/usage]**: 上游不可用时，仍记录并展示最后一次尝试的渠道（渠道名缺失时回退显示 `#channel_id`）
   - 类型: 微调（无方案包）
   - 文件: internal/api/openai/handler.go, internal/api/openai/handler_test.go, web/src/pages/admin/UsageAdminPage.tsx
@@ -42,6 +89,30 @@
 - **[admin/usage]**: 用量明细展开区的 `Error Message` 改为整行展示并支持换行，避免横向滚动才能看清错误
   - 类型: 微调（无方案包）
   - 文件: web/src/pages/admin/UsageAdminPage.tsx
+- **[usage]**: “缓存 tokens（bolt）”提示不再使用绿色，统一为中性灰以避免误读为“成功态”
+  - 类型: 微调（无方案包）
+  - 文件: web/src/pages/usage/UsageEventsCard.tsx, web/src/pages/admin/UsageAdminPage.tsx
+- **[web/ui]**: 引入分段容器 `SegmentedFrame`（外框线段 + 仅在分隔处画线）并推广到所有页面；补齐 Playwright 视觉快照覆盖所有路由页面
+  - 方案: [202602201654_segmented-divider-container](plan/202602201654_segmented-divider-container/)
+  - 文件: web/src/index.css, web/src/components/SegmentedFrame.tsx, web/src/pages/*, web/src/pages/admin/*, web/e2e/visual-routes.spec.ts, helloagents/modules/web-theme.md
+- **[web/ui]**: 分段容器外框线条加粗，并移除最外层左右实线（仅保留上下线段 + 内部分隔线）
+  - 类型: 微调（无方案包）
+  - 文件: web/src/index.css, .tmp/ui-theme-spec.md
+- **[web/ui]**: 分段容器移除最外层上下线段（外框不绘制）；增大内部区块留白间距（更疏离、更轻盈）
+  - 类型: 微调（无方案包）
+  - 文件: web/src/index.css, .tmp/ui-theme-spec.md, helloagents/modules/web-theme.md
+- **[web/ui]**: 分段容器内补充“同段自动分隔”规则：同一 `.row` 里纵向堆叠多个 `col-12` 时自动补分隔线，减少页面分隔不一致
+  - 类型: 微调（无方案包）
+  - 文件: web/src/index.css, .tmp/ui-theme-spec.md, helloagents/modules/web-theme.md
+- **[web/ui]**: 修复 `DividedStack` 处理纯空白子节点导致的“空分隔条”；修正多个 admin 页分段改造后的多余闭合标签并更新视觉快照
+  - 类型: 微调（无方案包）
+  - 文件: web/src/components/DividedStack.tsx, web/src/pages/admin/MainGroupsPage.tsx, web/src/pages/admin/OAuthAppsAdminPage.tsx, web/src/pages/admin/SubscriptionsPage.tsx, web/src/pages/admin/UsersPage.tsx, web/e2e/visual-routes.spec.ts-snapshots/*, .tmp/ui-theme-spec.md, helloagents/modules/web-theme.md
+- **[web/ui]**: 增大分隔线（segment/divided/row-stack）的上下留白间距，使横线分隔更“疏离、轻盈”
+  - 类型: 微调（无方案包）
+  - 文件: web/src/index.css, web/e2e/visual-routes.spec.ts-snapshots/*, .tmp/ui-theme-spec.md
+- **[web/ui]**: 统一“文字胶囊/导航项”的淡边框：badge 强制带边框；`nav-pills` tabs 统一描边；侧栏条目不画边框，仅用背景高亮表达当前项
+  - 类型: 微调（无方案包）
+  - 文件: web/src/index.css, web/e2e/visual-routes.spec.ts-snapshots/*
 
 ### 增强
 - **[admin/channels]**: 渠道"测试连接"改为可选的 CLI Runner 模式（Codex/Claude/Gemini CLI），测试结果仅在前端展示、不写数据库、不影响渠道可用性调度
@@ -81,6 +152,10 @@
   - 文件: web/e2e/theme-colors.spec.ts
 - **[e2e]**: `/models` 用例改为校验“所有已配置的可见模型”都能在模型列表页展示（按 `/api/user/models/detail` 返回为准）；`cmd/realms-e2e` 支持通过 `REALMS_E2E_BILLING_MODELS` 一次 seed 多个模型
   - 文件: web/e2e/routes.spec.ts, cmd/realms-e2e/main.go, web/README.md
+- **[playwright/visual]**: 增加全站页面视觉快照回归（逐页截图对比，用于主题/样式改动后的反复修正）
+  - 文件: web/e2e/visual-routes.spec.ts, web/package.json
+- **[playwright/visual]**: 增加侧栏专用快照与断言，确保 `/dashboard` 与 `/admin` 侧栏导航文字层级不被像素阈值吞掉（默认=muted，激活=heading）
+  - 文件: web/e2e/visual-routes.spec.ts, web/e2e/visual-routes.spec.ts-snapshots/*
 
 ### 开发体验
 - **[dev]**: `make dev` 默认尝试拉起 docker compose `cli-runner` 并设置 `REALMS_CHANNEL_TEST_CLI_RUNNER_URL`，保证管理后台“CLI 渠道测试”本地可用

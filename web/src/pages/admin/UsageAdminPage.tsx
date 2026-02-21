@@ -8,6 +8,7 @@ import {
   type AdminUsageTimeSeriesPoint,
   type UsageEventDetail,
 } from '../../api/admin/usage';
+import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { formatIntComma } from '../../format/int';
 
 type ChartInstance = {
@@ -303,65 +304,68 @@ export function UsageAdminPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="d-flex justify-content-between align-items-center mb-4">
+      <SegmentedFrame>
         <div>
-          <h3 className="mb-1 fw-bold">全站用量统计</h3>
-          <div className="text-muted small">系统级数据汇总，涵盖所有用户及上游通道。</div>
-        </div>
-      </div>
+          <div className="d-flex justify-content-between align-items-center mb-4">
+            <div>
+              <h3 className="mb-1 fw-bold">全站用量统计</h3>
+              <div className="text-muted small">系统级数据汇总，涵盖所有用户及上游通道。</div>
+            </div>
+          </div>
 
-      {err ? (
-        <div className="alert alert-danger">
-          <span className="me-2 material-symbols-rounded">warning</span>
-          {err}
-        </div>
-      ) : null}
+          {err ? (
+            <div className="alert alert-danger mb-3">
+              <span className="me-2 material-symbols-rounded">warning</span>
+              {err}
+            </div>
+          ) : null}
 
-      <form
-        className="row g-2 align-items-end mb-4"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setBeforeID(undefined);
-          setAfterID(undefined);
-          void refresh();
-        }}
-      >
-        <div className="col-auto">
-          <label className="form-label small text-muted mb-1">开始日期</label>
-          <input className="form-control form-control-sm" type="date" value={start} onChange={(e) => setStart(e.target.value)} />
-        </div>
-        <div className="col-auto">
-          <label className="form-label small text-muted mb-1">结束日期</label>
-          <input className="form-control form-control-sm" type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
-        </div>
-        <div className="col-auto">
-          <label className="form-label small text-muted mb-1">条数</label>
-          <select className="form-select form-select-sm" value={limit} onChange={(e) => setLimit(Number.parseInt(e.target.value, 10) || 50)}>
-            <option value={20}>20</option>
-            <option value={50}>50</option>
-            <option value={100}>100</option>
-          </select>
-        </div>
-        <div className="col-auto d-flex gap-2">
-          <button className="btn btn-sm btn-primary" type="submit" disabled={loading}>
-            更新统计
-          </button>
-          <button
-            className="btn btn-sm btn-white border text-dark"
-            type="button"
-            disabled={loading}
-            onClick={() => {
-              setStart('');
-              setEnd('');
+          <form
+            className="row g-2 align-items-end mb-0"
+            onSubmit={(e) => {
+              e.preventDefault();
               setBeforeID(undefined);
               setAfterID(undefined);
               void refresh();
             }}
           >
-            重置
-          </button>
+            <div className="col-auto">
+              <label className="form-label small text-muted mb-1">开始日期</label>
+              <input className="form-control form-control-sm" type="date" value={start} onChange={(e) => setStart(e.target.value)} />
+            </div>
+            <div className="col-auto">
+              <label className="form-label small text-muted mb-1">结束日期</label>
+              <input className="form-control form-control-sm" type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
+            </div>
+            <div className="col-auto">
+              <label className="form-label small text-muted mb-1">条数</label>
+              <select className="form-select form-select-sm" value={limit} onChange={(e) => setLimit(Number.parseInt(e.target.value, 10) || 50)}>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
+            <div className="col-auto d-flex gap-2">
+              <button className="btn btn-sm btn-primary" type="submit" disabled={loading}>
+                更新统计
+              </button>
+              <button
+                className="btn btn-sm btn-white border text-dark"
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  setStart('');
+                  setEnd('');
+                  setBeforeID(undefined);
+                  setAfterID(undefined);
+                  void refresh();
+                }}
+              >
+                重置
+              </button>
+            </div>
+          </form>
         </div>
-      </form>
 
       {loading ? (
         <div className="text-muted">加载中…</div>
@@ -680,7 +684,7 @@ export function UsageAdminPage() {
 	                                <span className="text-muted">Out:</span> {formatIntComma(e.output_tokens)}
 	                              </div>
 	                              {e.cached_tokens !== '-' ? (
-	                                <div className="text-success smaller">
+	                                <div className="text-muted smaller">
 	                                  <span className="material-symbols-rounded">bolt</span> {formatIntComma(e.cached_tokens)}
 	                                </div>
 	                              ) : null}
@@ -771,6 +775,7 @@ export function UsageAdminPage() {
           </div>
         </div>
       ) : null}
+      </SegmentedFrame>
     </div>
   );
 }

@@ -142,7 +142,7 @@ export function UsageEventsCard({
                           <span className="text-muted">Out:</span> {formatIntComma(e.output_tokens)}
                         </div>
                         {cached !== '-' ? (
-                          <div className="text-success smaller">
+                          <div className="text-muted smaller">
                             <span className="material-symbols-rounded">bolt</span> {formatIntComma(cached)}
                           </div>
                         ) : null}

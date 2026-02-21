@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { getSubscriptionPage, purchaseSubscription, type BillingPlanView, type BillingSubscriptionPageResponse } from '../api/billing';
+import { DividedStack } from '../components/DividedStack';
+import { SegmentedFrame } from '../components/SegmentedFrame';
 
 function subscriptionBadge(statusText: string): string {
   if (statusText === '已生效') return 'badge bg-success bg-opacity-10 text-success';
@@ -69,31 +71,28 @@ export function SubscriptionPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="row g-4">
+      <SegmentedFrame>
+        <DividedStack>
         {notice ? (
-          <div className="col-12">
-            <div className="alert alert-success d-flex align-items-center" role="alert">
-              <span className="me-2 material-symbols-rounded">check_circle</span>
-              <div>{notice}</div>
-            </div>
+          <div className="alert alert-success d-flex align-items-center mb-0" role="alert">
+            <span className="me-2 material-symbols-rounded">check_circle</span>
+            <div>{notice}</div>
           </div>
         ) : null}
 
         {err ? (
-          <div className="col-12">
-            <div className="alert alert-danger d-flex align-items-center" role="alert">
-              <span className="me-2 material-symbols-rounded">warning</span>
-              <div>{err}</div>
-            </div>
+          <div className="alert alert-danger d-flex align-items-center mb-0" role="alert">
+            <span className="me-2 material-symbols-rounded">warning</span>
+            <div>{err}</div>
           </div>
         ) : null}
 
-        <div className="col-12 mt-4">
+        <div>
           <div className="d-flex align-items-center mb-3">
             <h4 className="mb-0 fw-bold">我的订单</h4>
           </div>
 
-          <div className="card border-0 overflow-hidden">
+          <div className="card border-0 overflow-hidden mb-0">
             {loading ? (
               <div className="card-body p-4 text-muted">加载中…</div>
             ) : orders.length ? (
@@ -145,10 +144,16 @@ export function SubscriptionPage() {
           </div>
         </div>
 
-        <div className="col-12">
+        <div>
           <div className="d-flex align-items-center mb-3">
             <h4 className="mb-0 fw-bold">我的订阅</h4>
-            {hasActive ? <span className="badge bg-success ms-2">活跃</span> : subscriptions.length ? <span className="badge bg-primary ms-2">待生效</span> : <span className="badge bg-secondary ms-2">无活跃订阅</span>}
+            {hasActive ? (
+              <span className="badge bg-success ms-2">活跃</span>
+            ) : subscriptions.length ? (
+              <span className="badge bg-primary ms-2">待生效</span>
+            ) : (
+              <span className="badge bg-secondary ms-2">无活跃订阅</span>
+            )}
           </div>
 
           {data?.subscription ? (
@@ -161,92 +166,92 @@ export function SubscriptionPage() {
         </div>
 
         {loading ? (
-          <div className="col-12 text-muted">加载中…</div>
+          <div className="text-muted">加载中…</div>
         ) : subscriptions.length ? (
-          subscriptions.map((s, idx) => (
-            <div key={`${s.plan_name}-${idx}`} className="col-md-6 col-xl-4">
-              <div className="card border-0 h-100 overflow-hidden">
-                <div className="card-header border-0 pt-4 px-4 pb-0">
-                  <div className="d-flex justify-content-between align-items-center">
-                    <h5 className="fw-bold mb-0">{s.plan_name}</h5>
-                    <span className="text-primary font-monospace fw-bold">{s.price_cny}</span>
-                  </div>
-                </div>
-                <div className="card-body p-4">
-                  <div className="mb-4">
-                    <div className="text-muted small mb-1">
-                      <span className="me-2 material-symbols-rounded">group_work</span>组
-                    </div>
-                    <div className="small fw-medium">
-                      <code>{s.group_name}</code>
+          <div className="row g-4 mb-0">
+            {subscriptions.map((s, idx) => (
+              <div key={`${s.plan_name}-${idx}`} className="col-md-6 col-xl-4">
+                <div className="card border-0 h-100 overflow-hidden mb-0">
+                  <div className="card-header border-0 pt-4 px-4 pb-0">
+                    <div className="d-flex justify-content-between align-items-center">
+                      <h5 className="fw-bold mb-0">{s.plan_name}</h5>
+                      <span className="text-primary font-monospace fw-bold">{s.price_cny}</span>
                     </div>
                   </div>
-                  <div className="mb-4">
-                    <div className="text-muted small mb-1">
-                      <span className="me-2 material-symbols-rounded">calendar_today</span>有效期
+                  <div className="card-body p-4">
+                    <div className="mb-4">
+                      <div className="text-muted small mb-1">
+                        <span className="me-2 material-symbols-rounded">group_work</span>组
+                      </div>
+                      <div className="small fw-medium">
+                        <code>{s.group_name}</code>
+                      </div>
                     </div>
-                    <div className="small fw-medium">{s.start_at} 至</div>
-                    <div className="small fw-medium">{s.end_at}</div>
-                  </div>
+                    <div className="mb-4">
+                      <div className="text-muted small mb-1">
+                        <span className="me-2 material-symbols-rounded">calendar_today</span>有效期
+                      </div>
+                      <div className="small fw-medium">{s.start_at} 至</div>
+                      <div className="small fw-medium">{s.end_at}</div>
+                    </div>
 
-                  {s.usage_windows?.length ? (
-                    <div className="usage-bars mb-4">
-                      {s.usage_windows.map((w) => (
-                        <div key={w.window} className="mb-3">
-                          <div className="d-flex justify-content-between mb-1">
-                            <span className="text-muted smaller fw-bold">{w.window}</span>
-                            <span className="smaller fw-bold">{w.used_percent}%</span>
+                    {s.usage_windows?.length ? (
+                      <div className="usage-bars mb-4">
+                        {s.usage_windows.map((w) => (
+                          <div key={w.window} className="mb-3">
+                            <div className="d-flex justify-content-between mb-1">
+                              <span className="text-muted smaller fw-bold">{w.window}</span>
+                              <span className="smaller fw-bold">{w.used_percent}%</span>
+                            </div>
+                            <div className="progress" style={{ height: 6 }}>
+                              <div
+                                className={`progress-bar ${percentBarClass(w.used_percent)}`}
+                                role="progressbar"
+                                style={{ width: `${w.used_percent}%` }}
+                                aria-valuenow={w.used_percent}
+                                aria-valuemin={0}
+                                aria-valuemax={100}
+                              ></div>
+                            </div>
+                            <div className="d-flex justify-content-between mt-1">
+                              <span className="smaller text-muted">{w.used_usd}</span>
+                              <span className="smaller text-muted">/ {w.limit_usd}</span>
+                            </div>
                           </div>
-                          <div className="progress" style={{ height: 6 }}>
-                            <div
-                              className={`progress-bar ${percentBarClass(w.used_percent)}`}
-                              role="progressbar"
-                              style={{ width: `${w.used_percent}%` }}
-                              aria-valuenow={w.used_percent}
-                              aria-valuemin={0}
-                              aria-valuemax={100}
-                            ></div>
-                          </div>
-                          <div className="d-flex justify-content-between mt-1">
-                            <span className="smaller text-muted">{w.used_usd}</span>
-                            <span className="smaller text-muted">/ {w.limit_usd}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
+                        ))}
+                      </div>
+                    ) : null}
 
-                  {s.active ? (
-                    <div className="d-flex align-items-center text-success small">
-                      <span className="me-2 material-symbols-rounded">check_circle</span> 订阅生效中
-                    </div>
-                  ) : (
-                    <div className="d-flex align-items-center text-primary small">
-                      <span className="me-2 material-symbols-rounded">schedule</span> 待生效
-                    </div>
-                  )}
+                    {s.active ? (
+                      <div className="d-flex align-items-center text-success small">
+                        <span className="me-2 material-symbols-rounded">check_circle</span> 订阅生效中
+                      </div>
+                    ) : (
+                      <div className="d-flex align-items-center text-primary small">
+                        <span className="me-2 material-symbols-rounded">schedule</span> 待生效
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))
+            ))}
+          </div>
         ) : (
-          <div className="col-12">
-            <div className="card border-0 bg-light">
-              <div className="card-body p-5 text-center">
-                <div className="mb-3">
-                  <span className="fs-1 text-muted material-symbols-rounded">credit_card</span>
-                </div>
-                <h5>尚未购买任何订阅</h5>
-                <p className="text-muted">下单并完成支付后即可获得 API 访问限额。</p>
-                <a href="#plans" className="btn btn-primary mt-2">
-                  浏览订阅
-                </a>
+          <div className="card border-0 bg-light mb-0">
+            <div className="card-body p-5 text-center">
+              <div className="mb-3">
+                <span className="fs-1 text-muted material-symbols-rounded">credit_card</span>
               </div>
+              <h5>尚未购买任何订阅</h5>
+              <p className="text-muted">下单并完成支付后即可获得 API 访问限额。</p>
+              <a href="#plans" className="btn btn-primary mt-2">
+                浏览订阅
+              </a>
             </div>
           </div>
         )}
 
-        <div className="col-12 mt-5" id="plans">
+        <div id="plans">
           <h4 className="mb-4 fw-bold">购买新订阅</h4>
           {loading ? (
             <div className="text-muted">加载中…</div>
@@ -294,8 +299,8 @@ export function SubscriptionPage() {
             </div>
           )}
         </div>
-      </div>
+        </DividedStack>
+      </SegmentedFrame>
     </div>
   );
 }
-

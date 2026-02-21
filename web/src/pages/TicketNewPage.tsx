@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { createTicket } from '../api/tickets';
+import { SegmentedFrame } from '../components/SegmentedFrame';
 
 export function TicketNewPage() {
   const navigate = useNavigate();
@@ -19,38 +20,40 @@ export function TicketNewPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="mb-4">
-        <h3 className="mb-1 fw-bold">创建工单</h3>
-        <div className="text-muted small">提交问题或反馈，我们会尽快处理。请勿上传敏感信息（如完整 Key/Token）。</div>
-      </div>
-
-      {err ? (
-        <div className="alert alert-danger">
-          <span className="me-2 material-symbols-rounded">warning</span>
-          {err}
+      <SegmentedFrame>
+        <div>
+          <h3 className="mb-1 fw-bold">创建工单</h3>
+          <div className="text-muted small">提交问题或反馈，我们会尽快处理。请勿上传敏感信息（如完整 Key/Token）。</div>
         </div>
-      ) : null}
 
-      <div className="card border-0">
-        <div className="card-body p-4">
-          <form
-            onSubmit={async (e) => {
-              e.preventDefault();
-              setErr('');
-              setSubmitting(true);
-              try {
-                const res = await createTicket(subject.trim(), body.trim(), files);
-                if (!res.success) throw new Error(res.message || '提交失败');
-                const id = res.data?.ticket_id;
-                if (!id) throw new Error('提交失败：缺少 ticket_id');
-                navigate(`/tickets/${id}`);
-              } catch (e) {
-                setErr(e instanceof Error ? e.message : '提交失败');
-              } finally {
-                setSubmitting(false);
-              }
-            }}
-          >
+        <div>
+          {err ? (
+            <div className="alert alert-danger mb-3">
+              <span className="me-2 material-symbols-rounded">warning</span>
+              {err}
+            </div>
+          ) : null}
+
+          <div className="card border-0 mb-0">
+            <div className="card-body p-4">
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  setErr('');
+                  setSubmitting(true);
+                  try {
+                    const res = await createTicket(subject.trim(), body.trim(), files);
+                    if (!res.success) throw new Error(res.message || '提交失败');
+                    const id = res.data?.ticket_id;
+                    if (!id) throw new Error('提交失败：缺少 ticket_id');
+                    navigate(`/tickets/${id}`);
+                  } catch (e) {
+                    setErr(e instanceof Error ? e.message : '提交失败');
+                  } finally {
+                    setSubmitting(false);
+                  }
+                }}
+              >
             <div className="mb-3">
               <label className="form-label fw-medium">标题</label>
               <input
@@ -99,10 +102,11 @@ export function TicketNewPage() {
                 取消
               </Link>
             </div>
-          </form>
+              </form>
+            </div>
+          </div>
         </div>
-      </div>
+      </SegmentedFrame>
     </div>
   );
 }
-

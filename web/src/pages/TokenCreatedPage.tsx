@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 
+import { SegmentedFrame } from '../components/SegmentedFrame';
+
 type LocationState = {
   token?: string;
 };
@@ -25,20 +27,21 @@ export function TokenCreatedPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="row justify-content-center">
-        <div className="col-lg-7 col-xl-6">
-          <div className="card mt-4">
-            <div className="card-body p-4 p-md-5">
-              <div className="text-center mb-4">
-                <div
-                  className="bg-success bg-opacity-10 text-success rounded-circle d-inline-flex align-items-center justify-content-center mb-3"
-                  style={{ width: 64, height: 64 }}
-                >
-                  <span className="fs-1 material-symbols-rounded">check</span>
+      <SegmentedFrame>
+        <div className="row justify-content-center mb-0">
+          <div className="col-lg-7 col-xl-6">
+            <div className="card mt-4 mb-0">
+              <div className="card-body p-4 p-md-5">
+                <div className="text-center mb-4">
+                  <div
+                    className="bg-success bg-opacity-10 text-success rounded-circle d-inline-flex align-items-center justify-content-center mb-3"
+                    style={{ width: 64, height: 64 }}
+                  >
+                    <span className="fs-1 material-symbols-rounded">check</span>
+                  </div>
+                  <h4 className="fw-bold text-dark">令牌已生成</h4>
+                  <p className="text-muted">这是您的新 API 令牌，请立即复制并妥善保存。</p>
                 </div>
-                <h4 className="fw-bold text-dark">令牌已生成</h4>
-                <p className="text-muted">这是您的新 API 令牌，请立即复制并妥善保存。</p>
-              </div>
 
               <div className="alert alert-warning border-0 bg-warning bg-opacity-10 d-flex align-items-start mb-4">
                 <span className="me-2 mt-1 material-symbols-rounded">warning</span>
@@ -103,10 +106,11 @@ export function TokenCreatedPage() {
               )}
 
               <div className="text-muted small text-center">您可以在左侧菜单进入「API 令牌」继续管理。</div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </SegmentedFrame>
     </div>
   );
 }

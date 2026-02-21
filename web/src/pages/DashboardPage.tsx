@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 
 import { getDashboard, type DashboardData } from '../api/dashboard';
 import { getUsageTimeSeries, type UsageTimeSeriesPoint } from '../api/usage';
+import { SegmentedFrame } from '../components/SegmentedFrame';
 import { formatIntComma } from '../format/int';
 
 type ChartInstance = {
@@ -228,193 +229,190 @@ export function DashboardPage() {
         </div>
       ) : null}
 
-      <div className="row g-4">
-        <div className="col-12">
-          <div className="row g-4">
-            <div className="col-md-6 col-xl-3">
-              <div className="card h-100">
-                <div className="card-body">
-                  <div className="d-flex align-items-center mb-3">
-                    <div className="bg-primary bg-opacity-10 text-primary rounded-pill p-2 me-3">
-                      <span className="fs-4 px-1 material-symbols-rounded">attach_money</span>
-                    </div>
-                    <h6 className="card-title mb-0 fw-bold">今日费用</h6>
-                  </div>
-                  <div className="mb-3">
-                    <h3 className="fw-bold mb-1">{todayUsageUSD}</h3>
-                    <p className="text-muted small mb-0">预估消耗 (USD)</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="col-md-6 col-xl-3">
-              <div className="card h-100">
-                <div className="card-body">
-                  <div className="d-flex align-items-center mb-3">
-                    <div className="bg-info bg-opacity-10 text-info rounded-pill p-2 me-3">
-                      <span className="fs-4 px-1 material-symbols-rounded">chat</span>
-                    </div>
-                    <h6 className="card-title mb-0 fw-bold">今日请求</h6>
-                  </div>
-                  <div className="mb-3">
-                    <h3 className="fw-bold mb-1">{todayRequests}</h3>
-                    <div className="text-muted small">
-                      <span className="badge bg-light text-secondary border fw-normal">RPM: {todayRPM}</span>
-                      <span className="ms-1">次/分钟</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="col-md-6 col-xl-3">
-              <div className="card h-100">
-                <div className="card-body">
-                  <div className="d-flex align-items-center mb-3">
-                    <div className="bg-success bg-opacity-10 text-success rounded-pill p-2 me-3">
-                      <span className="fs-4 px-1 material-symbols-rounded">memory</span>
-                    </div>
-                    <h6 className="card-title mb-0 fw-bold">今日 Token</h6>
-                  </div>
-                  <div className="mb-3">
-                    <h3 className="fw-bold mb-1">{todayTokens}</h3>
-                    <div className="text-muted small">
-                      <span className="badge bg-light text-secondary border fw-normal">TPM: {todayTPM}</span>
-                      <span className="ms-1">Tokens/分钟</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {subscription ? (
+      <SegmentedFrame>
+        <div className="row g-4">
+          <div className="col-12">
+            <div className="row g-4">
               <div className="col-md-6 col-xl-3">
-                <div className="card h-100">
+                <div className="card h-100 mb-0">
                   <div className="card-body">
                     <div className="d-flex align-items-center mb-3">
-                      <div className="bg-warning bg-opacity-10 text-warning rounded-pill p-2 me-3">
-                        <span className="fs-4 px-1 material-symbols-rounded">diamond</span>
+                      <div className="bg-primary bg-opacity-10 text-primary rounded-pill p-2 me-3">
+                        <span className="fs-4 px-1 material-symbols-rounded">attach_money</span>
                       </div>
-                      <h6 className="card-title mb-0 fw-bold">当前订阅</h6>
+                      <h6 className="card-title mb-0 fw-bold">今日费用</h6>
                     </div>
-                    <div className="mb-1">
-                      <h5 className="fw-bold mb-1">{subscription.plan_name || '-'}</h5>
-                      <p className="text-muted small mb-0">至: {subscription.end_at || '-'}</p>
+                    <div className="mb-0">
+                      <h3 className="fw-bold mb-1">{todayUsageUSD}</h3>
+                      <p className="text-muted small mb-0">预估消耗 (USD)</p>
                     </div>
-                    {(subscription.usage_windows || []).map((w, i) => (
-                      <div key={`${w.window}-${i}`} className="mt-2">
-                        <div className="d-flex justify-content-between mb-0 smaller">
-                          <span className="text-muted">{w.window}</span>
-                          <span className="fw-medium">
-                            {w.used_usd}/{w.limit_usd}
-                          </span>
-                        </div>
-                        <div className="progress" style={{ height: 4 }}>
-                          <div
-                            className={`progress-bar ${subscriptionProgressBarClass(w.used_percent)}`}
-                            role="progressbar"
-                            style={{ width: `${Math.min(100, Math.max(0, w.used_percent))}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                    ))}
                   </div>
                 </div>
               </div>
-            ) : (
+
               <div className="col-md-6 col-xl-3">
-                <div className="card h-100 border-dashed">
-                  <div className="card-body d-flex flex-column align-items-center justify-content-center text-center py-4">
-                    <div className="bg-light text-muted rounded-circle p-2 mb-2">
-                      <span className="fs-4 material-symbols-rounded">event_available</span>
+                <div className="card h-100 mb-0">
+                  <div className="card-body">
+                    <div className="d-flex align-items-center mb-3">
+                      <div className="bg-info bg-opacity-10 text-info rounded-pill p-2 me-3">
+                        <span className="fs-4 px-1 material-symbols-rounded">chat</span>
+                      </div>
+                      <h6 className="card-title mb-0 fw-bold">今日请求</h6>
                     </div>
-                    <h6 className="fw-bold small mb-1">暂无订阅</h6>
-                    <Link to="/subscription" className="btn btn-outline-primary btn-sm px-3 py-1 smaller">
-                      浏览套餐
-                    </Link>
+                    <div className="mb-0">
+                      <h3 className="fw-bold mb-1">{todayRequests}</h3>
+                      <div className="text-muted small">
+                        <span className="badge bg-light text-secondary border fw-normal">RPM: {todayRPM}</span>
+                        <span className="ms-1">次/分钟</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
+              </div>
+
+              <div className="col-md-6 col-xl-3">
+                <div className="card h-100 mb-0">
+                  <div className="card-body">
+                    <div className="d-flex align-items-center mb-3">
+                      <div className="bg-success bg-opacity-10 text-success rounded-pill p-2 me-3">
+                        <span className="fs-4 px-1 material-symbols-rounded">memory</span>
+                      </div>
+                      <h6 className="card-title mb-0 fw-bold">今日 Token</h6>
+                    </div>
+                    <div className="mb-0">
+                      <h3 className="fw-bold mb-1">{todayTokens}</h3>
+                      <div className="text-muted small">
+                        <span className="badge bg-light text-secondary border fw-normal">TPM: {todayTPM}</span>
+                        <span className="ms-1">Tokens/分钟</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {subscription ? (
+                <div className="col-md-6 col-xl-3">
+                  <div className="card h-100 mb-0">
+                    <div className="card-body">
+                      <div className="d-flex align-items-center mb-3">
+                        <div className="bg-warning bg-opacity-10 text-warning rounded-pill p-2 me-3">
+                          <span className="fs-4 px-1 material-symbols-rounded">diamond</span>
+                        </div>
+                        <h6 className="card-title mb-0 fw-bold">当前订阅</h6>
+                      </div>
+                      <div className="mb-1">
+                        <h5 className="fw-bold mb-1">{subscription.plan_name || '-'}</h5>
+                        <p className="text-muted small mb-0">至: {subscription.end_at || '-'}</p>
+                      </div>
+                      {(subscription.usage_windows || []).map((w, i) => (
+                        <div key={`${w.window}-${i}`} className="mt-2">
+                          <div className="d-flex justify-content-between mb-0 smaller">
+                            <span className="text-muted">{w.window}</span>
+                            <span className="fw-medium">
+                              {w.used_usd}/{w.limit_usd}
+                            </span>
+                          </div>
+                          <div className="progress" style={{ height: 4 }}>
+                            <div
+                              className={`progress-bar ${subscriptionProgressBarClass(w.used_percent)}`}
+                              role="progressbar"
+                              style={{ width: `${Math.min(100, Math.max(0, w.used_percent))}%` }}
+                            ></div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="col-md-6 col-xl-3">
+                  <div className="card h-100 border-dashed mb-0">
+                    <div className="card-body d-flex flex-column align-items-center justify-content-center text-center py-4">
+                      <div className="bg-light text-muted rounded-circle p-2 mb-2">
+                        <span className="fs-4 material-symbols-rounded">event_available</span>
+                      </div>
+                      <h6 className="fw-bold small mb-1">暂无订阅</h6>
+                      <Link to="/subscription" className="btn btn-outline-primary btn-sm px-3 py-1 smaller">
+                        浏览套餐
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {unreadAnnouncementsCount > 0 ? (
+                <div className="col-12">
+                  <div className="card h-100 bg-warning bg-opacity-10 mb-0">
+                    <div className="card-body d-flex flex-column">
+                      <div className="d-flex align-items-center mb-3">
+                        <div className="bg-warning bg-opacity-25 text-warning rounded-pill p-2 me-3">
+                          <span className="fs-4 px-1 material-symbols-rounded">campaign</span>
+                        </div>
+                        <h6 className="card-title mb-0 fw-bold text-warning-emphasis">重要公告</h6>
+                      </div>
+                      <div className="flex-grow-1">
+                        <p className="fw-semibold mb-1">你有 {unreadAnnouncementsCountText} 条未读公告</p>
+                        <p className="text-muted small">请及时查看最新动态和维护通知。</p>
+                      </div>
+                      <Link to="/announcements" className="btn btn-warning btn-sm w-100 mt-2">
+                        查看公告
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        <div className="card border-0 overflow-hidden mb-0">
+          <div className="card-header py-3 px-4">
+            <h5 className="mb-0 fw-bold">
+              <i className="ri-line-chart-line me-2"></i>用量时间序列
+            </h5>
+          </div>
+          <div className="card-body p-4 border-top">
+            <div className="d-flex flex-wrap align-items-center gap-3 mb-2">
+              <div className="d-flex align-items-center gap-2 flex-grow-1">
+                <div className="d-flex flex-wrap gap-1">
+                  {fieldOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`btn btn-sm ${detailField === option.value ? 'btn-primary' : 'btn-outline-secondary'}`}
+                      onClick={() => setDetailField(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="d-flex align-items-center gap-2 ms-auto">
+                <div className="d-flex gap-1">
+                  {granularityOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`btn btn-sm ${detailGranularity === option.value ? 'btn-primary' : 'btn-outline-secondary'}`}
+                      onClick={() => setDetailGranularity(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            {detailSeriesErr ? <div className="alert alert-danger py-2 mb-2">{detailSeriesErr}</div> : null}
+            {detailSeriesLoading ? (
+              <div className="text-muted small py-4">时间序列加载中…</div>
+            ) : (
+              <div style={{ height: 280 }}>
+                <canvas ref={detailTimeLineRef}></canvas>
               </div>
             )}
-
-            {unreadAnnouncementsCount > 0 ? (
-              <div className="col-12">
-                <div className="card h-100 bg-warning bg-opacity-10">
-                  <div className="card-body d-flex flex-column">
-                    <div className="d-flex align-items-center mb-3">
-                      <div className="bg-warning bg-opacity-25 text-warning rounded-pill p-2 me-3">
-                        <span className="fs-4 px-1 material-symbols-rounded">campaign</span>
-                      </div>
-                      <h6 className="card-title mb-0 fw-bold text-warning-emphasis">重要公告</h6>
-                    </div>
-                    <div className="flex-grow-1">
-                      <p className="fw-semibold mb-1">你有 {unreadAnnouncementsCountText} 条未读公告</p>
-                      <p className="text-muted small">请及时查看最新动态和维护通知。</p>
-                    </div>
-                    <Link to="/announcements" className="btn btn-warning btn-sm w-100 mt-2">
-                      查看公告
-                    </Link>
-                  </div>
-                </div>
-              </div>
-            ) : null}
           </div>
         </div>
-
-        <div className="col-12">
-          <div className="card border-0 overflow-hidden">
-            <div className="card-header py-3 px-4">
-              <h5 className="mb-0 fw-bold">
-                <i className="ri-line-chart-line me-2"></i>用量时间序列
-              </h5>
-            </div>
-            <div className="card-body p-4 border-top">
-              <div className="d-flex flex-wrap align-items-center gap-3 mb-2">
-                <div className="d-flex align-items-center gap-2 flex-grow-1">
-                  <div className="d-flex flex-wrap gap-1">
-                    {fieldOptions.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className={`btn btn-sm ${detailField === option.value ? 'btn-primary' : 'btn-outline-secondary'}`}
-                        onClick={() => setDetailField(option.value)}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="d-flex align-items-center gap-2 ms-auto">
-                  <div className="d-flex gap-1">
-                    {granularityOptions.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className={`btn btn-sm ${detailGranularity === option.value ? 'btn-primary' : 'btn-outline-secondary'}`}
-                        onClick={() => setDetailGranularity(option.value)}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              {detailSeriesErr ? <div className="alert alert-danger py-2 mb-2">{detailSeriesErr}</div> : null}
-              {detailSeriesLoading ? (
-                <div className="text-muted small py-4">时间序列加载中…</div>
-              ) : (
-                <>
-                  <div style={{ height: 280 }}>
-                    <canvas ref={detailTimeLineRef}></canvas>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-
-      </div>
+      </SegmentedFrame>
     </div>
   );
 }

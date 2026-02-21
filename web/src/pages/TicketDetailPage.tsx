@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
 import { getTicketDetail, replyTicket, type TicketDetailResponse, type TicketMessage } from '../api/tickets';
+import { SegmentedFrame } from '../components/SegmentedFrame';
 
 function isUserMessage(m: TicketMessage): boolean {
   return (m.actor || '').trim() === '用户';
@@ -47,33 +48,35 @@ export function TicketDetailPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <div>
-          <div className="d-flex align-items-center gap-2 mb-1">
-            <h3 className="mb-0 fw-bold">工单 #{ticketId || '-'}</h3>
-            {ticket ? <span className={badgeCls}>{ticket.status_text}</span> : null}
+      <SegmentedFrame>
+        <div className="d-flex justify-content-between align-items-center">
+          <div>
+            <div className="d-flex align-items-center gap-2 mb-1">
+              <h3 className="mb-0 fw-bold">工单 #{ticketId || '-'}</h3>
+              {ticket ? <span className={badgeCls}>{ticket.status_text}</span> : null}
+            </div>
+            {ticket ? (
+              <div className="text-muted small">
+                <span className="text-dark fw-medium">{ticket.subject}</span>
+                <span className="mx-1">|</span>
+                <span>{ticket.created_at}</span>
+              </div>
+            ) : null}
           </div>
-          {ticket ? (
-            <div className="text-muted small">
-              <span className="text-dark fw-medium">{ticket.subject}</span>
-              <span className="mx-1">|</span>
-              <span>{ticket.created_at}</span>
+        </div>
+
+        <div>
+          {err ? (
+            <div className="alert alert-danger mb-3">
+              <span className="me-2 material-symbols-rounded">warning</span>
+              {err}
             </div>
           ) : null}
-        </div>
-      </div>
 
-      {err ? (
-        <div className="alert alert-danger">
-          <span className="me-2 material-symbols-rounded">warning</span>
-          {err}
-        </div>
-      ) : null}
-
-      {loading ? (
-        <div className="text-muted">加载中…</div>
-      ) : (
-        <>
+          {loading ? (
+            <div className="text-muted">加载中…</div>
+          ) : (
+            <>
           <div className="d-flex flex-column gap-3 mb-4">
             {messages.map((m) =>
               isUserMessage(m) ? (
@@ -200,8 +203,10 @@ export function TicketDetailPage() {
               )}
             </div>
           </div>
-        </>
-      )}
+            </>
+          )}
+        </div>
+      </SegmentedFrame>
     </div>
   );
 }

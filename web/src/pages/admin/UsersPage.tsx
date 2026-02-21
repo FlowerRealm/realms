@@ -12,6 +12,8 @@ import {
   type AdminUser,
 } from '../../api/admin/users';
 import { BootstrapModal } from '../../components/BootstrapModal';
+import { DividedStack } from '../../components/DividedStack';
+import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { closeModalById } from '../../components/modal';
 
 function roleBadge(role: string): string {
@@ -104,9 +106,9 @@ export function UsersPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="row g-4">
-        <div className="col-12">
-          <div className="card">
+      <SegmentedFrame>
+        <DividedStack>
+          <div className="card mb-0">
             <div className="card-body d-flex flex-column flex-md-row justify-content-between align-items-center">
               <div className="d-flex align-items-center mb-3 mb-md-0">
                 <div className="bg-warning bg-opacity-10 text-warning rounded-circle d-flex align-items-center justify-content-center me-3" style={{ width: 48, height: 48 }}>
@@ -133,27 +135,21 @@ export function UsersPage() {
               </div>
             </div>
           </div>
-        </div>
 
-        {notice ? (
-          <div className="col-12">
-            <div className="alert alert-success d-flex align-items-center" role="alert">
+          {notice ? (
+            <div className="alert alert-success d-flex align-items-center mb-0" role="alert">
               <span className="me-2 material-symbols-rounded">check_circle</span>
               <div>{notice}</div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        {err ? (
-          <div className="col-12">
-            <div className="alert alert-danger d-flex align-items-center" role="alert">
+          {err ? (
+            <div className="alert alert-danger d-flex align-items-center mb-0" role="alert">
               <span className="me-2 material-symbols-rounded">warning</span>
               <div>{err}</div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        <div className="col-12">
           {loading ? (
             <div className="text-muted">加载中…</div>
           ) : users.length === 0 ? (
@@ -185,9 +181,15 @@ export function UsersPage() {
                           <td className="ps-4">
                             <span className="fw-bold text-dark">{u.email}</span>
                           </td>
-                          <td>{u.username ? <span className="text-dark fw-medium user-select-all">{u.username}</span> : <span className="text-muted small fst-italic">未设置</span>}</td>
                           <td>
-                            {((u.user_group || '').trim()) ? (
+                            {u.username ? (
+                              <span className="text-dark fw-medium user-select-all">{u.username}</span>
+                            ) : (
+                              <span className="text-muted small fst-italic">未设置</span>
+                            )}
+                          </td>
+                          <td>
+                            {(u.user_group || '').trim() ? (
                               <span className="badge bg-light text-secondary border fw-normal font-monospace">{(u.user_group || '').trim()}</span>
                             ) : (
                               <span className="text-muted small fst-italic">未设置</span>
@@ -265,12 +267,12 @@ export function UsersPage() {
                       );
                     })}
                   </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+	                </table>
+	              </div>
+	            </div>
+	          )}
+	        </DividedStack>
+	      </SegmentedFrame>
 
       <BootstrapModal
         id="createUserModal"

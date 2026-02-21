@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 
 import { cancelPayOrder, getPayPage, startPayment, type BillingPayPageResponse, type BillingPaymentChannelView } from '../api/billing';
+import { DividedStack } from '../components/DividedStack';
+import { SegmentedFrame } from '../components/SegmentedFrame';
 
 function statusBadge(status: string): { cls: string; text: string } {
   if (status === '已生效' || status === '已入账') return { cls: 'badge bg-success bg-opacity-10 text-success', text: status };
@@ -102,26 +104,23 @@ export function PayPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="row g-4">
+      <SegmentedFrame>
+        <DividedStack>
         {notice ? (
-          <div className="col-12">
-            <div className="alert alert-success d-flex align-items-center" role="alert">
-              <span className="me-2 material-symbols-rounded">check_circle</span>
-              <div>{notice}</div>
-            </div>
+          <div className="alert alert-success d-flex align-items-center mb-0" role="alert">
+            <span className="me-2 material-symbols-rounded">check_circle</span>
+            <div>{notice}</div>
           </div>
         ) : null}
 
         {err ? (
-          <div className="col-12">
-            <div className="alert alert-danger d-flex align-items-center" role="alert">
-              <span className="me-2 material-symbols-rounded">warning</span>
-              <div>{err}</div>
-            </div>
+          <div className="alert alert-danger d-flex align-items-center mb-0" role="alert">
+            <span className="me-2 material-symbols-rounded">warning</span>
+            <div>{err}</div>
           </div>
         ) : null}
 
-        <div className="col-12">
+        <div>
           <div className="d-flex align-items-center justify-content-between mb-3">
             <div>
               <h4 className="mb-0 fw-bold">支付</h4>
@@ -129,7 +128,7 @@ export function PayPage() {
             </div>
           </div>
 
-          <div className="card border-0">
+          <div className="card border-0 mb-0">
             <div className="card-body p-4">
               {loading ? (
                 <div className="text-muted">加载中…</div>
@@ -190,7 +189,7 @@ export function PayPage() {
                           <div className="row g-3">
                             {data.payment_channels.map((ch) => (
                               <div key={ch.id} className="col-md-6">
-                                <div className="card bg-light h-100">
+                                <div className="card bg-light h-100 mb-0">
                                   <div className="card-body p-3">
                                     <div className="d-flex align-items-center justify-content-between mb-2">
                                       <div className="fw-semibold">
@@ -256,7 +255,8 @@ export function PayPage() {
             </div>
           </div>
         </div>
-      </div>
+        </DividedStack>
+      </SegmentedFrame>
     </div>
   );
 }

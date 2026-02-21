@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { listUserModelsDetail, type UserManagedModel } from '../api/models';
+import { SegmentedFrame } from '../components/SegmentedFrame';
 import { formatUSDPlain } from '../format/money';
 
 export function ModelsPage() {
@@ -115,8 +116,9 @@ export function ModelsPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="card overflow-hidden rlm-models-card">
-        <div className="card-body p-0">
+      <SegmentedFrame>
+        <div className="card overflow-hidden rlm-models-card mb-0">
+          <div className="card-body p-0">
           {err ? (
             <div className="alert alert-danger m-3" role="alert">
               <span className="me-2 material-symbols-rounded">report</span> {err}
@@ -241,8 +243,9 @@ export function ModelsPage() {
               </section>
             </div>
           )}
+          </div>
         </div>
-      </div>
+      </SegmentedFrame>
     </div>
   );
 }

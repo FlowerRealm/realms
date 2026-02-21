@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
 import { getAnnouncement, type AnnouncementDetail } from '../api/announcements';
+import { SegmentedFrame } from '../components/SegmentedFrame';
 
 export function AnnouncementDetailPage() {
   const params = useParams();
@@ -45,25 +46,29 @@ export function AnnouncementDetailPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="d-flex justify-content-between align-items-center mb-4">
+      <SegmentedFrame>
+        <div className="d-flex justify-content-between align-items-center">
+          <div>
+            <h2 className="h4 fw-bold mb-0">{data?.title || (loading ? '加载中…' : '公告')}</h2>
+            <p className="text-muted small mb-0">{data?.created_at || ''}</p>
+          </div>
+        </div>
+
         <div>
-          <h2 className="h4 fw-bold mb-0">{data?.title || (loading ? '加载中…' : '公告')}</h2>
-          <p className="text-muted small mb-0">{data?.created_at || ''}</p>
-        </div>
-      </div>
+          {err ? (
+            <div className="alert alert-danger d-flex align-items-center mb-3" role="alert">
+              <span className="me-2 material-symbols-rounded">warning</span>
+              <div>{err}</div>
+            </div>
+          ) : null}
 
-      {err ? (
-        <div className="alert alert-danger d-flex align-items-center" role="alert">
-          <span className="me-2 material-symbols-rounded">warning</span>
-          <div>{err}</div>
+          <div className="card overflow-hidden mb-0">
+            <div className="card-body">
+              {loading ? <div className="text-muted small">加载中…</div> : <div style={{ whiteSpace: 'pre-wrap' }}>{data?.body || ''}</div>}
+            </div>
+          </div>
         </div>
-      ) : null}
-
-      <div className="card overflow-hidden">
-        <div className="card-body">
-          {loading ? <div className="text-muted small">加载中…</div> : <div style={{ whiteSpace: 'pre-wrap' }}>{data?.body || ''}</div>}
-        </div>
-      </div>
+      </SegmentedFrame>
     </div>
   );
 }

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { BootstrapModal } from '../../components/BootstrapModal';
+import { DividedStack } from '../../components/DividedStack';
+import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { closeModalById } from '../../components/modal';
 import { createAdminOAuthApp, listAdminOAuthApps, type AdminOAuthApp } from '../../api/admin/oauthApps';
 
@@ -54,9 +56,9 @@ export function OAuthAppsAdminPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="row g-4">
-        <div className="col-12">
-          <div className="card">
+      <SegmentedFrame>
+        <DividedStack>
+          <div className="card mb-0">
             <div className="card-body d-flex flex-column flex-md-row justify-content-between align-items-center">
               <div className="d-flex align-items-center mb-3 mb-md-0">
                 <div
@@ -80,11 +82,9 @@ export function OAuthAppsAdminPage() {
               </div>
             </div>
           </div>
-        </div>
 
-        {createdClientSecret ? (
-          <div className="col-12">
-            <div className="alert alert-warning">
+          {createdClientSecret ? (
+            <div className="alert alert-warning mb-0">
               <div className="fw-bold mb-2">已创建 OAuth 应用（client_secret 仅展示一次，请立即保存）</div>
               <div className="mb-1">
                 client_id：<code className="user-select-all">{createdClientID}</code>
@@ -93,28 +93,22 @@ export function OAuthAppsAdminPage() {
                 client_secret：<code className="user-select-all">{createdClientSecret}</code>
               </div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        {notice ? (
-          <div className="col-12">
-            <div className="alert alert-success d-flex align-items-center" role="alert">
+          {notice ? (
+            <div className="alert alert-success d-flex align-items-center mb-0" role="alert">
               <span className="me-2 material-symbols-rounded">check_circle</span>
               <div>{notice}</div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        {err ? (
-          <div className="col-12">
-            <div className="alert alert-danger d-flex align-items-center" role="alert">
+          {err ? (
+            <div className="alert alert-danger d-flex align-items-center mb-0" role="alert">
               <span className="me-2 material-symbols-rounded">warning</span>
               <div>{err}</div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        <div className="col-12">
           {loading ? (
             <div className="text-muted">加载中…</div>
           ) : items.length === 0 ? (
@@ -169,12 +163,12 @@ export function OAuthAppsAdminPage() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+	                </table>
+	              </div>
+	            </div>
+	          )}
+	        </DividedStack>
+	      </SegmentedFrame>
 
       <BootstrapModal
         id="createOAuthAppModal"

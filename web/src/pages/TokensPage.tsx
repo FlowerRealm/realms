@@ -29,6 +29,8 @@ import {
   type UserToken,
 } from '../api/tokens';
 import { BootstrapModal } from '../components/BootstrapModal';
+import { DividedStack } from '../components/DividedStack';
+import { SegmentedFrame } from '../components/SegmentedFrame';
 import { closeModalById } from '../components/modal';
 import { PortalDragOverlay } from '../components/PortalDragOverlay';
 
@@ -444,9 +446,9 @@ export function TokensPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="row g-4">
-        <div className="col-12">
-          <div className="card">
+      <SegmentedFrame>
+        <DividedStack>
+          <div className="card mb-0">
             <div className="card-body d-flex flex-column flex-md-row justify-content-between align-items-center">
               <div className="d-flex align-items-center mb-3 mb-md-0">
                 <div
@@ -465,19 +467,15 @@ export function TokensPage() {
               </button>
             </div>
           </div>
-        </div>
 
-        {tokensErr ? (
-          <div className="col-12">
+          {tokensErr ? (
             <div className="alert alert-danger mb-0" role="alert">
               <span className="me-2 material-symbols-rounded">report</span>
               {tokensErr}
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        <div className="col-12">
-          <div className="card h-100 overflow-hidden">
+          <div className="card h-100 overflow-hidden mb-0">
             <div className="card-body p-0">
               <div className="table-responsive">
                 <table className="table table-hover align-middle mb-0">
@@ -679,9 +677,8 @@ export function TokensPage() {
               </div>
             </div>
           </div>
-        </div>
-
-      </div>
+        </DividedStack>
+      </SegmentedFrame>
 
       {/* programmatically open the generated-token modal */}
       <button ref={openGeneratedTokenModalBtnRef} type="button" className="d-none" data-bs-toggle="modal" data-bs-target="#generatedTokenModal"></button>

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { createTopupOrder, getTopupPage, type BillingTopupPageResponse } from '../api/billing';
+import { DividedStack } from '../components/DividedStack';
+import { SegmentedFrame } from '../components/SegmentedFrame';
 
 function orderBadge(status: string): string {
   if (status === '已入账') return 'badge bg-success bg-opacity-10 text-success';
@@ -62,26 +64,23 @@ export function TopupPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="row g-4">
+      <SegmentedFrame>
+        <DividedStack>
         {notice ? (
-          <div className="col-12">
-            <div className="alert alert-success d-flex align-items-center" role="alert">
-              <span className="me-2 material-symbols-rounded">check_circle</span>
-              <div>{notice}</div>
-            </div>
+          <div className="alert alert-success d-flex align-items-center mb-0" role="alert">
+            <span className="me-2 material-symbols-rounded">check_circle</span>
+            <div>{notice}</div>
           </div>
         ) : null}
 
         {err ? (
-          <div className="col-12">
-            <div className="alert alert-danger d-flex align-items-center" role="alert">
-              <span className="me-2 material-symbols-rounded">warning</span>
-              <div>{err}</div>
-            </div>
+          <div className="alert alert-danger d-flex align-items-center mb-0" role="alert">
+            <span className="me-2 material-symbols-rounded">warning</span>
+            <div>{err}</div>
           </div>
         ) : null}
 
-        <div className="col-12">
+        <div>
           <div className="d-flex align-items-center mb-3">
             <h4 className="mb-0 fw-bold">余额</h4>
             {data?.pay_as_you_go_enabled ? (
@@ -91,7 +90,7 @@ export function TopupPage() {
             )}
           </div>
 
-          <div className="card border-0">
+          <div className="card border-0 mb-0">
             <div className="card-body p-4">
               <div className="display-6 fw-bold text-dark">{data?.balance_usd || '-'}</div>
               <div className="text-muted small mt-1">余额用于无订阅/订阅额度不足时的按量计费扣费。</div>
@@ -99,12 +98,12 @@ export function TopupPage() {
           </div>
         </div>
 
-        <div className="col-12">
+        <div>
           <div className="d-flex align-items-center mb-3">
             <h4 className="mb-0 fw-bold">创建充值订单</h4>
           </div>
 
-          <div className="card border-0">
+          <div className="card border-0 mb-0">
             <div className="card-body p-4">
               {!hasPayment ? (
                 <div className="alert alert-warning d-flex align-items-center" role="alert">
@@ -136,12 +135,12 @@ export function TopupPage() {
           </div>
         </div>
 
-        <div className="col-12 mt-2">
+        <div>
           <div className="d-flex align-items-center mb-3">
             <h4 className="mb-0 fw-bold">我的充值订单</h4>
           </div>
 
-          <div className="card border-0 overflow-hidden">
+          <div className="card border-0 overflow-hidden mb-0">
             {loading ? (
               <div className="card-body p-4 text-muted">加载中…</div>
             ) : orders.length ? (
@@ -200,7 +199,8 @@ export function TopupPage() {
             )}
           </div>
         </div>
-      </div>
+        </DividedStack>
+      </SegmentedFrame>
     </div>
   );
 }

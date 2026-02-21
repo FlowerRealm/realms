@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
 import { closeAdminTicket, getAdminTicketDetail, reopenAdminTicket, replyAdminTicket, type AdminTicketDetailResponse, type AdminTicketMessage } from '../../api/admin/tickets';
+import { SegmentedFrame } from '../../components/SegmentedFrame';
 
 function isUserMessage(m: AdminTicketMessage): boolean {
   const actor = (m.actor || '').trim();
@@ -48,74 +49,76 @@ export function TicketAdminDetailPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <div>
-          <div className="d-flex align-items-center gap-2 mb-1">
-            <h3 className="h4 fw-bold mb-0">工单 #{ticketId || '-'}</h3>
-            {ticket ? <span className={badgeCls}>{ticket.status_text}</span> : null}
+      <SegmentedFrame>
+        <div className="d-flex justify-content-between align-items-center">
+          <div>
+            <div className="d-flex align-items-center gap-2 mb-1">
+              <h3 className="h4 fw-bold mb-0">工单 #{ticketId || '-'}</h3>
+              {ticket ? <span className={badgeCls}>{ticket.status_text}</span> : null}
+            </div>
+            {ticket ? (
+              <div className="text-muted small">
+                <span className="text-dark fw-medium">{ticket.user_email}</span>
+                <span className="mx-1">|</span>
+                <span>{ticket.created_at}</span>
+              </div>
+            ) : null}
           </div>
-          {ticket ? (
-            <div className="text-muted small">
-              <span className="text-dark fw-medium">{ticket.user_email}</span>
-              <span className="mx-1">|</span>
-              <span>{ticket.created_at}</span>
+          <div className="d-flex gap-2">
+            {ticket ? (
+              ticket.closed ? (
+                <button
+                  className="btn btn-sm btn-primary shadow-sm"
+                  type="button"
+                  onClick={async () => {
+                    if (!window.confirm('确认恢复该工单？')) return;
+                    setErr('');
+                    try {
+                      const res = await reopenAdminTicket(ticketId);
+                      if (!res.success) throw new Error(res.message || '恢复失败');
+                      await refresh();
+                    } catch (e) {
+                      setErr(e instanceof Error ? e.message : '恢复失败');
+                    }
+                  }}
+                >
+                  <i className="ri-refresh-line me-1"></i>恢复工单
+                </button>
+              ) : (
+                <button
+                  className="btn btn-sm btn-outline-danger shadow-sm border bg-white"
+                  type="button"
+                  onClick={async () => {
+                    if (!window.confirm('确认关闭该工单？')) return;
+                    setErr('');
+                    try {
+                      const res = await closeAdminTicket(ticketId);
+                      if (!res.success) throw new Error(res.message || '关闭失败');
+                      await refresh();
+                    } catch (e) {
+                      setErr(e instanceof Error ? e.message : '关闭失败');
+                    }
+                  }}
+                >
+                  <i className="ri-lock-line me-1"></i>关闭工单
+                </button>
+              )
+            ) : null}
+          </div>
+        </div>
+
+        <div>
+          {err ? (
+            <div className="alert alert-danger shadow-sm mb-3">
+              <i className="ri-alert-line me-2"></i>
+              {err}
             </div>
           ) : null}
-        </div>
-        <div className="d-flex gap-2">
-          {ticket ? (
-            ticket.closed ? (
-              <button
-                className="btn btn-sm btn-primary shadow-sm"
-                type="button"
-                onClick={async () => {
-                  if (!window.confirm('确认恢复该工单？')) return;
-                  setErr('');
-                  try {
-                    const res = await reopenAdminTicket(ticketId);
-                    if (!res.success) throw new Error(res.message || '恢复失败');
-                    await refresh();
-                  } catch (e) {
-                    setErr(e instanceof Error ? e.message : '恢复失败');
-                  }
-                }}
-              >
-                <i className="ri-refresh-line me-1"></i>恢复工单
-              </button>
-            ) : (
-              <button
-                className="btn btn-sm btn-outline-danger shadow-sm border bg-white"
-                type="button"
-                onClick={async () => {
-                  if (!window.confirm('确认关闭该工单？')) return;
-                  setErr('');
-                  try {
-                    const res = await closeAdminTicket(ticketId);
-                    if (!res.success) throw new Error(res.message || '关闭失败');
-                    await refresh();
-                  } catch (e) {
-                    setErr(e instanceof Error ? e.message : '关闭失败');
-                  }
-                }}
-              >
-                <i className="ri-lock-line me-1"></i>关闭工单
-              </button>
-            )
-          ) : null}
-        </div>
-      </div>
 
-      {err ? (
-        <div className="alert alert-danger shadow-sm mb-4">
-          <i className="ri-alert-line me-2"></i>
-          {err}
-        </div>
-      ) : null}
-
-      {loading ? (
-        <div className="text-muted">加载中…</div>
-      ) : (
-        <>
+          {loading ? (
+            <div className="text-muted">加载中…</div>
+          ) : (
+            <>
           <div className="d-flex flex-column gap-3 mb-4">
             {messages.map((m) =>
               isUserMessage(m) ? (
@@ -236,8 +239,10 @@ export function TicketAdminDetailPage() {
               )}
             </div>
           </div>
-        </>
-      )}
+            </>
+          )}
+        </div>
+      </SegmentedFrame>
     </div>
   );
 }

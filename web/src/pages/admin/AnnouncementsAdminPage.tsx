@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { BootstrapModal } from '../../components/BootstrapModal';
+import { DividedStack } from '../../components/DividedStack';
+import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { closeModalById } from '../../components/modal';
 import {
   createAdminAnnouncement,
@@ -49,9 +51,9 @@ export function AnnouncementsAdminPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="row g-4">
-        <div className="col-12">
-          <div className="card">
+      <SegmentedFrame>
+        <DividedStack>
+          <div className="card mb-0">
             <div className="card-body d-flex flex-column flex-md-row justify-content-between align-items-center">
               <div className="d-flex align-items-center mb-3 mb-md-0">
                 <div
@@ -75,27 +77,21 @@ export function AnnouncementsAdminPage() {
               </div>
             </div>
           </div>
-        </div>
 
         {notice ? (
-          <div className="col-12">
-            <div className="alert alert-success d-flex align-items-center" role="alert">
-              <span className="me-2 material-symbols-rounded">check_circle</span>
-              <div>{notice}</div>
-            </div>
+          <div className="alert alert-success d-flex align-items-center mb-0" role="alert">
+            <span className="me-2 material-symbols-rounded">check_circle</span>
+            <div>{notice}</div>
           </div>
         ) : null}
 
         {err ? (
-          <div className="col-12">
-            <div className="alert alert-danger d-flex align-items-center" role="alert">
-              <span className="me-2 material-symbols-rounded">warning</span>
-              <div>{err}</div>
-            </div>
+          <div className="alert alert-danger d-flex align-items-center mb-0" role="alert">
+            <span className="me-2 material-symbols-rounded">warning</span>
+            <div>{err}</div>
           </div>
         ) : null}
 
-        <div className="col-12">
           {loading ? (
             <div className="text-muted">加载中…</div>
           ) : items.length === 0 ? (
@@ -104,7 +100,7 @@ export function AnnouncementsAdminPage() {
               暂无公告。
             </div>
           ) : (
-            <div className="card overflow-hidden">
+            <div className="card overflow-hidden mb-0">
               <div className="table-responsive">
                 <table className="table table-hover align-middle mb-0">
                   <thead className="table-light">
@@ -186,8 +182,8 @@ export function AnnouncementsAdminPage() {
               </div>
             </div>
           )}
-        </div>
-      </div>
+        </DividedStack>
+      </SegmentedFrame>
 
       <BootstrapModal
         id="createAnnouncementModal"

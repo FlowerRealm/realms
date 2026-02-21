@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { getAdminSettings, resetAdminSettings, updateAdminSettings, type AdminSettings, type FeatureBanItem, type UpdateAdminSettingsRequest } from '../../api/admin/settings';
+import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { TimeZoneInput } from '../../components/TimeZoneInput';
 
 type TabKey = 'features' | 'base' | 'email' | 'billing';
 
 function boolBadge(on: boolean): string {
-  return on ? 'badge bg-success bg-opacity-10 text-success' : 'badge bg-secondary bg-opacity-10 text-secondary';
+  return on ? 'badge bg-light text-secondary border' : 'badge bg-light text-secondary border';
 }
 
 function initForm(s: AdminSettings): UpdateAdminSettingsRequest {
@@ -112,84 +113,84 @@ export function SettingsAdminPage() {
       ) : !settings || !form ? (
         <div className="alert alert-warning">未找到设置。</div>
       ) : (
-        <div className="card border-0">
-          <div className="card-body">
-            <div className="d-flex flex-column flex-md-row align-items-center justify-content-between gap-2 mb-4">
-              <ul className="nav nav-pills" role="tablist">
+        <SegmentedFrame>
+          <div className="d-flex flex-column flex-md-row align-items-center justify-content-between gap-2">
+            <ul className="nav nav-pills" role="tablist">
+              <li className="nav-item" role="presentation">
+                <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'features' ? 'active' : ''}`} type="button" onClick={() => setTab('features')}>
+                  <i className="ri-function-line"></i> 功能开关
+                </button>
+              </li>
+              <li className="nav-item" role="presentation">
+                <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'base' ? 'active' : ''}`} type="button" onClick={() => setTab('base')}>
+                  <i className="ri-settings-4-line"></i> 基础设置
+                </button>
+              </li>
+              <li className="nav-item" role="presentation">
+                <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'email' ? 'active' : ''}`} type="button" onClick={() => setTab('email')}>
+                  <i className="ri-mail-settings-line"></i> 邮件服务
+                </button>
+              </li>
+              {showBillingTab ? (
                 <li className="nav-item" role="presentation">
-                  <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'features' ? 'active' : ''}`} type="button" onClick={() => setTab('features')}>
-                    <i className="ri-function-line"></i> 功能开关
+                  <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'billing' ? 'active' : ''}`} type="button" onClick={() => setTab('billing')}>
+                    <i className="ri-bank-card-line"></i> 计费支付
                   </button>
                 </li>
-                <li className="nav-item" role="presentation">
-                  <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'base' ? 'active' : ''}`} type="button" onClick={() => setTab('base')}>
-                    <i className="ri-settings-4-line"></i> 基础设置
-                  </button>
-                </li>
-                <li className="nav-item" role="presentation">
-                  <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'email' ? 'active' : ''}`} type="button" onClick={() => setTab('email')}>
-                    <i className="ri-mail-settings-line"></i> 邮件服务
-                  </button>
-                </li>
-                {showBillingTab ? (
-                  <li className="nav-item" role="presentation">
-                    <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'billing' ? 'active' : ''}`} type="button" onClick={() => setTab('billing')}>
-                      <i className="ri-bank-card-line"></i> 计费支付
-                    </button>
-                  </li>
-                ) : null}
-              </ul>
+              ) : null}
+            </ul>
 
-              <div className="d-flex gap-2">
-                <button
-                  type="button"
-                  className="btn btn-outline-secondary btn-sm"
-                  onClick={async () => {
-                    if (!window.confirm('确认恢复默认？此操作会清理数据库中的设置覆盖。')) return;
-                    setErr('');
-                    setNotice('');
-                    setSaving(true);
-                    try {
-                      const res = await resetAdminSettings();
-                      if (!res.success) throw new Error(res.message || '恢复默认失败');
-                      setNotice(res.message || '已恢复默认');
-                      await refresh();
-                    } catch (e) {
-                      setErr(e instanceof Error ? e.message : '恢复默认失败');
-                    } finally {
-                      setSaving(false);
-                    }
-                  }}
-                  disabled={saving}
-                >
-                  恢复默认
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  onClick={async () => {
-                    if (!form) return;
-                    setErr('');
-                    setNotice('');
-                    setSaving(true);
-                    try {
-                      const res = await updateAdminSettings(form);
-                      if (!res.success) throw new Error(res.message || '保存失败');
-                      setNotice(res.message || '已保存');
-                      await refresh();
-                    } catch (e) {
-                      setErr(e instanceof Error ? e.message : '保存失败');
-                    } finally {
-                      setSaving(false);
-                    }
-                  }}
-                  disabled={saving}
-                >
-                  {saving ? '保存中…' : '保存'}
-                </button>
-              </div>
+            <div className="d-flex gap-2">
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm"
+                onClick={async () => {
+                  if (!window.confirm('确认恢复默认？此操作会清理数据库中的设置覆盖。')) return;
+                  setErr('');
+                  setNotice('');
+                  setSaving(true);
+                  try {
+                    const res = await resetAdminSettings();
+                    if (!res.success) throw new Error(res.message || '恢复默认失败');
+                    setNotice(res.message || '已恢复默认');
+                    await refresh();
+                  } catch (e) {
+                    setErr(e instanceof Error ? e.message : '恢复默认失败');
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
+                disabled={saving}
+              >
+                恢复默认
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={async () => {
+                  if (!form) return;
+                  setErr('');
+                  setNotice('');
+                  setSaving(true);
+                  try {
+                    const res = await updateAdminSettings(form);
+                    if (!res.success) throw new Error(res.message || '保存失败');
+                    setNotice(res.message || '已保存');
+                    await refresh();
+                  } catch (e) {
+                    setErr(e instanceof Error ? e.message : '保存失败');
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
+                disabled={saving}
+              >
+                {saving ? '保存中…' : '保存'}
+              </button>
             </div>
+          </div>
 
+          <div>
             {tab === 'features' ? (
               <div>
                 <div className="mb-3">
@@ -206,7 +207,7 @@ export function SettingsAdminPage() {
                         const disabled = featureToggleDisabled(item);
                         return (
                           <div key={item.key} className="col-md-6 col-lg-4">
-                            <div className="d-flex align-items-center justify-content-between p-3 border rounded bg-light bg-opacity-10 h-100">
+                            <div className="d-flex align-items-center justify-content-between p-3 border bg-white h-100">
                               <div className="d-flex flex-column" style={{ minWidth: 0 }}>
                                 <div className="fw-medium mb-1 text-truncate" title={item.label}>
                                   {item.label}
@@ -256,7 +257,7 @@ export function SettingsAdminPage() {
             {tab === 'base' ? (
               <div className="row g-4">
                 <div className="col-12 col-lg-6">
-                  <div className="card border-0 bg-light">
+                  <div className="card">
                     <div className="card-body">
                       <h5 className="fw-semibold mb-3">基础设置</h5>
 
@@ -297,7 +298,7 @@ export function SettingsAdminPage() {
                 </div>
 
                 <div className="col-12 col-lg-6">
-                  <div className="card border-0 bg-light">
+                  <div className="card">
                     <div className="card-body">
                       <h5 className="fw-semibold mb-3">启动期配置清单（只读）</h5>
                       <div className="form-text small text-muted mb-3">
@@ -320,7 +321,7 @@ export function SettingsAdminPage() {
             {tab === 'email' ? (
               <div className="row g-4">
                 <div className="col-12">
-                  <div className="card border-0 bg-light">
+                  <div className="card">
                     <div className="card-body d-flex align-items-center justify-content-between">
                       <div>
                         <h5 className="fw-semibold mb-1">邮箱验证码</h5>
@@ -344,7 +345,7 @@ export function SettingsAdminPage() {
                 </div>
 
                 <div className="col-12">
-                  <div className="card border-0 bg-light">
+                  <div className="card">
                     <div className="card-body">
                       <h5 className="fw-semibold mb-3">SMTP 配置</h5>
 
@@ -427,7 +428,7 @@ export function SettingsAdminPage() {
             {tab === 'billing' ? (
               <div className="row g-4">
                 <div className="col-12">
-                  <div className="card border-0 bg-light">
+                  <div className="card">
                     <div className="card-body">
                       <h5 className="fw-semibold mb-3">计费</h5>
 
@@ -495,7 +496,7 @@ export function SettingsAdminPage() {
               </div>
             ) : null}
           </div>
-        </div>
+        </SegmentedFrame>
       )}
     </div>
   );

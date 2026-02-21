@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 
 import { useAuth } from '../auth/AuthContext';
+import { SegmentedFrame } from '../components/SegmentedFrame';
 import { AdminHomePage } from './admin/AdminHomePage';
 import { AnnouncementsAdminPage } from './admin/AnnouncementsAdminPage';
 import { ChannelsPage } from './admin/ChannelsPage';
@@ -26,9 +27,11 @@ export function AdminPage() {
   if (user?.role !== 'root') {
     return (
       <div className="fade-in-up">
-        <div className="alert alert-danger" role="alert">
-          <span className="me-2 material-symbols-rounded">report</span> 权限不足（需要 root）。
-        </div>
+        <SegmentedFrame>
+          <div className="alert alert-danger mb-0" role="alert">
+            <span className="me-2 material-symbols-rounded">report</span> 权限不足（需要 root）。
+          </div>
+        </SegmentedFrame>
       </div>
     );
   }

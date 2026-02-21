@@ -7,6 +7,7 @@ import {
   updateAdminOAuthApp,
   type AdminOAuthApp,
 } from '../../api/admin/oauthApps';
+import { SegmentedFrame } from '../../components/SegmentedFrame';
 
 function parseURIs(raw: string): string[] {
   return raw
@@ -58,47 +59,49 @@ export function OAuthAppDetailPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="d-flex justify-content-between align-items-center mb-4">
+      <SegmentedFrame>
         <div>
-          <h3 className="mb-0 fw-bold">OAuth 应用</h3>
-          {app ? (
-            <div className="text-muted small mt-1">
-              id={app.id} · client_id：<code className="user-select-all">{app.client_id}</code>
+          <div className="d-flex justify-content-between align-items-center mb-4">
+            <div>
+              <h3 className="mb-0 fw-bold">OAuth 应用</h3>
+              {app ? (
+                <div className="text-muted small mt-1">
+                  id={app.id} · client_id：<code className="user-select-all">{app.client_id}</code>
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          {rotatedSecret ? (
+            <div className="alert alert-warning mb-3">
+              <div className="fw-bold mb-2">已轮换 client_secret（仅展示一次，请立即保存）</div>
+              <div>
+                client_secret：<code className="user-select-all">{rotatedSecret}</code>
+              </div>
+            </div>
+          ) : null}
+
+          {notice ? (
+            <div className="alert alert-success d-flex align-items-center mb-3" role="alert">
+              <span className="me-2 material-symbols-rounded">check_circle</span>
+              <div>{notice}</div>
+            </div>
+          ) : null}
+
+          {err ? (
+            <div className="alert alert-danger d-flex align-items-center mb-0" role="alert">
+              <span className="me-2 material-symbols-rounded">warning</span>
+              <div>{err}</div>
             </div>
           ) : null}
         </div>
-      </div>
 
-      {rotatedSecret ? (
-        <div className="alert alert-warning">
-          <div className="fw-bold mb-2">已轮换 client_secret（仅展示一次，请立即保存）</div>
+        {loading ? (
+          <div className="text-muted">加载中…</div>
+        ) : !app ? (
+          <div className="alert alert-warning mb-0">未找到该 OAuth 应用。</div>
+        ) : (
           <div>
-            client_secret：<code className="user-select-all">{rotatedSecret}</code>
-          </div>
-        </div>
-      ) : null}
-
-      {notice ? (
-        <div className="alert alert-success d-flex align-items-center" role="alert">
-          <span className="me-2 material-symbols-rounded">check_circle</span>
-          <div>{notice}</div>
-        </div>
-      ) : null}
-
-      {err ? (
-        <div className="alert alert-danger d-flex align-items-center" role="alert">
-          <span className="me-2 material-symbols-rounded">warning</span>
-          <div>{err}</div>
-        </div>
-      ) : null}
-
-      {loading ? (
-        <div className="text-muted">加载中…</div>
-      ) : !app ? (
-        <div className="alert alert-warning">未找到该 OAuth 应用。</div>
-      ) : (
-        <div className="card border-0">
-          <div className="card-body p-4">
             <form
               className="row g-3"
               onSubmit={async (e) => {
@@ -166,8 +169,8 @@ export function OAuthAppDetailPage() {
               </div>
             </form>
           </div>
-        </div>
-      )}
+        )}
+      </SegmentedFrame>
     </div>
   );
 }

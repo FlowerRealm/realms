@@ -17,6 +17,7 @@ web/dist/
 web/playwright-report/
 web/test-results/
 web/playwright/.auth/
+test-results/
 output/
 
 # MkDocs build output
@@ -38,9 +39,6 @@ data/
 
 # Backups
 backups/
-
-# Local agent workspace (keep local, do not commit)
-/helloagents/
 
 # oh-my-codex / Codex CLI local state
 .omx/

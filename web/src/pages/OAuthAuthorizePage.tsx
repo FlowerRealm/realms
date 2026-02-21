@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 
 import { api } from '../api/client';
 import type { APIResponse } from '../api/types';
+import { SegmentedFrame } from '../components/SegmentedFrame';
 
 type OAuthAuthorizePrepare = {
   app_name: string;
@@ -101,8 +102,12 @@ export function OAuthAuthorizePage() {
     return (
       <div className="container-fluid d-flex flex-column min-vh-100 p-0">
         <main className="flex-fill d-flex flex-column justify-content-center align-items-center">
-          <div className="card border-0" style={{ width: '100%', maxWidth: 560 }}>
-            <div className="card-body p-4 text-center text-muted">加载中…</div>
+          <div style={{ width: '100%', maxWidth: 560 }}>
+            <SegmentedFrame>
+              <div className="card border-0 mb-0">
+                <div className="card-body p-4 text-center text-muted">加载中…</div>
+              </div>
+            </SegmentedFrame>
           </div>
         </main>
       </div>
@@ -112,58 +117,61 @@ export function OAuthAuthorizePage() {
   return (
     <div className="container-fluid d-flex flex-column min-vh-100 p-0">
       <main className="flex-fill d-flex flex-column justify-content-center align-items-center">
-        <div className="card border-0" style={{ width: '100%', maxWidth: 560 }}>
-          <div className="card-body p-4">
-            <h2 className="h5 fw-semibold mb-2">应用授权</h2>
-            <div className="text-muted small mb-3">第三方应用正在请求访问你的 Realms 账号。</div>
+        <div style={{ width: '100%', maxWidth: 560 }}>
+          <SegmentedFrame>
+            <div className="card border-0 mb-0">
+              <div className="card-body p-4">
+                <h2 className="h5 fw-semibold mb-2">应用授权</h2>
+                <div className="text-muted small mb-3">第三方应用正在请求访问你的 Realms 账号。</div>
 
-            {err ? (
-              <div className="alert alert-danger py-2" role="alert">
-                <span className="me-1 material-symbols-rounded">warning</span> {err}
+                {err ? (
+                  <div className="alert alert-danger py-2" role="alert">
+                    <span className="me-1 material-symbols-rounded">warning</span> {err}
+                  </div>
+                ) : null}
+
+                <div className="border rounded p-3 mb-3 bg-light">
+                  <div className="small text-muted mb-1">应用</div>
+                  <div className="fw-semibold">{data?.app_name || '未知应用'}</div>
+                  <div className="small text-muted mt-2">请求权限</div>
+                  <div className="font-monospace small">{scope || '(empty)'}</div>
+                </div>
+
+                <div className="form-check mb-3">
+                  <input
+                    id="remember"
+                    className="form-check-input"
+                    type="checkbox"
+                    checked={remember}
+                    onChange={(e) => setRemember(e.target.checked)}
+                    disabled={loading}
+                  />
+                  <label className="form-check-label" htmlFor="remember">
+                    记住此次授权（下次同权限将自动通过）
+                  </label>
+                </div>
+
+                <div className="d-flex gap-2">
+                  <button type="button" className="btn btn-primary flex-fill" disabled={loading} onClick={() => void decide('approve')}>
+                    {loading ? '处理中…' : '授权'}
+                  </button>
+                  <button type="button" className="btn btn-outline-secondary flex-fill" disabled={loading} onClick={() => void decide('deny')}>
+                    拒绝
+                  </button>
+                </div>
+
+                <details className="mt-3">
+                  <summary className="small text-muted">显示详细信息</summary>
+                  <div className="small text-muted mt-2">client_id</div>
+                  <div className="font-monospace small">{clientID || '-'}</div>
+                  <div className="small text-muted mt-2">redirect_uri</div>
+                  <div className="font-monospace small">{redirectURI || '-'}</div>
+                </details>
               </div>
-            ) : null}
-
-            <div className="border rounded p-3 mb-3 bg-light">
-              <div className="small text-muted mb-1">应用</div>
-              <div className="fw-semibold">{data?.app_name || '未知应用'}</div>
-              <div className="small text-muted mt-2">请求权限</div>
-              <div className="font-monospace small">{scope || '(empty)'}</div>
             </div>
-
-            <div className="form-check mb-3">
-              <input
-                id="remember"
-                className="form-check-input"
-                type="checkbox"
-                checked={remember}
-                onChange={(e) => setRemember(e.target.checked)}
-                disabled={loading}
-              />
-              <label className="form-check-label" htmlFor="remember">
-                记住此次授权（下次同权限将自动通过）
-              </label>
-            </div>
-
-            <div className="d-flex gap-2">
-              <button type="button" className="btn btn-primary flex-fill" disabled={loading} onClick={() => void decide('approve')}>
-                {loading ? '处理中…' : '授权'}
-              </button>
-              <button type="button" className="btn btn-outline-secondary flex-fill" disabled={loading} onClick={() => void decide('deny')}>
-                拒绝
-              </button>
-            </div>
-
-            <details className="mt-3">
-              <summary className="small text-muted">显示详细信息</summary>
-              <div className="small text-muted mt-2">client_id</div>
-              <div className="font-monospace small">{clientID || '-'}</div>
-              <div className="small text-muted mt-2">redirect_uri</div>
-              <div className="font-monospace small">{redirectURI || '-'}</div>
-            </details>
-          </div>
+          </SegmentedFrame>
         </div>
       </main>
     </div>
   );
 }
-

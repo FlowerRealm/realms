@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { BootstrapModal } from '../../components/BootstrapModal';
+import { DividedStack } from '../../components/DividedStack';
+import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { closeModalById } from '../../components/modal';
 import { listAdminChannelGroups, type AdminChannelGroup } from '../../api/admin/channelGroups';
 import {
@@ -162,9 +164,9 @@ export function ModelsAdminPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="row g-4">
-        <div className="col-12">
-          <div className="card">
+      <SegmentedFrame>
+        <DividedStack>
+          <div className="card mb-0">
             <div className="card-body d-flex flex-column flex-md-row justify-content-between align-items-center">
               <div className="d-flex align-items-center mb-3 mb-md-0">
                 <div className="bg-info bg-opacity-10 text-info rounded-circle d-flex align-items-center justify-content-center me-3" style={{ width: 48, height: 48 }}>
@@ -187,27 +189,22 @@ export function ModelsAdminPage() {
               </div>
             </div>
           </div>
-        </div>
 
         {notice ? (
-          <div className="col-12">
-            <div className="alert alert-success d-flex align-items-center" role="alert">
-              <span className="me-2 material-symbols-rounded">check_circle</span>
-              <div>{notice}</div>
-            </div>
+          <div className="alert alert-success d-flex align-items-center mb-0" role="alert">
+            <span className="me-2 material-symbols-rounded">check_circle</span>
+            <div>{notice}</div>
           </div>
         ) : null}
 
         {err ? (
-          <div className="col-12">
-            <div className="alert alert-danger d-flex align-items-center" role="alert">
-              <span className="me-2 material-symbols-rounded">warning</span>
-              <div>{err}</div>
-            </div>
+          <div className="alert alert-danger d-flex align-items-center mb-0" role="alert">
+            <span className="me-2 material-symbols-rounded">warning</span>
+            <div>{err}</div>
           </div>
         ) : null}
 
-        <div className="col-12">
+        <div>
           <div className="card overflow-hidden mb-0">
             <div className="table-responsive">
               <table className="table table-hover align-middle mb-0">
@@ -356,7 +353,8 @@ export function ModelsAdminPage() {
             提示：模型“是否可用”还取决于是否已在“上游渠道”中绑定（channel_models）。
           </div>
         </div>
-      </div>
+        </DividedStack>
+      </SegmentedFrame>
 
       <BootstrapModal
         id="createModelModal"

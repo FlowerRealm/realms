@@ -12,6 +12,8 @@ import {
   type UpdateAdminMainGroupRequest,
 } from '../../api/admin/mainGroups';
 import { BootstrapModal } from '../../components/BootstrapModal';
+import { DividedStack } from '../../components/DividedStack';
+import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { closeModalById } from '../../components/modal';
 
 function statusBadge(status: number): { cls: string; label: string } {
@@ -122,9 +124,9 @@ export function MainGroupsPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="row g-4">
-        <div className="col-12">
-          <div className="card">
+      <SegmentedFrame>
+        <DividedStack>
+          <div className="card mb-0">
             <div className="card-body d-flex flex-column flex-md-row justify-content-between align-items-center">
               <div className="d-flex align-items-center mb-3 mb-md-0">
                 <div className="bg-primary bg-opacity-10 text-primary rounded-circle d-flex align-items-center justify-content-center me-3" style={{ width: 48, height: 48 }}>
@@ -140,27 +142,21 @@ export function MainGroupsPage() {
               </button>
             </div>
           </div>
-        </div>
 
-        {notice ? (
-          <div className="col-12">
-            <div className="alert alert-success d-flex align-items-center" role="alert">
+          {notice ? (
+            <div className="alert alert-success d-flex align-items-center mb-0" role="alert">
               <span className="me-2 material-symbols-rounded">check_circle</span>
               <div>{notice}</div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        {err ? (
-          <div className="col-12">
-            <div className="alert alert-danger d-flex align-items-center" role="alert">
+          {err ? (
+            <div className="alert alert-danger d-flex align-items-center mb-0" role="alert">
               <span className="me-2 material-symbols-rounded">warning</span>
               <div>{err}</div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        <div className="col-12">
           {loading ? (
             <div className="text-muted">加载中…</div>
           ) : groups.length === 0 ? (
@@ -182,14 +178,14 @@ export function MainGroupsPage() {
                     </tr>
                   </thead>
                   <tbody>
-	                    {groups.map((g) => {
-	                      const st = statusBadge(g.status);
-	                      const name = (g.name || '').trim();
-	                      return (
-	                        <tr key={name}>
-	                          <td className="ps-4">
-	                            <span className="badge bg-light text-dark border fw-normal font-monospace">{name}</span>
-	                          </td>
+                    {groups.map((g) => {
+                      const st = statusBadge(g.status);
+                      const name = (g.name || '').trim();
+                      return (
+                        <tr key={name}>
+                          <td className="ps-4">
+                            <span className="badge bg-light text-dark border fw-normal font-monospace">{name}</span>
+                          </td>
                           <td className="text-muted small">{(g.description || '').toString().trim() || '-'}</td>
                           <td>
                             <span className={st.cls}>{st.label}</span>
@@ -210,15 +206,15 @@ export function MainGroupsPage() {
                               >
                                 <i className="ri-edit-line"></i>
                               </button>
-	                              <button
-	                                type="button"
-	                                className="btn btn-sm btn-light border text-danger"
-	                                title="删除用户分组"
-	                                onClick={async () => {
-	                                  if (!window.confirm(`确认删除用户分组 ${name}？此操作不可恢复。`)) return;
-	                                  setErr('');
-	                                  setNotice('');
-	                                  setSaving(true);
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-light border text-danger"
+                                title="删除用户分组"
+                                onClick={async () => {
+                                  if (!window.confirm(`确认删除用户分组 ${name}？此操作不可恢复。`)) return;
+                                  setErr('');
+                                  setNotice('');
+                                  setSaving(true);
                                   try {
                                     const res = await deleteAdminMainGroup(name);
                                     if (!res.success) throw new Error(res.message || '删除失败');
@@ -239,12 +235,12 @@ export function MainGroupsPage() {
                       );
                     })}
                   </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+	                </table>
+	              </div>
+	            </div>
+	          )}
+	        </DividedStack>
+	      </SegmentedFrame>
 
       <BootstrapModal
         id="createMainGroupModal"

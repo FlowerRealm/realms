@@ -8,6 +8,7 @@ import {
   updateAdminSubscriptionPlan,
   type AdminSubscriptionPlan,
 } from '../../api/admin/billing';
+import { SegmentedFrame } from '../../components/SegmentedFrame';
 
 export function SubscriptionEditPage() {
   const params = useParams();
@@ -81,35 +82,37 @@ export function SubscriptionEditPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="d-flex justify-content-between align-items-center mb-4">
+      <SegmentedFrame>
+        <div className="d-flex justify-content-between align-items-center">
+          <div>
+            <h3 className="mb-0 fw-bold">编辑套餐</h3>
+            {plan ? <div className="text-muted small mt-1">#{plan.id} · code={plan.code}</div> : null}
+          </div>
+        </div>
+
         <div>
-          <h3 className="mb-0 fw-bold">编辑套餐</h3>
-          {plan ? <div className="text-muted small mt-1">#{plan.id} · code={plan.code}</div> : null}
-        </div>
-      </div>
+          {notice ? (
+            <div className="alert alert-success d-flex align-items-center mb-3" role="alert">
+              <span className="me-2 material-symbols-rounded">check_circle</span>
+              <div>{notice}</div>
+            </div>
+          ) : null}
 
-      {notice ? (
-        <div className="alert alert-success d-flex align-items-center" role="alert">
-          <span className="me-2 material-symbols-rounded">check_circle</span>
-          <div>{notice}</div>
-        </div>
-      ) : null}
+          {err ? (
+            <div className="alert alert-danger d-flex align-items-center mb-3" role="alert">
+              <span className="me-2 material-symbols-rounded">warning</span>
+              <div>{err}</div>
+            </div>
+          ) : null}
 
-      {err ? (
-        <div className="alert alert-danger d-flex align-items-center" role="alert">
-          <span className="me-2 material-symbols-rounded">warning</span>
-          <div>{err}</div>
-        </div>
-      ) : null}
-
-      {loading ? (
-        <div className="text-muted">加载中…</div>
-      ) : !plan ? (
-        <div className="alert alert-warning">未找到该套餐。</div>
-      ) : (
-        <div className="card border-0">
-          <div className="card-body p-4">
-            <form
+          {loading ? (
+            <div className="text-muted">加载中…</div>
+          ) : !plan ? (
+            <div className="alert alert-warning">未找到该套餐。</div>
+          ) : (
+            <div className="card border-0 mb-0">
+              <div className="card-body p-4">
+                <form
               onSubmit={async (e) => {
                 e.preventDefault();
                 setErr('');
@@ -237,10 +240,12 @@ export function SubscriptionEditPage() {
                   </button>
                 </div>
               </div>
-            </form>
-          </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </SegmentedFrame>
     </div>
   );
 }

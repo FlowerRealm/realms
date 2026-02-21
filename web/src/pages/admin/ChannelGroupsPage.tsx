@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { BootstrapModal } from '../../components/BootstrapModal';
+import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { closeModalById } from '../../components/modal';
 import {
   createAdminChannelGroup,
@@ -63,51 +64,42 @@ export function ChannelGroupsPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="row g-4">
-        <div className="col-12">
-          <div className="card">
-            <div className="card-body d-flex flex-column flex-md-row justify-content-between align-items-center">
-              <div className="d-flex align-items-center mb-3 mb-md-0">
-                <div
-                  className="bg-warning bg-opacity-10 text-warning rounded-circle d-flex align-items-center justify-content-center me-3"
-                  style={{ width: 48, height: 48 }}
-                >
-                  <span className="fs-4 material-symbols-rounded">folder</span>
-                </div>
-                <div>
-                  <h5 className="mb-1 fw-semibold">渠道组</h5>
-                  <p className="mb-0 text-muted small">{enabledCount} 启用 / {items.length} 总计 · 用于按用户组筛选可用上游渠道（不是租户）</p>
-                </div>
+      <SegmentedFrame>
+        <div className="card mb-0">
+          <div className="card-body d-flex flex-column flex-md-row justify-content-between align-items-center">
+            <div className="d-flex align-items-center mb-3 mb-md-0">
+              <div className="bg-warning bg-opacity-10 text-warning rounded-circle d-flex align-items-center justify-content-center me-3" style={{ width: 48, height: 48 }}>
+                <span className="fs-4 material-symbols-rounded">folder</span>
               </div>
+              <div>
+                <h5 className="mb-1 fw-semibold">渠道组</h5>
+                <p className="mb-0 text-muted small">{enabledCount} 启用 / {items.length} 总计 · 用于按用户组筛选可用上游渠道（不是租户）</p>
+              </div>
+            </div>
 
-              <div className="d-flex gap-2">
-                <button type="button" className="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createChannelGroupModal">
-                  <span className="me-1 material-symbols-rounded">add</span> 新建渠道组
-                </button>
-              </div>
+            <div className="d-flex gap-2">
+              <button type="button" className="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createChannelGroupModal">
+                <span className="me-1 material-symbols-rounded">add</span> 新建渠道组
+              </button>
             </div>
           </div>
         </div>
 
-        {notice ? (
-          <div className="col-12">
-            <div className="alert alert-success d-flex align-items-center" role="alert">
+        <div>
+          {notice ? (
+            <div className="alert alert-success d-flex align-items-center mb-3" role="alert">
               <span className="me-2 material-symbols-rounded">check_circle</span>
               <div>{notice}</div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        {err ? (
-          <div className="col-12">
-            <div className="alert alert-danger d-flex align-items-center" role="alert">
+          {err ? (
+            <div className="alert alert-danger d-flex align-items-center mb-3" role="alert">
               <span className="me-2 material-symbols-rounded">warning</span>
               <div>{err}</div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        <div className="col-12">
           {loading ? (
             <div className="text-muted">加载中…</div>
           ) : items.length === 0 ? (
@@ -135,11 +127,7 @@ export function ChannelGroupsPage() {
                       const st = statusBadge(g.status);
                       const ptrID = typeof g.pointer_channel_id === 'number' ? g.pointer_channel_id : 0;
                       const ptrPinned = !!g.pointer_pinned;
-                      const ptrLabel = ptrID
-                        ? g.pointer_channel_name?.trim()
-                          ? g.pointer_channel_name.trim()
-                          : `channel-${ptrID}`
-                        : '-';
+                      const ptrLabel = ptrID ? (g.pointer_channel_name?.trim() ? g.pointer_channel_name.trim() : `channel-${ptrID}`) : '-';
                       return (
                         <tr key={g.id}>
                           <td className="ps-4">
@@ -149,11 +137,7 @@ export function ChannelGroupsPage() {
                           <td>
                             {ptrID > 0 ? (
                               <span className="d-inline-flex align-items-center gap-1">
-                                <span
-                                  className={`material-symbols-rounded ${ptrPinned ? 'text-warning' : 'text-muted'}`}
-                                  style={{ fontSize: 18 }}
-                                  title={ptrPinned ? '已固定' : '未固定'}
-                                >
+                                <span className={`material-symbols-rounded ${ptrPinned ? 'text-warning' : 'text-muted'}`} style={{ fontSize: 18 }} title={ptrPinned ? '已固定' : '未固定'}>
                                   push_pin
                                 </span>
                                 <code className={`${ptrPinned ? 'text-warning' : 'text-muted'} user-select-all`}>{ptrLabel}</code>
@@ -171,7 +155,9 @@ export function ChannelGroupsPage() {
                           <td className="text-end pe-4 text-nowrap">
                             <div className="d-inline-flex gap-1">
                               <Link to={`/admin/channel-groups/${g.id}`} className="btn btn-sm btn-light border text-secondary" title="进入">
-                                <span className="material-symbols-rounded" style={{ fontSize: 18 }}>folder_open</span>
+                                <span className="material-symbols-rounded" style={{ fontSize: 18 }}>
+                                  folder_open
+                                </span>
                               </Link>
                               <button
                                 type="button"
@@ -192,7 +178,9 @@ export function ChannelGroupsPage() {
                                   }
                                 }}
                               >
-                                <span className="material-symbols-rounded" style={{ fontSize: 18 }}>star</span>
+                                <span className="material-symbols-rounded" style={{ fontSize: 18 }}>
+                                  star
+                                </span>
                               </button>
                               <button
                                 type="button"
@@ -226,7 +214,9 @@ export function ChannelGroupsPage() {
                                   setEditing(g);
                                 }}
                               >
-                                <span className="material-symbols-rounded" style={{ fontSize: 18 }}>edit</span>
+                                <span className="material-symbols-rounded" style={{ fontSize: 18 }}>
+                                  edit
+                                </span>
                               </button>
                               <button
                                 type="button"
@@ -261,7 +251,7 @@ export function ChannelGroupsPage() {
             </div>
           )}
         </div>
-      </div>
+      </SegmentedFrame>
 
       <BootstrapModal
         id="createChannelGroupModal"

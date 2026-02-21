@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 
 import { BootstrapModal } from '../../components/BootstrapModal';
+import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { closeModalById } from '../../components/modal';
 import { formatIntComma } from '../../format/int';
 import {
@@ -883,101 +884,103 @@ export function ChannelsPage() {
 
   return (
     <div className="fade-in-up">
-      <div className="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-3">
-        <div>
-          <h2 className="h4 fw-bold mb-1">上游渠道管理</h2>
-          <p className="text-muted small mb-0">
-            管理模型转发渠道。当前 {formatIntComma(enabledCount)} 启用 / {formatIntComma(disabledCount)} 禁用 / {formatIntComma(channels.length)} 总计。
-          </p>
-        </div>
-        <button type="button" className="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createChannelModal">
-          <i className="ri-add-line me-1"></i> 新建渠道
-        </button>
-      </div>
-
-      <div className="row g-2 align-items-end mb-4">
-        <div className="col-auto">
-          <label className="form-label small text-muted mb-1">开始日期</label>
-          <input
-            className="form-control form-control-sm"
-            type="date"
-            value={usageStart}
-            onChange={(e) => {
-              setUsageStart(e.target.value);
-              setUsageRangeDirty(true);
-            }}
-          />
-        </div>
-        <div className="col-auto">
-          <label className="form-label small text-muted mb-1">结束日期</label>
-          <input
-            className="form-control form-control-sm"
-            type="date"
-            value={usageEnd}
-            onChange={(e) => {
-              setUsageEnd(e.target.value);
-              setUsageRangeDirty(true);
-            }}
-          />
-        </div>
-        <div className="col-auto">
-          <div className="form-text small text-muted mb-0">统计区间（可选）：修改后自动更新。</div>
-        </div>
-      </div>
-
-      {notice ? (
-        <div className="alert alert-success d-flex align-items-center mb-4" role="alert">
-          <span className="me-2 material-symbols-rounded">check_circle</span>
-          <div>{notice}</div>
-        </div>
-      ) : null}
-
-      {err ? (
-        <div className="alert alert-danger d-flex align-items-center mb-4" role="alert">
-          <span className="me-2 material-symbols-rounded">warning</span>
-          <div>{err}</div>
-        </div>
-      ) : null}
-
-      <div className="card border-0 shadow-sm overflow-hidden mb-0">
-        <div className="bg-primary bg-opacity-10 py-3 px-4 d-flex justify-content-between align-items-center">
+      <SegmentedFrame>
+        <div className="d-flex justify-content-between align-items-start flex-wrap gap-3">
           <div>
-            <span className="text-primary fw-bold text-uppercase small">渠道列表</span>
+            <h2 className="h4 fw-bold mb-1">上游渠道管理</h2>
+            <p className="text-muted small mb-0">
+              管理模型转发渠道。当前 {formatIntComma(enabledCount)} 启用 / {formatIntComma(disabledCount)} 禁用 / {formatIntComma(channels.length)} 总计。
+            </p>
+          </div>
+          <button type="button" className="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createChannelModal">
+            <i className="ri-add-line me-1"></i> 新建渠道
+          </button>
+        </div>
+
+        <div className="row g-2 align-items-end mb-0">
+          <div className="col-auto">
+            <label className="form-label small text-muted mb-1">开始日期</label>
+            <input
+              className="form-control form-control-sm"
+              type="date"
+              value={usageStart}
+              onChange={(e) => {
+                setUsageStart(e.target.value);
+                setUsageRangeDirty(true);
+              }}
+            />
+          </div>
+          <div className="col-auto">
+            <label className="form-label small text-muted mb-1">结束日期</label>
+            <input
+              className="form-control form-control-sm"
+              type="date"
+              value={usageEnd}
+              onChange={(e) => {
+                setUsageEnd(e.target.value);
+                setUsageRangeDirty(true);
+              }}
+            />
+          </div>
+          <div className="col-auto">
+            <div className="form-text small text-muted mb-0">统计区间（可选）：修改后自动更新。</div>
           </div>
         </div>
-        <div className="table-responsive">
-          <table className="table table-hover align-middle mb-0">
-            <thead className="table-light">
-              <tr>
-                <th className="ps-4">渠道详情</th>
-                <th>状态</th>
 
-                <th className="text-end pe-4">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={3} className="text-center py-5 text-muted">
-                    加载中…
-                  </td>
-                </tr>
-              ) : channels.length === 0 ? (
-                <tr>
-                  <td colSpan={3} className="text-center py-5 text-muted">
-                    <span className="fs-1 d-block mb-3 material-symbols-rounded">inbox</span>
-                    暂无渠道。
-                  </td>
-                </tr>
-              ) : (
-                <>
-                  {channels.map((ch, idx) => {
-                      const st = statusBadge(ch.status);
-                      const channelDisabled = ch.status !== 1;
-                      const runtime = ch.runtime;
-                      const usage = ch.usage;
-                      const testPanel = testPanels[ch.id];
-                      const panelOpen = expandedChannelID === ch.id;
+        <div>
+          {notice ? (
+            <div className="alert alert-success d-flex align-items-center mb-3" role="alert">
+              <span className="me-2 material-symbols-rounded">check_circle</span>
+              <div>{notice}</div>
+            </div>
+          ) : null}
+
+          {err ? (
+            <div className="alert alert-danger d-flex align-items-center mb-3" role="alert">
+              <span className="me-2 material-symbols-rounded">warning</span>
+              <div>{err}</div>
+            </div>
+          ) : null}
+
+          <div className="card border-0 shadow-sm overflow-hidden mb-0">
+            <div className="bg-primary bg-opacity-10 py-3 px-4 d-flex justify-content-between align-items-center">
+              <div>
+                <span className="text-primary fw-bold text-uppercase small">渠道列表</span>
+              </div>
+            </div>
+            <div className="table-responsive">
+              <table className="table table-hover align-middle mb-0">
+                <thead className="table-light">
+                  <tr>
+                    <th className="ps-4">渠道详情</th>
+                    <th>状态</th>
+
+                    <th className="text-end pe-4">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={3} className="text-center py-5 text-muted">
+                        加载中…
+                      </td>
+                    </tr>
+                  ) : channels.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="text-center py-5 text-muted">
+                        <span className="fs-1 d-block mb-3 material-symbols-rounded">inbox</span>
+                        暂无渠道。
+                      </td>
+                    </tr>
+                  ) : (
+                    <>
+                      {channels.map((ch, idx) => {
+                        const st = statusBadge(ch.status);
+                        const channelDisabled = ch.status !== 1;
+                        const runtime = ch.runtime;
+                        const usage = ch.usage;
+                        const testPanel = testPanels[ch.id];
+                        const panelOpen = expandedChannelID === ch.id;
                       const testRunning = testingChannelID === ch.id;
                       const anyTesting = testingChannelID !== null;
                       const activeTestPanel = testPanel && (testPanel.running || testPanel.summary != null || testPanel.summaryMessage.trim() !== '' || testPanel.models.length > 0) ? testPanel : null;
@@ -1457,7 +1460,7 @@ export function ChannelsPage() {
 	                                    </div>
                                     <div className="d-flex align-items-center">
                                       <span className="me-1">缓存:</span>
-                                      <span className="fw-medium text-success">{usage?.cache_ratio ?? '0.0%'}</span>
+                                      <span className="fw-medium text-muted">{usage?.cache_ratio ?? '0.0%'}</span>
                                     </div>
                                     <div className="d-flex align-items-center">
                                       <span className="me-1">首字:</span>
@@ -1518,13 +1521,15 @@ export function ChannelsPage() {
                         ) : null}
                         </Fragment>
                       );
-                  })}
-                </>
-              )}
-            </tbody>
-          </table>
+                      })}
+                    </>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-      </div>
+      </SegmentedFrame>
 
       <BootstrapModal
         id="setChannelPointerModal"
