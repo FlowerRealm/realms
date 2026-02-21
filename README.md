@@ -277,7 +277,7 @@ bash "./scripts/smoke-codex.sh"
 本仓库 CI 的统一入口是 `scripts/ci.sh`（对应 `.github/workflows/ci.yml`），本地与 CI 使用同一套检查集：
 - Go：`go test ./...`
 - E2E（Codex CLI，可用性 / fake upstream）：`go test ./tests/e2e -run TestCodexCLI_E2E_FakeUpstream_Cache -count=1`
-- E2E（Playwright Web，seed）：`npm --prefix web run test:e2e:ci`（由 `scripts/ci.sh` 负责安装依赖、构建 `web/dist`、安装 chromium）
+- Web（curl 冒烟，seed）：构建 `web/dist` + 启动 `cmd/realms-e2e` + `curl /healthz`、`/`、`/assets/realms_icon.svg`（由 `scripts/ci.sh` 执行）
 
 当同时设置以下环境变量时，`make ci` / `scripts/ci.sh` **默认改为跑真实上游集成回归**（等价于执行 `scripts/ci-real.sh`）：
 - `REALMS_CI_UPSTREAM_BASE_URL`
@@ -292,7 +292,7 @@ bash "./scripts/smoke-codex.sh"
 
 `.github/workflows/ci-real.yml` 提供 `workflow_dispatch` 入口（可选 schedule），用于：
 - E2E（Codex CLI → Realms → Real Upstream）
-- E2E（Playwright Web seed → Real Upstream）
+- Web（curl 冒烟，seed + Real Upstream 配置）
 
 需要在仓库 Secrets 中配置（占位名，勿提交真实密钥到仓库）：
 - `REALMS_CI_UPSTREAM_BASE_URL`：上游 OpenAI 兼容 `base_url`（例如 `https://api.openai.com` 或 `https://api.openai.com/v1`）

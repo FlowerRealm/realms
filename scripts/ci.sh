@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # 统一 CI 入口（本地/CI 同口径）。
-# - 默认不依赖真实上游 Secrets：Codex E2E 使用 fake upstream，Playwright 使用 seed 模式
+# - 默认不依赖真实上游 Secrets：Codex E2E 使用 fake upstream；Web 仅做 curl 冒烟（seed 启动器）
 # - 真实上游集成回归请使用: scripts/ci-real.sh（对应 GitHub Actions: ci-real.yml）
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -24,6 +24,7 @@ need_cmd go
 need_cmd node
 need_cmd npm
 need_cmd codex
+need_cmd curl
 
 has_real_env_any() {
   [[ "${REALMS_CI_UPSTREAM_BASE_URL:-}" != "" || "${REALMS_CI_UPSTREAM_API_KEY:-}" != "" || "${REALMS_CI_MODEL:-}" != "" ]]
@@ -54,14 +55,92 @@ export REALMS_CI_ENFORCE_E2E="1"
 export REALMS_CI_MODEL="${REALMS_CI_MODEL:-gpt-5.2}"
 go test ./tests/e2e -run TestCodexCLI_E2E_FakeUpstream_Cache -count=1
 
-log "web e2e (playwright seed)"
-npm --prefix web ci
-if [[ "${CI:-}" != "" ]]; then
-  (cd web && npx playwright install --with-deps chromium)
-else
-  (cd web && npx playwright install chromium)
-fi
+log "web smoke (curl seed)"
+PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm --prefix web ci
 npm --prefix web run build
-npm --prefix web run test:e2e:ci
+
+BASE_URL="${REALMS_E2E_BASE_URL:-http://127.0.0.1:18181}"
+export REALMS_E2E_BASE_URL="${BASE_URL}"
+
+existing_no_proxy="$(printf "%s" "${NO_PROXY:-${no_proxy:-}}" | xargs || true)"
+no_proxy_parts=()
+IFS=',' read -r -a no_proxy_parts <<<"${existing_no_proxy}"
+append_no_proxy() {
+  local host="$1"
+  for part in "${no_proxy_parts[@]:-}"; do
+    if [[ "$(printf "%s" "${part}" | xargs)" == "${host}" ]]; then
+      return 0
+    fi
+  done
+  no_proxy_parts+=("${host}")
+}
+append_no_proxy "127.0.0.1"
+append_no_proxy "localhost"
+append_no_proxy "::1"
+merged_no_proxy="$(IFS=','; printf "%s" "${no_proxy_parts[*]// /}")"
+export NO_PROXY="${merged_no_proxy}"
+export no_proxy="${merged_no_proxy}"
+
+mkdir -p "${ROOT_DIR}/output"
+WEB_SMOKE_LOG="${ROOT_DIR}/output/ci-web-smoke.log"
+
+web_smoke_on_err() {
+  if [[ -f "${WEB_SMOKE_LOG}" ]]; then
+    echo "web smoke: 失败，最近日志（${WEB_SMOKE_LOG}）:" >&2
+    tail -n 200 "${WEB_SMOKE_LOG}" >&2 || true
+  fi
+}
+
+cleanup_web_smoke() {
+  if [[ "${WEB_SMOKE_PID:-}" != "" ]]; then
+    kill "${WEB_SMOKE_PID}" >/dev/null 2>&1 || true
+    wait "${WEB_SMOKE_PID}" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup_web_smoke EXIT
+trap web_smoke_on_err ERR
+
+addr="${REALMS_E2E_BASE_URL#http://}"
+addr="${addr#https://}"
+addr="${addr%%/*}"
+export REALMS_E2E_ADDR="${addr:-127.0.0.1:18181}"
+export REALMS_E2E_FRONTEND_DIST_DIR="${ROOT_DIR}/web/dist"
+
+log "start: go run ./cmd/realms-e2e (${REALMS_E2E_BASE_URL})"
+go run ./cmd/realms-e2e >"${WEB_SMOKE_LOG}" 2>&1 &
+WEB_SMOKE_PID="$!"
+
+wait_healthz() {
+  local url="$1"
+  local attempts="${2:-60}"
+  local sleep_secs="${3:-1}"
+  for _ in $(seq 1 "${attempts}"); do
+    if curl -fsS "${url}" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep "${sleep_secs}"
+  done
+  return 1
+}
+
+if ! wait_healthz "${REALMS_E2E_BASE_URL}/healthz" 90 1; then
+  echo "web smoke: healthz 未就绪: ${REALMS_E2E_BASE_URL}/healthz" >&2
+  tail -n 200 "${WEB_SMOKE_LOG}" >&2 || true
+  exit 1
+fi
+
+healthz_json="$(curl -fsS "${REALMS_E2E_BASE_URL}/healthz")"
+printf "%s" "${healthz_json}" | grep -q '"ok":true'
+printf "%s" "${healthz_json}" | grep -q '"db_ok":true'
+
+index_html="$(curl -fsS "${REALMS_E2E_BASE_URL}/")"
+printf "%s" "${index_html}" | grep -q "Realms"
+if printf "%s" "${index_html}" | grep -q "前端构建产物未发现"; then
+  echo "web smoke: 仍在使用 fallback index（web/dist 未被正确加载）" >&2
+  exit 1
+fi
+
+headers="$(curl -fsSI "${REALMS_E2E_BASE_URL}/assets/realms_icon.svg" | tr -d '\r')"
+printf "%s" "${headers}" | grep -qi "^content-type: image/svg+xml"
 
 log "OK"

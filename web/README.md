@@ -34,9 +34,10 @@ npm run build
 
 - `VITE_API_BASE_URL`：API baseURL（默认空字符串，同源）
 
-## E2E（Playwright）
+## E2E（Playwright，可选）
 
-本仓库约定：前端相关测试统一使用 Playwright（组件级交互与跨页面流程都以 E2E 方式覆盖，见 `web/e2e/`）。
+Playwright 用于前端的**组件级交互**与**跨页面流程**回归（见 `web/e2e/`）。  
+说明：CI 默认不跑 Playwright（避免浏览器依赖带来的不稳定），CI 的 Web 验证改为 `curl` 冒烟（见下方）。
 
 默认（seed 模式，自动启动 `cmd/realms-e2e`，使用内置种子数据）：
 
@@ -87,3 +88,14 @@ make ci
 ```
 
 若你已配置 `REALMS_CI_UPSTREAM_BASE_URL/REALMS_CI_UPSTREAM_API_KEY/REALMS_CI_MODEL`，则 `make ci` 会默认跑真实上游集成回归（等价于 `make ci-real`）。
+
+## CI Web 冒烟（curl）
+
+CI 的 Web 部分不跑 Playwright，改为：
+- 构建 `web/dist`
+- 启动 `cmd/realms-e2e`
+- `curl` 校验：`/healthz`、`/`、`/assets/realms_icon.svg`
+
+入口：
+- `scripts/ci.sh`（seed/fake upstream）
+- `scripts/ci-real.sh`（seed + real upstream 配置）
