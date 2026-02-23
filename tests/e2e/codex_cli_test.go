@@ -120,6 +120,7 @@ func main() {
 	defer upstream.Close()
 
 	dir := t.TempDir()
+	codexHomeRoot := codexHomeRootForTest(t)
 
 	dbPath := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
 	db, err := store.OpenSQLite(dbPath)
@@ -245,7 +246,7 @@ func main() {
 	homeDirs := make([]string, 0, conns)
 	workDirs := make([]string, 0, conns)
 	for i := 0; i < conns; i++ {
-		homeDir := filepath.Join(dir, fmt.Sprintf("home-%d", i))
+		homeDir := filepath.Join(codexHomeRoot, fmt.Sprintf("home-%d", i))
 		if err := writeCodexConfig(homeDir, model, baseURL); err != nil {
 			t.Fatalf("writeCodexConfig(%d): %v", i, err)
 		}
@@ -465,6 +466,7 @@ func runCodexE2E(t *testing.T, e2eCfg codexE2EConfig) {
 	t.Helper()
 
 	dir := t.TempDir()
+	codexHomeRoot := codexHomeRootForTest(t)
 	dbPath := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
 	db, err := store.OpenSQLite(dbPath)
 	if err != nil {
@@ -576,7 +578,7 @@ func runCodexE2E(t *testing.T, e2eCfg codexE2EConfig) {
 	defer ts.Close()
 
 	baseURL := strings.TrimRight(ts.URL, "/") + "/v1"
-	homeDir := filepath.Join(dir, "home")
+	homeDir := filepath.Join(codexHomeRoot, "home")
 	if err := writeCodexConfig(homeDir, e2eCfg.model, baseURL); err != nil {
 		t.Fatalf("writeCodexConfig: %v", err)
 	}
@@ -638,6 +640,47 @@ func runCodexE2E(t *testing.T, e2eCfg codexE2EConfig) {
 	}
 
 	t.Fatalf("不支持的 wantEvents=%d（当前仅支持 1 或 2）", e2eCfg.wantEvents)
+}
+
+func codexHomeRootForTest(t *testing.T) string {
+	t.Helper()
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+
+	repoRoot, err := findRepoRoot(wd)
+	if err != nil {
+		t.Fatalf("findRepoRoot: %v", err)
+	}
+
+	root := filepath.Join(repoRoot, ".tmp", "codex-e2e-homes")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", root, err)
+	}
+
+	dir := filepath.Join(root, fmt.Sprintf("home-%d-%d", os.Getpid(), time.Now().UnixNano()))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", dir, err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
+func findRepoRoot(start string) (string, error) {
+	dir := start
+	for i := 0; i < 20; i++ {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", fmt.Errorf("go.mod not found from %s", start)
 }
 
 // requiredEnvOrSkip returns the first non-empty env value in keys.

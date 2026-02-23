@@ -7,14 +7,60 @@ const os = require('node:os');
 const path = require('node:path');
 
 const PORT = parseInt(process.env.PORT || '3100', 10);
-const MAX_OUTPUT = 1024;
+const MAX_OUTPUT = parseInt(process.env.REALMS_CLI_RUNNER_MAX_OUTPUT || process.env.REALMS_CLI_RUNNER_MAX_OUTPUT_BYTES || String(8 * 1024 * 1024), 10);
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
+function resolveHomeRoot() {
+  const sysTmp = path.resolve(os.tmpdir());
+
+  const isTmpDir = (v) => {
+    const p = path.resolve(v);
+    if (p === sysTmp || p.startsWith(sysTmp + path.sep)) return true;
+    if (p === '/tmp' || p.startsWith('/tmp' + path.sep)) return true;
+    return false;
+  };
+
+  const fromEnv = (process.env.REALMS_CLI_RUNNER_HOME_ROOT || process.env.CLI_RUNNER_HOME_ROOT || '').trim();
+  if (fromEnv && !isTmpDir(fromEnv)) {
+    try {
+      const v = path.resolve(fromEnv);
+      fs.mkdirSync(v, { recursive: true });
+      return v;
+    } catch { /* fallthrough */ }
+  }
+  const candidates = [
+    path.join(os.homedir(), '.realms-cli-runner'),
+    '/root/.realms-cli-runner',
+    '/app/.realms-cli-runner',
+    path.join(process.cwd(), '.realms-cli-runner'),
+  ];
+
+  for (const c of candidates) {
+    const v = path.resolve(c);
+    if (isTmpDir(v)) continue;
+    try {
+      fs.mkdirSync(v, { recursive: true });
+      return v;
+    } catch { /* try next */ }
+  }
+
+  // Last resort (should not happen): fall back to a non-empty path.
+  const fallback = path.join(os.homedir() || '/root', '.realms-cli-runner');
+  try {
+    fs.mkdirSync(fallback, { recursive: true });
+    return fallback;
+  } catch {
+    return path.join(process.cwd(), '.realms-cli-runner');
+  }
+}
+
 function tmpHome() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-runner-'));
+  const root = resolveHomeRoot();
+  fs.mkdirSync(root, { recursive: true });
+  const dir = fs.mkdtempSync(path.join(root, 'cli-runner-'));
   return dir;
 }
 
@@ -43,6 +89,19 @@ function truncate(s, max) {
   return s.length <= max ? s : s.slice(0, max) + '…';
 }
 
+function joinOutput(stdout, stderr) {
+  const out = (stdout || '').trimEnd();
+  const err = (stderr || '').trimEnd();
+  if (!out && !err) return '';
+  if (!out) return err;
+  if (!err) return out;
+  return out + '\n' + err;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // ---------------------------------------------------------------------------
 // CLI executors
 // ---------------------------------------------------------------------------
@@ -50,6 +109,10 @@ function truncate(s, max) {
 function runCodex({ base_url, api_key, model, prompt, timeout_seconds }, home) {
   const codexDir = path.join(home, '.codex');
   fs.mkdirSync(codexDir, { recursive: true });
+  const cacheDir = path.join(home, '.cache');
+  fs.mkdirSync(cacheDir, { recursive: true });
+  const tmpDir = path.join(home, 'tmp');
+  fs.mkdirSync(tmpDir, { recursive: true });
 
   const provider = base_url ? 'custom' : 'openai';
   const providerBlock = base_url
@@ -66,23 +129,63 @@ function runCodex({ base_url, api_key, model, prompt, timeout_seconds }, home) {
   const env = {
     ...process.env,
     HOME: home,
+    CODEX_HOME: codexDir,
     OPENAI_API_KEY: api_key || '',
     CODEX_API_KEY: '',
+    XDG_CACHE_HOME: cacheDir,
+    TMPDIR: tmpDir,
+    TMP: tmpDir,
+    TEMP: tmpDir,
   };
 
   return new Promise((resolve) => {
-    const start = Date.now();
-    execFile('codex', ['exec', '--skip-git-repo-check', prompt || 'Reply with exactly: OK'], {
-      env,
-      cwd: home,
-      timeout: (timeout_seconds || 30) * 1000,
-    }, (err, stdout, stderr) => {
-      const latency_ms = Date.now() - start;
-      if (err) {
-        resolve({ ok: false, latency_ms, output: '', error: truncate((stderr || err.message), MAX_OUTPUT) });
-      } else {
-        resolve({ ok: true, latency_ms, output: truncate(stdout.trim(), MAX_OUTPUT), error: '' });
+    const startedAt = Date.now();
+    const totalTimeoutMs = Math.max(1, (timeout_seconds || 30) * 1000);
+    const deadlineMs = startedAt + totalTimeoutMs;
+
+    const maxAttempts = 3;
+    const retryDelayMs = 500;
+
+    const attemptOnce = (attempt) => new Promise((r) => {
+      const now = Date.now();
+      const remainingMs = Math.max(1, deadlineMs - now);
+      execFile('codex', ['exec', '--skip-git-repo-check', prompt || 'Reply with exactly: OK'], {
+        env,
+        cwd: home,
+        timeout: remainingMs,
+      }, (err, stdout, stderr) => {
+        r({ attempt, err, stdout: stdout || '', stderr: stderr || '' });
+      });
+    });
+
+    (async () => {
+      const errors = [];
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const res = await attemptOnce(attempt);
+        if (!res.err) {
+          const latency_ms = Date.now() - startedAt;
+          const out = joinOutput(res.stdout, res.stderr);
+          resolve({ ok: true, latency_ms, output: truncate(out, MAX_OUTPUT), error: '' });
+          return;
+        }
+
+        const errText = joinOutput(res.stdout, res.stderr) || (res.err && res.err.message) || '';
+        errors.push(`attempt ${attempt}/${maxAttempts}\n${errText || '<no output>'}`);
+
+        if (attempt < maxAttempts) {
+          const remaining = deadlineMs - Date.now();
+          if (remaining <= retryDelayMs) {
+            break;
+          }
+          await sleep(retryDelayMs);
+        }
       }
+
+      const latency_ms = Date.now() - startedAt;
+      resolve({ ok: false, latency_ms, output: '', error: truncate(errors.join('\n\n'), MAX_OUTPUT) });
+    })().catch((e) => {
+      const latency_ms = Date.now() - startedAt;
+      resolve({ ok: false, latency_ms, output: '', error: truncate((e instanceof Error ? e.message : String(e)), MAX_OUTPUT) });
     });
   });
 }
@@ -106,10 +209,11 @@ function runClaude({ base_url, api_key, model, prompt, timeout_seconds }, home) 
       timeout: (timeout_seconds || 30) * 1000,
     }, (err, stdout, stderr) => {
       const latency_ms = Date.now() - start;
+      const combined = joinOutput(stdout, stderr);
       if (err) {
-        resolve({ ok: false, latency_ms, output: '', error: truncate((stderr || err.message), MAX_OUTPUT) });
+        resolve({ ok: false, latency_ms, output: '', error: truncate(combined || err.message, MAX_OUTPUT) });
       } else {
-        resolve({ ok: true, latency_ms, output: truncate(stdout.trim(), MAX_OUTPUT), error: '' });
+        resolve({ ok: true, latency_ms, output: truncate(combined, MAX_OUTPUT), error: '' });
       }
     });
   });
@@ -133,10 +237,11 @@ function runGemini({ api_key, model, prompt, timeout_seconds }, home) {
       timeout: (timeout_seconds || 30) * 1000,
     }, (err, stdout, stderr) => {
       const latency_ms = Date.now() - start;
+      const combined = joinOutput(stdout, stderr);
       if (err) {
-        resolve({ ok: false, latency_ms, output: '', error: truncate((stderr || err.message), MAX_OUTPUT) });
+        resolve({ ok: false, latency_ms, output: '', error: truncate(combined || err.message, MAX_OUTPUT) });
       } else {
-        resolve({ ok: true, latency_ms, output: truncate(stdout.trim(), MAX_OUTPUT), error: '' });
+        resolve({ ok: true, latency_ms, output: truncate(combined, MAX_OUTPUT), error: '' });
       }
     });
   });
@@ -160,7 +265,13 @@ async function healthPayload() {
     whichCLI('claude'),
     whichCLI('gemini'),
   ]);
-  return { status: 'ok', cli: { codex, claude, gemini } };
+  return {
+    status: 'ok',
+    cli: { codex, claude, gemini },
+    cwd: process.cwd(),
+    home_root: resolveHomeRoot(),
+    max_output_bytes: MAX_OUTPUT,
+  };
 }
 
 // ---------------------------------------------------------------------------

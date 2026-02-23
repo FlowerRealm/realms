@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${ROOT_DIR}"
+
 ADDR="${REALMS_SMOKE_ADDR:-127.0.0.1:19090}"
 BASE_URL="http://${ADDR}"
 API_BASE="${BASE_URL}/v1"
@@ -14,7 +17,7 @@ cleanup() {
   fi
   if [[ "${REALMS_SMOKE_TMP_DIR:-}" != "" ]]; then
     case "${REALMS_SMOKE_TMP_DIR}" in
-      /tmp/realms-smoke-codex.*)
+      "${ROOT_DIR}/.tmp/realms-smoke-codex."*|/tmp/realms-smoke-codex.*)
         rm -r -- "${REALMS_SMOKE_TMP_DIR}" >/dev/null 2>&1 || true
         ;;
     esac
@@ -43,7 +46,8 @@ echo "[smoke-codex] GET /healthz"
 curl -fsS "${BASE_URL}/healthz"
 echo
 
-REALMS_SMOKE_TMP_DIR="$(mktemp -d -t realms-smoke-codex.XXXXXX)"
+mkdir -p "${ROOT_DIR}/.tmp"
+REALMS_SMOKE_TMP_DIR="$(mktemp -d "${ROOT_DIR}/.tmp/realms-smoke-codex.XXXXXX")"
 home_dir="${REALMS_SMOKE_TMP_DIR}/home"
 work_dir="${REALMS_SMOKE_TMP_DIR}/work"
 mkdir -p "${home_dir}/.codex" "${work_dir}"

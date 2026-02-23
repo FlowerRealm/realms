@@ -31,14 +31,13 @@ import {
   updateChannelSetting,
   updateChannelStatusCodeMapping,
   type Channel,
-  type ChannelAdminItem,
-  type ChannelCredential,
-  type ChannelModelProbeResult,
-  type ChannelProbeSummary,
-  type ChannelTestProgressEvent,
-  type ChannelTimeSeriesPoint,
-  type CodexOAuthAccount,
-} from '../../api/channels';
+	  type ChannelAdminItem,
+	  type ChannelCredential,
+	  type ChannelModelProbeResult,
+	  type ChannelTestProgressEvent,
+	  type ChannelTimeSeriesPoint,
+	  type CodexOAuthAccount,
+	} from '../../api/channels';
 import { listAdminChannelGroups, upsertAdminChannelGroupPointer, type AdminChannelGroup } from '../../api/admin/channelGroups';
 import { createChannelModel, listChannelModels, updateChannelModel, type ChannelModelBinding } from '../../api/channelModels';
 import { listManagedModelsAdmin } from '../../api/models';
@@ -58,16 +57,8 @@ function statusBadge(status: number): { cls: string; label: string } {
 function compactProbeMessage(raw: string): string {
   let msg = raw.trim();
   if (!msg) return '';
-  msg = msg.replace(/\s+/g, ' ');
   msg = msg.replace(/Post "[^"]+": context deadline exceeded \(Client\.Timeout exceeded while awaiting headers\)/g, '请求超时');
   msg = msg.replace(/context deadline exceeded \(Client\.Timeout exceeded while awaiting headers\)/g, '请求超时');
-  if (msg.includes('；失败示例：')) {
-    const idx = msg.indexOf('；失败示例：');
-    msg = `${msg.slice(0, idx)}；失败详情见下方模型结果`;
-  }
-  if (msg.length > 140) {
-    msg = `${msg.slice(0, 140)}…`;
-  }
   return msg;
 }
 
@@ -84,16 +75,15 @@ type ChannelModelLiveState = {
   result?: ChannelModelProbeResult;
 };
 
-type ChannelTestPanelState = {
-  running: boolean;
-  source: string;
-  total: number;
-  done: number;
-  currentModel: string;
-  models: ChannelModelLiveState[];
-  summary?: ChannelProbeSummary;
-  summaryMessage: string;
-};
+	type ChannelTestPanelState = {
+	  running: boolean;
+	  source: string;
+	  total: number;
+	  done: number;
+	  currentModel: string;
+	  models: ChannelModelLiveState[];
+	  error: string;
+	};
 
 type ChannelPointerTarget = {
   id: number;
@@ -108,8 +98,8 @@ export function ChannelsPage() {
   const [managedModelIDs, setManagedModelIDs] = useState<string[]>([]);
   const [channelGroups, setChannelGroups] = useState<AdminChannelGroup[]>([]);
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState('');
-  const [notice, setNotice] = useState('');
+  const [, setErr] = useState('');
+  const [, setNotice] = useState('');
   const [testingChannelID, setTestingChannelID] = useState<number | null>(null);
   const [expandedChannelID, setExpandedChannelID] = useState<number | null>(null);
   const [testPanels, setTestPanels] = useState<Record<number, ChannelTestPanelState>>({});
@@ -289,34 +279,33 @@ export function ChannelsPage() {
     openChannelPanel(channelID);
   }
 
-  function applyTestProgress(channelID: number, evt: ChannelTestProgressEvent) {
-    setTestPanels((prev) => {
-      const current = prev[channelID] || {
-        running: true,
-        source: '',
-        total: 0,
-        done: 0,
-        currentModel: '',
-        models: [],
-        summaryMessage: '',
-      };
-      if (evt.type === 'start') {
-        const modelList = Array.isArray(evt.models) ? evt.models : [];
-        return {
-          ...prev,
-          [channelID]: {
-            ...current,
-            running: true,
-            source: evt.source || current.source,
-            total: evt.total || modelList.length,
-            done: 0,
-            currentModel: '',
-            models: modelList.map((model) => ({ model, status: 'pending', message: '' })),
-            summary: undefined,
-            summaryMessage: '',
-          },
-        };
-      }
+	  function applyTestProgress(channelID: number, evt: ChannelTestProgressEvent) {
+	    setTestPanels((prev) => {
+	      const current = prev[channelID] || {
+	        running: true,
+	        source: '',
+	        total: 0,
+	        done: 0,
+	        currentModel: '',
+	        models: [],
+	        error: '',
+	      };
+	      if (evt.type === 'start') {
+	        const modelList = Array.isArray(evt.models) ? evt.models : [];
+	        return {
+	          ...prev,
+	          [channelID]: {
+	            ...current,
+	            running: true,
+	            source: evt.source || current.source,
+	            total: evt.total || modelList.length,
+	            done: 0,
+	            currentModel: '',
+	            models: modelList.map((model) => ({ model, status: 'pending', message: '' })),
+	            error: '',
+	          },
+	        };
+	      }
       if (evt.type === 'model_start') {
         const model = evt.model || '';
         return {
@@ -335,6 +324,7 @@ export function ChannelsPage() {
         const model = evt.model || evt.result?.model || '';
         const result = evt.result;
         const done = Math.max(current.done, evt.index || current.done);
+        const rawMessage = (result?.message || '').toString();
         return {
           ...prev,
           [channelID]: {
@@ -347,7 +337,7 @@ export function ChannelsPage() {
             models: model
               ? upsertModelState(current.models, model, {
                   status: result?.ok ? 'success' : 'failed',
-                  message: compactProbeMessage(result?.message || ''),
+                  message: compactProbeMessage(rawMessage) || rawMessage,
                   result,
                 })
               : current.models,
@@ -928,20 +918,6 @@ export function ChannelsPage() {
         </div>
 
         <div>
-          {notice ? (
-            <div className="alert alert-success d-flex align-items-center mb-3" role="alert">
-              <span className="me-2 material-symbols-rounded">check_circle</span>
-              <div>{notice}</div>
-            </div>
-          ) : null}
-
-          {err ? (
-            <div className="alert alert-danger d-flex align-items-center mb-3" role="alert">
-              <span className="me-2 material-symbols-rounded">warning</span>
-              <div>{err}</div>
-            </div>
-          ) : null}
-
           <div className="card border-0 shadow-sm overflow-hidden mb-0">
             <div className="bg-primary bg-opacity-10 py-3 px-4 d-flex justify-content-between align-items-center">
               <div>
@@ -979,13 +955,13 @@ export function ChannelsPage() {
                         const channelDisabled = ch.status !== 1;
                         const runtime = ch.runtime;
                         const usage = ch.usage;
-                        const testPanel = testPanels[ch.id];
-                        const panelOpen = expandedChannelID === ch.id;
-                      const testRunning = testingChannelID === ch.id;
-                      const anyTesting = testingChannelID !== null;
-                      const activeTestPanel = testPanel && (testPanel.running || testPanel.summary != null || testPanel.summaryMessage.trim() !== '' || testPanel.models.length > 0) ? testPanel : null;
-                      const detailPanel = detailPanelByChannel[ch.id] || (activeTestPanel ? 'test' : 'stats');
-                      const codexPanelAccounts = codexAccountsByChannel[ch.id] || [];
+	                      const testPanel = testPanels[ch.id];
+	                      const panelOpen = expandedChannelID === ch.id;
+	                      const testRunning = testingChannelID === ch.id;
+	                      const anyTesting = testingChannelID !== null;
+	                      const activeTestPanel = testPanel && (testPanel.running || testPanel.error.trim() !== '' || testPanel.models.length > 0) ? testPanel : null;
+	                      const detailPanel = detailPanelByChannel[ch.id] || (activeTestPanel ? 'test' : 'stats');
+	                      const codexPanelAccounts = codexAccountsByChannel[ch.id] || [];
                       const codexPanelLoading = !!codexAccountsLoadingByChannel[ch.id];
                       const codexPanelErr = codexAccountsErrByChannel[ch.id] || '';
                       const rowBaseClassName = ['rlm-channel-row-main', channelDisabled ? 'table-secondary opacity-75' : ''].filter((v) => v).join(' ');
@@ -1081,19 +1057,18 @@ export function ChannelsPage() {
                                   setErr('');
                                   setNotice('');
                                   setTestingChannelID(ch.id);
-                                  setTestPanels((prev) => ({
-                                    ...prev,
-                                    [ch.id]: {
-                                      running: true,
-                                      source: '',
-                                      total: 0,
-                                      done: 0,
-                                      currentModel: '',
-                                      models: [],
-                                      summary: undefined,
-                                      summaryMessage: '',
-                                    },
-                                  }));
+	                                  setTestPanels((prev) => ({
+	                                    ...prev,
+	                                    [ch.id]: {
+	                                      running: true,
+	                                      source: '',
+	                                      total: 0,
+	                                      done: 0,
+	                                      currentModel: '',
+	                                      models: [],
+	                                      error: '',
+	                                    },
+	                                  }));
                                   try {
                                     const res = await testChannelStream(ch.id, (evt) => applyTestProgress(ch.id, evt));
                                     const probe = res.data?.probe;
@@ -1105,45 +1080,43 @@ export function ChannelsPage() {
                                           ? probe.results.map((item) => ({
                                               model: item.model,
                                               status: item.ok ? ('success' as const) : ('failed' as const),
-                                              message: compactProbeMessage(item.message || ''),
+                                              message: (compactProbeMessage(item.message || '') || (item.message || '')).toString(),
                                               result: item,
                                             }))
                                           : current.models;
-                                      return {
-                                        ...prev,
-                                        [ch.id]: {
-                                          ...current,
-                                          running: false,
-                                          source: probe?.source || current.source,
-                                          total: probe?.total ?? current.total,
-                                          done: probe?.total ?? current.done,
-                                          currentModel: '',
-                                          models: finalModels,
-                                          summary: probe,
-                                          summaryMessage: compactProbeMessage(res.message || probe?.message || ''),
-                                        },
-                                      };
-                                    });
+	                                      return {
+	                                        ...prev,
+	                                        [ch.id]: {
+	                                          ...current,
+	                                          running: false,
+	                                          source: probe?.source || current.source,
+	                                          total: probe?.total ?? current.total,
+	                                          done: probe?.total ?? current.done,
+	                                          currentModel: '',
+	                                          models: finalModels,
+	                                          error: '',
+	                                        },
+	                                      };
+	                                    });
                                     if (!res.success) throw new Error(res.message || '测试失败');
                                     setNotice(res.message || '测试成功');
                                     await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
                                   } catch (e) {
                                     const msg = e instanceof Error ? e.message : '测试失败';
-                                    const compactMsg = compactProbeMessage(msg);
-                                    setErr('');
-                                    setTestPanels((prev) => {
-                                      const current = prev[ch.id];
-                                      if (!current) return prev;
-                                      return {
-                                        ...prev,
-                                        [ch.id]: {
-                                          ...current,
-                                          running: false,
-                                          currentModel: '',
-                                          summaryMessage: compactMsg || msg,
-                                        },
-                                      };
-                                    });
+                                    setErr(msg.toString().trim());
+	                                    setTestPanels((prev) => {
+	                                      const current = prev[ch.id];
+	                                      if (!current) return prev;
+	                                      return {
+	                                        ...prev,
+	                                        [ch.id]: {
+	                                          ...current,
+	                                          running: false,
+	                                          currentModel: '',
+	                                          error: msg.toString().trim(),
+	                                        },
+	                                      };
+	                                    });
                                   } finally {
                                     setTestingChannelID((prev) => (prev === ch.id ? null : prev));
                                     setTestPanels((prev) => {
@@ -1279,44 +1252,35 @@ export function ChannelsPage() {
 
                               {detailPanel === 'test' ? (
                                 <div className="border rounded-3 p-3 bg-white">
-                                  <div className="d-flex flex-wrap align-items-center gap-2">
-                                    <span className="fw-semibold text-dark">测试详情</span>
+	                                  <div className="d-flex flex-wrap align-items-center gap-2">
+	                                    <span className="fw-semibold text-dark">测试详情</span>
 	                                    {activeTestPanel?.running ? (
 	                                      <span className="badge bg-primary bg-opacity-10 text-primary border border-primary-subtle">
 	                                        测试中 {formatIntComma(activeTestPanel?.done)} / {formatIntComma(activeTestPanel?.total)}
 	                                      </span>
-	                                    ) : (
-                                      <span
-                                        className={`badge ${
-                                          activeTestPanel?.summary?.ok
-                                            ? 'bg-success bg-opacity-10 text-success border border-success-subtle'
-                                            : 'bg-secondary bg-opacity-10 text-secondary border'
-                                        }`}
-                                      >
-                                        {activeTestPanel?.summary?.ok ? '测试通过' : '测试完成'}
-                                      </span>
-                                    )}
-                                    {activeTestPanel?.currentModel ? <span className="badge bg-light text-dark border">当前模型：{activeTestPanel.currentModel}</span> : null}
-                                  </div>
-                                  {activeTestPanel?.models?.length ? (
-                                    <div className="d-flex flex-column gap-1 mt-2">
-                                      {(activeTestPanel?.models || []).map((item) => (
-                                        <div key={item.model} className="d-flex flex-wrap align-items-center gap-2 small">
-                                          <span
-                                            className={`badge ${
-                                              item.status === 'success'
-                                                ? 'bg-success bg-opacity-10 text-success border border-success-subtle'
-                                                : item.status === 'failed'
-                                                  ? 'bg-danger bg-opacity-10 text-danger border border-danger-subtle'
-                                                  : item.status === 'running'
-                                                    ? 'bg-primary bg-opacity-10 text-primary border border-primary-subtle'
-                                                    : 'bg-light text-secondary border'
-                                            }`}
-                                          >
-                                            {item.status === 'success' ? '通过' : item.status === 'failed' ? '失败' : item.status === 'running' ? '测试中' : '待测试'}
-                                          </span>
-                                          <span className="font-monospace text-dark">{item.model}</span>
-                                          {item.message ? <span className="text-muted">{item.message}</span> : null}
+	                                    ) : null}
+	                                  </div>
+	                                  {activeTestPanel?.error?.trim() ? (
+	                                    <pre className="mb-0 small text-danger mt-2" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+	                                      {activeTestPanel.error}
+	                                    </pre>
+	                                  ) : null}
+	                                  {activeTestPanel?.models?.length ? (
+	                                    <div className="d-flex flex-column gap-1 mt-2">
+	                                      {(activeTestPanel?.models || []).map((item) => (
+	                                        <div key={item.model} className="d-flex flex-column gap-1 mt-1">
+	                                          <div className="small">
+	                                            <span className="font-monospace text-dark">{item.model}</span>
+	                                          </div>
+	                                          {item.result?.message ? (
+	                                            <pre className="mb-0 small text-muted" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+	                                              {item.result.message}
+	                                            </pre>
+                                          ) : item.message ? (
+                                            <pre className="mb-0 small text-muted" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                              {item.message}
+                                            </pre>
+                                          ) : null}
                                         </div>
                                       ))}
                                     </div>
