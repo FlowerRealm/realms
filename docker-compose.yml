@@ -45,6 +45,9 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:${CLI_RUNNER_PORT:-3100}:3100"
+    volumes:
+      - cli_runner_state:/root/.realms-cli-runner
 
 volumes:
   mysql_data:
+  cli_runner_state:

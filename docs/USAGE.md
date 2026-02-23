@@ -80,6 +80,18 @@ docker compose pull realms
 docker compose up -d
 ```
 
+### CLI Runner（渠道测试连接）
+
+`docker-compose.yml` 默认包含 `cli-runner`（用于管理后台「渠道 → 测试连接」）。
+
+- 持久化：会创建命名卷 `cli_runner_state` 用于 runner 缓存/配置复用（**注意：`docker compose down -v` 会清理卷**）
+- 并发：可用 `REALMS_CHANNEL_TEST_CLI_CONCURRENCY` 控制单次测试的模型探测并发（默认 4）
+- 构建加速（可选）：启用 BuildKit 后构建 `cli-runner` 会更快
+
+```bash
+DOCKER_BUILDKIT=1 docker compose build cli-runner
+```
+
 ### 3) 查看状态 / 日志
 
 ```bash

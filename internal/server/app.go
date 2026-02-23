@@ -144,6 +144,7 @@ func NewApp(opts AppOptions) (*App, error) {
 		OpenAI:                          openaiHandler,
 		Sched:                           sched,
 		ChannelTestCLIRunnerURL:         opts.Config.ChannelTestCLIRunnerURL,
+		ChannelTestCLIConcurrency:       opts.Config.ChannelTestCLIConcurrency,
 
 		CodexOAuthHandler: func() http.Handler {
 			return oauthFlow.Handler()

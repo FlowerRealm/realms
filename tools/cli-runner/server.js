@@ -2,6 +2,7 @@
 
 const http = require('node:http');
 const { execFile } = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -12,6 +13,10 @@ const MAX_OUTPUT = parseInt(process.env.REALMS_CLI_RUNNER_MAX_OUTPUT || process.
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function sha256Hex(s) {
+  return crypto.createHash('sha256').update(String(s || '')).digest('hex');
+}
 
 function resolveHomeRoot() {
   const sysTmp = path.resolve(os.tmpdir());
@@ -57,10 +62,40 @@ function resolveHomeRoot() {
   }
 }
 
-function tmpHome() {
-  const root = resolveHomeRoot();
-  fs.mkdirSync(root, { recursive: true });
-  const dir = fs.mkdtempSync(path.join(root, 'cli-runner-'));
+function ensureDir(p) {
+  const v = path.resolve(p);
+  fs.mkdirSync(v, { recursive: true });
+  return v;
+}
+
+function resolveStateRoot() {
+  return ensureDir(resolveHomeRoot());
+}
+
+function resolveWorkRoot() {
+  const fromEnv = (process.env.REALMS_CLI_RUNNER_WORK_ROOT || process.env.CLI_RUNNER_WORK_ROOT || '').trim();
+  if (fromEnv) {
+    try {
+      return ensureDir(fromEnv);
+    } catch { /* fallthrough */ }
+  }
+  return ensureDir(path.join(resolveStateRoot(), 'work'));
+}
+
+function profileDirs(cliType, baseURL, model) {
+  const key = [String(cliType || ''), String(baseURL || ''), String(model || '')].join('|');
+  const id = sha256Hex(key).slice(0, 24);
+  const stateRoot = resolveStateRoot();
+  return {
+    id,
+    stateRoot,
+    codexHome: ensureDir(path.join(stateRoot, 'codex', id)),
+    xdgCacheHome: ensureDir(path.join(stateRoot, 'xdg-cache', id)),
+  };
+}
+
+function tmpWorkDir() {
+  const dir = fs.mkdtempSync(path.join(resolveWorkRoot(), 'cli-runner-'));
   return dir;
 }
 
@@ -106,13 +141,12 @@ function sleep(ms) {
 // CLI executors
 // ---------------------------------------------------------------------------
 
-function runCodex({ base_url, api_key, model, prompt, timeout_seconds }, home) {
-  const codexDir = path.join(home, '.codex');
-  fs.mkdirSync(codexDir, { recursive: true });
-  const cacheDir = path.join(home, '.cache');
-  fs.mkdirSync(cacheDir, { recursive: true });
-  const tmpDir = path.join(home, 'tmp');
-  fs.mkdirSync(tmpDir, { recursive: true });
+function runCodex({ base_url, api_key, model, prompt, timeout_seconds, _paths }, home) {
+  const paths = _paths || {};
+  const codexDir = paths.codexHome ? path.resolve(paths.codexHome) : ensureDir(path.join(home, '.codex'));
+  const cacheDir = paths.xdgCacheHome ? path.resolve(paths.xdgCacheHome) : ensureDir(path.join(home, '.cache'));
+  const configDir = paths.xdgConfigHome ? path.resolve(paths.xdgConfigHome) : ensureDir(path.join(home, '.config'));
+  const tmpDir = ensureDir(path.join(home, 'tmp'));
 
   const provider = base_url ? 'custom' : 'openai';
   const providerBlock = base_url
@@ -133,6 +167,7 @@ function runCodex({ base_url, api_key, model, prompt, timeout_seconds }, home) {
     OPENAI_API_KEY: api_key || '',
     CODEX_API_KEY: '',
     XDG_CACHE_HOME: cacheDir,
+    XDG_CONFIG_HOME: configDir,
     TMPDIR: tmpDir,
     TMP: tmpDir,
     TEMP: tmpDir,
@@ -190,12 +225,17 @@ function runCodex({ base_url, api_key, model, prompt, timeout_seconds }, home) {
   });
 }
 
-function runClaude({ base_url, api_key, model, prompt, timeout_seconds }, home) {
+function runClaude({ base_url, api_key, model, prompt, timeout_seconds, _paths }, home) {
+  const paths = _paths || {};
+  const cacheDir = paths.xdgCacheHome ? path.resolve(paths.xdgCacheHome) : undefined;
+  const configDir = paths.xdgConfigHome ? path.resolve(paths.xdgConfigHome) : undefined;
   const env = {
     ...process.env,
     HOME: home,
     ANTHROPIC_API_KEY: api_key || '',
   };
+  if (cacheDir) env.XDG_CACHE_HOME = cacheDir;
+  if (configDir) env.XDG_CONFIG_HOME = configDir;
   if (base_url) env.ANTHROPIC_BASE_URL = base_url;
 
   const args = ['-p', prompt || 'Reply with exactly: OK', '--output-format', 'text'];
@@ -219,12 +259,17 @@ function runClaude({ base_url, api_key, model, prompt, timeout_seconds }, home) 
   });
 }
 
-function runGemini({ api_key, model, prompt, timeout_seconds }, home) {
+function runGemini({ api_key, model, prompt, timeout_seconds, _paths }, home) {
+  const paths = _paths || {};
+  const cacheDir = paths.xdgCacheHome ? path.resolve(paths.xdgCacheHome) : undefined;
+  const configDir = paths.xdgConfigHome ? path.resolve(paths.xdgConfigHome) : undefined;
   const env = {
     ...process.env,
     HOME: home,
     GEMINI_API_KEY: api_key || '',
   };
+  if (cacheDir) env.XDG_CACHE_HOME = cacheDir;
+  if (configDir) env.XDG_CONFIG_HOME = configDir;
 
   const args = [prompt || 'Reply with exactly: OK'];
   if (model) args.push('-m', model);
@@ -269,7 +314,8 @@ async function healthPayload() {
     status: 'ok',
     cli: { codex, claude, gemini },
     cwd: process.cwd(),
-    home_root: resolveHomeRoot(),
+    state_root: resolveStateRoot(),
+    work_root: resolveWorkRoot(),
     max_output_bytes: MAX_OUTPUT,
   };
 }
@@ -304,7 +350,14 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const home = tmpHome();
+    const home = tmpWorkDir();
+    const dirs = profileDirs(body.cli_type, body.base_url, body.model);
+    const configDir = ensureDir(path.join(home, 'xdg-config'));
+    body._paths = {
+      codexHome: dirs.codexHome,
+      xdgCacheHome: dirs.xdgCacheHome,
+      xdgConfigHome: configDir,
+    };
     try {
       const result = await runner(body, home);
       res.writeHead(200, { 'Content-Type': 'application/json' });

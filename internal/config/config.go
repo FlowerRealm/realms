@@ -29,6 +29,10 @@ type Config struct {
 	// 配置后启用基于 CLI（Codex/Claude/Gemini）的渠道测试功能。
 	ChannelTestCLIRunnerURL string `yaml:"channel_test_cli_runner_url"`
 
+	// ChannelTestCLIConcurrency 控制“渠道测试连接（CLI runner）”的模型探测并发上限。
+	// 该并发仅影响单次“测试连接”的模型循环，不影响真实转发链路。
+	ChannelTestCLIConcurrency int `yaml:"channel_test_cli_concurrency"`
+
 	// AppSettingsDefaults 提供管理后台"系统设置"（app_settings）的配置文件默认值。
 	// 仅当数据库未配置对应 app_settings 键时才会生效（app_settings 仍优先）。
 	AppSettingsDefaults AppSettingsDefaultsConfig `yaml:"app_settings_defaults"`
@@ -167,6 +171,13 @@ func normalizeAndValidate(cfg Config) (Config, error) {
 		cfg.Tickets.AttachmentsDir = "./data/tickets"
 	}
 
+	if cfg.ChannelTestCLIConcurrency <= 0 {
+		cfg.ChannelTestCLIConcurrency = 4
+	}
+	if cfg.ChannelTestCLIConcurrency > 16 {
+		cfg.ChannelTestCLIConcurrency = 16
+	}
+
 	cfg.AppSettingsDefaults.SiteBaseURL = strings.TrimSpace(cfg.AppSettingsDefaults.SiteBaseURL)
 	siteBaseURL, err := NormalizeHTTPBaseURL(cfg.AppSettingsDefaults.SiteBaseURL, "app_settings_defaults.site_base_url")
 	if err != nil {
@@ -273,6 +284,7 @@ func defaultConfig() Config {
 		Tickets: TicketsConfig{
 			AttachmentsDir: "./data/tickets",
 		},
+		ChannelTestCLIConcurrency: 4,
 		AppSettingsDefaults: AppSettingsDefaultsConfig{
 			AdminTimeZone: "Asia/Shanghai",
 		},
@@ -446,6 +458,11 @@ func applyEnvOverrides(cfg *Config) {
 
 	if v := os.Getenv("REALMS_CHANNEL_TEST_CLI_RUNNER_URL"); v != "" {
 		cfg.ChannelTestCLIRunnerURL = v
+	}
+	if v := os.Getenv("REALMS_CHANNEL_TEST_CLI_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.ChannelTestCLIConcurrency = n
+		}
 	}
 }
 

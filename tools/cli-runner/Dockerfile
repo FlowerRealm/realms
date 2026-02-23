@@ -1,9 +1,15 @@
+# syntax=docker/dockerfile:1.7
+
 FROM node:20-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Install CLIs globally
-RUN npm install -g @openai/codex @anthropic-ai/claude-code @google/gemini-cli && npm cache clean --force
+ENV npm_config_cache=/root/.npm
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    npm install -g --no-fund --no-audit @openai/codex @anthropic-ai/claude-code @google/gemini-cli
 
 WORKDIR /app
 COPY package.json server.js ./

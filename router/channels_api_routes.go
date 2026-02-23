@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -167,12 +168,12 @@ type channelUsageView struct {
 }
 
 type channelUsageOverviewView struct {
-	Requests             int64              `json:"requests"`
-	Tokens               int64              `json:"tokens"`
-	CommittedUSD         string             `json:"committed_usd"`
-	CacheRatio           string             `json:"cache_ratio"`
-	AvgFirstTokenLatency string             `json:"avg_first_token_latency"`
-	TokensPerSecond      string             `json:"tokens_per_second"`
+	Requests             int64  `json:"requests"`
+	Tokens               int64  `json:"tokens"`
+	CommittedUSD         string `json:"committed_usd"`
+	CacheRatio           string `json:"cache_ratio"`
+	AvgFirstTokenLatency string `json:"avg_first_token_latency"`
+	TokensPerSecond      string `json:"tokens_per_second"`
 }
 
 type channelAdminListItem struct {
@@ -2003,13 +2004,16 @@ func streamChannelCLITestHandler(c *gin.Context, opts Options, channelID int64) 
 	c.Status(http.StatusOK)
 	flusher.Flush()
 
+	var writeMu sync.Mutex
 	writeEvent := func(name string, payload any) {
 		b, err := json.Marshal(payload)
 		if err != nil {
 			return
 		}
+		writeMu.Lock()
 		_, _ = c.Writer.Write([]byte("event: " + name + "\ndata: " + string(b) + "\n\n"))
 		flusher.Flush()
+		writeMu.Unlock()
 	}
 
 	total := len(models)
@@ -2078,150 +2082,181 @@ func streamChannelCLITestHandler(c *gin.Context, opts Options, channelID int64) 
 
 	runnerURL := strings.TrimRight(opts.ChannelTestCLIRunnerURL, "/") + "/v1/test"
 	client := &http.Client{Timeout: 60 * time.Second}
-	results := make([]channelModelProbeResult, 0, total)
+	results := make([]channelModelProbeResult, total)
+
 	success := 0
 	latencySum := 0
 	ttftSum := 0
-	var sample string
-	var firstError string
+	sample := ""
+	firstError := ""
+	firstErrorIdx := total + 1
 
-	for idx, model := range models {
-		modelLabel := modelLabels[idx]
-		writeEvent("model_start", channelProbeProgressEvent{
-			Type:   "model_start",
-			Source: "cli_runner",
-			Index:  idx + 1,
-			Total:  total,
-			Model:  modelLabel,
-		})
-
-		// 构建 CLI runner 请求
-		runnerReq := struct {
-			CLIType        string `json:"cli_type"`
-			BaseURL        string `json:"base_url,omitempty"`
-			APIKey         string `json:"api_key"`
-			Model          string `json:"model,omitempty"`
-			Prompt         string `json:"prompt"`
-			TimeoutSeconds int    `json:"timeout_seconds"`
-		}{
-			CLIType:        cliType,
-			BaseURL:        ep.BaseURL,
-			APIKey:         apiKey,
-			Model:          model,
-			Prompt:         "Reply with exactly: OK",
-			TimeoutSeconds: 30,
-		}
-		body, _ := json.Marshal(runnerReq)
-
-		httpReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, runnerURL, bytes.NewReader(body))
-		if err != nil {
-			firstError = "构建 CLI runner 请求失败"
-			result := channelModelProbeResult{
-				Model:   modelLabel,
-				OK:      false,
-				Message: firstError,
-			}
-			results = append(results, result)
-			writeEvent("model_done", channelProbeProgressEvent{
-				Type:   "model_done",
-				Source: "cli_runner",
-				Index:  idx + 1,
-				Total:  total,
-				Model:  modelLabel,
-				Result: &result,
-			})
-			continue
-		}
-		httpReq.Header.Set("Content-Type", "application/json")
-
-		resp, err := client.Do(httpReq)
-		if err != nil {
-			msg := "CLI runner 不可达: " + err.Error()
-			if firstError == "" {
-				firstError = msg
-			}
-			result := channelModelProbeResult{
-				Model:   modelLabel,
-				OK:      false,
-				Message: msg,
-			}
-			results = append(results, result)
-			writeEvent("model_done", channelProbeProgressEvent{
-				Type:   "model_done",
-				Source: "cli_runner",
-				Index:  idx + 1,
-				Total:  total,
-				Model:  modelLabel,
-				Result: &result,
-			})
-			continue
-		}
-
-		var runnerResp struct {
-			OK        bool   `json:"ok"`
-			LatencyMS int    `json:"latency_ms"`
-			Output    string `json:"output"`
-			Error     string `json:"error"`
-		}
-		err = json.NewDecoder(resp.Body).Decode(&runnerResp)
-		_ = resp.Body.Close()
-		if err != nil {
-			msg := "CLI runner 响应解析失败"
-			if firstError == "" {
-				firstError = msg
-			}
-			result := channelModelProbeResult{
-				Model:   modelLabel,
-				OK:      false,
-				Message: msg,
-			}
-			results = append(results, result)
-			writeEvent("model_done", channelProbeProgressEvent{
-				Type:   "model_done",
-				Source: "cli_runner",
-				Index:  idx + 1,
-				Total:  total,
-				Model:  modelLabel,
-				Result: &result,
-			})
-			continue
-		}
-
-		latencySum += runnerResp.LatencyMS
-		ttftSum += runnerResp.LatencyMS
-		if sample == "" && strings.TrimSpace(runnerResp.Output) != "" {
-			sample = runnerResp.Output
-		}
-
-		msg := runnerResp.Output
-		if !runnerResp.OK {
-			msg = runnerResp.Error
-			if firstError == "" {
-				firstError = msg
-			}
-		}
-
-		result := channelModelProbeResult{
-			Model:   modelLabel,
-			OK:      runnerResp.OK,
-			Message: msg,
-			TTFTMS:  runnerResp.LatencyMS,
-			Sample:  runnerResp.Output,
-		}
-		if runnerResp.OK {
-			success++
-		}
-		results = append(results, result)
-
-		writeEvent("model_done", channelProbeProgressEvent{
-			Type:   "model_done",
-			Source: "cli_runner",
-			Index:  idx + 1,
-			Total:  total,
-			Model:  modelLabel,
-			Result: &result,
-		})
+	limit := opts.ChannelTestCLIConcurrency
+	if limit <= 0 {
+		limit = 4
 	}
+	if limit > total {
+		limit = total
+	}
+
+	type job struct {
+		idx        int
+		model      string
+		modelLabel string
+	}
+
+	var mu sync.Mutex
+	jobs := make(chan job)
+	var wg sync.WaitGroup
+
+	worker := func() {
+		defer wg.Done()
+		for j := range jobs {
+			writeEvent("model_start", channelProbeProgressEvent{
+				Type:   "model_start",
+				Source: "cli_runner",
+				Index:  j.idx + 1,
+				Total:  total,
+				Model:  j.modelLabel,
+			})
+
+			runnerReq := struct {
+				CLIType        string `json:"cli_type"`
+				BaseURL        string `json:"base_url,omitempty"`
+				APIKey         string `json:"api_key"`
+				Model          string `json:"model,omitempty"`
+				Prompt         string `json:"prompt"`
+				TimeoutSeconds int    `json:"timeout_seconds"`
+			}{
+				CLIType:        cliType,
+				BaseURL:        ep.BaseURL,
+				APIKey:         apiKey,
+				Model:          j.model,
+				Prompt:         "Reply with exactly: OK",
+				TimeoutSeconds: 30,
+			}
+			body, _ := json.Marshal(runnerReq)
+
+			httpReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, runnerURL, bytes.NewReader(body))
+			if err != nil {
+				result := channelModelProbeResult{Model: j.modelLabel, OK: false, Message: "构建 CLI runner 请求失败"}
+				mu.Lock()
+				results[j.idx] = result
+				if j.idx < firstErrorIdx {
+					firstErrorIdx = j.idx
+					firstError = result.Message
+				}
+				mu.Unlock()
+				writeEvent("model_done", channelProbeProgressEvent{
+					Type:   "model_done",
+					Source: "cli_runner",
+					Index:  j.idx + 1,
+					Total:  total,
+					Model:  j.modelLabel,
+					Result: &result,
+				})
+				continue
+			}
+			httpReq.Header.Set("Content-Type", "application/json")
+
+			resp, err := client.Do(httpReq)
+			if err != nil {
+				msg := "CLI runner 不可达: " + err.Error()
+				result := channelModelProbeResult{Model: j.modelLabel, OK: false, Message: msg}
+				mu.Lock()
+				results[j.idx] = result
+				if j.idx < firstErrorIdx {
+					firstErrorIdx = j.idx
+					firstError = result.Message
+				}
+				mu.Unlock()
+				writeEvent("model_done", channelProbeProgressEvent{
+					Type:   "model_done",
+					Source: "cli_runner",
+					Index:  j.idx + 1,
+					Total:  total,
+					Model:  j.modelLabel,
+					Result: &result,
+				})
+				continue
+			}
+
+			var runnerResp struct {
+				OK        bool   `json:"ok"`
+				LatencyMS int    `json:"latency_ms"`
+				Output    string `json:"output"`
+				Error     string `json:"error"`
+			}
+			decodeErr := json.NewDecoder(resp.Body).Decode(&runnerResp)
+			_ = resp.Body.Close()
+			if decodeErr != nil {
+				result := channelModelProbeResult{Model: j.modelLabel, OK: false, Message: "CLI runner 响应解析失败"}
+				mu.Lock()
+				results[j.idx] = result
+				if j.idx < firstErrorIdx {
+					firstErrorIdx = j.idx
+					firstError = result.Message
+				}
+				mu.Unlock()
+				writeEvent("model_done", channelProbeProgressEvent{
+					Type:   "model_done",
+					Source: "cli_runner",
+					Index:  j.idx + 1,
+					Total:  total,
+					Model:  j.modelLabel,
+					Result: &result,
+				})
+				continue
+			}
+
+			msg := runnerResp.Output
+			if !runnerResp.OK {
+				msg = runnerResp.Error
+			}
+
+			result := channelModelProbeResult{
+				Model:   j.modelLabel,
+				OK:      runnerResp.OK,
+				Message: msg,
+				TTFTMS:  runnerResp.LatencyMS,
+				Sample:  runnerResp.Output,
+			}
+
+			mu.Lock()
+			results[j.idx] = result
+			latencySum += runnerResp.LatencyMS
+			ttftSum += runnerResp.LatencyMS
+			if sample == "" && strings.TrimSpace(runnerResp.Output) != "" {
+				sample = runnerResp.Output
+			}
+			if runnerResp.OK {
+				success++
+			} else if j.idx < firstErrorIdx {
+				firstErrorIdx = j.idx
+				firstError = msg
+			}
+			mu.Unlock()
+
+			writeEvent("model_done", channelProbeProgressEvent{
+				Type:   "model_done",
+				Source: "cli_runner",
+				Index:  j.idx + 1,
+				Total:  total,
+				Model:  j.modelLabel,
+				Result: &result,
+			})
+		}
+	}
+
+	wg.Add(limit)
+	for i := 0; i < limit; i++ {
+		go worker()
+	}
+	for idx, model := range models {
+		jobs <- job{idx: idx, model: model, modelLabel: modelLabels[idx]}
+	}
+	close(jobs)
+	wg.Wait()
 
 	avgTTFT := 0
 	if total > 0 {

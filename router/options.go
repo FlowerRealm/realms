@@ -33,7 +33,8 @@ type Options struct {
 	FrontendFS        fs.FS  // optional; when set, static assets are served from this FS (typically go:embed).
 
 	// ChannelTestCLIRunnerURL 为 CLI Runner 服务地址；非空时启用 CLI 渠道测试。
-	ChannelTestCLIRunnerURL string
+	ChannelTestCLIRunnerURL   string
+	ChannelTestCLIConcurrency int
 
 	OpenAI *openaiapi.Handler
 

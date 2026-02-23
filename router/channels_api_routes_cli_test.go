@@ -9,7 +9,9 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -129,6 +131,103 @@ func TestCLITestDelegation(t *testing.T) {
 	}
 	if chBefore.LastTestAt != nil && chAfter.LastTestAt != nil && !chBefore.LastTestAt.Equal(*chAfter.LastTestAt) {
 		t.Errorf("expected last_test_at to be unchanged, before=%v after=%v", chBefore.LastTestAt, chAfter.LastTestAt)
+	}
+}
+
+func TestCLITestDelegation_ConcurrentModels(t *testing.T) {
+	const wantConcurrency = 4
+
+	var mu sync.Mutex
+	inFlight := 0
+	maxInFlight := 0
+
+	release := make(chan struct{})
+	var once sync.Once
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		once.Do(func() { close(release) })
+	}()
+
+	fakeRunner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/test" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var req struct {
+			CLIType string `json:"cli_type"`
+			APIKey  string `json:"api_key"`
+			Model   string `json:"model"`
+		}
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if req.CLIType == "" || req.APIKey == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		mu.Lock()
+		inFlight++
+		if inFlight > maxInFlight {
+			maxInFlight = inFlight
+		}
+		if inFlight >= wantConcurrency {
+			once.Do(func() { close(release) })
+		}
+		mu.Unlock()
+
+		<-release
+		time.Sleep(10 * time.Millisecond)
+
+		mu.Lock()
+		inFlight--
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":         true,
+			"latency_ms": 10,
+			"output":     "OK",
+			"error":      "",
+		})
+	}))
+	defer fakeRunner.Close()
+
+	st := openTestStore(t)
+	ctx := context.Background()
+	channelID := createOpenAIChannelWithCredential(t, ctx, st, "https://api.example.com")
+
+	for i := 0; i < 8; i++ {
+		publicID := fmt.Sprintf("m%d", i+1)
+		if _, err := st.CreateChannelModel(ctx, store.ChannelModelCreate{
+			ChannelID:     channelID,
+			PublicID:      publicID,
+			UpstreamModel: publicID,
+			Status:        1,
+		}); err != nil {
+			t.Fatalf("CreateChannelModel(%s): %v", publicID, err)
+		}
+	}
+
+	opts := Options{
+		Store:                     st,
+		ChannelTestCLIRunnerURL:   fakeRunner.URL,
+		ChannelTestCLIConcurrency: wantConcurrency,
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := newTestGinContext(w)
+	c.Params = gin.Params{{Key: "channel_id", Value: fmt.Sprintf("%d", channelID)}}
+
+	streamChannelCLITestHandler(c, opts, channelID)
+
+	mu.Lock()
+	gotMax := maxInFlight
+	mu.Unlock()
+	if gotMax < 2 {
+		t.Fatalf("expected concurrent runner requests, got max_in_flight=%d", gotMax)
 	}
 }
 
