@@ -1368,25 +1368,63 @@ export function ChannelsPage() {
                                         <tbody>
                                           {codexPanelAccounts.map((acc) => {
                                             const cooldownActive = !!acc.cooldown_until && new Date(acc.cooldown_until).getTime() > Date.now();
+                                            
+                                            const getQuotaStyles = (p: number) => {
+                                              if (p >= 90) return { bar: '#dcc8c8', text: '#7d5a5a' };
+                                              if (p >= 70) return { bar: '#dcd7c8', text: '#7d705a' };
+                                              return { bar: '#c8dcd0', text: '#5a7d5e' };
+                                            };
+
+                                            const renderQuotaRow = (title: string, percent: number | null | undefined, resetAt?: string | null) => {
+                                              if (typeof percent !== 'number') return null;
+                                              const styles = getQuotaStyles(percent);
+                                              const resetHint = (() => {
+                                                if (!resetAt || percent < 70) return null;
+                                                const d = new Date(resetAt);
+                                                if (d.getTime() <= Date.now()) return null;
+                                                return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+                                              })();
+
+                                              return (
+                                                <div className="d-flex align-items-center gap-2 mb-1" style={{ maxWidth: '240px' }}>
+                                                  <span className="text-muted" style={{ fontSize: '11px', width: '20px', flexShrink: 0 }}>{title}</span>
+                                                  <div className="progress flex-grow-1" style={{ height: '4px', backgroundColor: '#f0f0f0', borderRadius: '2px' }}>
+                                                    <div 
+                                                      className="progress-bar" 
+                                                      style={{ width: `${percent}%`, backgroundColor: styles.bar, borderRadius: '2px', transition: 'width 0.3s' }} 
+                                                    />
+                                                  </div>
+                                                  <span className="font-monospace fw-bold" style={{ fontSize: '11px', color: styles.text, width: '32px', textAlign: 'right' }}>
+                                                    {percent}%
+                                                  </span>
+                                                  {resetHint && <span className="text-muted smaller" style={{ marginLeft: '2px' }}>({resetHint})</span>}
+                                                </div>
+                                              );
+                                            };
+
                                             return (
                                               <tr key={acc.id}>
                                                 <td className="ps-3">
                                                   <div className="d-flex flex-column">
                                                     <span className="fw-semibold text-dark">{acc.email || '未绑定邮箱'}</span>
                                                     <span className="text-muted small font-monospace">{acc.account_id || '-'}</span>
-                                                    <span className="text-muted smaller">更新：{fmtDateTime(acc.updated_at)}</span>
+                                                    <span className="text-muted smaller">更新于：{fmtDateTime(acc.updated_at)}</span>
                                                   </div>
                                                 </td>
                                                 <td>
                                                   {acc.quota_error || acc.balance_error ? (
-                                                    <span className="text-danger small">{acc.quota_error || acc.balance_error}</span>
-                                                  ) : (
                                                     <div className="d-flex flex-column small">
-                                                      <span>可用额度：{acc.balance_total_available_usd ? `$${acc.balance_total_available_usd}` : '-'}</span>
-                                                      <span className="text-muted">
-                                                        5h：{typeof acc.quota_primary_used_percent === 'number' ? `${acc.quota_primary_used_percent}%` : '-'} · 周：
-                                                        {typeof acc.quota_secondary_used_percent === 'number' ? `${acc.quota_secondary_used_percent}%` : '-'}
-                                                      </span>
+                                                      <span className="text-danger fw-medium">⚠️ {acc.quota_error || acc.balance_error}</span>
+                                                      <span className="text-muted smaller">同步: {fmtDateTime(acc.quota_updated_at || acc.updated_at)}</span>
+                                                    </div>
+                                                  ) : (
+                                                    <div className="d-flex flex-column">
+                                                      {renderQuotaRow('5h', acc.quota_primary_used_percent, acc.quota_primary_reset_at)}
+                                                      {renderQuotaRow('周', acc.quota_secondary_used_percent, acc.quota_secondary_reset_at)}
+                                                      <div className="d-flex justify-content-between text-muted smaller" style={{ maxWidth: '240px', marginTop: '2px' }}>
+                                                        <span>{acc.quota_credits_unlimited ? '✨ 无限' : ''}</span>
+                                                        <span>同步: {fmtDateTime(acc.quota_updated_at || acc.updated_at)}</span>
+                                                      </div>
                                                     </div>
                                                   )}
                                                 </td>
