@@ -13,9 +13,9 @@ type ChannelGroupMemberDetail struct {
 	MemberID      int64
 	ParentGroupID int64
 
-	MemberGroupID          *int64
-	MemberGroupName        *string
-	MemberGroupStatus      *int
+	MemberGroupID     *int64
+	MemberGroupName   *string
+	MemberGroupStatus *int
 
 	MemberChannelID     *int64
 	MemberChannelName   *string
@@ -141,6 +141,37 @@ func (s *Store) ListUsedUpstreamChannelIDs(ctx context.Context) ([]int64, error)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("遍历使用中渠道失败: %w", err)
+	}
+	return out, nil
+}
+
+func (s *Store) ListUpstreamChannelIDsWithRequestsSince(ctx context.Context, since time.Time) ([]int64, error) {
+	if since.IsZero() {
+		return nil, errors.New("since 不能为空")
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT DISTINCT upstream_channel_id
+FROM usage_events
+WHERE upstream_channel_id IS NOT NULL AND upstream_channel_id > 0 AND time >= ?
+`, since)
+	if err != nil {
+		return nil, fmt.Errorf("查询最近请求渠道失败: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]int64, 0, 64)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("扫描最近请求渠道失败: %w", err)
+		}
+		if id <= 0 {
+			continue
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历最近请求渠道失败: %w", err)
 	}
 	return out, nil
 }

@@ -303,6 +303,17 @@ func channelsPageHandler(opts Options) gin.HandlerFunc {
 			usedSet[id] = struct{}{}
 		}
 
+		sinceRecent := time.Now().UTC().Add(-1 * time.Minute)
+		recentIDs, err := opts.Store.ListUpstreamChannelIDsWithRequestsSince(c.Request.Context(), sinceRecent)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询最近请求渠道失败"})
+			return
+		}
+		recentSet := make(map[int64]struct{}, len(recentIDs))
+		for _, id := range recentIDs {
+			recentSet[id] = struct{}{}
+		}
+
 		out := make([]channelAdminListItem, 0, len(channels))
 		for _, ch := range channels {
 			view := channelView{
@@ -353,7 +364,9 @@ func channelsPageHandler(opts Options) gin.HandlerFunc {
 
 			inUse := false
 			if _, ok := usedSet[ch.ID]; ok {
-				inUse = true
+				if _, ok2 := recentSet[ch.ID]; ok2 {
+					inUse = true
+				}
 			}
 
 			out = append(out, channelAdminListItem{

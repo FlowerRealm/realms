@@ -75,42 +75,6 @@ func TestChannels_PageAndInUse_RootFlow(t *testing.T) {
 		t.Fatalf("AddChannelGroupMemberChannel: %v", err)
 	}
 
-	usageID, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
-		RequestID:        "req_test_1",
-		UserID:           userID,
-		TokenID:          tokenID,
-		ReservedUSD:      decimal.Zero,
-		ReserveExpiresAt: time.Now().Add(1 * time.Hour),
-	})
-	if err != nil {
-		t.Fatalf("ReserveUsage: %v", err)
-	}
-	inTokens := int64(100)
-	outTokens := int64(50)
-	cachedIn := int64(10)
-	cachedOut := int64(5)
-	ch1ID := ch1
-	if err := st.CommitUsage(ctx, store.CommitUsageInput{
-		UsageEventID:       usageID,
-		UpstreamChannelID:  &ch1ID,
-		InputTokens:        &inTokens,
-		CachedInputTokens:  &cachedIn,
-		OutputTokens:       &outTokens,
-		CachedOutputTokens: &cachedOut,
-		CommittedUSD:       decimal.RequireFromString("1.23"),
-	}); err != nil {
-		t.Fatalf("CommitUsage: %v", err)
-	}
-	if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
-		UsageEventID:        usageID,
-		StatusCode:          200,
-		LatencyMS:           1000,
-		FirstTokenLatencyMS: 200,
-		UpstreamChannelID:   &ch1ID,
-	}); err != nil {
-		t.Fatalf("FinalizeUsageEvent: %v", err)
-	}
-
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 
@@ -125,9 +89,10 @@ func TestChannels_PageAndInUse_RootFlow(t *testing.T) {
 	engine.Use(sessions.Sessions(cookieName, sessionStore))
 
 	SetRouter(engine, Options{
-		Store:             st,
-		SelfMode:          false,
-		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+		Store:                st,
+		SelfMode:             false,
+		AdminTimeZoneDefault: "UTC",
+		FrontendIndexPage:    []byte("<!doctype html><html><body>INDEX</body></html>"),
 	})
 
 	// login
@@ -206,14 +171,8 @@ func TestChannels_PageAndInUse_RootFlow(t *testing.T) {
 	if pageResp.Data.AdminTimeZone == "" || pageResp.Data.Start == "" || pageResp.Data.End == "" {
 		t.Fatalf("expected tz/start/end, got: %#v", pageResp.Data)
 	}
-	if pageResp.Data.Overview.Requests != 1 {
-		t.Fatalf("expected overview requests=1, got %d", pageResp.Data.Overview.Requests)
-	}
-	if pageResp.Data.Overview.AvgFirstTokenLatency != "200.0 ms" {
-		t.Fatalf("expected overview avg_first_token_latency=200.0 ms, got %q", pageResp.Data.Overview.AvgFirstTokenLatency)
-	}
-	if pageResp.Data.Overview.TokensPerSecond != "62.50" {
-		t.Fatalf("expected overview tokens_per_second=62.50, got %q", pageResp.Data.Overview.TokensPerSecond)
+	if pageResp.Data.Overview.Requests != 0 {
+		t.Fatalf("expected overview requests=0, got %d", pageResp.Data.Overview.Requests)
 	}
 	if pageResp.Data.Overview.BindingRuntime.Available {
 		t.Fatalf("expected overview.binding_runtime.available=false when opts.Sched nil")
@@ -226,23 +185,8 @@ func TestChannels_PageAndInUse_RootFlow(t *testing.T) {
 	for _, it := range pageResp.Data.Channels {
 		if it.ID == ch1 {
 			foundCh1 = true
-			if !it.InUse {
-				t.Fatalf("expected ch1 in_use=true")
-			}
-			if it.Usage.CommittedUSD != "1.23" {
-				t.Fatalf("expected ch1 committed_usd=1.23, got %q", it.Usage.CommittedUSD)
-			}
-			if it.Usage.Tokens != 150 {
-				t.Fatalf("expected ch1 tokens=150, got %d", it.Usage.Tokens)
-			}
-			if it.Usage.CacheRatio != "10.0%" {
-				t.Fatalf("expected ch1 cache_ratio=10.0%%, got %q", it.Usage.CacheRatio)
-			}
-			if it.Usage.AvgFirstTokenLatency != "200.0 ms" {
-				t.Fatalf("expected ch1 avg_first_token_latency=200.0 ms, got %q", it.Usage.AvgFirstTokenLatency)
-			}
-			if it.Usage.OutputTokensPerSecond != "62.50" {
-				t.Fatalf("expected ch1 tokens_per_second=62.50, got %q", it.Usage.OutputTokensPerSecond)
+			if it.InUse {
+				t.Fatalf("expected ch1 in_use=false when no recent requests")
 			}
 			if it.Runtime.Available {
 				t.Fatalf("expected runtime.available=false when opts.Admin nil")
@@ -262,8 +206,134 @@ func TestChannels_PageAndInUse_RootFlow(t *testing.T) {
 		t.Fatalf("expected ch2 in response")
 	}
 
+	usageID, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
+		RequestID:        "req_test_1",
+		UserID:           userID,
+		TokenID:          tokenID,
+		ReservedUSD:      decimal.Zero,
+		ReserveExpiresAt: time.Now().Add(1 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("ReserveUsage: %v", err)
+	}
+	inTokens := int64(100)
+	outTokens := int64(50)
+	cachedIn := int64(10)
+	cachedOut := int64(5)
+	ch1ID := ch1
+	if err := st.CommitUsage(ctx, store.CommitUsageInput{
+		UsageEventID:       usageID,
+		UpstreamChannelID:  &ch1ID,
+		InputTokens:        &inTokens,
+		CachedInputTokens:  &cachedIn,
+		OutputTokens:       &outTokens,
+		CachedOutputTokens: &cachedOut,
+		CommittedUSD:       decimal.RequireFromString("1.23"),
+	}); err != nil {
+		t.Fatalf("CommitUsage: %v", err)
+	}
+	if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
+		UsageEventID:        usageID,
+		StatusCode:          200,
+		LatencyMS:           1000,
+		FirstTokenLatencyMS: 200,
+		UpstreamChannelID:   &ch1ID,
+	}); err != nil {
+		t.Fatalf("FinalizeUsageEvent: %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/channel/page", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("page status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &pageResp); err != nil {
+		t.Fatalf("json.Unmarshal page: %v", err)
+	}
+	if !pageResp.Success {
+		t.Fatalf("expected success, got message=%q", pageResp.Message)
+	}
+	if pageResp.Data.Overview.Requests != 1 {
+		t.Fatalf("expected overview requests=1, got %d", pageResp.Data.Overview.Requests)
+	}
+	if pageResp.Data.Overview.AvgFirstTokenLatency != "200.0 ms" {
+		t.Fatalf("expected overview avg_first_token_latency=200.0 ms, got %q", pageResp.Data.Overview.AvgFirstTokenLatency)
+	}
+	if pageResp.Data.Overview.TokensPerSecond != "62.50" {
+		t.Fatalf("expected overview tokens_per_second=62.50, got %q", pageResp.Data.Overview.TokensPerSecond)
+	}
+
+	foundCh1 = false
+	for _, it := range pageResp.Data.Channels {
+		if it.ID != ch1 {
+			continue
+		}
+		foundCh1 = true
+		if !it.InUse {
+			t.Fatalf("expected ch1 in_use=true when recent requests exist")
+		}
+		if it.Usage.CommittedUSD != "1.23" {
+			t.Fatalf("expected ch1 committed_usd=1.23, got %q", it.Usage.CommittedUSD)
+		}
+		if it.Usage.Tokens != 150 {
+			t.Fatalf("expected ch1 tokens=150, got %d", it.Usage.Tokens)
+		}
+		if it.Usage.CacheRatio != "10.0%" {
+			t.Fatalf("expected ch1 cache_ratio=10.0%%, got %q", it.Usage.CacheRatio)
+		}
+		if it.Usage.AvgFirstTokenLatency != "200.0 ms" {
+			t.Fatalf("expected ch1 avg_first_token_latency=200.0 ms, got %q", it.Usage.AvgFirstTokenLatency)
+		}
+		if it.Usage.OutputTokensPerSecond != "62.50" {
+			t.Fatalf("expected ch1 tokens_per_second=62.50, got %q", it.Usage.OutputTokensPerSecond)
+		}
+	}
+	if !foundCh1 {
+		t.Fatalf("expected ch1 in response")
+	}
+
+	oldTime := time.Now().UTC().Add(-2 * time.Minute)
+	oldTimeStr := oldTime.Format("2006-01-02 15:04:05")
+	if _, err := db.ExecContext(ctx, `UPDATE usage_events SET time=? WHERE id=?`, oldTimeStr, usageID); err != nil {
+		t.Fatalf("update usage_events.time: %v", err)
+	}
+	day := oldTime.Format("2006-01-02")
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/channel/page?start="+day+"&end="+day, nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("page status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &pageResp); err != nil {
+		t.Fatalf("json.Unmarshal page: %v", err)
+	}
+	if !pageResp.Success {
+		t.Fatalf("expected success, got message=%q", pageResp.Message)
+	}
+	if pageResp.Data.Overview.Requests != 1 {
+		t.Fatalf("expected overview requests=1, got %d", pageResp.Data.Overview.Requests)
+	}
+	foundCh1 = false
+	for _, it := range pageResp.Data.Channels {
+		if it.ID != ch1 {
+			continue
+		}
+		foundCh1 = true
+		if it.InUse {
+			t.Fatalf("expected ch1 in_use=false when last request older than 1 minute")
+		}
+	}
+	if !foundCh1 {
+		t.Fatalf("expected ch1 in response")
+	}
+
 	// channel timeseries
-	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/channel/"+strconv.FormatInt(ch1, 10)+"/timeseries", nil)
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/channel/"+strconv.FormatInt(ch1, 10)+"/timeseries?start="+day+"&end="+day, nil)
 	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
 	req.Header.Set("Cookie", sessionCookie)
 	rr = httptest.NewRecorder()
@@ -322,7 +392,7 @@ func TestChannels_PageAndInUse_RootFlow(t *testing.T) {
 		t.Fatalf("expected tokens_per_second around 62.50, got %.4f", p.TokensPerSecond)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/channel/"+strconv.FormatInt(ch1, 10)+"/timeseries?granularity=day", nil)
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/channel/"+strconv.FormatInt(ch1, 10)+"/timeseries?granularity=day&start="+day+"&end="+day, nil)
 	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
 	req.Header.Set("Cookie", sessionCookie)
 	rr = httptest.NewRecorder()
