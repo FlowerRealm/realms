@@ -204,6 +204,27 @@ body {
 .nav-tabs .nav-item.show .nav-link {
   border-bottom-color: var(--rlm-surface-1) !important;
 }
+
+/* Borderless tabs: keep typography/background, remove the "boxed" border around each label. */
+.nav-tabs.rlm-tabs-borderless {
+  border-bottom: 0;
+  background: rgba(var(--bs-primary-rgb), 0.06);
+  padding: 0.25rem;
+  border-radius: var(--rlm-frame-radius);
+  flex-wrap: nowrap;
+}
+.nav-tabs.rlm-tabs-borderless .nav-item {
+  flex: 1 1 0;
+}
+.nav-tabs.rlm-tabs-borderless .nav-link {
+  border: 0 !important;
+  margin-bottom: 0;
+  width: 100%;
+  text-align: center;
+}
+.nav-tabs.rlm-tabs-borderless .nav-link:not(.active):hover {
+  background: rgba(var(--bs-primary-rgb), 0.08);
+}
 .app-shell {
   height: 100%;
   min-height: 0;
@@ -1120,8 +1141,14 @@ h6,
 .content-scrollable {
   flex: 1;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   padding: 2.25rem;
   background-color: var(--rlm-surface-1) !important;
+}
+
+/* Avoid layout shift when a scrollable modal body toggles its vertical scrollbar. */
+.modal-dialog-scrollable .modal-body {
+  scrollbar-gutter: stable;
 }
 
 /* Simple Header (Login) */

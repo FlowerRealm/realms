@@ -1774,7 +1774,7 @@ export function ChannelsPage() {
               <span className="text-muted small">({channelTypeLabel(settingsChannel.type)})</span>
             </div>
 
-            <ul className="nav nav-tabs mb-3">
+            <ul className="nav nav-tabs mb-3 rlm-tabs-borderless">
               <li className="nav-item">
                 <button type="button" className={`nav-link ${settingsTab === 'common' ? 'active' : ''}`} onClick={() => setSettingsTab('common')}>
                   常用
