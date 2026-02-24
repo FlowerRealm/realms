@@ -1049,9 +1049,8 @@ export function ChannelsPage() {
                                 className="btn btn-sm btn-light border text-primary"
                                 type="button"
                                 title="测试连接"
-                                disabled={loading || ch.type === 'codex_oauth' || anyTesting}
+                                disabled={loading || anyTesting}
                                 onClick={async () => {
-                                  if (ch.type === 'codex_oauth') return;
                                   openChannelPanel(ch.id);
                                   setDetailPanelByChannel((prev) => ({ ...prev, [ch.id]: 'test' }));
                                   setErr('');

@@ -4,8 +4,6 @@ package upstream
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -619,8 +617,30 @@ func (e *Executor) buildRequest(ctx context.Context, sel scheduler.Selection, do
 		return nil, errors.New("未知 credential 类型")
 	}
 
+	var codexPromptCacheKey string
+	codexIsCLI := false
+	if sel.CredentialType == scheduler.CredentialTypeCodex && len(body) > 0 {
+		codexIsCLI = isCodexCLIUserAgent(downstream.Header.Get("User-Agent"))
+		var reqBody map[string]any
+		if err := json.Unmarshal(body, &reqBody); err == nil && reqBody != nil {
+			result := applyCodexOAuthTransform(reqBody, codexIsCLI)
+			codexPromptCacheKey = strings.TrimSpace(result.PromptCacheKey)
+			if result.Modified {
+				rewritten, err := json.Marshal(reqBody)
+				if err != nil {
+					return nil, fmt.Errorf("codex_oauth 请求体 transform 失败: %w", err)
+				}
+				body = rewritten
+			}
+		}
+	}
+
 	u := *base
-	joined, err := url.JoinPath(base.String(), normalizeUpstreamPath(base, targetPath))
+	upstreamPath := normalizeUpstreamPath(base, targetPath)
+	if sel.CredentialType == scheduler.CredentialTypeCodex && targetPath == "/v1/responses" {
+		upstreamPath = "/responses"
+	}
+	joined, err := url.JoinPath(base.String(), upstreamPath)
 	if err != nil {
 		return nil, fmt.Errorf("拼接上游 URL 失败: %w", err)
 	}
@@ -630,7 +650,7 @@ func (e *Executor) buildRequest(ctx context.Context, sel scheduler.Selection, do
 	}
 	u = *uu
 	u.RawQuery = downstream.URL.RawQuery
-	if u.RawQuery != "" && (targetPath == "/v1/responses" || targetPath == "/v1/messages") {
+	if sel.CredentialType != scheduler.CredentialTypeCodex && u.RawQuery != "" && (targetPath == "/v1/responses" || targetPath == "/v1/messages") {
 		q := u.Query()
 		changed := false
 		for _, k := range []string{"max_tokens", "max_output_tokens", "max_completion_tokens"} {
@@ -648,13 +668,18 @@ func (e *Executor) buildRequest(ctx context.Context, sel scheduler.Selection, do
 	if err != nil {
 		return nil, fmt.Errorf("创建上游请求失败: %w", err)
 	}
-	copyHeaders(req.Header, downstream.Header)
+	if sel.CredentialType == scheduler.CredentialTypeCodex {
+		req.Header = make(http.Header)
+		copyCodexOAuthWhitelistedHeaders(req.Header, downstream.Header)
+	} else {
+		copyHeaders(req.Header, downstream.Header)
 
-	// 禁止把下游鉴权与压缩语义带到上游。
-	req.Header.Del("Authorization")
-	req.Header.Del("X-Api-Key")
-	req.Header.Del("x-api-key")
-	req.Header.Del("Accept-Encoding")
+		// 禁止把下游鉴权与压缩语义带到上游。
+		req.Header.Del("Authorization")
+		req.Header.Del("X-Api-Key")
+		req.Header.Del("x-api-key")
+		req.Header.Del("Accept-Encoding")
+	}
 
 	if sel.CredentialType == scheduler.CredentialTypeOpenAI && sel.OpenAIOrganization != nil && strings.TrimSpace(*sel.OpenAIOrganization) != "" {
 		req.Header.Set("OpenAI-Organization", strings.TrimSpace(*sel.OpenAIOrganization))
@@ -722,9 +747,25 @@ func (e *Executor) buildRequest(ctx context.Context, sel scheduler.Selection, do
 		if err := applyHeaderOverride(req.Header, sel.HeaderOverride, accessToken); err != nil {
 			return nil, err
 		}
-		req.Header.Set("Accept-Encoding", "identity")
-		applyCodexHeaders(req.Header, sec.AccountID)
-		req.Header.Set("Authorization", "Bearer "+accessToken)
+		req.Host = "chatgpt.com"
+		req.Header.Set("OpenAI-Beta", "responses=experimental")
+		req.Header.Set("accept", "text/event-stream")
+		if codexIsCLI {
+			req.Header.Set("originator", "codex_cli_rs")
+		} else {
+			req.Header.Set("originator", "opencode")
+		}
+		if strings.TrimSpace(sec.AccountID) != "" {
+			req.Header.Set("chatgpt-account-id", strings.TrimSpace(sec.AccountID))
+		}
+		if codexPromptCacheKey != "" {
+			req.Header.Set("conversation_id", codexPromptCacheKey)
+			req.Header.Set("session_id", codexPromptCacheKey)
+		}
+		if strings.TrimSpace(req.Header.Get("content-type")) == "" {
+			req.Header.Set("content-type", "application/json")
+		}
+		req.Header.Set("authorization", "Bearer "+accessToken)
 	default:
 	}
 
@@ -863,58 +904,6 @@ func applyAnthropicBetaHeader(h http.Header, pref string) {
 func stringFromAny(v any) string {
 	s, _ := v.(string)
 	return s
-}
-
-func applyCodexHeaders(h http.Header, accountID string) {
-	h.Set("Content-Type", "application/json")
-	h.Set("Accept", "text/event-stream")
-	h.Set("Connection", "Keep-Alive")
-
-	if strings.TrimSpace(h.Get("Version")) == "" {
-		h.Set("Version", "0.21.0")
-	}
-	sessionID := strings.TrimSpace(h.Get("Session_id"))
-	if sessionID == "" {
-		for _, key := range []string{"Session-Id", "X-Session-Id"} {
-			if v := strings.TrimSpace(h.Get(key)); v != "" {
-				sessionID = v
-				break
-			}
-		}
-	}
-	if sessionID == "" {
-		sessionID = newUUIDv4()
-	}
-	if sessionID != "" {
-		h.Set("Session_id", sessionID)
-	}
-
-	h.Set("User-Agent", "codex_cli_rs/0.50.0 (Mac OS 26.0.1; arm64) Apple_Terminal/464")
-	h.Set("Openai-Beta", "responses=experimental")
-	h.Set("Originator", "codex_cli_rs")
-	if strings.TrimSpace(accountID) != "" {
-		h.Set("Chatgpt-Account-Id", accountID)
-	}
-}
-
-func newUUIDv4() string {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return ""
-	}
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	var buf [36]byte
-	hex.Encode(buf[0:8], b[0:4])
-	buf[8] = '-'
-	hex.Encode(buf[9:13], b[4:6])
-	buf[13] = '-'
-	hex.Encode(buf[14:18], b[6:8])
-	buf[18] = '-'
-	hex.Encode(buf[19:23], b[8:10])
-	buf[23] = '-'
-	hex.Encode(buf[24:36], b[10:16])
-	return string(buf[:])
 }
 
 func (e *Executor) shouldAttemptRefresh(accountID int64, now time.Time) bool {

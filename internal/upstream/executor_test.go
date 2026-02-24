@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -182,6 +184,20 @@ func TestExecutor_HeaderOverride_AppliesAndDoesNotOverrideDefaultAuth(t *testing
 }
 
 func TestExecutor_CodexOAuth_LeavesPathAndBody(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cacheDir := filepath.Join(home, ".opencode", "cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatalf("mkdir cache dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheDir, "opencode-codex-header.txt"), []byte("cached-instructions"), 0o644); err != nil {
+		t.Fatalf("write cache content: %v", err)
+	}
+	metaBytes, _ := json.Marshal(opencodeCacheMetadata{LastChecked: time.Now().UnixMilli()})
+	if err := os.WriteFile(filepath.Join(cacheDir, "opencode-codex-header-meta.json"), metaBytes, 0o644); err != nil {
+		t.Fatalf("write cache meta: %v", err)
+	}
+
 	exec := &Executor{
 		st: &fakeUpstreamStore{
 			codexSecret: store.CodexOAuthSecret{
@@ -193,7 +209,7 @@ func TestExecutor_CodexOAuth_LeavesPathAndBody(t *testing.T) {
 		upstreamTimeout: 2 * time.Minute,
 	}
 
-	body := []byte(`{"model":"gpt-5.2","stream":false,"max_output_tokens":123,"input":"hi"}`)
+	body := []byte(`{"model":"gpt-5.2","stream":false,"max_output_tokens":123,"prompt_cache_key":"pc1","input":"hi"}`)
 	r := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader(body))
 
 	req, err := exec.buildRequest(context.Background(), scheduler.Selection{
@@ -205,38 +221,77 @@ func TestExecutor_CodexOAuth_LeavesPathAndBody(t *testing.T) {
 		t.Fatalf("buildRequest returned error: %v", err)
 	}
 
-	if got := req.URL.Path; got != "/backend-api/codex/v1/responses" {
-		t.Fatalf("expected path to be passthrough, got %q", got)
+	if got := req.URL.Path; got != "/backend-api/codex/responses" {
+		t.Fatalf("path = %q, want %q", got, "/backend-api/codex/responses")
+	}
+	if got := req.Host; got != "chatgpt.com" {
+		t.Fatalf("Host = %q, want %q", got, "chatgpt.com")
+	}
+	if got := req.Header.Get("OpenAI-Beta"); got != "responses=experimental" {
+		t.Fatalf("OpenAI-Beta = %q, want %q", got, "responses=experimental")
+	}
+	if got := req.Header.Get("Accept"); got != "text/event-stream" {
+		t.Fatalf("Accept = %q, want %q", got, "text/event-stream")
+	}
+	if got := req.Header.Get("Originator"); got != "opencode" {
+		t.Fatalf("Originator = %q, want %q", got, "opencode")
+	}
+	if got := req.Header.Get("Chatgpt-Account-Id"); got != "acc" {
+		t.Fatalf("Chatgpt-Account-Id = %q, want %q", got, "acc")
+	}
+	if got := req.Header.Get("Authorization"); got != "Bearer at" {
+		t.Fatalf("Authorization = %q, want %q", got, "Bearer at")
+	}
+	if got := req.Header.Get("Conversation_id"); got != "pc1" {
+		t.Fatalf("Conversation_id = %q, want %q", got, "pc1")
+	}
+	if got := req.Header.Get("Session_id"); got != "pc1" {
+		t.Fatalf("Session_id = %q, want %q", got, "pc1")
 	}
 
 	gotBody, err := io.ReadAll(req.Body)
 	if err != nil {
 		t.Fatalf("read request body: %v", err)
 	}
-	if string(gotBody) != string(body) {
-		t.Fatalf("expected body to be passthrough, got %s", string(gotBody))
+
+	var payload map[string]any
+	if err := json.Unmarshal(gotBody, &payload); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if v, ok := payload["store"].(bool); !ok || v != false {
+		t.Fatalf("store = (%T)%v, want bool(false)", payload["store"], payload["store"])
+	}
+	if v, ok := payload["stream"].(bool); !ok || v != true {
+		t.Fatalf("stream = (%T)%v, want bool(true)", payload["stream"], payload["stream"])
+	}
+	if _, ok := payload["max_output_tokens"]; ok {
+		t.Fatalf("expected max_output_tokens to be stripped")
+	}
+	if got := strings.TrimSpace(stringFromAny(payload["instructions"])); got != "cached-instructions" {
+		t.Fatalf("instructions = %q, want %q", got, "cached-instructions")
 	}
 }
 
-func TestApplyCodexHeaders_ReusesSessionIDFromSessionDashID(t *testing.T) {
-	h := make(http.Header)
-	h.Set("Session-Id", "sess-from-dash")
+func TestCopyCodexOAuthWhitelistedHeaders(t *testing.T) {
+	src := make(http.Header)
+	src.Set("Accept-Language", "zh-CN")
+	src.Set("Content-Type", "application/json")
+	src.Set("Conversation_id", "c1")
+	src.Set("User-Agent", "ua")
+	src.Set("Originator", "x")
+	src.Set("Session_id", "s1")
+	src.Set("X-Foo", "bar")
 
-	applyCodexHeaders(h, "")
+	dst := make(http.Header)
+	copyCodexOAuthWhitelistedHeaders(dst, src)
 
-	if got := h.Get("Session_id"); got != "sess-from-dash" {
-		t.Fatalf("expected Session_id from Session-Id, got %q", got)
+	for _, k := range []string{"Accept-Language", "Content-Type", "Conversation_id", "User-Agent", "Originator", "Session_id"} {
+		if got := dst.Get(k); got == "" {
+			t.Fatalf("expected %s to be copied", k)
+		}
 	}
-}
-
-func TestApplyCodexHeaders_ReusesSessionIDFromXSessionID(t *testing.T) {
-	h := make(http.Header)
-	h.Set("X-Session-Id", "sess-from-x")
-
-	applyCodexHeaders(h, "")
-
-	if got := h.Get("Session_id"); got != "sess-from-x" {
-		t.Fatalf("expected Session_id from X-Session-Id, got %q", got)
+	if got := dst.Get("X-Foo"); got != "" {
+		t.Fatalf("expected X-Foo to be stripped, got %q", got)
 	}
 }
 

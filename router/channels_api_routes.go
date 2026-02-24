@@ -1929,6 +1929,8 @@ func channelTypeToCLIType(chType string) string {
 		return "codex"
 	case store.UpstreamTypeAnthropic:
 		return "claude"
+	case store.UpstreamTypeCodexOAuth:
+		return "codex_oauth"
 	default:
 		return ""
 	}
@@ -2026,14 +2028,6 @@ func streamChannelCLITestHandler(c *gin.Context, opts Options, channelID int64) 
 		modelLabels = append(modelLabels, label)
 	}
 
-	// codex_oauth：当前不支持 CLI 测试。
-	if ch.Type == store.UpstreamTypeCodexOAuth {
-		writeEvent("summary", buildChannelTestResponse(false, 0, "codex_oauth 渠道暂不支持测试连接", channelProbeSummary{
-			OK: false, Message: "codex_oauth 渠道暂不支持测试连接", Source: "cli_runner", Total: total, Success: 0, Results: []channelModelProbeResult{},
-		}))
-		return
-	}
-
 	// 其他渠道：走 CLI runner。
 	if opts.ChannelTestCLIRunnerURL == "" {
 		writeEvent("summary", buildChannelTestResponse(false, 0, "CLI runner 未配置，请设置 REALMS_CHANNEL_TEST_CLI_RUNNER_URL", channelProbeSummary{
@@ -2050,8 +2044,14 @@ func streamChannelCLITestHandler(c *gin.Context, opts Options, channelID int64) 
 		return
 	}
 
-	// 取第一个可用凭证的 API key
+	// 准备 CLI runner 凭证（仅用于测试请求，不写数据库、不影响调度）。
 	apiKey := ""
+	baseURL := ep.BaseURL
+	profileKey := ""
+	chatgptAccountID := ""
+	accessToken := ""
+	refreshToken := ""
+	idToken := ""
 	switch ch.Type {
 	case store.UpstreamTypeOpenAICompatible:
 		if creds, err := st.ListOpenAICompatibleCredentialsByEndpoint(c.Request.Context(), ep.ID); err == nil && len(creds) > 0 {
@@ -2059,18 +2059,76 @@ func streamChannelCLITestHandler(c *gin.Context, opts Options, channelID int64) 
 				apiKey = sec.APIKey
 			}
 		}
+		if apiKey == "" {
+			writeEvent("summary", buildChannelTestResponse(false, 0, "未找到可用凭证", channelProbeSummary{
+				OK: false, Message: "未找到可用凭证", Source: "cli_runner", Total: total, Success: 0, Results: []channelModelProbeResult{},
+			}))
+			return
+		}
 	case store.UpstreamTypeAnthropic:
 		if creds, err := st.ListAnthropicCredentialsByEndpoint(c.Request.Context(), ep.ID); err == nil && len(creds) > 0 {
 			if sec, err := st.GetAnthropicCredentialSecret(c.Request.Context(), creds[0].ID); err == nil {
 				apiKey = sec.APIKey
 			}
 		}
-	}
-	if apiKey == "" {
-		writeEvent("summary", buildChannelTestResponse(false, 0, "未找到可用凭证", channelProbeSummary{
-			OK: false, Message: "未找到可用凭证", Source: "cli_runner", Total: total, Success: 0, Results: []channelModelProbeResult{},
-		}))
-		return
+		if apiKey == "" {
+			writeEvent("summary", buildChannelTestResponse(false, 0, "未找到可用凭证", channelProbeSummary{
+				OK: false, Message: "未找到可用凭证", Source: "cli_runner", Total: total, Success: 0, Results: []channelModelProbeResult{},
+			}))
+			return
+		}
+	case store.UpstreamTypeCodexOAuth:
+		accounts, err := st.ListCodexOAuthAccountsByEndpoint(c.Request.Context(), ep.ID)
+		if err != nil {
+			writeEvent("summary", buildChannelTestResponse(false, 0, "读取 Codex OAuth 账号失败", channelProbeSummary{
+				OK: false, Message: "读取 Codex OAuth 账号失败", Source: "cli_runner", Total: total, Success: 0, Results: []channelModelProbeResult{},
+			}))
+			return
+		}
+		now := time.Now()
+		var selected store.CodexOAuthAccount
+		found := false
+		for _, a := range accounts {
+			if a.Status != 1 {
+				continue
+			}
+			if a.CooldownUntil != nil && now.Before(*a.CooldownUntil) {
+				continue
+			}
+			selected = a
+			found = true
+			break
+		}
+		if !found {
+			writeEvent("summary", buildChannelTestResponse(false, 0, "暂无可用 Codex OAuth 账号（可能被禁用或冷却中）", channelProbeSummary{
+				OK: false, Message: "暂无可用 Codex OAuth 账号（可能被禁用或冷却中）", Source: "cli_runner", Total: total, Success: 0, Results: []channelModelProbeResult{},
+			}))
+			return
+		}
+		sec, err := st.GetCodexOAuthSecret(c.Request.Context(), selected.ID)
+		if err != nil {
+			writeEvent("summary", buildChannelTestResponse(false, 0, "读取 Codex OAuth 账号密钥失败", channelProbeSummary{
+				OK: false, Message: "读取 Codex OAuth 账号密钥失败", Source: "cli_runner", Total: total, Success: 0, Results: []channelModelProbeResult{},
+			}))
+			return
+		}
+		chatgptAccountID = strings.TrimSpace(sec.AccountID)
+		accessToken = strings.TrimSpace(sec.AccessToken)
+		refreshToken = strings.TrimSpace(sec.RefreshToken)
+		if sec.IDToken != nil {
+			idToken = strings.TrimSpace(*sec.IDToken)
+		}
+		// codex_oauth 的测试连接走 Codex CLI 内置 ChatGPT 上游，因此无需 base_url；
+		// 但为避免不同 endpoint/account 的并发测试互相覆盖 runner 的 $CODEX_HOME，
+		// 这里通过 profile_key 显式隔离 profile 目录。
+		baseURL = ""
+		profileKey = fmt.Sprintf("codex_oauth|endpoint:%d|account:%d", ep.ID, selected.ID)
+		if chatgptAccountID == "" || accessToken == "" || refreshToken == "" || idToken == "" {
+			writeEvent("summary", buildChannelTestResponse(false, 0, "Codex OAuth 账号缺少必要凭据（account_id/access_token/refresh_token/id_token），请重新授权", channelProbeSummary{
+				OK: false, Message: "Codex OAuth 账号缺少必要凭据（account_id/access_token/refresh_token/id_token），请重新授权", Source: "cli_runner", Total: total, Success: 0, Results: []channelModelProbeResult{},
+			}))
+			return
+		}
 	}
 
 	writeEvent("start", channelProbeProgressEvent{
@@ -2121,19 +2179,29 @@ func streamChannelCLITestHandler(c *gin.Context, opts Options, channelID int64) 
 			})
 
 			runnerReq := struct {
-				CLIType        string `json:"cli_type"`
-				BaseURL        string `json:"base_url,omitempty"`
-				APIKey         string `json:"api_key"`
-				Model          string `json:"model,omitempty"`
-				Prompt         string `json:"prompt"`
-				TimeoutSeconds int    `json:"timeout_seconds"`
+				CLIType          string `json:"cli_type"`
+				BaseURL          string `json:"base_url,omitempty"`
+				ProfileKey       string `json:"profile_key,omitempty"`
+				APIKey           string `json:"api_key"`
+				ChatGPTAccountID string `json:"chatgpt_account_id,omitempty"`
+				AccessToken      string `json:"access_token,omitempty"`
+				RefreshToken     string `json:"refresh_token,omitempty"`
+				IDToken          string `json:"id_token,omitempty"`
+				Model            string `json:"model,omitempty"`
+				Prompt           string `json:"prompt"`
+				TimeoutSeconds   int    `json:"timeout_seconds"`
 			}{
-				CLIType:        cliType,
-				BaseURL:        ep.BaseURL,
-				APIKey:         apiKey,
-				Model:          j.model,
-				Prompt:         "Reply with exactly: OK",
-				TimeoutSeconds: 30,
+				CLIType:          cliType,
+				BaseURL:          baseURL,
+				ProfileKey:       profileKey,
+				APIKey:           apiKey,
+				ChatGPTAccountID: chatgptAccountID,
+				AccessToken:      accessToken,
+				RefreshToken:     refreshToken,
+				IDToken:          idToken,
+				Model:            j.model,
+				Prompt:           "Reply with exactly: OK",
+				TimeoutSeconds:   30,
 			}
 			body, _ := json.Marshal(runnerReq)
 

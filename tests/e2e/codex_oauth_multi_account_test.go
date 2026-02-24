@@ -29,7 +29,7 @@ func TestCodexOAuth_MultiAccount_UsageLimitMarksBalanceAndFailover_E2E(t *testin
 	var firstAccountID atomic.Value // string
 	var secondAccountID atomic.Value
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/backend-api/codex/v1/responses" {
+		if r.Method != http.MethodPost || r.URL.Path != "/backend-api/codex/responses" {
 			http.NotFound(w, r)
 			return
 		}
@@ -278,7 +278,7 @@ func TestCodexOAuth_MultiAccount_InvalidTokenDisablesAndFailover_E2E(t *testing.
 
 	var calls atomic.Int64
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/backend-api/codex/v1/responses" {
+		if r.Method != http.MethodPost || r.URL.Path != "/backend-api/codex/responses" {
 			http.NotFound(w, r)
 			return
 		}

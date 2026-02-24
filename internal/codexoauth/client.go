@@ -20,6 +20,8 @@ type Client struct {
 	refreshBackoffs []time.Duration
 }
 
+const codexCLIOAuthUserAgent = "codex-cli/0.91.0"
+
 type TokenResult struct {
 	AccessToken  string
 	RefreshToken string
@@ -175,6 +177,7 @@ func (c *Client) token(ctx context.Context, form url.Values) (TokenResult, error
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", codexCLIOAuthUserAgent)
 
 	resp, err := c.http.Do(req)
 	if err != nil {

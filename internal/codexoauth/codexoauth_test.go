@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
@@ -27,6 +28,12 @@ func TestNewPKCE(t *testing.T) {
 	}
 	if verifier == "" || challenge == "" {
 		t.Fatalf("NewPKCE returned empty verifier/challenge")
+	}
+	if len(verifier) != 128 {
+		t.Fatalf("verifier len = %d, want 128", len(verifier))
+	}
+	if _, err := hex.DecodeString(verifier); err != nil {
+		t.Fatalf("verifier should be hex: %v", err)
 	}
 	sum := sha256.Sum256([]byte(verifier))
 	want := base64.RawURLEncoding.EncodeToString(sum[:])
@@ -194,6 +201,12 @@ func TestClientRefreshRetryAndInvalidGrant(t *testing.T) {
 		calls := 0
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			calls++
+			if got := strings.TrimSpace(r.Header.Get("User-Agent")); got != codexCLIOAuthUserAgent {
+				t.Fatalf("User-Agent = %q, want %q", got, codexCLIOAuthUserAgent)
+			}
+			if got := strings.TrimSpace(r.Header.Get("Content-Type")); got != "application/x-www-form-urlencoded" {
+				t.Fatalf("Content-Type = %q, want %q", got, "application/x-www-form-urlencoded")
+			}
 			if calls == 1 {
 				w.WriteHeader(http.StatusInternalServerError)
 				_, _ = w.Write([]byte("oops"))
@@ -229,6 +242,9 @@ func TestClientRefreshRetryAndInvalidGrant(t *testing.T) {
 		calls := 0
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			calls++
+			if got := strings.TrimSpace(r.Header.Get("User-Agent")); got != codexCLIOAuthUserAgent {
+				t.Fatalf("User-Agent = %q, want %q", got, codexCLIOAuthUserAgent)
+			}
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"expired"}`))
 		}))
@@ -258,6 +274,55 @@ func TestClientRefreshRetryAndInvalidGrant(t *testing.T) {
 			t.Fatalf("calls = %d, want 1", calls)
 		}
 	})
+}
+
+func TestClientExchangeCode_SendsFormAndUserAgent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if got := strings.TrimSpace(r.Header.Get("User-Agent")); got != codexCLIOAuthUserAgent {
+			t.Fatalf("User-Agent = %q, want %q", got, codexCLIOAuthUserAgent)
+		}
+		if got := strings.TrimSpace(r.Header.Get("Content-Type")); got != "application/x-www-form-urlencoded" {
+			t.Fatalf("Content-Type = %q, want %q", got, "application/x-www-form-urlencoded")
+		}
+		body, _ := io.ReadAll(r.Body)
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			t.Fatalf("ParseQuery: %v", err)
+		}
+		if values.Get("grant_type") != "authorization_code" {
+			t.Fatalf("grant_type = %q, want %q", values.Get("grant_type"), "authorization_code")
+		}
+		if values.Get("client_id") != "app_test" {
+			t.Fatalf("client_id = %q, want %q", values.Get("client_id"), "app_test")
+		}
+		if values.Get("code") != "c" {
+			t.Fatalf("code = %q, want %q", values.Get("code"), "c")
+		}
+		if values.Get("redirect_uri") != "http://localhost:8080/auth/callback" {
+			t.Fatalf("redirect_uri = %q, want %q", values.Get("redirect_uri"), "http://localhost:8080/auth/callback")
+		}
+		if values.Get("code_verifier") != "v" {
+			t.Fatalf("code_verifier = %q, want %q", values.Get("code_verifier"), "v")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"at","refresh_token":"rt","id_token":"it","expires_in":60}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{
+		TokenURL:     srv.URL,
+		ClientID:     "app_test",
+		RedirectURI:  "http://localhost:8080/auth/callback",
+		AuthorizeURL: "http://example.com",
+	})
+	_, err := c.ExchangeCode(context.Background(), "c", "v")
+	if err != nil {
+		t.Fatalf("ExchangeCode: %v", err)
+	}
 }
 
 func TestClientFetchQuota(t *testing.T) {

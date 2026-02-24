@@ -225,6 +225,80 @@ function runCodex({ base_url, api_key, model, prompt, timeout_seconds, _paths },
   });
 }
 
+function runCodexOAuth({ access_token, refresh_token, id_token, chatgpt_account_id, model, prompt, timeout_seconds, _paths }, home) {
+  const paths = _paths || {};
+  const codexDir = paths.codexHome ? path.resolve(paths.codexHome) : ensureDir(path.join(home, '.codex'));
+  const cacheDir = paths.xdgCacheHome ? path.resolve(paths.xdgCacheHome) : ensureDir(path.join(home, '.cache'));
+  const configDir = paths.xdgConfigHome ? path.resolve(paths.xdgConfigHome) : ensureDir(path.join(home, '.config'));
+  const tmpDir = ensureDir(path.join(home, 'tmp'));
+
+  const accessToken = String(access_token || '').trim();
+  const refreshToken = String(refresh_token || '').trim();
+  const idToken = String(id_token || '').trim();
+  const accountID = String(chatgpt_account_id || '').trim();
+
+  if (!accessToken || !refreshToken || !idToken || !accountID) {
+    return Promise.resolve({ ok: false, latency_ms: 0, output: '', error: 'missing required oauth tokens' });
+  }
+
+  // Codex CLI 官方 auth.json 结构（AuthDotJson / AuthMode / TokenData）：
+  // - auth_mode: "chatgpt"
+  // - tokens: { id_token, access_token, refresh_token, account_id }
+  // - last_refresh: ISO8601
+  const authPath = path.join(codexDir, 'auth.json');
+  const authJSON = JSON.stringify({
+    auth_mode: 'chatgpt',
+    tokens: {
+      id_token: idToken,
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      account_id: accountID,
+    },
+    last_refresh: new Date().toISOString(),
+  }, null, 2);
+  fs.writeFileSync(authPath, authJSON, { mode: 0o600 });
+
+  fs.writeFileSync(path.join(codexDir, 'config.toml'), [
+    'disable_response_storage = true',
+    'model_provider = "openai"',
+    model ? `model = "${model}"` : '',
+  ].join('\n'));
+
+  const env = {
+    ...process.env,
+    HOME: home,
+    CODEX_HOME: codexDir,
+    // Ensure API-key auth is not accidentally used.
+    OPENAI_API_KEY: '',
+    CODEX_API_KEY: '',
+    XDG_CACHE_HOME: cacheDir,
+    XDG_CONFIG_HOME: configDir,
+    TMPDIR: tmpDir,
+    TMP: tmpDir,
+    TEMP: tmpDir,
+  };
+
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const totalTimeoutMs = Math.max(1, (timeout_seconds || 30) * 1000);
+
+    execFile('codex', ['exec', '--skip-git-repo-check', String(prompt || '').trim() || 'Reply with exactly: OK'], {
+      env,
+      cwd: home,
+      timeout: totalTimeoutMs,
+    }, (err, stdout, stderr) => {
+      const latency_ms = Date.now() - startedAt;
+      const combined = joinOutput(stdout, stderr);
+      if (err) {
+        // Do not echo tokens into error output.
+        resolve({ ok: false, latency_ms, output: '', error: truncate(combined || err.message || 'codex exec failed', MAX_OUTPUT) });
+      } else {
+        resolve({ ok: true, latency_ms, output: truncate(combined, MAX_OUTPUT), error: '' });
+      }
+    });
+  });
+}
+
 function runClaude({ base_url, api_key, model, prompt, timeout_seconds, _paths }, home) {
   const paths = _paths || {};
   const cacheDir = paths.xdgCacheHome ? path.resolve(paths.xdgCacheHome) : undefined;
@@ -292,7 +366,7 @@ function runGemini({ api_key, model, prompt, timeout_seconds, _paths }, home) {
   });
 }
 
-const runners = { codex: runCodex, claude: runClaude, gemini: runGemini };
+const runners = { codex: runCodex, codex_oauth: runCodexOAuth, claude: runClaude, gemini: runGemini };
 
 // ---------------------------------------------------------------------------
 // Health check: detect which CLIs are installed
@@ -351,7 +425,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     const home = tmpWorkDir();
-    const dirs = profileDirs(body.cli_type, body.base_url, body.model);
+    const profileKey = String(body.profile_key || '').trim() || String(body.base_url || '').trim();
+    const dirs = profileDirs(body.cli_type, profileKey, body.model);
     const configDir = ensureDir(path.join(home, 'xdg-config'));
     body._paths = {
       codexHome: dirs.codexHome,

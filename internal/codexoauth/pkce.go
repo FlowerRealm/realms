@@ -4,23 +4,25 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 )
 
-func newRandomBase64URL(bytesLen int) (string, error) {
-	if bytesLen < 32 {
-		bytesLen = 32
+func newRandomHex(bytesLen int) (string, error) {
+	if bytesLen < 64 {
+		bytesLen = 64
 	}
 	b := make([]byte, bytesLen)
 	if _, err := io.ReadFull(rand.Reader, b); err != nil {
 		return "", fmt.Errorf("生成随机数失败: %w", err)
 	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
+	return hex.EncodeToString(b), nil
 }
 
 func NewPKCE() (verifier string, challenge string, err error) {
-	v, err := newRandomBase64URL(32)
+	// 对齐 sub2api：verifier 使用 64 bytes 随机数的 hex 字符串。
+	v, err := newRandomHex(64)
 	if err != nil {
 		return "", "", err
 	}
