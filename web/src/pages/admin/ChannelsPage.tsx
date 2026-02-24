@@ -41,6 +41,7 @@ import {
 import { listAdminChannelGroups, upsertAdminChannelGroupPointer, type AdminChannelGroup } from '../../api/admin/channelGroups';
 import { createChannelModel, listChannelModels, updateChannelModel, type ChannelModelBinding } from '../../api/channelModels';
 import { listManagedModelsAdmin } from '../../api/models';
+import { DateRangePicker } from '../../components/DateRangePicker';
 
 function channelTypeLabel(t: string): string {
   if (t === 'openai_compatible') return 'OpenAI 兼容';
@@ -887,33 +888,72 @@ export function ChannelsPage() {
           </button>
         </div>
 
-        <div className="row g-2 align-items-end mb-0">
-          <div className="col-auto">
-            <label className="form-label small text-muted mb-1">开始日期</label>
-            <input
-              className="form-control form-control-sm"
-              type="date"
-              value={usageStart}
-              onChange={(e) => {
-                setUsageStart(e.target.value);
+        <div className="d-flex flex-wrap align-items-center gap-2 mb-0 bg-white p-2 rounded-3 border-light shadow-sm mt-3" style={{ border: '1px solid #f1f3f5' }}>
+          <div className="d-flex align-items-center px-2">
+            <span className="small text-muted me-2" style={{ whiteSpace: 'nowrap', fontSize: '12px' }}>统计区间</span>
+            <DateRangePicker
+              start={usageStart}
+              end={usageEnd}
+              onChange={(r) => {
+                setUsageStart(r.start);
+                setUsageEnd(r.end);
                 setUsageRangeDirty(true);
               }}
+              loading={loading}
             />
           </div>
-          <div className="col-auto">
-            <label className="form-label small text-muted mb-1">结束日期</label>
-            <input
-              className="form-control form-control-sm"
-              type="date"
-              value={usageEnd}
-              onChange={(e) => {
-                setUsageEnd(e.target.value);
+
+          <div className="ms-auto d-flex gap-2 pe-1">
+            <button
+              className="btn btn-sm"
+              style={{ 
+                backgroundColor: '#326c52', 
+                color: '#ffffff', 
+                fontWeight: 500,
+                height: '28px',
+                fontSize: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                borderRadius: '4px',
+                padding: '0 12px',
+                transition: 'all 0.2s',
+                border: 'none'
+              }}
+              type="button"
+              disabled={loading}
+              onClick={() => {
+                void refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+              }}
+            >
+              <span className="material-symbols-rounded me-1" style={{ fontSize: '16px' }}>
+                refresh
+              </span>
+              刷新数据
+            </button>
+            <button
+              className="btn btn-sm"
+              style={{ 
+                height: '28px',
+                fontSize: '12px',
+                border: '1px solid #e9ecef',
+                borderRadius: '4px',
+                backgroundColor: '#ffffff',
+                color: '#6c757d',
+                padding: '0 12px',
+                display: 'flex',
+                alignItems: 'center',
+                transition: 'all 0.2s',
+              }}
+              type="button"
+              disabled={loading}
+              onClick={() => {
+                setUsageStart('');
+                setUsageEnd('');
                 setUsageRangeDirty(true);
               }}
-            />
-          </div>
-          <div className="col-auto">
-            <div className="form-text small text-muted mb-0">统计区间（可选）：修改后自动更新。</div>
+            >
+              重置
+            </button>
           </div>
         </div>
 

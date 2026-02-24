@@ -8,6 +8,7 @@ import {
   type AdminUsageTimeSeriesPoint,
   type UsageEventDetail,
 } from '../../api/admin/usage';
+import { DateRangePicker, SelectPicker } from '../../components/DateRangePicker';
 import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { formatIntComma } from '../../format/int';
 
@@ -320,37 +321,82 @@ export function UsageAdminPage() {
             </div>
           ) : null}
 
-          <form
-            className="row g-2 align-items-end mb-0"
-            onSubmit={(e) => {
-              e.preventDefault();
-              setBeforeID(undefined);
-              setAfterID(undefined);
-              void refresh();
-            }}
-          >
-            <div className="col-auto">
-              <label className="form-label small text-muted mb-1">开始日期</label>
-              <input className="form-control form-control-sm" type="date" value={start} onChange={(e) => setStart(e.target.value)} />
+          <div className="d-flex flex-wrap align-items-center gap-2 mb-0 bg-white p-2 rounded-3 border-light shadow-sm" style={{ border: '1px solid #f1f3f5' }}>
+            <div className="d-flex align-items-center px-2">
+              <span className="small text-muted me-2" style={{ whiteSpace: 'nowrap', fontSize: '12px' }}>时间区间</span>
+              <DateRangePicker
+                start={start}
+                end={end}
+                onChange={(r) => {
+                  setStart(r.start);
+                  setEnd(r.end);
+                  setBeforeID(undefined);
+                  setAfterID(undefined);
+                }}
+                loading={loading}
+              />
             </div>
-            <div className="col-auto">
-              <label className="form-label small text-muted mb-1">结束日期</label>
-              <input className="form-control form-control-sm" type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
+
+            <div className="vr my-2" style={{ height: '16px', opacity: 0.1 }}></div>
+
+            <div className="d-flex align-items-center px-2">
+              <span className="small text-muted me-2" style={{ whiteSpace: 'nowrap', fontSize: '12px' }}>显示条数</span>
+              <SelectPicker
+                value={limit}
+                options={[
+                  { label: '20', value: 20 },
+                  { label: '50', value: 50 },
+                  { label: '100', value: 100 },
+                  { label: '200', value: 200 },
+                ]}
+                label="条"
+                onChange={(val) => setLimit(val)}
+              />
             </div>
-            <div className="col-auto">
-              <label className="form-label small text-muted mb-1">条数</label>
-              <select className="form-select form-select-sm" value={limit} onChange={(e) => setLimit(Number.parseInt(e.target.value, 10) || 50)}>
-                <option value={20}>20</option>
-                <option value={50}>50</option>
-                <option value={100}>100</option>
-              </select>
-            </div>
-            <div className="col-auto d-flex gap-2">
-              <button className="btn btn-sm btn-primary" type="submit" disabled={loading}>
-                更新统计
+
+            <div className="ms-auto d-flex gap-2 pe-1">
+              <button
+                className="btn btn-sm"
+                style={{ 
+                  backgroundColor: '#326c52', 
+                  color: '#ffffff', 
+                  fontWeight: 500,
+                  height: '28px',
+                  fontSize: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  borderRadius: '4px',
+                  padding: '0 12px',
+                  transition: 'all 0.2s',
+                  border: 'none'
+                }}
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  setBeforeID(undefined);
+                  setAfterID(undefined);
+                  void refresh();
+                }}
+              >
+                <span className="material-symbols-rounded me-1" style={{ fontSize: '16px' }}>
+                  refresh
+                </span>
+                更新
               </button>
               <button
-                className="btn btn-sm btn-white border text-dark"
+                className="btn btn-sm"
+                style={{ 
+                  height: '28px',
+                  fontSize: '12px',
+                  border: '1px solid #e9ecef',
+                  borderRadius: '4px',
+                  backgroundColor: '#ffffff',
+                  color: '#6c757d',
+                  padding: '0 12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  transition: 'all 0.2s',
+                }}
                 type="button"
                 disabled={loading}
                 onClick={() => {
@@ -364,7 +410,7 @@ export function UsageAdminPage() {
                 重置
               </button>
             </div>
-          </form>
+          </div>
         </div>
 
       {loading ? (
