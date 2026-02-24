@@ -374,6 +374,35 @@ WHERE user_id=? AND time >= ? AND time < ? AND (state=? OR state=?)
 	return committedUSD, reservedUSD, nil
 }
 
+type UsageSumWithReservedRangeByTokenInput struct {
+	TokenID int64
+	Since   time.Time
+	Until   time.Time
+	Now     time.Time
+}
+
+func (s *Store) SumCommittedAndReservedUSDRangeByToken(ctx context.Context, in UsageSumWithReservedRangeByTokenInput) (committedUSD decimal.Decimal, reservedUSD decimal.Decimal, err error) {
+	var committedSum decimal.NullDecimal
+	var reservedSum decimal.NullDecimal
+	err = s.db.QueryRowContext(ctx, `
+SELECT
+  SUM(CASE WHEN state=? THEN committed_usd ELSE 0 END) AS committed_sum,
+  SUM(CASE WHEN state=? AND reserve_expires_at >= ? THEN reserved_usd ELSE 0 END) AS reserved_sum
+FROM usage_events
+WHERE token_id=? AND time >= ? AND time < ? AND (state=? OR state=?)
+	`, UsageStateCommitted, UsageStateReserved, in.Now, in.TokenID, in.Since, in.Until, UsageStateCommitted, UsageStateReserved).Scan(&committedSum, &reservedSum)
+	if err != nil {
+		return decimal.Zero, decimal.Zero, fmt.Errorf("汇总用量失败: %w", err)
+	}
+	if committedSum.Valid {
+		committedUSD = committedSum.Decimal.Truncate(USDScale)
+	}
+	if reservedSum.Valid {
+		reservedUSD = reservedSum.Decimal.Truncate(USDScale)
+	}
+	return committedUSD, reservedUSD, nil
+}
+
 func (s *Store) GetUsageEvent(ctx context.Context, id int64) (UsageEvent, error) {
 	var e UsageEvent
 	var model sql.NullString
@@ -611,6 +640,258 @@ SELECT id, time, request_id, endpoint, method,
        created_at, updated_at
 FROM usage_events
 WHERE user_id=? AND time >= ? AND time < ? AND state<>?
+`
+	if beforeID != nil && *beforeID > 0 {
+		q += " AND id < ?\n"
+		args = append(args, *beforeID)
+	}
+	if afterID != nil && *afterID > 0 {
+		q += " AND id > ?\n"
+		args = append(args, *afterID)
+		q += "ORDER BY id ASC\nLIMIT ?\n"
+	} else {
+		q += "ORDER BY id DESC\nLIMIT ?\n"
+	}
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("查询 usage_events 失败: %w", err)
+	}
+	defer rows.Close()
+
+	var out []UsageEvent
+	for rows.Next() {
+		var e UsageEvent
+		var endpoint sql.NullString
+		var method sql.NullString
+		var model sql.NullString
+		var subscriptionID sql.NullInt64
+		var inputTokens sql.NullInt64
+		var cachedInputTokens sql.NullInt64
+		var outputTokens sql.NullInt64
+		var cachedOutputTokens sql.NullInt64
+		var upstreamChannelID sql.NullInt64
+		var upstreamEndpointID sql.NullInt64
+		var upstreamCredID sql.NullInt64
+		var errClass sql.NullString
+		var errMsg sql.NullString
+		var multGroupName sql.NullString
+		var isStream int
+		if err := rows.Scan(&e.ID, &e.Time, &e.RequestID, &endpoint, &method,
+			&e.UserID, &subscriptionID, &e.TokenID,
+			&upstreamChannelID, &upstreamEndpointID, &upstreamCredID,
+			&e.State, &model,
+			&inputTokens, &cachedInputTokens, &outputTokens, &cachedOutputTokens,
+			&e.ReservedUSD, &e.CommittedUSD, &e.PriceMultiplier, &e.PriceMultiplierGroup, &e.PriceMultiplierPayment, &multGroupName, &e.ReserveExpiresAt,
+			&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &errClass, &errMsg,
+			&isStream, &e.RequestBytes, &e.ResponseBytes,
+			&e.CreatedAt, &e.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("扫描 usage_events 失败: %w", err)
+		}
+		e.ReservedUSD = e.ReservedUSD.Truncate(USDScale)
+		e.CommittedUSD = e.CommittedUSD.Truncate(USDScale)
+		e.PriceMultiplier = e.PriceMultiplier.Truncate(PriceMultiplierScale)
+		e.PriceMultiplierGroup = e.PriceMultiplierGroup.Truncate(PriceMultiplierScale)
+		e.PriceMultiplierPayment = e.PriceMultiplierPayment.Truncate(PriceMultiplierScale)
+		if multGroupName.Valid {
+			v := strings.TrimSpace(multGroupName.String)
+			if v != "" {
+				e.PriceMultiplierGroupName = &v
+			}
+		}
+		if endpoint.Valid {
+			e.Endpoint = &endpoint.String
+		}
+		if method.Valid {
+			e.Method = &method.String
+		}
+		if model.Valid {
+			e.Model = &model.String
+		}
+		if subscriptionID.Valid {
+			e.SubscriptionID = &subscriptionID.Int64
+		}
+		if inputTokens.Valid {
+			e.InputTokens = &inputTokens.Int64
+		}
+		if cachedInputTokens.Valid {
+			e.CachedInputTokens = &cachedInputTokens.Int64
+		}
+		if outputTokens.Valid {
+			e.OutputTokens = &outputTokens.Int64
+		}
+		if cachedOutputTokens.Valid {
+			e.CachedOutputTokens = &cachedOutputTokens.Int64
+		}
+		if upstreamChannelID.Valid {
+			e.UpstreamChannelID = &upstreamChannelID.Int64
+		}
+		if upstreamEndpointID.Valid {
+			e.UpstreamEndpointID = &upstreamEndpointID.Int64
+		}
+		if upstreamCredID.Valid {
+			e.UpstreamCredID = &upstreamCredID.Int64
+		}
+		if errClass.Valid {
+			e.ErrorClass = &errClass.String
+		}
+		if errMsg.Valid {
+			e.ErrorMessage = &errMsg.String
+		}
+		e.IsStream = isStream != 0
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历 usage_events 失败: %w", err)
+	}
+	if afterID != nil {
+		for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+			out[i], out[j] = out[j], out[i]
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) ListUsageEventsByToken(ctx context.Context, tokenID int64, limit int, beforeID *int64) ([]UsageEvent, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	args := []any{tokenID, UsageStateReserved}
+	q := `
+SELECT id, time, request_id, endpoint, method,
+       user_id, subscription_id, token_id,
+       upstream_channel_id, upstream_endpoint_id, upstream_credential_id,
+       state, model,
+       input_tokens, cached_input_tokens, output_tokens, cached_output_tokens,
+       reserved_usd, committed_usd, price_multiplier, price_multiplier_group, price_multiplier_payment, price_multiplier_group_name, reserve_expires_at,
+       status_code, latency_ms, first_token_latency_ms, error_class, error_message,
+       is_stream, request_bytes, response_bytes,
+       created_at, updated_at
+FROM usage_events
+WHERE token_id=? AND state<>?
+`
+	if beforeID != nil && *beforeID > 0 {
+		q += " AND id < ?\n"
+		args = append(args, *beforeID)
+	}
+	q += "ORDER BY id DESC\nLIMIT ?\n"
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("查询 usage_events 失败: %w", err)
+	}
+	defer rows.Close()
+
+	var out []UsageEvent
+	for rows.Next() {
+		var e UsageEvent
+		var model sql.NullString
+		var endpoint sql.NullString
+		var method sql.NullString
+		var subscriptionID sql.NullInt64
+		var inputTokens sql.NullInt64
+		var cachedInputTokens sql.NullInt64
+		var outputTokens sql.NullInt64
+		var cachedOutputTokens sql.NullInt64
+		var upstreamChannelID sql.NullInt64
+		var upstreamEndpointID sql.NullInt64
+		var upstreamCredID sql.NullInt64
+		var errClass sql.NullString
+		var errMsg sql.NullString
+		var multGroupName sql.NullString
+		var isStream int
+		if err := rows.Scan(&e.ID, &e.Time, &e.RequestID, &endpoint, &method,
+			&e.UserID, &subscriptionID, &e.TokenID,
+			&upstreamChannelID, &upstreamEndpointID, &upstreamCredID,
+			&e.State, &model,
+			&inputTokens, &cachedInputTokens, &outputTokens, &cachedOutputTokens,
+			&e.ReservedUSD, &e.CommittedUSD, &e.PriceMultiplier, &e.PriceMultiplierGroup, &e.PriceMultiplierPayment, &multGroupName, &e.ReserveExpiresAt,
+			&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &errClass, &errMsg,
+			&isStream, &e.RequestBytes, &e.ResponseBytes,
+			&e.CreatedAt, &e.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("扫描 usage_events 失败: %w", err)
+		}
+		e.ReservedUSD = e.ReservedUSD.Truncate(USDScale)
+		e.CommittedUSD = e.CommittedUSD.Truncate(USDScale)
+		e.PriceMultiplier = e.PriceMultiplier.Truncate(PriceMultiplierScale)
+		e.PriceMultiplierGroup = e.PriceMultiplierGroup.Truncate(PriceMultiplierScale)
+		e.PriceMultiplierPayment = e.PriceMultiplierPayment.Truncate(PriceMultiplierScale)
+		if multGroupName.Valid {
+			v := strings.TrimSpace(multGroupName.String)
+			if v != "" {
+				e.PriceMultiplierGroupName = &v
+			}
+		}
+		if endpoint.Valid {
+			e.Endpoint = &endpoint.String
+		}
+		if method.Valid {
+			e.Method = &method.String
+		}
+		if model.Valid {
+			e.Model = &model.String
+		}
+		if subscriptionID.Valid {
+			e.SubscriptionID = &subscriptionID.Int64
+		}
+		if inputTokens.Valid {
+			e.InputTokens = &inputTokens.Int64
+		}
+		if cachedInputTokens.Valid {
+			e.CachedInputTokens = &cachedInputTokens.Int64
+		}
+		if outputTokens.Valid {
+			e.OutputTokens = &outputTokens.Int64
+		}
+		if cachedOutputTokens.Valid {
+			e.CachedOutputTokens = &cachedOutputTokens.Int64
+		}
+		if upstreamChannelID.Valid {
+			e.UpstreamChannelID = &upstreamChannelID.Int64
+		}
+		if upstreamEndpointID.Valid {
+			e.UpstreamEndpointID = &upstreamEndpointID.Int64
+		}
+		if upstreamCredID.Valid {
+			e.UpstreamCredID = &upstreamCredID.Int64
+		}
+		if errClass.Valid {
+			e.ErrorClass = &errClass.String
+		}
+		if errMsg.Valid {
+			e.ErrorMessage = &errMsg.String
+		}
+		e.IsStream = isStream != 0
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历 usage_events 失败: %w", err)
+	}
+	return out, nil
+}
+
+func (s *Store) ListUsageEventsByTokenRange(ctx context.Context, tokenID int64, since, until time.Time, limit int, beforeID, afterID *int64) ([]UsageEvent, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if beforeID != nil && afterID != nil {
+		return nil, errors.New("before_id 与 after_id 不能同时使用")
+	}
+	args := []any{tokenID, since, until, UsageStateReserved}
+	q := `
+SELECT id, time, request_id, endpoint, method,
+       user_id, subscription_id, token_id,
+       upstream_channel_id, upstream_endpoint_id, upstream_credential_id,
+       state, model,
+       input_tokens, cached_input_tokens, output_tokens, cached_output_tokens,
+       reserved_usd, committed_usd, price_multiplier, price_multiplier_group, price_multiplier_payment, price_multiplier_group_name, reserve_expires_at,
+       status_code, latency_ms, first_token_latency_ms, error_class, error_message,
+       is_stream, request_bytes, response_bytes,
+       created_at, updated_at
+FROM usage_events
+WHERE token_id=? AND time >= ? AND time < ? AND state<>?
 `
 	if beforeID != nil && *beforeID > 0 {
 		q += " AND id < ?\n"
@@ -1518,6 +1799,103 @@ ORDER BY hr ASC
 	return out, nil
 }
 
+func (s *Store) GetTokenUsageTimeSeriesRange(ctx context.Context, tokenID int64, since, until time.Time, granularity string) ([]ChannelTimeSeriesUsageStats, error) {
+	if tokenID <= 0 {
+		return nil, fmt.Errorf("tokenID 不合法")
+	}
+	bucketExprMySQL := "DATE_FORMAT(time, '%Y-%m-%d %H:00:00')"
+	bucketExprSQLite := "STRFTIME('%Y-%m-%d %H:00:00', time)"
+	switch granularity {
+	case "", "hour":
+		granularity = "hour"
+	case "day":
+		bucketExprMySQL = "DATE_FORMAT(time, '%Y-%m-%d 00:00:00')"
+		bucketExprSQLite = "STRFTIME('%Y-%m-%d 00:00:00', time)"
+	default:
+		return nil, fmt.Errorf("granularity 不合法")
+	}
+	query := `
+SELECT
+  ` + bucketExprMySQL + ` as hr,
+  COUNT(1),
+  SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)),
+  SUM(CASE WHEN state=? THEN committed_usd ELSE 0 END),
+  SUM(COALESCE(cached_input_tokens, 0) + COALESCE(cached_output_tokens, 0)),
+  SUM(CASE WHEN first_token_latency_ms IS NOT NULL AND first_token_latency_ms > 0 THEN first_token_latency_ms ELSE 0 END),
+  SUM(CASE WHEN first_token_latency_ms IS NOT NULL AND first_token_latency_ms > 0 THEN 1 ELSE 0 END),
+  SUM(COALESCE(output_tokens, 0)),
+  SUM(CASE WHEN latency_ms > first_token_latency_ms THEN latency_ms - first_token_latency_ms ELSE 0 END)
+FROM usage_events
+WHERE token_id=? AND time >= ? AND time < ?
+GROUP BY hr
+ORDER BY hr ASC
+`
+	if s.dialect == DialectSQLite {
+		query = `
+SELECT
+  ` + bucketExprSQLite + ` as hr,
+  COUNT(1),
+  SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)),
+  SUM(CASE WHEN state=? THEN committed_usd ELSE 0 END),
+  SUM(COALESCE(cached_input_tokens, 0) + COALESCE(cached_output_tokens, 0)),
+  SUM(CASE WHEN first_token_latency_ms IS NOT NULL AND first_token_latency_ms > 0 THEN first_token_latency_ms ELSE 0 END),
+  SUM(CASE WHEN first_token_latency_ms IS NOT NULL AND first_token_latency_ms > 0 THEN 1 ELSE 0 END),
+  SUM(COALESCE(output_tokens, 0)),
+  SUM(CASE WHEN latency_ms > first_token_latency_ms THEN latency_ms - first_token_latency_ms ELSE 0 END)
+FROM usage_events
+WHERE token_id=? AND time >= ? AND time < ?
+GROUP BY hr
+ORDER BY hr ASC
+`
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, UsageStateCommitted, tokenID, since, until)
+	if err != nil {
+		return nil, fmt.Errorf("查询 token 时间序列失败: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ChannelTimeSeriesUsageStats
+	for rows.Next() {
+		var row ChannelTimeSeriesUsageStats
+		var hr string
+		var tokens sql.NullInt64
+		var committedUSD decimal.NullDecimal
+		var cachedTokens sql.NullInt64
+		var firstTokenLatencySum sql.NullInt64
+		var firstTokenSamples sql.NullInt64
+		var outputTokens sql.NullInt64
+		var decodeLatencyMS sql.NullInt64
+		if err := rows.Scan(&hr, &row.Requests, &tokens, &committedUSD, &cachedTokens, &firstTokenLatencySum, &firstTokenSamples, &outputTokens, &decodeLatencyMS); err != nil {
+			return nil, fmt.Errorf("扫描 token 时间序列失败: %w", err)
+		}
+		row.Time, _ = time.Parse("2006-01-02 15:04:05", hr)
+		if tokens.Valid {
+			row.Tokens = tokens.Int64
+		}
+		if committedUSD.Valid {
+			row.CommittedUSD = committedUSD.Decimal.Truncate(USDScale)
+		}
+		if cachedTokens.Valid && row.Tokens > 0 {
+			row.CacheRatio = float64(cachedTokens.Int64) / float64(row.Tokens)
+		}
+		if firstTokenSamples.Valid {
+			row.FirstTokenSamples = firstTokenSamples.Int64
+		}
+		if firstTokenLatencySum.Valid && row.FirstTokenSamples > 0 {
+			row.AvgFirstTokenMS = float64(firstTokenLatencySum.Int64) / float64(row.FirstTokenSamples)
+		}
+		if outputTokens.Valid && decodeLatencyMS.Valid {
+			row.OutputTokensPerSec = computeOutputTokensPerSecond(outputTokens.Int64, decodeLatencyMS.Int64)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历 token 时间序列失败: %w", err)
+	}
+	return out, nil
+}
+
 func (s *Store) GetGlobalUsageTimeSeriesRange(ctx context.Context, since, until time.Time, granularity string) ([]ChannelTimeSeriesUsageStats, error) {
 	bucketExprMySQL := "DATE_FORMAT(time, '%Y-%m-%d %H:00:00')"
 	bucketExprSQLite := "STRFTIME('%Y-%m-%d %H:00:00', time)"
@@ -1765,6 +2143,45 @@ SELECT
 FROM usage_events
 WHERE user_id=? AND time >= ? AND time < ?
 `, userID, since, until).Scan(&stats.Requests, &inputTokens, &outputTokens, &cachedInputTokens, &cachedOutputTokens)
+	if err != nil {
+		return UsageTokenStats{}, fmt.Errorf("统计用量失败: %w", err)
+	}
+	if inputTokens.Valid {
+		stats.InputTokens = inputTokens.Int64
+	}
+	if outputTokens.Valid {
+		stats.OutputTokens = outputTokens.Int64
+	}
+	if cachedInputTokens.Valid {
+		stats.CachedInputTokens = cachedInputTokens.Int64
+	}
+	if cachedOutputTokens.Valid {
+		stats.CachedOutputTokens = cachedOutputTokens.Int64
+	}
+	stats.Tokens = stats.InputTokens + stats.OutputTokens
+	if stats.Tokens > 0 {
+		stats.CacheRatio = float64(stats.CachedInputTokens+stats.CachedOutputTokens) / float64(stats.Tokens)
+	}
+	return stats, nil
+}
+
+func (s *Store) GetUsageTokenStatsByTokenRange(ctx context.Context, tokenID int64, since, until time.Time) (UsageTokenStats, error) {
+	var stats UsageTokenStats
+	var inputTokens sql.NullInt64
+	var outputTokens sql.NullInt64
+	var cachedInputTokens sql.NullInt64
+	var cachedOutputTokens sql.NullInt64
+
+	err := s.db.QueryRowContext(ctx, `
+SELECT
+  COUNT(1),
+  SUM(input_tokens),
+  SUM(output_tokens),
+  SUM(cached_input_tokens),
+  SUM(cached_output_tokens)
+FROM usage_events
+WHERE token_id=? AND time >= ? AND time < ?
+`, tokenID, since, until).Scan(&stats.Requests, &inputTokens, &outputTokens, &cachedInputTokens, &cachedOutputTokens)
 	if err != nil {
 		return UsageTokenStats{}, fmt.Errorf("统计用量失败: %w", err)
 	}

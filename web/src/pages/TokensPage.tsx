@@ -28,11 +28,14 @@ import {
   type UserTokenChannelGroups,
   type UserToken,
 } from '../api/tokens';
+import { getUsageWindows, type UsageWindow } from '../api/usage';
 import { BootstrapModal } from '../components/BootstrapModal';
 import { DividedStack } from '../components/DividedStack';
 import { SegmentedFrame } from '../components/SegmentedFrame';
 import { closeModalById } from '../components/modal';
 import { PortalDragOverlay } from '../components/PortalDragOverlay';
+import { formatUSDPlain } from '../format/money';
+import { cacheHitRate, formatLocalDate, formatLocalDateTimeMinute } from './usage/usageUtils';
 
 type UseSortableReturn = ReturnType<typeof useSortable>;
 type SortableRowRenderArgs = Pick<
@@ -133,6 +136,14 @@ export function TokensPage() {
   const [draggingID, setDraggingID] = useState<number | null>(null);
   const [dragOverlayWidth, setDragOverlayWidth] = useState<number | null>(null);
   const [dragOverlayColWidths, setDragOverlayColWidths] = useState<number[] | null>(null);
+
+  const openTokenUsageModalBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [usageToken, setUsageToken] = useState<UserToken | null>(null);
+  const [usageWindow, setUsageWindow] = useState<UsageWindow | null>(null);
+  const [usageStart, setUsageStart] = useState('');
+  const [usageEnd, setUsageEnd] = useState('');
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [usageErr, setUsageErr] = useState('');
 
   const channelGroupIDByNameRef = useRef<Map<string, number>>(new Map());
   const nextChannelGroupIDRef = useRef(1);
@@ -403,6 +414,41 @@ export function TokensPage() {
     setChannels(next);
   }
 
+  async function refreshUsage(tokenID: number, override?: { start?: string; end?: string }) {
+    setUsageErr('');
+    setUsageLoading(true);
+    try {
+      const startValue = (override?.start ?? usageStart).trim();
+      const endValue = (override?.end ?? usageEnd).trim();
+      const res = await getUsageWindows(startValue || undefined, endValue || undefined, tokenID);
+      if (!res.success) throw new Error(res.message || '加载失败');
+      const window0 = res.data?.windows?.[0] ?? null;
+      setUsageWindow(window0);
+
+      const day0 = window0 ? formatLocalDate(String(window0.since)) : '';
+      if (window0) {
+        if (!startValue && day0) setUsageStart(day0);
+        if (!endValue && (startValue || day0)) setUsageEnd(startValue || day0);
+      }
+    } catch (e) {
+      setUsageErr(e instanceof Error ? e.message : '加载失败');
+      setUsageWindow(null);
+    } finally {
+      setUsageLoading(false);
+    }
+  }
+
+  async function openTokenUsageModal(t: UserToken) {
+    setTokensErr('');
+    setUsageToken(t);
+    setUsageWindow(null);
+    setUsageStart('');
+    setUsageEnd('');
+    setUsageErr('');
+    window.setTimeout(() => openTokenUsageModalBtnRef.current?.click(), 0);
+    void refreshUsage(t.id, { start: '', end: '' });
+  }
+
   async function openTokenGroupsModal(t: UserToken) {
     setTokensErr('');
     setErr('');
@@ -595,6 +641,17 @@ export function TokensPage() {
                                 </button>
 
                                 <span className="text-muted small mx-2">|</span>
+
+                                <button
+                                  className="btn btn-link text-secondary p-0 text-decoration-none small"
+                                  type="button"
+                                  disabled={tokensLoading}
+                                  onClick={() => void openTokenUsageModal(t)}
+                                >
+                                  用量
+                                </button>
+
+                                <span className="text-muted small mx-2">|</span>
                               </>
                             ) : null}
 
@@ -685,6 +742,134 @@ export function TokensPage() {
 
       {/* programmatically open the token-groups modal */}
       <button ref={openTokenGroupsModalBtnRef} type="button" className="d-none" data-bs-toggle="modal" data-bs-target="#tokenGroupsModal"></button>
+
+      {/* programmatically open the token-usage modal */}
+      <button ref={openTokenUsageModalBtnRef} type="button" className="d-none" data-bs-toggle="modal" data-bs-target="#tokenUsageModal"></button>
+
+      <BootstrapModal
+        id="tokenUsageModal"
+        title="令牌用量"
+        dialogClassName="modal-dialog-centered modal-lg"
+        onHidden={() => {
+          setUsageToken(null);
+          setUsageWindow(null);
+          setUsageStart('');
+          setUsageEnd('');
+          setUsageLoading(false);
+          setUsageErr('');
+        }}
+      >
+        {usageToken ? (
+          <div>
+            <div className="mb-3">
+              <div className="text-muted small mb-1">令牌</div>
+              <div className="fw-semibold">
+                {(usageToken.name || usageToken.token_hint || `Token #${usageToken.id}`).toString()}
+              </div>
+            </div>
+
+            {usageErr ? (
+              <div className="alert alert-danger mb-3" role="alert">
+                <span className="me-2 material-symbols-rounded">warning</span>
+                {usageErr}
+              </div>
+            ) : null}
+
+            <form
+              className="row g-2 align-items-end mb-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void refreshUsage(usageToken.id);
+              }}
+            >
+              <div className="col-auto">
+                <label className="form-label small text-muted mb-1">开始日期</label>
+                <input
+                  className="form-control form-control-sm"
+                  type="date"
+                  value={usageStart}
+                  onChange={(e) => setUsageStart(e.target.value)}
+                  disabled={usageLoading}
+                />
+              </div>
+              <div className="col-auto">
+                <label className="form-label small text-muted mb-1">结束日期</label>
+                <input
+                  className="form-control form-control-sm"
+                  type="date"
+                  value={usageEnd}
+                  onChange={(e) => setUsageEnd(e.target.value)}
+                  disabled={usageLoading}
+                />
+              </div>
+              <div className="col-auto d-flex gap-2">
+                <button className="btn btn-sm btn-primary" type="submit" disabled={usageLoading}>
+                  查询
+                </button>
+                <button
+                  className="btn btn-sm btn-white border text-dark"
+                  type="button"
+                  disabled={usageLoading}
+                  onClick={() => {
+                    setUsageStart('');
+                    setUsageEnd('');
+                    void refreshUsage(usageToken.id, { start: '', end: '' });
+                  }}
+                >
+                  重置
+                </button>
+              </div>
+            </form>
+
+            {usageLoading ? <div className="text-muted">加载中…</div> : null}
+
+            {usageWindow ? (
+              <div className="table-responsive">
+                <table className="table table-sm mb-0">
+                  <tbody>
+                    <tr>
+                      <td className="text-muted">时间范围</td>
+                      <td className="text-end">
+                        {formatLocalDateTimeMinute(String(usageWindow.since))} - {formatLocalDateTimeMinute(String(usageWindow.until))}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="text-muted">消耗 (USD)</td>
+                      <td className="text-end">{formatUSDPlain(usageWindow.committed_usd)}</td>
+                    </tr>
+                    <tr>
+                      <td className="text-muted">请求数</td>
+                      <td className="text-end">{usageWindow.requests}</td>
+                    </tr>
+                    <tr>
+                      <td className="text-muted">Tokens</td>
+                      <td className="text-end">{usageWindow.tokens}</td>
+                    </tr>
+                    <tr>
+                      <td className="text-muted">Tokens (In/Out/Cache)</td>
+                      <td className="text-end">
+                        {usageWindow.input_tokens}/{usageWindow.output_tokens}/{usageWindow.cached_input_tokens + usageWindow.cached_output_tokens}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="text-muted">缓存率</td>
+                      <td className="text-end">{cacheHitRate(usageWindow.cache_ratio)}</td>
+                    </tr>
+                    <tr>
+                      <td className="text-muted">RPM/TPM</td>
+                      <td className="text-end">
+                        {usageWindow.rpm}/{usageWindow.tpm}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="text-muted">请选择一个令牌。</div>
+        )}
+      </BootstrapModal>
 
       <BootstrapModal
         id="generatedTokenModal"

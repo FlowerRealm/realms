@@ -18,6 +18,41 @@ Realms 提供 OpenAI 兼容（Responses）与 Anthropic 兼容（Messages）的 
 
 健康检查（公开），包含 DB 状态与构建信息（版本/构建时间）。
 
+### Realms 扩展：Usage（按当前 API key）
+
+> 说明：以下为 Realms 扩展端点（非 OpenAI 标准）。  
+> 认证：同数据面一致（`Authorization: Bearer <user_api_key>` 或 `x-api-key`）。  
+> 约束：仅允许查询**当前 key** 的用量，不支持 `token_id` / `token_ids` 参数。
+
+#### [GET] /v1/usage/windows
+
+按时间范围返回窗口汇总（请求数、Token、RPM/TPM、费用等）。
+
+Query（可选）：
+- `start` / `end`：`YYYY-MM-DD`（默认当天）
+- `tz`：IANA 时区名（默认 `UTC`）
+
+#### [GET] /v1/usage/events
+
+列出用量事件（分页）。
+
+Query（可选）：
+- `limit`：1-500（默认 100）
+- `before_id`：向前翻页游标
+- `start` / `end` / `tz`：同上
+
+#### [GET] /v1/usage/events/{event_id}/detail
+
+获取用量事件详情（含 pricing breakdown）。
+
+#### [GET] /v1/usage/timeseries
+
+按小时/天聚合的时间序列。
+
+Query（可选）：
+- `start` / `end` / `tz`
+- `granularity`：`hour|day`（默认 `hour`）
+
 ### OpenAI Responses
 
 #### [POST] /v1/responses

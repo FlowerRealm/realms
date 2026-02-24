@@ -118,6 +118,24 @@ func usageWindowsHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
+		var tokenID int64
+		if v := strings.TrimSpace(c.Query("token_id")); v != "" {
+			id, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || id <= 0 {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "token_id 不合法"})
+				return
+			}
+			if _, err := opts.Store.GetUserTokenByID(c.Request.Context(), userID, id); err != nil {
+				if err == sql.ErrNoRows {
+					c.JSON(http.StatusOK, gin.H{"success": false, "message": "not found"})
+					return
+				}
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
+				return
+			}
+			tokenID = id
+		}
+
 		loc, tzName, ok := usageRequestLocation(c)
 		if !ok {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "tz 不合法（需为 IANA 时区名，如 Asia/Shanghai）"})
@@ -148,24 +166,45 @@ func usageWindowsHandler(opts Options) gin.HandlerFunc {
 			}
 		}
 
-		committed, reserved, err := opts.Store.SumCommittedAndReservedUSDRange(c.Request.Context(), store.UsageSumWithReservedRangeInput{
-			UserID: userID,
-			Since:  since,
-			Until:  until,
-			Now:    now,
-		})
+		var committed decimal.Decimal
+		var reserved decimal.Decimal
+		if tokenID > 0 {
+			committed, reserved, err = opts.Store.SumCommittedAndReservedUSDRangeByToken(c.Request.Context(), store.UsageSumWithReservedRangeByTokenInput{
+				TokenID: tokenID,
+				Since:   since,
+				Until:   until,
+				Now:     now,
+			})
+		} else {
+			committed, reserved, err = opts.Store.SumCommittedAndReservedUSDRange(c.Request.Context(), store.UsageSumWithReservedRangeInput{
+				UserID: userID,
+				Since:  since,
+				Until:  until,
+				Now:    now,
+			})
+		}
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "用量汇总失败"})
 			return
 		}
 
-		tokenStats, err := opts.Store.GetUsageTokenStatsByUserRange(c.Request.Context(), userID, since, until)
+		var tokenStats store.UsageTokenStats
+		if tokenID > 0 {
+			tokenStats, err = opts.Store.GetUsageTokenStatsByTokenRange(c.Request.Context(), tokenID, since, until)
+		} else {
+			tokenStats, err = opts.Store.GetUsageTokenStatsByUserRange(c.Request.Context(), userID, since, until)
+		}
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "Token 统计失败"})
 			return
 		}
 		recentSince := now.Add(-time.Minute)
-		recentStats, err := opts.Store.GetUsageTokenStatsByUserRange(c.Request.Context(), userID, recentSince, now)
+		var recentStats store.UsageTokenStats
+		if tokenID > 0 {
+			recentStats, err = opts.Store.GetUsageTokenStatsByTokenRange(c.Request.Context(), tokenID, recentSince, now)
+		} else {
+			recentStats, err = opts.Store.GetUsageTokenStatsByUserRange(c.Request.Context(), userID, recentSince, now)
+		}
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "实时速率统计失败"})
 			return
@@ -205,6 +244,24 @@ func usageEventsHandler(opts Options) gin.HandlerFunc {
 		if !ok {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "未登录"})
 			return
+		}
+
+		var tokenID int64
+		if v := strings.TrimSpace(c.Query("token_id")); v != "" {
+			id, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || id <= 0 {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "token_id 不合法"})
+				return
+			}
+			if _, err := opts.Store.GetUserTokenByID(c.Request.Context(), userID, id); err != nil {
+				if err == sql.ErrNoRows {
+					c.JSON(http.StatusOK, gin.H{"success": false, "message": "not found"})
+					return
+				}
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
+				return
+			}
+			tokenID = id
 		}
 
 		limit := 100
@@ -251,9 +308,17 @@ func usageEventsHandler(opts Options) gin.HandlerFunc {
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "start/end 不合法（格式：YYYY-MM-DD）"})
 				return
 			}
-			events, err = opts.Store.ListUsageEventsByUserRange(c.Request.Context(), userID, since, until, limit, beforeID, nil)
+			if tokenID > 0 {
+				events, err = opts.Store.ListUsageEventsByTokenRange(c.Request.Context(), tokenID, since, until, limit, beforeID, nil)
+			} else {
+				events, err = opts.Store.ListUsageEventsByUserRange(c.Request.Context(), userID, since, until, limit, beforeID, nil)
+			}
 		} else {
-			events, err = opts.Store.ListUsageEventsByUser(c.Request.Context(), userID, limit, beforeID)
+			if tokenID > 0 {
+				events, err = opts.Store.ListUsageEventsByToken(c.Request.Context(), tokenID, limit, beforeID)
+			} else {
+				events, err = opts.Store.ListUsageEventsByUser(c.Request.Context(), userID, limit, beforeID)
+			}
 		}
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
@@ -329,6 +394,24 @@ func usageEventDetailHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
+		var tokenID int64
+		if v := strings.TrimSpace(c.Query("token_id")); v != "" {
+			id, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || id <= 0 {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "token_id 不合法"})
+				return
+			}
+			if _, err := opts.Store.GetUserTokenByID(c.Request.Context(), userID, id); err != nil {
+				if err == sql.ErrNoRows {
+					c.JSON(http.StatusOK, gin.H{"success": false, "message": "not found"})
+					return
+				}
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
+				return
+			}
+			tokenID = id
+		}
+
 		idStr := strings.TrimSpace(c.Param("event_id"))
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil || id <= 0 {
@@ -346,6 +429,10 @@ func usageEventDetailHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 		if ev.UserID != userID {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "not found"})
+			return
+		}
+		if tokenID > 0 && ev.TokenID != tokenID {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "not found"})
 			return
 		}
@@ -374,6 +461,24 @@ func usageTimeSeriesHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
+		var tokenID int64
+		if v := strings.TrimSpace(c.Query("token_id")); v != "" {
+			id, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || id <= 0 {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "token_id 不合法"})
+				return
+			}
+			if _, err := opts.Store.GetUserTokenByID(c.Request.Context(), userID, id); err != nil {
+				if err == sql.ErrNoRows {
+					c.JSON(http.StatusOK, gin.H{"success": false, "message": "not found"})
+					return
+				}
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
+				return
+			}
+			tokenID = id
+		}
+
 		loc, tzName, ok := usageRequestLocation(c)
 		if !ok {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "tz 不合法（需为 IANA 时区名，如 Asia/Shanghai）"})
@@ -399,9 +504,15 @@ func usageTimeSeriesHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
-		rows, err := opts.Store.GetUserUsageTimeSeriesRange(c.Request.Context(), userID, since, until, granularity)
+		var rows []store.ChannelTimeSeriesUsageStats
+		var err error
+		if tokenID > 0 {
+			rows, err = opts.Store.GetTokenUsageTimeSeriesRange(c.Request.Context(), tokenID, since, until, granularity)
+		} else {
+			rows, err = opts.Store.GetUserUsageTimeSeriesRange(c.Request.Context(), userID, since, until, granularity)
+		}
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询用户时间序列失败"})
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询时间序列失败"})
 			return
 		}
 		points := make([]usageTimeSeriesPointAPI, 0, len(rows))

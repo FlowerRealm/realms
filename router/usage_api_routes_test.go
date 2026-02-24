@@ -363,6 +363,540 @@ func TestUsageTimeSeries_UserResponse_ReturnsPoints(t *testing.T) {
 	}
 }
 
+func TestUsageEvents_TokenFilter_WorksAndChecksOwnership(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	user1ID, err := st.CreateUser(ctx, "u1@example.com", "u1", pwHash, store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser(u1): %v", err)
+	}
+	user2ID, err := st.CreateUser(ctx, "u2@example.com", "u2", pwHash, store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser(u2): %v", err)
+	}
+
+	t1Name := "t1"
+	t1ID, _, err := st.CreateUserToken(ctx, user1ID, &t1Name, "sk-test-u1-t1")
+	if err != nil {
+		t.Fatalf("CreateUserToken(t1): %v", err)
+	}
+	t2Name := "t2"
+	t2ID, _, err := st.CreateUserToken(ctx, user1ID, &t2Name, "sk-test-u1-t2")
+	if err != nil {
+		t.Fatalf("CreateUserToken(t2): %v", err)
+	}
+	otherName := "other"
+	otherTokenID, _, err := st.CreateUserToken(ctx, user2ID, &otherName, "sk-test-u2-t1")
+	if err != nil {
+		t.Fatalf("CreateUserToken(other): %v", err)
+	}
+
+	now := time.Now().UTC()
+	newUsageEvent := func(reqID string, tokenID int64) int64 {
+		t.Helper()
+
+		usageEventID, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
+			RequestID:        reqID,
+			UserID:           user1ID,
+			SubscriptionID:   nil,
+			TokenID:          tokenID,
+			Model:            nil,
+			ReservedUSD:      decimal.Zero,
+			ReserveExpiresAt: now.Add(time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("ReserveUsage(%s): %v", reqID, err)
+		}
+		inTokens := int64(1)
+		outTokens := int64(2)
+		if err := st.CommitUsage(ctx, store.CommitUsageInput{
+			UsageEventID: usageEventID,
+			InputTokens:  &inTokens,
+			OutputTokens: &outTokens,
+			CommittedUSD: decimal.RequireFromString("1.00"),
+		}); err != nil {
+			t.Fatalf("CommitUsage(%s): %v", reqID, err)
+		}
+		if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
+			UsageEventID: usageEventID,
+			Endpoint:     "/v1/responses",
+			Method:       "POST",
+			StatusCode:   200,
+			LatencyMS:    10,
+			IsStream:     false,
+			RequestBytes: 123,
+			ResponseBytes: 456,
+		}); err != nil {
+			t.Fatalf("FinalizeUsageEvent(%s): %v", reqID, err)
+		}
+		return usageEventID
+	}
+
+	newUsageEvent("req_u1_t1", t1ID)
+	newUsageEvent("req_u1_t2", t2ID)
+
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+
+	cookieName := "realms_session"
+	sessionStore := cookie.NewStore([]byte("test-secret"))
+	sessionStore.Options(sessions.Options{
+		Path:     "/",
+		MaxAge:   2592000,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	engine.Use(sessions.Sessions(cookieName, sessionStore))
+
+	SetRouter(engine, Options{
+		Store:             st,
+		SelfMode:          false,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
+
+	// login (user1)
+	loginBody, _ := json.Marshal(map[string]any{
+		"login":    "u1@example.com",
+		"password": "password123",
+	})
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/user/login", bytes.NewReader(loginBody))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	sessionCookie := ""
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == cookieName {
+			sessionCookie = c.String()
+			break
+		}
+	}
+	if sessionCookie == "" {
+		t.Fatalf("expected session cookie %q", cookieName)
+	}
+
+	// list usage events filtered by token_id=t1
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/usage/events?token_id="+strconv.FormatInt(t1ID, 10), nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(user1ID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("usage events status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Events []struct {
+				TokenID int64 `json:"token_id"`
+			} `json:"events"`
+		} `json:"data"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal usage events: %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("expected success, got message=%q", got.Message)
+	}
+	if len(got.Data.Events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(got.Data.Events))
+	}
+	if got.Data.Events[0].TokenID != t1ID {
+		t.Fatalf("expected token_id=%d, got=%d", t1ID, got.Data.Events[0].TokenID)
+	}
+
+	// token_id not owned by user1 should return not found
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/usage/events?token_id="+strconv.FormatInt(otherTokenID, 10), nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(user1ID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("usage events (not owned) status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal usage events (not owned): %v", err)
+	}
+	if got.Success {
+		t.Fatalf("expected failure for not owned token_id")
+	}
+	if got.Message != "not found" {
+		t.Fatalf("expected message=%q, got=%q", "not found", got.Message)
+	}
+}
+
+func TestUsageWindows_TokenFilter_WorksAndChecksOwnership(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	user1ID, err := st.CreateUser(ctx, "u1w@example.com", "u1w", pwHash, store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser(u1): %v", err)
+	}
+	user2ID, err := st.CreateUser(ctx, "u2w@example.com", "u2w", pwHash, store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser(u2): %v", err)
+	}
+
+	t1Name := "t1"
+	t1ID, _, err := st.CreateUserToken(ctx, user1ID, &t1Name, "sk-test-u1w-t1")
+	if err != nil {
+		t.Fatalf("CreateUserToken(t1): %v", err)
+	}
+	t2Name := "t2"
+	_, _, err = st.CreateUserToken(ctx, user1ID, &t2Name, "sk-test-u1w-t2")
+	if err != nil {
+		t.Fatalf("CreateUserToken(t2): %v", err)
+	}
+	otherName := "other"
+	otherTokenID, _, err := st.CreateUserToken(ctx, user2ID, &otherName, "sk-test-u2w-t1")
+	if err != nil {
+		t.Fatalf("CreateUserToken(other): %v", err)
+	}
+
+	now := time.Now().UTC()
+	newUsageEvent := func(reqID string, tokenID int64, committedUSD string, inTok, outTok int64) {
+		t.Helper()
+
+		usageEventID, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
+			RequestID:        reqID,
+			UserID:           user1ID,
+			SubscriptionID:   nil,
+			TokenID:          tokenID,
+			Model:            nil,
+			ReservedUSD:      decimal.Zero,
+			ReserveExpiresAt: now.Add(time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("ReserveUsage(%s): %v", reqID, err)
+		}
+		if err := st.CommitUsage(ctx, store.CommitUsageInput{
+			UsageEventID: usageEventID,
+			InputTokens:  &inTok,
+			OutputTokens: &outTok,
+			CommittedUSD: decimal.RequireFromString(committedUSD),
+		}); err != nil {
+			t.Fatalf("CommitUsage(%s): %v", reqID, err)
+		}
+		if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
+			UsageEventID: usageEventID,
+			Endpoint:     "/v1/responses",
+			Method:       "POST",
+			StatusCode:   200,
+			LatencyMS:    10,
+			IsStream:     false,
+			RequestBytes: 123,
+			ResponseBytes: 456,
+		}); err != nil {
+			t.Fatalf("FinalizeUsageEvent(%s): %v", reqID, err)
+		}
+	}
+
+	newUsageEvent("req_u1w_t1", t1ID, "1.23", 10, 5)
+
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+
+	cookieName := "realms_session"
+	sessionStore := cookie.NewStore([]byte("test-secret"))
+	sessionStore.Options(sessions.Options{
+		Path:     "/",
+		MaxAge:   2592000,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	engine.Use(sessions.Sessions(cookieName, sessionStore))
+
+	SetRouter(engine, Options{
+		Store:             st,
+		SelfMode:          false,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
+
+	// login (user1)
+	loginBody, _ := json.Marshal(map[string]any{
+		"login":    "u1w@example.com",
+		"password": "password123",
+	})
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/user/login", bytes.NewReader(loginBody))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	sessionCookie := ""
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == cookieName {
+			sessionCookie = c.String()
+			break
+		}
+	}
+	if sessionCookie == "" {
+		t.Fatalf("expected session cookie %q", cookieName)
+	}
+
+	// /api/usage/windows filtered by token_id=t1
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/usage/windows?token_id="+strconv.FormatInt(t1ID, 10), nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(user1ID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("usage windows status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Windows []struct {
+				Requests     int64           `json:"requests"`
+				Tokens       int64           `json:"tokens"`
+				UsedUSD      decimal.Decimal `json:"used_usd"`
+				CommittedUSD decimal.Decimal `json:"committed_usd"`
+				ReservedUSD  decimal.Decimal `json:"reserved_usd"`
+			} `json:"windows"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal usage windows: %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("expected success, got message=%q", got.Message)
+	}
+	if len(got.Data.Windows) != 1 {
+		t.Fatalf("expected 1 window, got %d", len(got.Data.Windows))
+	}
+	w := got.Data.Windows[0]
+	if w.Requests != 1 {
+		t.Fatalf("requests mismatch: got=%d want=%d", w.Requests, 1)
+	}
+	if w.Tokens != 15 {
+		t.Fatalf("tokens mismatch: got=%d want=%d", w.Tokens, 15)
+	}
+	if gotUSD := w.CommittedUSD.StringFixed(2); gotUSD != "1.23" {
+		t.Fatalf("committed_usd mismatch: got=%s want=%s", gotUSD, "1.23")
+	}
+	if !w.ReservedUSD.Equal(decimal.Zero) {
+		t.Fatalf("reserved_usd mismatch: got=%s want=0", w.ReservedUSD.String())
+	}
+	if gotUSD := w.UsedUSD.StringFixed(2); gotUSD != "1.23" {
+		t.Fatalf("used_usd mismatch: got=%s want=%s", gotUSD, "1.23")
+	}
+
+	// token_id not owned by user1 should return not found
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/usage/windows?token_id="+strconv.FormatInt(otherTokenID, 10), nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(user1ID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("usage windows (not owned) status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal usage windows (not owned): %v", err)
+	}
+	if got.Success {
+		t.Fatalf("expected failure for not owned token_id")
+	}
+	if got.Message != "not found" {
+		t.Fatalf("expected message=%q, got=%q", "not found", got.Message)
+	}
+}
+
+func TestV1Usage_TokenAuth_IsSingleKeyAndCannotAccessOtherTokenEvents(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	ctx := context.Background()
+	userID, err := st.CreateUser(ctx, "u@example.com", "u", []byte("pw-hash"), store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	t1Name := "t1"
+	rawT1 := "sk-test-t1"
+	t1ID, _, err := st.CreateUserToken(ctx, userID, &t1Name, rawT1)
+	if err != nil {
+		t.Fatalf("CreateUserToken(t1): %v", err)
+	}
+	t2Name := "t2"
+	rawT2 := "sk-test-t2"
+	t2ID, _, err := st.CreateUserToken(ctx, userID, &t2Name, rawT2)
+	if err != nil {
+		t.Fatalf("CreateUserToken(t2): %v", err)
+	}
+
+	now := time.Now().UTC()
+	newUsageEvent := func(reqID string, tokenID int64) int64 {
+		t.Helper()
+
+		usageEventID, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
+			RequestID:        reqID,
+			UserID:           userID,
+			SubscriptionID:   nil,
+			TokenID:          tokenID,
+			Model:            nil,
+			ReservedUSD:      decimal.Zero,
+			ReserveExpiresAt: now.Add(time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("ReserveUsage(%s): %v", reqID, err)
+		}
+		inTokens := int64(1)
+		outTokens := int64(2)
+		if err := st.CommitUsage(ctx, store.CommitUsageInput{
+			UsageEventID: usageEventID,
+			InputTokens:  &inTokens,
+			OutputTokens: &outTokens,
+			CommittedUSD: decimal.Zero,
+		}); err != nil {
+			t.Fatalf("CommitUsage(%s): %v", reqID, err)
+		}
+		if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
+			UsageEventID: usageEventID,
+			Endpoint:     "/v1/responses",
+			Method:       "POST",
+			StatusCode:   200,
+			LatencyMS:    10,
+			IsStream:     false,
+			RequestBytes: 123,
+			ResponseBytes: 456,
+		}); err != nil {
+			t.Fatalf("FinalizeUsageEvent(%s): %v", reqID, err)
+		}
+		return usageEventID
+	}
+
+	newUsageEvent("req_t1", t1ID)
+	ev2ID := newUsageEvent("req_t2", t2ID)
+
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+	SetRouter(engine, Options{
+		Store:             st,
+		SelfMode:          false,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
+
+	// list /v1/usage/events with token1 should only see token1 events
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/v1/usage/events", nil)
+	req.Header.Set("Authorization", "Bearer "+rawT1)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("v1 usage events status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Events []struct {
+				TokenID int64 `json:"token_id"`
+			} `json:"events"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal v1 usage events: %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("expected success, got message=%q", got.Message)
+	}
+	if len(got.Data.Events) != 1 || got.Data.Events[0].TokenID != t1ID {
+		t.Fatalf("expected exactly one event for token1")
+	}
+
+	// token1 cannot access token2's event detail
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/v1/usage/events/"+strconv.FormatInt(ev2ID, 10)+"/detail", nil)
+	req.Header.Set("Authorization", "Bearer "+rawT1)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("v1 usage event detail status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal v1 usage event detail: %v", err)
+	}
+	if got.Success {
+		t.Fatalf("expected not found for other token event detail")
+	}
+	if got.Message != "not found" {
+		t.Fatalf("expected message=%q, got=%q", "not found", got.Message)
+	}
+
+	// /v1/usage rejects token_id query param
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/v1/usage/events?token_id=1", nil)
+	req.Header.Set("Authorization", "Bearer "+rawT2)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("v1 usage events (token_id param) status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal v1 usage events (token_id param): %v", err)
+	}
+	if got.Success {
+		t.Fatalf("expected failure when token_id param present")
+	}
+}
+
 func TestUsageEventDetail_UserResponse_IncludesPricingBreakdown(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

@@ -233,6 +233,29 @@ ORDER BY id DESC
 	return out, nil
 }
 
+func (s *Store) GetUserTokenByID(ctx context.Context, userID, tokenID int64) (UserToken, error) {
+	if userID == 0 {
+		return UserToken{}, errors.New("userID 不能为空")
+	}
+	if tokenID == 0 {
+		return UserToken{}, errors.New("tokenID 不能为空")
+	}
+
+	var t UserToken
+	err := s.db.QueryRowContext(ctx, `
+SELECT id, user_id, name, token_hash, token_hint, status, created_at, revoked_at, last_used_at
+FROM user_tokens
+WHERE id=? AND user_id=?
+`, tokenID, userID).Scan(&t.ID, &t.UserID, &t.Name, &t.TokenHash, &t.TokenHint, &t.Status, &t.CreatedAt, &t.RevokedAt, &t.LastUsedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return UserToken{}, sql.ErrNoRows
+		}
+		return UserToken{}, fmt.Errorf("查询 Token 失败: %w", err)
+	}
+	return t, nil
+}
+
 func (s *Store) RevealUserToken(ctx context.Context, userID, tokenID int64) (string, error) {
 	if userID == 0 {
 		return "", errors.New("userID 不能为空")

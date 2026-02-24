@@ -30,6 +30,12 @@ func setOpenAIRoutes(r *gin.Engine, opts Options) {
 		))
 	}
 
+	// 数据面扩展：按当前 API key 查询用量（仅单个 key）。
+	r.GET("/v1/usage/windows", apiChain(http.HandlerFunc(v1UsageWindowsHTTPHandler(opts))))
+	r.GET("/v1/usage/events", apiChain(http.HandlerFunc(v1UsageEventsHTTPHandler(opts))))
+	r.GET("/v1/usage/events/:event_id/detail", apiChain(http.HandlerFunc(v1UsageEventDetailHTTPHandler(opts))))
+	r.GET("/v1/usage/timeseries", apiChain(http.HandlerFunc(v1UsageTimeSeriesHTTPHandler(opts))))
+
 	if opts.OpenAI != nil {
 		r.POST("/v1/responses", apiChain(http.HandlerFunc(opts.OpenAI.Responses)))
 		r.GET("/v1/responses/:response_id", apiChain(http.HandlerFunc(opts.OpenAI.ResponseRetrieve)))

@@ -95,36 +95,39 @@ type UsageTimeSeriesResponse = {
   points: UsageTimeSeriesPoint[];
 };
 
-export async function getUsageWindows(start?: string, end?: string) {
+export async function getUsageWindows(start?: string, end?: string, tokenID?: number) {
   const res = await api.get<APIResponse<UsageWindowsResponse>>('/api/usage/windows', {
     params: {
       start: start || undefined,
       end: end || undefined,
+      token_id: tokenID || undefined,
       tz: browserTimeZone(),
     },
   });
   return res.data;
 }
 
-export async function getUsageEvents(limit = 100, beforeID?: number, start?: string, end?: string) {
+export async function getUsageEvents(limit = 100, beforeID?: number, start?: string, end?: string, tokenID?: number) {
   const res = await api.get<APIResponse<UsageEventsResponse>>('/api/usage/events', {
     params: {
       limit,
       before_id: beforeID || undefined,
       start: start || undefined,
       end: end || undefined,
+      token_id: tokenID || undefined,
       tz: browserTimeZone(),
     },
   });
   return res.data;
 }
 
-export async function getUsageTimeSeries(start?: string, end?: string, granularity?: 'hour' | 'day') {
+export async function getUsageTimeSeries(start?: string, end?: string, granularity?: 'hour' | 'day', tokenID?: number) {
   const res = await api.get<APIResponse<UsageTimeSeriesResponse>>('/api/usage/timeseries', {
     params: {
       start: start || undefined,
       end: end || undefined,
       granularity: granularity || undefined,
+      token_id: tokenID || undefined,
       tz: browserTimeZone(),
     },
   });
@@ -170,7 +173,11 @@ export type UsageEventPricingBreakdown = {
   diff_from_source_usd: string;
 };
 
-export async function getUsageEventDetail(eventID: number) {
-  const res = await api.get<APIResponse<UsageEventDetail>>(`/api/usage/events/${eventID}/detail`);
+export async function getUsageEventDetail(eventID: number, tokenID?: number) {
+  const res = await api.get<APIResponse<UsageEventDetail>>(`/api/usage/events/${eventID}/detail`, {
+    params: {
+      token_id: tokenID || undefined,
+    },
+  });
   return res.data;
 }
