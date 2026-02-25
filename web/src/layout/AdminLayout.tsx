@@ -29,26 +29,25 @@ export function AdminLayout() {
 
   const features = user?.features;
   const closeSidebar = () => setSidebarOpen(false);
-  const isSelfMode = !!user?.self_mode;
 
   const loginLabel = useMemo(() => userEmail(user?.email, user?.username), [user?.email, user?.username]);
 
-  const showOverview = !isSelfMode;
+  const showOverview = true;
   const showChannels = !(features?.admin_channels_disabled ?? false);
-  const showChannelGroups = !isSelfMode && !(features?.admin_channel_groups_disabled ?? false);
-  const showModels = !isSelfMode && !(features?.models_disabled ?? false);
-  const showUsers = !isSelfMode && !(features?.admin_users_disabled ?? false);
-  const showBilling = !isSelfMode && !(features?.billing_disabled ?? false);
+  const showChannelGroups = !(features?.admin_channel_groups_disabled ?? false);
+  const showModels = !(features?.models_disabled ?? false);
+  const showUsers = !(features?.admin_users_disabled ?? false);
+  const showBilling = !(features?.billing_disabled ?? false);
   const showUsage = !(features?.admin_usage_disabled ?? false);
-  const showTickets = !isSelfMode && !(features?.tickets_disabled ?? false);
-  const showAnnouncements = !isSelfMode && !(features?.admin_announcements_disabled ?? false);
-  const showOAuthApps = !isSelfMode;
-  const showSettings = !isSelfMode;
+  const showTickets = !(features?.tickets_disabled ?? false);
+  const showAnnouncements = !(features?.admin_announcements_disabled ?? false);
+  const showOAuthApps = true;
+  const showSettings = true;
 
   return (
     <div className="app-shell d-flex flex-grow-1">
       <aside className={`sidebar d-flex flex-column flex-shrink-0 p-3 ${sidebarOpen ? 'show' : ''}`} id="sidebarMenu">
-        <Link to={isSelfMode ? '/admin/channels' : '/admin'} className="d-flex align-items-center mb-4 mb-md-0 me-md-auto text-decoration-none px-2 mt-2" onClick={closeSidebar}>
+        <Link to="/admin" className="d-flex align-items-center mb-4 mb-md-0 me-md-auto text-decoration-none px-2 mt-2" onClick={closeSidebar}>
           <div className="me-2 d-flex align-items-center justify-content-center flex-shrink-0" style={{ width: 36, height: 36 }}>
             <img src="/assets/realms_icon.svg" alt="Realms" style={{ width: 24, height: 24 }} />
           </div>
@@ -154,18 +153,12 @@ export function AdminLayout() {
             </li>
           ) : null}
 
-          {isSelfMode ? null : (
-            <li className="mt-4 mb-2 ms-2 text-uppercase text-muted sidebar-section-label">
-              应用
-            </li>
-          )}
-          {isSelfMode ? null : (
-            <li>
-              <NavLink to="/dashboard" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`} onClick={closeSidebar}>
-                <i className="ri-external-link-line"></i> 用户控制台
-              </NavLink>
-            </li>
-          )}
+          <li className="mt-4 mb-2 ms-2 text-uppercase text-muted sidebar-section-label">应用</li>
+          <li>
+            <NavLink to="/dashboard" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`} onClick={closeSidebar}>
+              <i className="ri-external-link-line"></i> 用户控制台
+            </NavLink>
+          </li>
         </ul>
 
         <div className="mt-auto px-2 pb-2">

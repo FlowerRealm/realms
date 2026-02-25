@@ -9,7 +9,7 @@ Realms 的前端工程位于 `web/`，后端提供 `/api/*` 与 `/v1/*`；但对
 
 - 使用官方 Docker 镜像：已内置前端构建产物（同源可直接访问 `/login`）
 - 前后端分离（外置前端）时：使用后端专用镜像 `flowerrealm/realms:backend`（或固定版本 `flowerrealm/realms:<TAG>-backend`），并设置 `FRONTEND_BASE_URL`
-- 使用源码构建（二进制）：需要自行构建 `web/dist`（或设置 `FRONTEND_BASE_URL` 外置前端）
+- 使用源码构建（二进制）：需要自行构建前端（正常模式：`web/dist`；自用模式：`web/dist-self`），或设置 `FRONTEND_BASE_URL` 外置前端
 
 更多说明见：[前后端分离](frontend.md)。
 
@@ -21,6 +21,7 @@ Realms 的前端工程位于 `web/`，后端提供 `/api/*` 与 `/v1/*`；但对
 - 固定监听：`127.0.0.1:8080`（端口写死不变；占用则启动失败）
 - 固定 base_url：`http://127.0.0.1:8080/v1`
 - 后端强制启用自用模式：`REALMS_SELF_MODE_ENABLE=true`
+- 桌面前端构建产物：`web/dist-self`（对应 `npm --prefix "web" run build:self`）
 
 ### 开发运行（本机）
 

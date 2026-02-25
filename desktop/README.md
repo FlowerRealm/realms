@@ -3,6 +3,7 @@
 本目录提供一个 Electron 桌面壳，用于把 Realms 以“自用模式”封装成桌面应用：
 - 桌面应用启动时会拉起内置 Realms 后端（本机 `127.0.0.1` 固定端口）
 - BrowserWindow 直接加载 `http://127.0.0.1:<port>/login`
+- 桌面版使用独立前端构建产物：`web/dist-self`
 
 ## 端口（固定）
 

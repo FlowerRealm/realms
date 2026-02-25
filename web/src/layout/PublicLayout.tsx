@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router-dom';
 
-import { useAuth } from '../auth/AuthContext';
 import { ProjectFooter } from './ProjectFooter';
 
 export type PublicLayoutContext = {
@@ -18,7 +17,6 @@ type HealthzResp = {
 export function PublicLayout() {
   const [allowOpenRegistration, setAllowOpenRegistration] = useState(true);
   const [emailVerificationEnabled, setEmailVerificationEnabled] = useState(false);
-  const { selfMode, selfModeKeySet } = useAuth();
 
   useEffect(() => {
     document.documentElement.classList.remove('admin-html');
@@ -64,10 +62,10 @@ export function PublicLayout() {
         <ul className="nav nav-pills me-4">
           <li className="nav-item">
             <NavLink to="/login" className={({ isActive }) => `nav-link${isActive ? ' active rounded-pill px-4' : ' text-secondary'}`}>
-              {selfMode ? (selfModeKeySet ? '解锁' : '初始化') : '登录'}
+              登录
             </NavLink>
           </li>
-          {!selfMode && allowOpenRegistration ? (
+          {allowOpenRegistration ? (
             <li className="nav-item">
               <NavLink to="/register" className={({ isActive }) => `nav-link${isActive ? ' active rounded-pill px-4' : ' text-secondary'}`}>
                 注册

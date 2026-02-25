@@ -124,21 +124,21 @@ func NewApp(opts AppOptions) (*App, error) {
 	frontendBaseURL := strings.TrimSpace(os.Getenv("FRONTEND_BASE_URL"))
 	frontendDistDir := strings.TrimSpace(os.Getenv("FRONTEND_DIST_DIR"))
 	if frontendDistDir == "" {
-		frontendDistDir = "./web/dist"
+		if opts.Config.SelfMode.Enable {
+			frontendDistDir = "./web/dist-self"
+		} else {
+			frontendDistDir = "./web/dist"
+		}
 	}
-	var frontendFS fs.FS
-	frontendIndexPage := loadEmbeddedIndexHTML()
-	if len(frontendIndexPage) > 0 {
-		frontendFS = root.WebDistFS
-	}
+	frontendFS, frontendIndexPage := loadEmbeddedFrontend(opts.Config.SelfMode.Enable)
 
-		router.SetRouter(engine, router.Options{
-			Store:                           st,
-			SelfMode:                        opts.Config.SelfMode.Enable,
-			AllowOpenRegistration:           opts.Config.Security.AllowOpenRegistration,
-			EmailVerificationEnabledDefault: opts.Config.EmailVerif.Enable,
-			PublicBaseURLDefault:            publicBaseURL,
-			AdminTimeZoneDefault:            opts.Config.AppSettingsDefaults.AdminTimeZone,
+	router.SetRouter(engine, router.Options{
+		Store:                           st,
+		SelfMode:                        opts.Config.SelfMode.Enable,
+		AllowOpenRegistration:           opts.Config.Security.AllowOpenRegistration,
+		EmailVerificationEnabledDefault: opts.Config.EmailVerif.Enable,
+		PublicBaseURLDefault:            publicBaseURL,
+		AdminTimeZoneDefault:            opts.Config.AppSettingsDefaults.AdminTimeZone,
 		BillingDefault:                  opts.Config.Billing,
 		SMTPDefault:                     opts.Config.SMTP,
 		TicketStorage:                   ticketStorage,
@@ -212,12 +212,33 @@ func randomSecret(n int) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-func loadEmbeddedIndexHTML() []byte {
-	b, err := fs.ReadFile(root.WebDistFS, "web/dist/index.html")
-	if err != nil || len(b) == 0 {
-		return nil
+func loadEmbeddedFrontend(selfMode bool) (fs.FS, []byte) {
+	if selfMode {
+		if dist, index := loadEmbeddedDist(root.WebSelfDistFS, "web/dist-self"); dist != nil && len(index) > 0 {
+			return dist, index
+		}
+		return nil, nil
 	}
-	return b
+	if dist, index := loadEmbeddedDist(root.WebDistFS, "web/dist"); dist != nil && len(index) > 0 {
+		return dist, index
+	}
+	return nil, nil
+}
+
+func loadEmbeddedDist(rootFS fs.FS, distDir string) (fs.FS, []byte) {
+	if rootFS == nil {
+		return nil, nil
+	}
+	indexPath := strings.TrimRight(strings.TrimSpace(distDir), "/") + "/index.html"
+	b, err := fs.ReadFile(rootFS, indexPath)
+	if err != nil || len(b) == 0 {
+		return nil, nil
+	}
+	sub, err := fs.Sub(rootFS, strings.TrimRight(strings.TrimSpace(distDir), "/"))
+	if err != nil {
+		return nil, nil
+	}
+	return sub, b
 }
 
 func quotaProvider(st *store.Store, cfg config.Config) quota.Provider {

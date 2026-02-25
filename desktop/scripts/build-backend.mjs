@@ -8,7 +8,7 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..', '..');
 const desktopDir = path.join(rootDir, 'desktop');
 const webDir = path.join(rootDir, 'web');
-const webDistIndex = path.join(webDir, 'dist', 'index.html');
+const webDistIndex = path.join(webDir, 'dist-self', 'index.html');
 
 function run(cmd, args, opts = {}) {
   execFileSync(cmd, args, {
@@ -20,9 +20,9 @@ function run(cmd, args, opts = {}) {
 
 function ensureWebDist() {
   if (fs.existsSync(webDistIndex)) return;
-  run('npm', ['--prefix', 'web', 'run', 'build']);
+  run('npm', ['--prefix', 'web', 'run', 'build:self']);
   if (!fs.existsSync(webDistIndex)) {
-    throw new Error('web/dist 构建失败：缺少 web/dist/index.html');
+    throw new Error('web/dist-self 构建失败：缺少 web/dist-self/index.html');
   }
 }
 
@@ -36,5 +36,5 @@ function outPath() {
 ensureWebDist();
 
 const out = outPath();
-run('go', ['build', '-tags', 'embed_web', '-o', out, './cmd/realms']);
+run('go', ['build', '-tags', 'embed_web_self', '-o', out, './cmd/realms']);
 console.log(`\nbackend built: ${out}\n`);

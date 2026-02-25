@@ -41,14 +41,14 @@ jobs:
         shell: bash
         run: |
           npm --prefix "web" ci
-          npm --prefix "web" run build
+          npm --prefix "web" run build:self
 
       - name: Build web/dist (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           npm --prefix "web" ci
-          npm --prefix "web" run build
+          npm --prefix "web" run build:self
 
       - name: Install desktop deps
         if: runner.os != 'Windows'

@@ -6,13 +6,9 @@ import { SegmentedFrame } from '../components/SegmentedFrame';
 import type { PublicLayoutContext } from '../layout/PublicLayout';
 
 export function RegisterPage() {
-  const { user, register, loading, selfMode } = useAuth();
+  const { user, register, loading } = useAuth();
   const navigate = useNavigate();
   const { allowOpenRegistration, emailVerificationEnabled } = useOutletContext<PublicLayoutContext>();
-
-  if (selfMode) {
-    return <Navigate to="/login" replace />;
-  }
 
   const [form, setForm] = useState({
     email: '',

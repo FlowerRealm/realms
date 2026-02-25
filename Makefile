@@ -31,7 +31,7 @@ dev: tools
 
 desktop-dev:
 	@npm --prefix "web" install
-	@npm --prefix "web" run build
+	@npm --prefix "web" run build:self
 	@npm --prefix "desktop" install
 	@npm --prefix "desktop" run dev
 

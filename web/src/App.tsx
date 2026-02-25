@@ -27,28 +27,14 @@ import { OAuthAuthorizePage } from './pages/OAuthAuthorizePage';
 import { UserGuidePage } from './pages/UserGuidePage';
 
 function HomeRedirect() {
-  const { user, loading, selfMode } = useAuth();
+  const { user, loading } = useAuth();
   if (loading) return null;
-  if (user) {
-    return <Navigate to={user.self_mode ? '/admin' : '/dashboard'} replace />;
-  }
-  if (selfMode) {
-    return <Navigate to="/login" replace state={{ from: '/admin' }} />;
-  }
+  if (user) return <Navigate to="/dashboard" replace />;
   return <Navigate to="/login" replace state={{ from: '/dashboard' }} />;
 }
 
-function RegisterRoute() {
-  const { selfMode, loading } = useAuth();
-  if (loading) return null;
-  if (selfMode) {
-    return <Navigate to="/login" replace />;
-  }
-  return <RegisterPage />;
-}
-
 export function App() {
-  const { selfMode, loading } = useAuth();
+  const { loading } = useAuth();
   if (loading) return null;
 
   return (
@@ -56,49 +42,45 @@ export function App() {
       <Route path="/" element={<HomeRedirect />} />
       <Route element={<PublicLayout />}>
         <Route path="/login" element={<LoginPage />} />
-        {selfMode ? null : <Route path="/register" element={<RegisterRoute />} />}
+        <Route path="/register" element={<RegisterPage />} />
       </Route>
 
-      {selfMode ? null : (
-        <Route
-          path="/oauth/authorize"
-          element={
-            <RequireAuth>
-              <OAuthAuthorizePage />
-            </RequireAuth>
-          }
-        />
-      )}
+      <Route
+        path="/oauth/authorize"
+        element={
+          <RequireAuth>
+            <OAuthAuthorizePage />
+          </RequireAuth>
+        }
+      />
 
-      {selfMode ? null : (
-        <Route
-          element={
-            <RequireAuth>
-              <AppLayout />
-            </RequireAuth>
-          }
-        >
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/guide" element={<UserGuidePage />} />
-          <Route path="/announcements" element={<AnnouncementsPage />} />
-          <Route path="/announcements/:id" element={<AnnouncementDetailPage />} />
-          <Route path="/tokens" element={<TokensPage />} />
-          <Route path="/tokens/created" element={<TokenCreatedPage />} />
-          <Route path="/models" element={<ModelsPage />} />
-          <Route path="/usage" element={<UsagePage />} />
-          <Route path="/account" element={<AccountPage />} />
-          <Route path="/subscription" element={<SubscriptionPage />} />
-          <Route path="/topup" element={<TopupPage />} />
-          <Route path="/pay/:kind/:orderId" element={<PayPage />} />
-          <Route path="/pay/:kind/:orderId/success" element={<PayPage />} />
-          <Route path="/pay/:kind/:orderId/cancel" element={<PayPage />} />
-          <Route path="/tickets" element={<TicketsPage mode="all" />} />
-          <Route path="/tickets/open" element={<TicketsPage mode="open" />} />
-          <Route path="/tickets/closed" element={<TicketsPage mode="closed" />} />
-          <Route path="/tickets/new" element={<TicketNewPage />} />
-          <Route path="/tickets/:id" element={<TicketDetailPage />} />
-        </Route>
-      )}
+      <Route
+        element={
+          <RequireAuth>
+            <AppLayout />
+          </RequireAuth>
+        }
+      >
+        <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/guide" element={<UserGuidePage />} />
+        <Route path="/announcements" element={<AnnouncementsPage />} />
+        <Route path="/announcements/:id" element={<AnnouncementDetailPage />} />
+        <Route path="/tokens" element={<TokensPage />} />
+        <Route path="/tokens/created" element={<TokenCreatedPage />} />
+        <Route path="/models" element={<ModelsPage />} />
+        <Route path="/usage" element={<UsagePage />} />
+        <Route path="/account" element={<AccountPage />} />
+        <Route path="/subscription" element={<SubscriptionPage />} />
+        <Route path="/topup" element={<TopupPage />} />
+        <Route path="/pay/:kind/:orderId" element={<PayPage />} />
+        <Route path="/pay/:kind/:orderId/success" element={<PayPage />} />
+        <Route path="/pay/:kind/:orderId/cancel" element={<PayPage />} />
+        <Route path="/tickets" element={<TicketsPage mode="all" />} />
+        <Route path="/tickets/open" element={<TicketsPage mode="open" />} />
+        <Route path="/tickets/closed" element={<TicketsPage mode="closed" />} />
+        <Route path="/tickets/new" element={<TicketNewPage />} />
+        <Route path="/tickets/:id" element={<TicketDetailPage />} />
+      </Route>
 
       <Route
         element={
