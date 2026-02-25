@@ -390,7 +390,7 @@ func TestAdminUsagePage_UpstreamUnavailable_ShowsDetailedErrorMessage(t *testing
 	}
 }
 
-func TestAdminUsagePage_CodexOAuthUsesAccountInModelField(t *testing.T) {
+func TestAdminUsagePage_CodexOAuthKeepsModelAndSetsAccount(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	dir := t.TempDir()
@@ -592,8 +592,8 @@ func TestAdminUsagePage_CodexOAuthUsesAccountInModelField(t *testing.T) {
 	if !codexFound {
 		t.Fatalf("expected codex event in response")
 	}
-	if codexModelGot != "acct_team_001" {
-		t.Fatalf("expected codex event model to be account_id, got %q", codexModelGot)
+	if codexModelGot != codexModel {
+		t.Fatalf("expected codex event model=%q, got %q", codexModel, codexModelGot)
 	}
 	if codexAccountGot != "acct_team_001" {
 		t.Fatalf("expected codex event account=acct_team_001, got %q", codexAccountGot)

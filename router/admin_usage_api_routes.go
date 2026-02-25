@@ -407,9 +407,6 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 					codexAccountByCredentialID[credID] = resolved
 					account = resolved
 				}
-				if account != "-" {
-					model = account
-				}
 			}
 			errClass := ""
 			if e.ErrorClass != nil && strings.TrimSpace(*e.ErrorClass) != "" {

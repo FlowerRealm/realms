@@ -715,10 +715,11 @@ export function UsageAdminPage() {
                                 <div className="text-muted smaller">ID: {e.user_id}</div>
                               </td>
                             )}
-                            <td className="text-nowrap">
-                              <div className="badge bg-light text-dark border fw-normal">{e.account && e.account !== '-' ? e.account : e.model}</div>
-                              <div className="text-muted smaller mt-1 font-monospace">{e.endpoint}</div>
-                            </td>
+	                            <td className="text-nowrap">
+	                              <div className="badge bg-light text-dark border fw-normal">{e.model}</div>
+	                              <div className="text-muted smaller mt-1 font-monospace">{e.endpoint}</div>
+	                              {e.account && e.account !== '-' ? <div className="text-muted smaller font-monospace">acct: {e.account}</div> : null}
+	                            </td>
                             <td className="text-center">
                               {e.status_code === '200' ? (
                                 <span className="badge bg-success-subtle text-success border border-success-subtle rounded-pill">200</span>
