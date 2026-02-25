@@ -1,10 +1,10 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 
-import { ChannelsPage } from './admin/ChannelsPage'
-import { UsageAdminPage } from './admin/UsageAdminPage'
-import { useAuth } from '../auth/AuthContext'
+import { useAuth } from '../../auth/AuthContext'
+import { ChannelsPage } from '../admin/ChannelsPage'
+import { UsageAdminPage } from '../admin/UsageAdminPage'
 
-export function AdminPageSelf() {
+export function AdminPage() {
   const { user } = useAuth()
   if (user?.role !== 'root') {
     return <Navigate to="/login" replace />

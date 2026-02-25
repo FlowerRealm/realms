@@ -1,11 +1,17 @@
+import type { Dispatch, SetStateAction } from 'react'
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
 
-import { ProjectFooter } from './ProjectFooter'
-import { api } from '../api/client'
-import type { APIResponse } from '../api/types'
+import { api } from '../../api/client'
+import type { APIResponse } from '../../api/types'
+import { ProjectFooter } from '../ProjectFooter'
 
-export function PublicLayoutSelf() {
+export type PublicLayoutContext = {
+  selfModeKeySet: boolean
+  setSelfModeKeySet: Dispatch<SetStateAction<boolean>>
+}
+
+export function PublicLayout() {
   const [selfModeKeySet, setSelfModeKeySet] = useState(false)
 
   useEffect(() => {
@@ -56,7 +62,7 @@ export function PublicLayoutSelf() {
 
       <main className="flex-fill d-flex flex-column justify-content-center align-items-center">
         <div className="w-100" style={{ maxWidth: 520 }}>
-          <Outlet />
+          <Outlet context={{ selfModeKeySet, setSelfModeKeySet } satisfies PublicLayoutContext} />
         </div>
       </main>
 

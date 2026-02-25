@@ -2,10 +2,10 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { RequireAuth } from './auth/RequireAuth'
 import { useAuth } from './auth/AuthContext'
-import { AdminLayoutSelf } from './layout/AdminLayoutSelf'
-import { PublicLayoutSelf } from './layout/PublicLayoutSelf'
-import { AdminPageSelf } from './pages/AdminPageSelf'
-import { LoginPageSelf } from './pages/LoginPageSelf'
+import { AdminLayout } from './layout/self/AdminLayout'
+import { PublicLayout } from './layout/self/PublicLayout'
+import { AdminPage } from './pages/self/AdminPage'
+import { LoginPage } from './pages/self/LoginPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 
 function HomeRedirectSelf() {
@@ -23,18 +23,18 @@ export function AppSelf() {
     <Routes>
       <Route path="/" element={<HomeRedirectSelf />} />
 
-      <Route element={<PublicLayoutSelf />}>
-        <Route path="/login" element={<LoginPageSelf />} />
+      <Route element={<PublicLayout />}>
+        <Route path="/login" element={<LoginPage />} />
       </Route>
 
       <Route
         element={
           <RequireAuth>
-            <AdminLayoutSelf />
+            <AdminLayout />
           </RequireAuth>
         }
       >
-        <Route path="/admin/*" element={<AdminPageSelf />} />
+        <Route path="/admin/*" element={<AdminPage />} />
       </Route>
 
       <Route path="*" element={<NotFoundPage />} />

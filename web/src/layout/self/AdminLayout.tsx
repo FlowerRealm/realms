@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
 
-import { useAuth } from '../auth/AuthContext'
-import { ProjectFooter } from './ProjectFooter'
+import { useAuth } from '../../auth/AuthContext'
+import { ProjectFooter } from '../ProjectFooter'
 
 function userEmail(userEmailValue: string | null | undefined, username: string | null | undefined): string {
   const email = (userEmailValue || '').trim()
@@ -12,7 +12,7 @@ function userEmail(userEmailValue: string | null | undefined, username: string |
   return '未登录'
 }
 
-export function AdminLayoutSelf() {
+export function AdminLayout() {
   const { user, loading, refresh } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(false)
 

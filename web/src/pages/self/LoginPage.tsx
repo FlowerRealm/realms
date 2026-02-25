@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { useMemo, useState } from 'react'
+import { Navigate, useLocation, useNavigate, useOutletContext } from 'react-router-dom'
 
-import { api } from '../api/client'
-import type { APIResponse } from '../api/types'
-import { useAuth } from '../auth/AuthContext'
-import { SegmentedFrame } from '../components/SegmentedFrame'
+import { api } from '../../api/client'
+import type { APIResponse } from '../../api/types'
+import { useAuth } from '../../auth/AuthContext'
+import { SegmentedFrame } from '../../components/SegmentedFrame'
+import type { PublicLayoutContext } from '../../layout/self/PublicLayout'
 
 type LocationState = {
   from?: string
@@ -12,34 +13,14 @@ type LocationState = {
   error?: string
 }
 
-export function LoginPageSelf() {
+export function LoginPage() {
   const { user, loading, refresh } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
+  const { selfModeKeySet, setSelfModeKeySet } = useOutletContext<PublicLayoutContext>()
 
   const [form, setForm] = useState({ key: '', confirm: '' })
   const [err, setErr] = useState('')
-  const [selfModeKeySet, setSelfModeKeySet] = useState(false)
-
-  useEffect(() => {
-    let mounted = true
-    ;(async () => {
-      try {
-        const res = await api.get<APIResponse<{ self_mode?: boolean; self_mode_key_set?: boolean }>>('/api/meta')
-        if (!mounted) return
-        if (res.data?.success && res.data?.data?.self_mode) {
-          setSelfModeKeySet(!!res.data?.data?.self_mode_key_set)
-        } else {
-          setSelfModeKeySet(false)
-        }
-      } catch {
-        // ignore
-      }
-    })()
-    return () => {
-      mounted = false
-    }
-  }, [])
 
   const notice = useMemo(() => {
     const state = location.state as LocationState | null
