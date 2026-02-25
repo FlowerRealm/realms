@@ -300,6 +300,52 @@ WHERE id=?
 	return nil
 }
 
+type UpstreamChannelPriorityPatch struct {
+	ID       int64
+	Priority int
+}
+
+func (s *Store) UpdateUpstreamChannelPriorities(ctx context.Context, items []UpstreamChannelPriorityPatch) error {
+	if len(items) == 0 {
+		return errors.New("items 不能为空")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("开始事务失败: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := tx.PrepareContext(ctx, `
+UPDATE upstream_channels
+SET priority=?,
+    updated_at=CURRENT_TIMESTAMP
+WHERE id=?
+`)
+	if err != nil {
+		return fmt.Errorf("准备语句失败: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+
+	for _, it := range items {
+		if it.ID <= 0 {
+			return errors.New("id 不合法")
+		}
+		res, err := stmt.ExecContext(ctx, it.Priority, it.ID)
+		if err != nil {
+			return fmt.Errorf("更新 upstream_channel priority 失败: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return sql.ErrNoRows
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("提交事务失败: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamChannel, error) {
 	var c UpstreamChannel
 	var promotion int

@@ -1,9 +1,26 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type ReactNode } from 'react';
+
+import {
+  DndContext,
+  MouseSensor,
+  TouchSensor,
+  closestCenter,
+  pointerWithin,
+  useSensor,
+  useSensors,
+  type CollisionDetection,
+  type DragEndEvent,
+  type DragStartEvent,
+  type Modifier,
+} from '@dnd-kit/core';
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 import { useAuth } from '../../auth/AuthContext';
 import { BootstrapModal } from '../../components/BootstrapModal';
 import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { closeModalById } from '../../components/modal';
+import { PortalDragOverlay } from '../../components/PortalDragOverlay';
 import { formatIntComma } from '../../format/int';
 import {
   createChannel,
@@ -22,6 +39,7 @@ import {
   refreshChannelCodexAccount,
   startChannelCodexOAuth,
   testChannelStream,
+  reorderChannels,
   updateChannel,
   updateChannelHeaderOverride,
   updateChannelMeta,
@@ -32,13 +50,13 @@ import {
   updateChannelSetting,
   updateChannelStatusCodeMapping,
   type Channel,
-	  type ChannelAdminItem,
-	  type ChannelCredential,
-	  type ChannelModelProbeResult,
-	  type ChannelTestProgressEvent,
-	  type ChannelTimeSeriesPoint,
-	  type CodexOAuthAccount,
-	} from '../../api/channels';
+  type ChannelAdminItem,
+  type ChannelCredential,
+  type ChannelModelProbeResult,
+  type ChannelTestProgressEvent,
+  type ChannelTimeSeriesPoint,
+  type CodexOAuthAccount,
+} from '../../api/channels';
 import { listAdminChannelGroups, upsertAdminChannelGroupPointer, type AdminChannelGroup } from '../../api/admin/channelGroups';
 import { createChannelModel, listChannelModels, updateChannelModel, type ChannelModelBinding } from '../../api/channelModels';
 import { listManagedModelsAdmin } from '../../api/models';
@@ -54,6 +72,70 @@ function channelTypeLabel(t: string): string {
 function statusBadge(status: number): { cls: string; label: string } {
   if (status === 1) return { cls: 'badge bg-success bg-opacity-10 text-success border border-success-subtle', label: '启用' };
   return { cls: 'badge bg-secondary bg-opacity-10 text-secondary border', label: '禁用' };
+}
+
+type UseSortableReturn = ReturnType<typeof useSortable>;
+type SortableRowRenderArgs = Pick<
+  UseSortableReturn,
+  'attributes' | 'listeners' | 'setActivatorNodeRef' | 'setNodeRef' | 'transform' | 'transition' | 'isDragging' | 'isOver'
+> & {
+  setRowRef: (node: HTMLTableRowElement | null) => void;
+};
+
+function wrapDndListeners(listeners: SortableRowRenderArgs['listeners']): SortableRowRenderArgs['listeners'] {
+  if (!listeners) return listeners;
+
+  const getTarget = (e: unknown): Element | null => {
+    if (!e || typeof e !== 'object') return null;
+    const target = (e as { target?: unknown }).target;
+    return target instanceof Element ? target : null;
+  };
+
+  const shouldIgnore = (target: Element | null) => {
+    if (!target) return false;
+    return !!target.closest('button, a, input, textarea, select, label, [data-rlm-dnd-ignore]');
+  };
+
+  const wrap = (fn: unknown) => {
+    if (typeof fn !== 'function') return fn;
+    return (e: unknown) => {
+      if (shouldIgnore(getTarget(e))) return;
+      (fn as (e: unknown) => void)(e);
+    };
+  };
+
+  const base = listeners as unknown as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...base };
+  out.onMouseDown = wrap(base.onMouseDown);
+  out.onTouchStart = wrap(base.onTouchStart);
+  out.onPointerDown = wrap(base.onPointerDown);
+  return out as unknown as SortableRowRenderArgs['listeners'];
+}
+
+const restrictToVerticalAxisModifier: Modifier = ({ transform }) => {
+  if (!transform) return transform;
+  return { ...transform, x: 0 };
+};
+
+function SortableRow({
+  id,
+  disabled,
+  children,
+}: {
+  id: number;
+  disabled: boolean | { draggable?: boolean; droppable?: boolean };
+  children: (args: SortableRowRenderArgs) => ReactNode;
+}) {
+  const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, transition, isDragging, isOver } = useSortable({ id, disabled });
+  const wrappedListeners = useMemo(() => wrapDndListeners(listeners), [listeners]);
+  const setRowRef = useCallback(
+    (node: HTMLTableRowElement | null) => {
+      setNodeRef(node);
+      setActivatorNodeRef(node);
+    },
+    [setActivatorNodeRef, setNodeRef],
+  );
+  return children({ attributes, listeners: wrappedListeners, setActivatorNodeRef, setNodeRef, setRowRef, transform, transition, isDragging, isOver });
 }
 
 function compactProbeMessage(raw: string): string {
@@ -97,9 +179,14 @@ export function ChannelsPage() {
   const { user } = useAuth();
   const isSelfMode = !!user?.self_mode;
   const allowCodexOAuth = !isSelfMode;
+  const channelTableCols = isSelfMode ? 4 : 3;
 
   const [channels, setChannels] = useState<ChannelAdminItem[]>([]);
   const channelsRef = useRef<ChannelAdminItem[]>([]);
+  const [reordering, setReordering] = useState(false);
+  const [draggingID, setDraggingID] = useState<number | null>(null);
+  const [dragOverlayWidth, setDragOverlayWidth] = useState<number | null>(null);
+  const [dragOverlayColWidths, setDragOverlayColWidths] = useState<number[] | null>(null);
 
   const [managedModelIDs, setManagedModelIDs] = useState<string[]>([]);
   const [channelGroups, setChannelGroups] = useState<AdminChannelGroup[]>([]);
@@ -207,6 +294,41 @@ export function ChannelsPage() {
   const enabledCount = useMemo(() => channels.filter((c) => c.status === 1).length, [channels]);
   const disabledCount = useMemo(() => channels.length - enabledCount, [channels.length, enabledCount]);
   const firstDisabledIndex = useMemo(() => channels.findIndex((c) => c.status !== 1), [channels]);
+  const enabledChannelIDs = useMemo(() => channels.filter((c) => c.status === 1).map((c) => c.id), [channels]);
+  const draggingChannel = useMemo(() => {
+    if (draggingID === null) return null;
+    return channels.find((c) => c.id === draggingID) || null;
+  }, [channels, draggingID]);
+
+  const reduceMotion = useMemo(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }, []);
+
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 7 } }),
+  );
+  const collisionDetection = useCallback<CollisionDetection>((args) => {
+    const pointerCollisions = pointerWithin(args);
+    if (pointerCollisions.length > 0) return pointerCollisions;
+    return closestCenter(args);
+  }, []);
+
+  useEffect(() => {
+    if (!isSelfMode) return;
+    if (draggingID === null) return;
+    const prevCursor = document.body.style.cursor;
+    const prevUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'grabbing';
+    document.body.style.userSelect = 'none';
+    document.body.classList.add('rlm-dnd-sorting');
+    return () => {
+      document.body.style.cursor = prevCursor;
+      document.body.style.userSelect = prevUserSelect;
+      document.body.classList.remove('rlm-dnd-sorting');
+    };
+  }, [draggingID, isSelfMode]);
   const selectableModelIDs = useMemo(() => {
     const uniq = new Set<string>();
     for (const id of managedModelIDs) {
@@ -488,6 +610,95 @@ export function ChannelsPage() {
     else set.delete(name);
     const out = Array.from(set);
     return out.join(',');
+  }
+
+  function sameIDOrder(a: number[], b: number[]): boolean {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return false;
+    }
+    return true;
+  }
+
+  function handleDragStart(e: DragStartEvent) {
+    if (!isSelfMode) return;
+    if (loading || reordering) return;
+    const raw = e.active.id;
+    const id = typeof raw === 'number' ? raw : Number.parseInt(String(raw), 10);
+    if (!Number.isFinite(id) || id <= 0) return;
+    setDraggingID(id);
+
+    const row =
+      typeof document !== 'undefined'
+        ? (document.querySelector(`tr[data-rlm-channel-row="main"][data-rlm-channel-id="${id}"]`) as HTMLElement | null)
+        : null;
+    const rect = row?.getBoundingClientRect() || null;
+    setDragOverlayWidth(rect ? Math.round(rect.width) : null);
+
+    const cols = row ? Array.from(row.querySelectorAll('td')) : [];
+    const colWidths = cols.map((td) => Math.round(td.getBoundingClientRect().width));
+    setDragOverlayColWidths(colWidths.length > 0 && colWidths.every((w) => Number.isFinite(w) && w > 0) ? colWidths : null);
+  }
+
+  function handleDragCancel() {
+    setDraggingID(null);
+    setDragOverlayWidth(null);
+    setDragOverlayColWidths(null);
+  }
+
+  async function handleDragEnd(e: DragEndEvent) {
+    const rawActive = e.active.id;
+    const rawOver = e.over?.id;
+    const activeID = typeof rawActive === 'number' ? rawActive : Number.parseInt(String(rawActive), 10);
+    const overID = rawOver == null ? null : typeof rawOver === 'number' ? rawOver : Number.parseInt(String(rawOver), 10);
+
+    setDraggingID(null);
+    setDragOverlayWidth(null);
+    setDragOverlayColWidths(null);
+    if (!isSelfMode) return;
+    if (loading || reordering) return;
+    if (!overID || !Number.isFinite(activeID) || activeID <= 0) return;
+    if (activeID === overID) return;
+
+    const startList = channelsRef.current || [];
+    const activeCh = startList.find((c) => c.id === activeID) || null;
+    const overCh = startList.find((c) => c.id === overID) || null;
+    if (!activeCh || !overCh) return;
+    if (activeCh.status !== 1 || overCh.status !== 1) return;
+    if (!!activeCh.promotion !== !!overCh.promotion) {
+      setNotice('“优先(promotion)”渠道与普通渠道不可互相拖动。');
+      return;
+    }
+
+    const enabled = startList.filter((c) => c.status === 1);
+    const disabled = startList.filter((c) => c.status !== 1);
+    const from = enabled.findIndex((c) => c.id === activeID);
+    const to = enabled.findIndex((c) => c.id === overID);
+    if (from < 0 || to < 0) return;
+
+    const nextEnabled = arrayMove(enabled, from, to);
+    const nextEnabledIDs = nextEnabled.map((c) => c.id);
+    if (sameIDOrder(nextEnabledIDs, enabled.map((c) => c.id))) return;
+
+    const nextChannels = [...nextEnabled, ...disabled];
+
+    setReordering(true);
+    setErr('');
+    setNotice('');
+    channelsRef.current = nextChannels;
+    setChannels(nextChannels);
+    try {
+      const res = await reorderChannels(nextEnabledIDs);
+      if (!res.success) throw new Error(res.message || '保存排序失败');
+      setNotice('已保存排序');
+      await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+    } catch (e2) {
+      channelsRef.current = startList;
+      setChannels(startList);
+      setErr(e2 instanceof Error ? e2.message : '保存排序失败');
+    } finally {
+      setReordering(false);
+    }
   }
 
   async function reloadCredentials(channelID: number) {
@@ -973,33 +1184,96 @@ export function ChannelsPage() {
                 <span className="text-primary fw-bold text-uppercase small">渠道列表</span>
               </div>
             </div>
-            <div className="table-responsive">
-              <table className="table table-hover align-middle mb-0">
-                <thead className="table-light">
-                  <tr>
-                    <th className="ps-4">渠道详情</th>
-                    <th>状态</th>
-
-                    <th className="text-end pe-4">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
+            <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
+              {isSelfMode ? (
+                <PortalDragOverlay modifiers={[restrictToVerticalAxisModifier]} zIndex={2000}>
+                  {draggingChannel ? (
+                    <div className="rlm-channel-dnd-overlay" style={{ width: dragOverlayWidth || undefined }}>
+                      <table className="table table-hover align-middle mb-0" style={{ tableLayout: 'fixed', width: '100%' }}>
+                        {dragOverlayColWidths ? (
+                          <colgroup>
+                            {dragOverlayColWidths.map((w, idx) => (
+                              <col key={idx} style={{ width: w }} />
+                            ))}
+                          </colgroup>
+                        ) : null}
+                        <tbody>
+                          <tr className="rlm-channel-row-main rlm-channel-row-drag-preview">
+                            <td className="text-center text-muted">
+                              <span className="d-inline-flex align-items-center justify-content-center" style={{ width: 48 }}>
+                                <i className="ri-drag-move-2-line fs-5"></i>
+                              </span>
+                            </td>
+                            <td className="ps-4" style={{ minWidth: 0 }}>
+                              <div className="d-flex flex-column">
+                                <div className="d-flex flex-wrap align-items-center gap-2">
+                                  <span className="fw-bold text-dark">{draggingChannel.name || `渠道 #${draggingChannel.id}`}</span>
+                                  <span className="text-muted small">({channelTypeLabel(draggingChannel.type)})</span>
+                                  {draggingChannel.promotion ? (
+                                    <span className="small text-warning fw-medium">
+                                      <i className="ri-fire-line me-1"></i>优先
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <div className="d-flex flex-wrap align-items-center gap-2 small text-muted mt-1">
+                                  {draggingChannel.base_url ? (
+                                    <span
+                                      className="font-monospace d-inline-block user-select-all"
+                                      style={{ maxWidth: 360, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                                      title={draggingChannel.base_url}
+                                    >
+                                      {draggingChannel.base_url}
+                                    </span>
+                                  ) : null}
+                                  <div className="d-flex align-items-center">
+                                    {draggingChannel.base_url ? <span className="text-secondary">·</span> : null}
+                                    <span className={`${draggingChannel.base_url ? 'ms-2 ' : ''}me-1`}>渠道组:</span>
+                                    <span className="text-secondary font-monospace user-select-all">{(draggingChannel.groups || '').trim() || '-'}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                            <td>
+                              <span className={statusBadge(draggingChannel.status).cls}>{statusBadge(draggingChannel.status).label}</span>
+                            </td>
+                            <td className="text-end pe-4 text-nowrap">
+                              <span className="text-muted small">拖动中…</span>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
+                </PortalDragOverlay>
+              ) : null}
+              <div className="table-responsive">
+                <table className="table table-hover align-middle mb-0">
+                  <thead className="table-light">
+                    <tr>
+                      {isSelfMode ? <th className="text-center text-muted" style={{ width: 48 }}></th> : null}
+                      <th className="ps-4">渠道详情</th>
+                      <th>状态</th>
+                      <th className="text-end pe-4">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={3} className="text-center py-5 text-muted">
+                      <td colSpan={channelTableCols} className="text-center py-5 text-muted">
                         加载中…
                       </td>
                     </tr>
                   ) : channels.length === 0 ? (
                     <tr>
-                      <td colSpan={3} className="text-center py-5 text-muted">
+                      <td colSpan={channelTableCols} className="text-center py-5 text-muted">
                         <span className="fs-1 d-block mb-3 material-symbols-rounded">inbox</span>
                         暂无渠道。
                       </td>
                     </tr>
                   ) : (
-                    <>
-                      {channels.map((ch, idx) => {
+                    <SortableContext items={enabledChannelIDs} strategy={verticalListSortingStrategy}>
+                      <>
+                        {channels.map((ch, idx) => {
                         const st = statusBadge(ch.status);
                         const channelDisabled = ch.status !== 1;
                         const runtime = ch.runtime;
@@ -1021,65 +1295,59 @@ export function ChannelsPage() {
                       const canSetPointer = !isSelfMode && !channelDisabled && pointerGroups.length > 0;
                       const setPointerTitle = channelDisabled ? '禁用渠道不可设为指针' : pointerGroups.length === 0 ? '该渠道未加入任何启用的渠道组' : '设为指针';
 
-                      return (
-                        <Fragment key={ch.id}>
-                          {idx === firstDisabledIndex ? (
-                            <tr className="table-light">
-                              <td colSpan={3} className="px-4 py-2">
-                                <span className="text-muted small">
-                                  <i className="ri-forbid-2-line me-1"></i>已禁用渠道（{disabledCount}）已固定在底部分区
-                                </span>
-                              </td>
-                            </tr>
+                      const renderMainRowCells = (rowDragging: boolean) => (
+                        <>
+                          {isSelfMode ? (
+                            <td className="text-center text-muted" title={loading || reordering || channelDisabled ? '不可拖动' : '拖动排序'}>
+                              <span
+                                className={`d-inline-flex align-items-center justify-content-center ${channelDisabled ? 'opacity-25' : ''}`}
+                                style={{ width: 48, touchAction: loading || reordering || channelDisabled ? 'auto' : rowDragging ? 'none' : 'auto' }}
+                                aria-label="拖动排序"
+                                data-rlm-drag-handle="1"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <i className="ri-drag-move-2-line fs-5"></i>
+                              </span>
+                            </td>
                           ) : null}
-                          <tr
-                            className={rowBaseClassName || undefined}
-                            data-rlm-channel-row="main"
-                            data-rlm-channel-id={ch.id}
-                            data-rlm-channel-disabled={channelDisabled ? '1' : '0'}
-                            onClick={(e) => {
-                              const target = e.target as HTMLElement;
-                              if (target.closest('button, a, input, textarea, select, label')) return;
-                              toggleChannelPanel(ch.id);
-                            }}
-                          >
-                            <td className="ps-4" style={{ minWidth: 0 }}>
-	                            <div className="d-flex flex-column">
-                                <div className="d-flex flex-wrap align-items-center gap-2">
-                                  <span className="fw-bold text-dark">{ch.name || `渠道 #${ch.id}`}</span>
-                                  <span className="text-muted small">({channelTypeLabel(ch.type)})</span>
-                                  {ch.in_use ? <span className="badge bg-info bg-opacity-10 text-info border border-info-subtle">使用中</span> : null}
-                                  {ch.promotion ? (
-                                    <span className="small text-warning fw-medium">
-                                      <i className="ri-fire-line me-1"></i>优先
-                                    </span>
-	                                ) : null}
-	                              </div>
+                          <td className="ps-4" style={{ minWidth: 0 }}>
+                            <div className="d-flex flex-column">
+                              <div className="d-flex flex-wrap align-items-center gap-2">
+                                <span className="fw-bold text-dark">{ch.name || `渠道 #${ch.id}`}</span>
+                                <span className="text-muted small">({channelTypeLabel(ch.type)})</span>
+                                {ch.in_use ? <span className="badge bg-info bg-opacity-10 text-info border border-info-subtle">使用中</span> : null}
+                                {ch.promotion ? (
+                                  <span className="small text-warning fw-medium">
+                                    <i className="ri-fire-line me-1"></i>优先
+                                  </span>
+                                ) : null}
+                              </div>
                               <div className="d-flex flex-wrap align-items-center gap-2 small text-muted mt-1">
-		                                {ch.base_url ? (
-		                                  <span
-		                                    className="font-monospace d-inline-block user-select-all"
-		                                    style={{ maxWidth: 360, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
-		                                    title={ch.base_url}
-		                                  >
-		                                    {ch.base_url}
-		                                  </span>
-		                                ) : null}
+                                {ch.base_url ? (
+                                  <span
+                                    className="font-monospace d-inline-block user-select-all"
+                                    style={{ maxWidth: 360, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                                    title={ch.base_url}
+                                  >
+                                    {ch.base_url}
+                                  </span>
+                                ) : null}
                                 <div className="d-flex align-items-center">
                                   {ch.base_url ? <span className="text-secondary">·</span> : null}
-			                                  <span className={`${ch.base_url ? 'ms-2 ' : ''}me-1`}>渠道组:</span>
-		                                  <span className="text-secondary font-monospace user-select-all">
-		                                    {(ch.groups || '').trim() || '-'}
-		                                  </span>
-		                                </div>
-		                              </div>
-		                            </div>
-		                          </td>
+                                  <span className={`${ch.base_url ? 'ms-2 ' : ''}me-1`}>渠道组:</span>
+                                  <span className="text-secondary font-monospace user-select-all">{(ch.groups || '').trim() || '-'}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
                           <td>
                             <span className={st.cls}>{st.label}</span>
                             {runtime?.available && runtime.banned_active ? (
                               <div className="mt-1">
-                                <span className="badge bg-warning-subtle text-warning-emphasis border px-2" title={runtime.banned_until ? `封禁至 ${runtime.banned_until}` : undefined}>
+                                <span
+                                  className="badge bg-warning-subtle text-warning-emphasis border px-2"
+                                  title={runtime.banned_until ? `封禁至 ${runtime.banned_until}` : undefined}
+                                >
                                   <i className="ri-forbid-2-line me-1"></i>封禁中 · 剩余 {runtime.banned_remaining || '-'}
                                 </span>
                               </div>
@@ -1105,18 +1373,18 @@ export function ChannelsPage() {
                                   setErr('');
                                   setNotice('');
                                   setTestingChannelID(ch.id);
-	                                  setTestPanels((prev) => ({
-	                                    ...prev,
-	                                    [ch.id]: {
-	                                      running: true,
-	                                      source: '',
-	                                      total: 0,
-	                                      done: 0,
-	                                      currentModel: '',
-	                                      models: [],
-	                                      error: '',
-	                                    },
-	                                  }));
+                                  setTestPanels((prev) => ({
+                                    ...prev,
+                                    [ch.id]: {
+                                      running: true,
+                                      source: '',
+                                      total: 0,
+                                      done: 0,
+                                      currentModel: '',
+                                      models: [],
+                                      error: '',
+                                    },
+                                  }));
                                   try {
                                     const res = await testChannelStream(ch.id, (evt) => applyTestProgress(ch.id, evt));
                                     const probe = res.data?.probe;
@@ -1132,39 +1400,39 @@ export function ChannelsPage() {
                                               result: item,
                                             }))
                                           : current.models;
-	                                      return {
-	                                        ...prev,
-	                                        [ch.id]: {
-	                                          ...current,
-	                                          running: false,
-	                                          source: probe?.source || current.source,
-	                                          total: probe?.total ?? current.total,
-	                                          done: probe?.total ?? current.done,
-	                                          currentModel: '',
-	                                          models: finalModels,
-	                                          error: '',
-	                                        },
-	                                      };
-	                                    });
+                                      return {
+                                        ...prev,
+                                        [ch.id]: {
+                                          ...current,
+                                          running: false,
+                                          source: probe?.source || current.source,
+                                          total: probe?.total ?? current.total,
+                                          done: probe?.total ?? current.done,
+                                          currentModel: '',
+                                          models: finalModels,
+                                          error: '',
+                                        },
+                                      };
+                                    });
                                     if (!res.success) throw new Error(res.message || '测试失败');
                                     setNotice(res.message || '测试成功');
                                     await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
                                   } catch (e) {
                                     const msg = e instanceof Error ? e.message : '测试失败';
                                     setErr(msg.toString().trim());
-	                                    setTestPanels((prev) => {
-	                                      const current = prev[ch.id];
-	                                      if (!current) return prev;
-	                                      return {
-	                                        ...prev,
-	                                        [ch.id]: {
-	                                          ...current,
-	                                          running: false,
-	                                          currentModel: '',
-	                                          error: msg.toString().trim(),
-	                                        },
-	                                      };
-	                                    });
+                                    setTestPanels((prev) => {
+                                      const current = prev[ch.id];
+                                      if (!current) return prev;
+                                      return {
+                                        ...prev,
+                                        [ch.id]: {
+                                          ...current,
+                                          running: false,
+                                          currentModel: '',
+                                          error: msg.toString().trim(),
+                                        },
+                                      };
+                                    });
                                   } finally {
                                     setTestingChannelID((prev) => (prev === ch.id ? null : prev));
                                     setTestPanels((prev) => {
@@ -1267,13 +1535,84 @@ export function ChannelsPage() {
                               </button>
                             </div>
                           </td>
-                        </tr>
-                        {panelOpen ? (
-                          <tr className={`${channelDisabled ? 'table-secondary opacity-75' : 'bg-light-subtle'} rlm-channel-detail-row`}>
-                            <td colSpan={3} className="px-4 py-3">
-                              <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
-                                <button
-                                  type="button"
+                        </>
+                      );
+
+                      return (
+                        <Fragment key={ch.id}>
+	                          {idx === firstDisabledIndex ? (
+	                            <tr className="table-light">
+	                              <td colSpan={channelTableCols} className="px-4 py-2">
+	                                <span className="text-muted small">
+	                                  <i className="ri-forbid-2-line me-1"></i>已禁用渠道（{disabledCount}）已固定在底部分区
+	                                </span>
+	                              </td>
+                            </tr>
+                          ) : null}
+                          {isSelfMode && !channelDisabled ? (
+                            <SortableRow id={ch.id} disabled={loading || reordering}>
+                              {({ attributes, listeners, setRowRef, transform, transition, isDragging, isOver }) => {
+                                const dropTarget = draggingID !== null && isOver && !isDragging;
+                                const rowClassName = [
+                                  rowBaseClassName,
+                                  dropTarget ? 'table-primary rlm-channel-row-drop-target' : '',
+                                  isDragging ? 'rlm-channel-row-dragging' : '',
+                                ]
+                                  .filter((v) => v)
+                                  .join(' ');
+                                const style: CSSProperties = {
+                                  transform: CSS.Transform.toString(transform ? { ...transform, x: 0, scaleX: 1, scaleY: 1 } : null),
+                                  transition: reduceMotion
+                                    ? undefined
+                                    : transition
+                                      ? `${transition}, background-color 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease`
+                                      : undefined,
+                                  cursor: loading || reordering ? 'not-allowed' : isDragging ? 'grabbing' : 'grab',
+                                };
+                                return (
+                                  <tr
+                                    ref={setRowRef}
+                                    style={style}
+                                    className={rowClassName || undefined}
+                                    {...attributes}
+                                    {...listeners}
+                                    data-rlm-channel-row="main"
+                                    data-rlm-channel-id={ch.id}
+                                    data-rlm-channel-disabled="0"
+                                    onClick={(e) => {
+                                      if (draggingID !== null || reordering) return;
+                                      const target = e.target as HTMLElement;
+                                      if (target.closest('button, a, input, textarea, select, label')) return;
+                                      toggleChannelPanel(ch.id);
+                                    }}
+                                  >
+                                    {renderMainRowCells(isDragging)}
+                                  </tr>
+                                );
+                              }}
+                            </SortableRow>
+                          ) : (
+                            <tr
+                              className={rowBaseClassName || undefined}
+                              data-rlm-channel-row="main"
+                              data-rlm-channel-id={ch.id}
+                              data-rlm-channel-disabled={channelDisabled ? '1' : '0'}
+                              onClick={(e) => {
+                                if (draggingID !== null || reordering) return;
+                                const target = e.target as HTMLElement;
+                                if (target.closest('button, a, input, textarea, select, label')) return;
+                                toggleChannelPanel(ch.id);
+                              }}
+                            >
+                              {renderMainRowCells(false)}
+                            </tr>
+                          )}
+	                        {panelOpen ? (
+	                          <tr className={`${channelDisabled ? 'table-secondary opacity-75' : 'bg-light-subtle'} rlm-channel-detail-row`}>
+	                            <td colSpan={channelTableCols} className="px-4 py-3">
+	                              <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+	                                <button
+	                                  type="button"
                                   className={`btn btn-sm ${detailPanel === 'stats' ? 'btn-primary' : 'btn-light border'}`}
                                   onClick={() => setDetailPanelByChannel((prev) => ({ ...prev, [ch.id]: 'stats' }))}
                                 >
@@ -1573,15 +1912,17 @@ export function ChannelsPage() {
                         ) : null}
                         </Fragment>
                       );
-                      })}
-                    </>
+                        })}
+                      </>
+                    </SortableContext>
                   )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </SegmentedFrame>
+	                </tbody>
+	              </table>
+	            </div>
+	          </DndContext>
+	          </div>
+	        </div>
+	      </SegmentedFrame>
 
       {isSelfMode ? null : (
         <BootstrapModal

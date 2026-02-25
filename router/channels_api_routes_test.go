@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"realms/internal/auth"
+	rlmcrypto "realms/internal/crypto"
 	"realms/internal/store"
 )
 
@@ -408,6 +410,81 @@ func TestChannels_PageAndInUse_RootFlow(t *testing.T) {
 	}
 	if tsResp.Data.Granularity != "day" {
 		t.Fatalf("expected granularity=day, got %q", tsResp.Data.Granularity)
+	}
+}
+
+func TestChannels_Reorder_SelfMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	ctx := context.Background()
+	key := "k_self_mode_test_123"
+	hashHex := hex.EncodeToString(rlmcrypto.TokenHash(key))
+	if _, err := st.InsertAppSettingIfAbsent(ctx, store.SettingSelfModeKeyHash, hashHex); err != nil {
+		t.Fatalf("InsertAppSettingIfAbsent: %v", err)
+	}
+
+	ch1, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "c1", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel ch1: %v", err)
+	}
+	ch2, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "c2", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel ch2: %v", err)
+	}
+
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+	SetRouter(engine, Options{
+		Store:                st,
+		SelfMode:             true,
+		AdminTimeZoneDefault: "UTC",
+		FrontendIndexPage:    []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
+
+	body, _ := json.Marshal([]int64{ch1, ch2})
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/channel/reorder", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Authorization", "Bearer "+key)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("expected success, got message=%q", resp.Message)
+	}
+
+	c1, err := st.GetUpstreamChannelByID(ctx, ch1)
+	if err != nil {
+		t.Fatalf("GetUpstreamChannelByID ch1: %v", err)
+	}
+	c2, err := st.GetUpstreamChannelByID(ctx, ch2)
+	if err != nil {
+		t.Fatalf("GetUpstreamChannelByID ch2: %v", err)
+	}
+	if c1.Priority <= c2.Priority {
+		t.Fatalf("expected ch1 priority > ch2 priority, got %d <= %d", c1.Priority, c2.Priority)
 	}
 }
 

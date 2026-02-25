@@ -75,6 +75,10 @@ func setChannelAPIRoutes(r gin.IRoutes, opts Options) {
 
 	r.PUT("/channel", admin, updateChannelHandler(opts))
 	r.PUT("/channel/", admin, updateChannelHandler(opts))
+	if opts.SelfMode {
+		r.POST("/channel/reorder", admin, reorderChannelsHandler(opts))
+		r.POST("/channel/reorder/", admin, reorderChannelsHandler(opts))
+	}
 
 	r.GET("/channel/:channel_id", admin, getChannelHandler(opts))
 	r.DELETE("/channel/:channel_id", admin, deleteChannelHandler(opts))
@@ -667,6 +671,42 @@ type updateChannelRequest struct {
 	AllowServiceTier      *bool   `json:"allow_service_tier,omitempty"`
 	DisableStore          *bool   `json:"disable_store,omitempty"`
 	AllowSafetyIdentifier *bool   `json:"allow_safety_identifier,omitempty"`
+}
+
+func reorderChannelsHandler(opts Options) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !opts.SelfMode {
+			c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "not found"})
+			return
+		}
+		if opts.Store == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			return
+		}
+		var ids []int64
+		if err := c.ShouldBindJSON(&ids); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
+			return
+		}
+		if len(ids) == 0 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "ids 不能为空"})
+			return
+		}
+		base := len(ids) * 10
+		patches := make([]store.UpstreamChannelPriorityPatch, 0, len(ids))
+		for idx, id := range ids {
+			if id <= 0 {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "id 不合法"})
+				return
+			}
+			patches = append(patches, store.UpstreamChannelPriorityPatch{ID: id, Priority: base - idx*10})
+		}
+		if err := opts.Store.UpdateUpstreamChannelPriorities(c.Request.Context(), patches); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "更新失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
+	}
 }
 
 func updateChannelHandler(opts Options) gin.HandlerFunc {

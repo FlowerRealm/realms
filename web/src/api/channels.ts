@@ -150,6 +150,11 @@ export async function updateChannel(req: UpdateChannelRequest) {
   return res.data;
 }
 
+export async function reorderChannels(orderedChannelIDs: number[]) {
+  const res = await api.post<APIResponse<void>>('/api/channel/reorder', orderedChannelIDs);
+  return res.data;
+}
+
 export async function getChannel(channelID: number) {
   const res = await api.get<APIResponse<Channel>>(`/api/channel/${channelID}`);
   return res.data;
