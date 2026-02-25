@@ -8,6 +8,8 @@ import type { APIResponse, User } from '../api/types';
 type AuthState = {
   user: User | null;
   loading: boolean;
+  selfMode: boolean;
+  selfModeKeySet: boolean;
   refresh: () => Promise<void>;
   login: (login: string, password: string) => Promise<void>;
   register: (email: string, username: string, password: string, verificationCode?: string) => Promise<void>;
@@ -19,6 +21,9 @@ const AuthContext = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selfMode, setSelfMode] = useState(false);
+  const [selfModeKeySet, setSelfModeKeySet] = useState(false);
+  const [metaLoaded, setMetaLoaded] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -38,6 +43,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (login: string, password: string) => {
+      if (selfMode) {
+        const key = (login || '').trim();
+        if (!key) {
+          throw new Error('Key 不能为空');
+        }
+        setLoading(true);
+        try {
+          if (!selfModeKeySet) {
+            const res = await api.post<APIResponse<unknown>>('/api/self-mode/bootstrap', { key });
+            if (!res.data?.success) {
+              throw new Error(res.data?.message || '设置 Key 失败');
+            }
+            setSelfModeKeySet(true);
+          }
+
+          localStorage.setItem('self_mode_key', key);
+          try {
+            await refresh();
+            if (!localStorage.getItem('user')) {
+              throw new Error('Key 无效');
+            }
+            return;
+          } catch (e) {
+            localStorage.removeItem('self_mode_key');
+            throw e;
+          }
+        } finally {
+          setLoading(false);
+        }
+      }
       setLoading(true);
       try {
         const res = await api.post<APIResponse<User>>('/api/user/login', {
@@ -52,11 +87,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false);
       }
     },
-    [refresh],
+    [refresh, selfMode],
   );
 
   const register = useCallback(
     async (email: string, username: string, password: string, verificationCode?: string) => {
+      if (selfMode) {
+        throw new Error('自用模式不支持注册');
+      }
       setLoading(true);
       try {
         const res = await api.post<APIResponse<User>>('/api/user/register', {
@@ -73,10 +111,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false);
       }
     },
-    [refresh],
+    [refresh, selfMode],
   );
 
   const logout = useCallback(async () => {
+    if (selfMode) {
+      localStorage.removeItem('self_mode_key');
+      setUser(null);
+      localStorage.removeItem('user');
+      return;
+    }
     setLoading(true);
     try {
       await api.get('/api/user/logout');
@@ -88,19 +132,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await api.get<APIResponse<{ self_mode?: boolean; self_mode_key_set?: boolean }>>('/api/meta');
+        if (mounted && res.data?.success) {
+          setSelfMode(!!res.data?.data?.self_mode);
+          setSelfModeKeySet(!!res.data?.data?.self_mode_key_set);
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (mounted) setMetaLoaded(true);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!metaLoaded) return;
     void refresh();
-  }, [refresh]);
+  }, [metaLoaded, refresh]);
 
   const value = useMemo<AuthState>(
     () => ({
       user,
       loading,
+      selfMode,
+      selfModeKeySet,
       refresh,
       login,
       register,
       logout,
     }),
-    [loading, login, logout, refresh, register, user],
+    [loading, login, logout, refresh, register, selfMode, selfModeKeySet, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

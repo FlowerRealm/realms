@@ -15,7 +15,7 @@ func (s *Store) FeatureDisabledEffective(ctx context.Context, selfMode bool, key
 		return false
 	}
 	switch key {
-	case SettingFeatureDisableBilling, SettingFeatureDisableTickets:
+	case SettingFeatureDisableBilling, SettingFeatureDisableTickets, SettingFeatureDisableAdminUsers:
 		if selfMode {
 			return true
 		}

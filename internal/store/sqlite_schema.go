@@ -65,6 +65,9 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 		if err := ensureSQLiteOpenAIObjectRefsTable(db); err != nil {
 			return err
 		}
+		if err := ensureSQLiteAnthropicCredentialsTable(db); err != nil {
+			return err
+		}
 		if err := ensureSQLiteChannelGroupPointers(db); err != nil {
 			return err
 		}
@@ -119,6 +122,9 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 		return err
 	}
 	if err := ensureSQLiteOpenAIObjectRefsTable(db); err != nil {
+		return err
+	}
+	if err := ensureSQLiteAnthropicCredentialsTable(db); err != nil {
 		return err
 	}
 	if err := ensureSQLiteChannelGroupPointers(db); err != nil {

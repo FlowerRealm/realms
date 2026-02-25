@@ -317,7 +317,7 @@ function runClaude({ base_url, api_key, model, prompt, timeout_seconds, _paths }
 
   return new Promise((resolve) => {
     const start = Date.now();
-    execFile('claude', args, {
+    const cp = execFile('claude', args, {
       env,
       cwd: home,
       timeout: (timeout_seconds || 30) * 1000,
@@ -330,6 +330,8 @@ function runClaude({ base_url, api_key, model, prompt, timeout_seconds, _paths }
         resolve({ ok: true, latency_ms, output: truncate(combined, MAX_OUTPUT), error: '' });
       }
     });
+    // Claude Code -p 会把 stdin 作为输入源的一部分；这里显式关闭 stdin，避免进程等待 EOF。
+    try { cp.stdin && cp.stdin.end(); } catch { /* best effort */ }
   });
 }
 
@@ -345,12 +347,12 @@ function runGemini({ api_key, model, prompt, timeout_seconds, _paths }, home) {
   if (cacheDir) env.XDG_CACHE_HOME = cacheDir;
   if (configDir) env.XDG_CONFIG_HOME = configDir;
 
-  const args = [prompt || 'Reply with exactly: OK'];
+  const args = ['-p', prompt || 'Reply with exactly: OK', '-o', 'text'];
   if (model) args.push('-m', model);
 
   return new Promise((resolve) => {
     const start = Date.now();
-    execFile('gemini', args, {
+    const cp = execFile('gemini', args, {
       env,
       cwd: home,
       timeout: (timeout_seconds || 30) * 1000,
@@ -363,6 +365,8 @@ function runGemini({ api_key, model, prompt, timeout_seconds, _paths }, home) {
         resolve({ ok: true, latency_ms, output: truncate(combined, MAX_OUTPUT), error: '' });
       }
     });
+    // Gemini -p 会把 stdin 作为输入源的一部分；这里显式关闭 stdin，避免进程等待 EOF。
+    try { cp.stdin && cp.stdin.end(); } catch { /* best effort */ }
   });
 }
 

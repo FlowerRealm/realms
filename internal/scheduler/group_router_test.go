@@ -15,6 +15,32 @@ type fakeGroupStore struct {
 	members      map[int64][]store.ChannelGroupMemberDetail
 }
 
+type fakeUpstreamStore struct {
+	channels  []store.UpstreamChannel
+	endpoints map[int64][]store.UpstreamEndpoint
+	creds     map[int64][]store.OpenAICompatibleCredential
+}
+
+func (f *fakeUpstreamStore) ListUpstreamChannels(_ context.Context) ([]store.UpstreamChannel, error) {
+	return f.channels, nil
+}
+
+func (f *fakeUpstreamStore) ListUpstreamEndpointsByChannel(_ context.Context, channelID int64) ([]store.UpstreamEndpoint, error) {
+	return f.endpoints[channelID], nil
+}
+
+func (f *fakeUpstreamStore) ListOpenAICompatibleCredentialsByEndpoint(_ context.Context, endpointID int64) ([]store.OpenAICompatibleCredential, error) {
+	return f.creds[endpointID], nil
+}
+
+func (f *fakeUpstreamStore) ListAnthropicCredentialsByEndpoint(_ context.Context, _ int64) ([]store.AnthropicCredential, error) {
+	return nil, nil
+}
+
+func (f *fakeUpstreamStore) ListCodexOAuthAccountsByEndpoint(_ context.Context, _ int64) ([]store.CodexOAuthAccount, error) {
+	return nil, nil
+}
+
 func (f *fakeGroupStore) GetChannelGroupByName(_ context.Context, name string) (store.ChannelGroup, error) {
 	g, ok := f.groupsByName[name]
 	if !ok {
@@ -37,6 +63,34 @@ func (f *fakeGroupStore) ListChannelGroupMembers(_ context.Context, parentGroupI
 
 func ptrString(v string) *string {
 	return &v
+}
+
+func TestGroupRouterNext_FallbackWithoutChannelGroups(t *testing.T) {
+	fs := &fakeUpstreamStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+
+	router := NewGroupRouter(nil, s, 10, "", Constraints{})
+	sel, err := router.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next err: %v", err)
+	}
+	if sel.ChannelID != 1 {
+		t.Fatalf("expected channel=1, got=%d", sel.ChannelID)
+	}
 }
 
 func ptrInt64(v int64) *int64 {

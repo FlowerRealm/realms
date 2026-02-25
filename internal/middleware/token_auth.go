@@ -2,15 +2,22 @@
 package middleware
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	"net/http"
 	"strings"
 
 	"realms/internal/auth"
+	rlmcrypto "realms/internal/crypto"
 	"realms/internal/store"
 )
 
-func TokenAuth(st *store.Store) Middleware {
+const (
+	selfModeVirtualUserID  int64 = 1
+	selfModeVirtualTokenID int64 = 1
+)
+
+func TokenAuth(st *store.Store, selfMode bool) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			raw := extractBearer(r.Header.Get("Authorization"))
@@ -19,6 +26,40 @@ func TokenAuth(st *store.Store) Middleware {
 			}
 			if raw == "" {
 				http.Error(w, "未提供 Token", http.StatusUnauthorized)
+				return
+			}
+
+			if selfMode {
+				if st == nil {
+					http.Error(w, "鉴权失败", http.StatusInternalServerError)
+					return
+				}
+				expectHash, ok, err := st.GetSelfModeKeyHash(r.Context())
+				if err != nil {
+					http.Error(w, "鉴权失败", http.StatusInternalServerError)
+					return
+				}
+				if !ok {
+					http.Error(w, "自用模式尚未设置 Key", http.StatusUnauthorized)
+					return
+				}
+				if subtle.ConstantTimeCompare(rlmcrypto.TokenHash(raw), expectHash) != 1 {
+					http.Error(w, "Token 无效", http.StatusUnauthorized)
+					return
+				}
+				tokenID := selfModeVirtualTokenID
+				p := auth.Principal{
+					ActorType: auth.ActorTypeToken,
+					UserID:    selfModeVirtualUserID,
+					TokenID:   &tokenID,
+					Role:      store.UserRoleRoot,
+				}
+				next.ServeHTTP(w, r.WithContext(auth.WithPrincipal(r.Context(), p)))
+				return
+			}
+
+			if st == nil {
+				http.Error(w, "鉴权失败", http.StatusInternalServerError)
 				return
 			}
 			ta, err := st.GetTokenAuthByRawToken(r.Context(), raw)

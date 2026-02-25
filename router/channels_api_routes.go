@@ -61,7 +61,7 @@ type channelDetailView struct {
 }
 
 func setChannelAPIRoutes(r gin.IRoutes, opts Options) {
-	admin := requireRootSession(opts)
+	admin := requireRoot(opts)
 
 	r.GET("/channel", admin, listChannelsHandler(opts))
 	r.GET("/channel/", admin, listChannelsHandler(opts))
@@ -86,13 +86,15 @@ func setChannelAPIRoutes(r gin.IRoutes, opts Options) {
 	r.GET("/channel/:channel_id/credentials", admin, listChannelCredentialsHandler(opts))
 	r.POST("/channel/:channel_id/credentials", admin, createChannelCredentialHandler(opts))
 	r.DELETE("/channel/:channel_id/credentials/:credential_id", admin, deleteChannelCredentialHandler(opts))
-	r.GET("/channel/:channel_id/codex-accounts", admin, listChannelCodexAccountsHandler(opts))
-	r.POST("/channel/:channel_id/codex-oauth/start", admin, startChannelCodexOAuthHandler(opts))
-	r.POST("/channel/:channel_id/codex-oauth/complete", admin, completeChannelCodexOAuthHandler(opts))
-	r.POST("/channel/:channel_id/codex-accounts", admin, createChannelCodexAccountHandler(opts))
-	r.POST("/channel/:channel_id/codex-accounts/refresh", admin, refreshChannelCodexAccountsHandler(opts))
-	r.POST("/channel/:channel_id/codex-accounts/:account_id/refresh", admin, refreshChannelCodexAccountHandler(opts))
-	r.DELETE("/channel/:channel_id/codex-accounts/:account_id", admin, deleteChannelCodexAccountHandler(opts))
+	if !opts.SelfMode {
+		r.GET("/channel/:channel_id/codex-accounts", admin, listChannelCodexAccountsHandler(opts))
+		r.POST("/channel/:channel_id/codex-oauth/start", admin, startChannelCodexOAuthHandler(opts))
+		r.POST("/channel/:channel_id/codex-oauth/complete", admin, completeChannelCodexOAuthHandler(opts))
+		r.POST("/channel/:channel_id/codex-accounts", admin, createChannelCodexAccountHandler(opts))
+		r.POST("/channel/:channel_id/codex-accounts/refresh", admin, refreshChannelCodexAccountsHandler(opts))
+		r.POST("/channel/:channel_id/codex-accounts/:account_id/refresh", admin, refreshChannelCodexAccountHandler(opts))
+		r.DELETE("/channel/:channel_id/codex-accounts/:account_id", admin, deleteChannelCodexAccountHandler(opts))
+	}
 
 	r.PUT("/channel/:channel_id/meta", admin, updateChannelMetaHandler(opts))
 	r.PUT("/channel/:channel_id/setting", admin, updateChannelSettingHandler(opts))
@@ -610,6 +612,10 @@ func createChannelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "不支持的渠道类型"})
 			return
 		}
+		if opts.SelfMode && req.Type == store.UpstreamTypeCodexOAuth {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "自用模式不支持 codex_oauth 渠道"})
+			return
+		}
 		if req.Type == store.UpstreamTypeCodexOAuth && req.Key != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "codex_oauth Channel 不支持 key"})
 			return
@@ -686,6 +692,10 @@ func updateChannelHandler(opts Options) gin.HandlerFunc {
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询 channel 失败"})
+			return
+		}
+		if opts.SelfMode && ch.Type == store.UpstreamTypeCodexOAuth {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "自用模式不支持 codex_oauth 渠道（建议删除）"})
 			return
 		}
 		if ch.Type == store.UpstreamTypeCodexOAuth && req.Key != nil && strings.TrimSpace(*req.Key) != "" {
@@ -1955,6 +1965,10 @@ func streamChannelCLITestHandler(c *gin.Context, opts Options, channelID int64) 
 	ch, err := st.GetUpstreamChannelByID(c.Request.Context(), channelID)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel 不存在"})
+		return
+	}
+	if opts.SelfMode && ch.Type == store.UpstreamTypeCodexOAuth {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "自用模式不支持 codex_oauth 渠道测试"})
 		return
 	}
 

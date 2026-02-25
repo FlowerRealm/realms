@@ -249,14 +249,14 @@ func parseDecimalNonNeg(raw string, scale int32) (decimal.Decimal, error) {
 }
 
 func defaultConfig() Config {
-	return Config{
-		Env: "dev",
-		SelfMode: SelfModeConfig{
-			Enable: false,
-		},
-		Server: ServerConfig{
-			Addr: ":8080",
-		},
+		return Config{
+			Env: "dev",
+			SelfMode: SelfModeConfig{
+				Enable: false,
+			},
+			Server: ServerConfig{
+				Addr: ":8080",
+			},
 		Debug: DebugConfig{
 			ProxyLog: ProxyLogConfig{
 				Enable: false,

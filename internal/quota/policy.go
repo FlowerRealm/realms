@@ -14,7 +14,7 @@ type FeatureGetter interface {
 // FeatureProvider 根据功能开关在不同 QuotaProvider 之间切换。
 //
 // 目前仅实现：
-// - feature_disable_billing=true 或 self_mode.enable=true：使用 free provider（无限用量）
+// - feature_disable_billing=true 或 self_mode=true：使用 free provider（无限用量）
 // - 否则：使用 normal provider（订阅优先 + 余额兜底）
 type FeatureProvider struct {
 	features FeatureGetter

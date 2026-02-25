@@ -1028,9 +1028,9 @@ SELECT ue.id, ue.time, ue.request_id, ue.endpoint, ue.method,
        ue.status_code, ue.latency_ms, ue.first_token_latency_ms, ue.error_class, ue.error_message,
        ue.is_stream, ue.request_bytes, ue.response_bytes,
        ue.created_at, ue.updated_at,
-       u.email
+       COALESCE(u.email, '')
 FROM usage_events ue
-JOIN users u ON u.id=ue.user_id
+LEFT JOIN users u ON u.id=ue.user_id
 WHERE ue.time >= ? AND ue.time < ? AND ue.state<>?
 `
 	if beforeID != nil && *beforeID > 0 {
@@ -1125,6 +1125,11 @@ WHERE ue.time >= ? AND ue.time < ? AND ue.state<>?
 		}
 		e.IsStream = isStream != 0
 
+		email = strings.TrimSpace(email)
+		if email == "" {
+			email = fmt.Sprintf("#%d", e.UserID)
+		}
+
 		out = append(out, UsageEventWithUser{
 			Event:     e,
 			UserEmail: email,
@@ -1218,7 +1223,11 @@ func (s *Store) ListUsageTopUsers(ctx context.Context, in UsageTopUsersInput) ([
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-SELECT u.id, u.email, u.role, u.status, x.committed_sum, x.reserved_sum
+SELECT x.user_id,
+       COALESCE(u.email, ''),
+       COALESCE(u.role, ''),
+       COALESCE(u.status, 0),
+       x.committed_sum, x.reserved_sum
 FROM (
   SELECT user_id,
          SUM(CASE WHEN state=? THEN committed_usd ELSE 0 END) AS committed_sum,
@@ -1227,7 +1236,7 @@ FROM (
   WHERE time >= ? AND time < ? AND (state=? OR state=?)
   GROUP BY user_id
 ) x
-JOIN users u ON u.id=x.user_id
+LEFT JOIN users u ON u.id=x.user_id
 ORDER BY x.committed_sum DESC
 LIMIT ?
 `, UsageStateCommitted, UsageStateReserved, in.Now, in.Since, in.Until, UsageStateCommitted, UsageStateReserved, in.Limit)
@@ -1249,6 +1258,17 @@ LIMIT ?
 		}
 		if reservedSum.Valid {
 			row.ReservedUSD = reservedSum.Decimal.Truncate(USDScale)
+		}
+		row.Email = strings.TrimSpace(row.Email)
+		if row.Email == "" {
+			row.Email = fmt.Sprintf("#%d", row.UserID)
+		}
+		row.Role = strings.TrimSpace(row.Role)
+		if row.Role == "" {
+			row.Role = UserRoleRoot
+		}
+		if row.Status == 0 {
+			row.Status = 1
 		}
 		out = append(out, row)
 	}

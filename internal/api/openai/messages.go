@@ -71,13 +71,19 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 	var cons scheduler.Constraints
 	cons.RequireChannelType = store.UpstreamTypeAnthropic
 	ags := allowGroupsFromPrincipal(p)
-	if len(ags.Order) == 0 {
-		writeAnthropicError(w, http.StatusBadRequest, "Token 未配置渠道组")
-		return
-	}
 	allowSet := ags.Set
-	cons.AllowGroups = allowSet
-	cons.AllowGroupOrder = ags.Order
+	if h.selfMode {
+		allowSet = nil
+		cons.AllowGroups = nil
+		cons.AllowGroupOrder = nil
+	} else {
+		if len(ags.Order) == 0 {
+			writeAnthropicError(w, http.StatusBadRequest, "Token 未配置渠道组")
+			return
+		}
+		cons.AllowGroups = allowSet
+		cons.AllowGroupOrder = ags.Order
+	}
 
 	var rewriteBody func(sel scheduler.Selection) ([]byte, error)
 	var upstreamByChannel map[int64]string
@@ -94,9 +100,11 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 				writeAnthropicError(w, http.StatusBadGateway, "查询模型失败")
 				return
 			}
-			if _, ok := allowSet[managedModelGroupName(mm)]; !ok {
-				writeAnthropicError(w, http.StatusBadRequest, "无权限使用该模型")
-				return
+			if allowSet != nil {
+				if _, ok := allowSet[managedModelGroupName(mm)]; !ok {
+					writeAnthropicError(w, http.StatusBadRequest, "无权限使用该模型")
+					return
+				}
 			}
 		}
 		// passthrough 模式下仍尝试使用“渠道绑定模型”做 model 转发（best-effort）；
@@ -167,9 +175,11 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 			writeAnthropicError(w, http.StatusBadGateway, "查询模型失败")
 			return
 		}
-		if _, ok := allowSet[managedModelGroupName(mm)]; !ok {
-			writeAnthropicError(w, http.StatusBadRequest, "无权限使用该模型")
-			return
+		if allowSet != nil {
+			if _, ok := allowSet[managedModelGroupName(mm)]; !ok {
+				writeAnthropicError(w, http.StatusBadRequest, "无权限使用该模型")
+				return
+			}
 		}
 		bindings, err := h.models.ListEnabledChannelModelBindingsByPublicID(r.Context(), publicModel)
 		if err != nil {
@@ -265,7 +275,7 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	reqBytes := int64(len(body))
 
-	if h.groups == nil {
+	if h.groups == nil && !h.selfMode {
 		if usageID != 0 && h.quota != nil {
 			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_ = h.quota.Void(bookCtx, usageID)

@@ -16,7 +16,7 @@ func setOpenAIRoutes(r *gin.Engine, opts Options) {
 		return wrapHTTP(middleware.Chain(h,
 			middleware.RequestID,
 			middleware.AccessLog,
-			middleware.TokenAuth(opts.Store),
+			middleware.TokenAuth(opts.Store, selfMode),
 			middleware.BodyCache(0),
 		))
 	}
@@ -25,7 +25,7 @@ func setOpenAIRoutes(r *gin.Engine, opts Options) {
 			middleware.RequestID,
 			middleware.AccessLog,
 			middleware.FeatureGateEffective(opts.Store, selfMode, featureKey),
-			middleware.TokenAuth(opts.Store),
+			middleware.TokenAuth(opts.Store, selfMode),
 			middleware.BodyCache(0),
 		))
 	}

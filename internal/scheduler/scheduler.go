@@ -80,6 +80,8 @@ type Scheduler struct {
 	cooldownBase  time.Duration
 	probeClaimTTL time.Duration
 
+	disableCodexOAuth bool
+
 	groupPointerPersistMu   sync.Mutex
 	groupPointerPersistLast map[int64]groupPointerPersistState
 	groupPointerSyncMu      sync.Mutex
@@ -92,6 +94,10 @@ type Constraints struct {
 	AllowGroups        map[string]struct{}
 	AllowGroupOrder    []string
 	AllowChannelIDs    map[int64]struct{}
+}
+
+type Options struct {
+	DisableCodexOAuth bool
 }
 
 type UpstreamStore interface {
@@ -108,6 +114,10 @@ type ChannelGroupPointerStore interface {
 }
 
 func New(st UpstreamStore) *Scheduler {
+	return NewWithOptions(st, Options{})
+}
+
+func NewWithOptions(st UpstreamStore, opts Options) *Scheduler {
 	s := &Scheduler{
 		st:                      st,
 		state:                   NewState(),
@@ -115,6 +125,7 @@ func New(st UpstreamStore) *Scheduler {
 		rpmWindow:               60 * time.Second,
 		cooldownBase:            30 * time.Second,
 		probeClaimTTL:           30 * time.Second,
+		disableCodexOAuth:       opts.DisableCodexOAuth,
 		groupPointerPersistLast: make(map[int64]groupPointerPersistState),
 		groupPointerSync:        make(map[int64]groupPointerSyncState),
 	}
@@ -290,6 +301,9 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 			continue
 		}
 		if ch.Type != store.UpstreamTypeOpenAICompatible && ch.Type != store.UpstreamTypeCodexOAuth && ch.Type != store.UpstreamTypeAnthropic {
+			continue
+		}
+		if s.disableCodexOAuth && ch.Type == store.UpstreamTypeCodexOAuth {
 			continue
 		}
 		if cons.RequireChannelType != "" && ch.Type != cons.RequireChannelType {

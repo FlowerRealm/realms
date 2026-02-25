@@ -49,7 +49,7 @@ func setModelAPIRoutes(r gin.IRoutes, opts Options) {
 	// Admin models CRUD: /api/models/*
 	// 对齐 new-api：管理侧使用 trailing slash 的集合接口（/api/models/?p=1&page_size=...）。
 	models := r.(*gin.RouterGroup).Group("/models")
-	models.Use(requireRootSession(opts))
+	models.Use(requireRoot(opts))
 	{
 		models.GET("/", adminListManagedModelsHandler(opts))
 		models.GET("/:model_id", adminGetManagedModelHandler(opts))
@@ -62,7 +62,7 @@ func setModelAPIRoutes(r gin.IRoutes, opts Options) {
 
 	// Channel model bindings: /api/channel/:id/models
 	ch := r.(*gin.RouterGroup).Group("/channel")
-	ch.Use(requireRootSession(opts))
+	ch.Use(requireRoot(opts))
 	{
 		ch.GET("/:channel_id/models", adminListChannelModelsHandler(opts))
 		ch.POST("/:channel_id/models", adminCreateChannelModelHandler(opts))

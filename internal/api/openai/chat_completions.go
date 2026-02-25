@@ -77,13 +77,19 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 	var cons scheduler.Constraints
 	cons.RequireChannelType = store.UpstreamTypeOpenAICompatible
 	ags := allowGroupsFromPrincipal(p)
-	if len(ags.Order) == 0 {
-		http.Error(w, "Token 未配置渠道组", http.StatusBadRequest)
-		return
-	}
 	allowSet := ags.Set
-	cons.AllowGroups = allowSet
-	cons.AllowGroupOrder = ags.Order
+	if h.selfMode {
+		allowSet = nil
+		cons.AllowGroups = nil
+		cons.AllowGroupOrder = nil
+	} else {
+		if len(ags.Order) == 0 {
+			http.Error(w, "Token 未配置渠道组", http.StatusBadRequest)
+			return
+		}
+		cons.AllowGroups = allowSet
+		cons.AllowGroupOrder = ags.Order
+	}
 
 	if wantStore {
 		ownerTag := realmsOwnerTagForUser(p.UserID)
@@ -117,9 +123,11 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 				http.Error(w, "查询模型失败", http.StatusBadGateway)
 				return
 			}
-			if _, ok := allowSet[managedModelGroupName(mm)]; !ok {
-				http.Error(w, "无权限使用该模型", http.StatusBadRequest)
-				return
+			if allowSet != nil {
+				if _, ok := allowSet[managedModelGroupName(mm)]; !ok {
+					http.Error(w, "无权限使用该模型", http.StatusBadRequest)
+					return
+				}
 			}
 		}
 		// passthrough 模式下仍尝试使用“渠道绑定模型”做 model 转发（best-effort）；
@@ -193,9 +201,11 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 			http.Error(w, "查询模型失败", http.StatusBadGateway)
 			return
 		}
-		if _, ok := allowSet[managedModelGroupName(mm)]; !ok {
-			http.Error(w, "无权限使用该模型", http.StatusBadRequest)
-			return
+		if allowSet != nil {
+			if _, ok := allowSet[managedModelGroupName(mm)]; !ok {
+				http.Error(w, "无权限使用该模型", http.StatusBadRequest)
+				return
+			}
 		}
 		bindings, err := h.models.ListEnabledChannelModelBindingsByPublicID(r.Context(), publicModel)
 		if err != nil {
@@ -298,7 +308,7 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 	}
 	reqBytes := int64(len(body))
 
-	if h.groups == nil {
+	if h.groups == nil && !h.selfMode {
 		if usageID != 0 && h.quota != nil {
 			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_ = h.quota.Void(bookCtx, usageID)

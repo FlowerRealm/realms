@@ -29,11 +29,13 @@ func setAuthAndPublicRoutes(r *gin.Engine, opts Options) {
 		))
 	}
 
-	r.POST("/oauth/token", publicChain(http.HandlerFunc(oauthTokenHandler(opts))))
-	r.POST("/api/email/verification/send", publicChain(http.HandlerFunc(emailVerificationSendHandler(opts))))
+	if !selfMode {
+		r.POST("/oauth/token", publicChain(http.HandlerFunc(oauthTokenHandler(opts))))
+		r.POST("/api/email/verification/send", publicChain(http.HandlerFunc(emailVerificationSendHandler(opts))))
 
-	if opts.CodexOAuthHandler != nil {
-		r.GET("/auth/callback", publicChain(opts.CodexOAuthHandler))
+		if opts.CodexOAuthHandler != nil {
+			r.GET("/auth/callback", publicChain(opts.CodexOAuthHandler))
+		}
 	}
 
 	// webhooks & notify

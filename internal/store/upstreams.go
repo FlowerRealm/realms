@@ -1550,7 +1550,7 @@ func (s *Store) CreateAnthropicCredential(ctx context.Context, endpointID int64,
 	hint := tokenHint(apiKey)
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO anthropic_credentials(endpoint_id, name, api_key_enc, api_key_hint, status, created_at, updated_at)
-VALUES(?, ?, ?, ?, 1, NOW(), NOW())
+VALUES(?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `, endpointID, name, enc, hint)
 	if err != nil {
 		return 0, nil, fmt.Errorf("创建 anthropic_credential 失败: %w", err)

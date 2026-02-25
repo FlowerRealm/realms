@@ -17,6 +17,9 @@ func TestFeatureStateEffective_SelfModeForcesBillingAndTickets(t *testing.T) {
 	if !got.TicketsDisabled {
 		t.Fatalf("FeatureStateEffective(selfMode=true).TicketsDisabled = false, want true")
 	}
+	if !got.AdminUsersDisabled {
+		t.Fatalf("FeatureStateEffective(selfMode=true).AdminUsersDisabled = false, want true")
+	}
 
 	got = st.FeatureStateEffective(context.Background(), false)
 	if got.BillingDisabled {
@@ -24,5 +27,8 @@ func TestFeatureStateEffective_SelfModeForcesBillingAndTickets(t *testing.T) {
 	}
 	if got.TicketsDisabled {
 		t.Fatalf("FeatureStateEffective(selfMode=false).TicketsDisabled = true, want false")
+	}
+	if got.AdminUsersDisabled {
+		t.Fatalf("FeatureStateEffective(selfMode=false).AdminUsersDisabled = true, want false")
 	}
 }

@@ -23,6 +23,7 @@ import { UsersPage } from './admin/UsersPage';
 
 export function AdminPage() {
   const { user } = useAuth();
+  const isSelfMode = !!user?.self_mode;
 
   if (user?.role !== 'root') {
     return (
@@ -38,28 +39,39 @@ export function AdminPage() {
 
   return (
     <Routes>
-      <Route index element={<AdminHomePage />} />
-      <Route path="channels" element={<ChannelsPage />} />
-      <Route path="channel-groups" element={<ChannelGroupsPage />} />
-      <Route path="channel-groups/:id" element={<ChannelGroupDetailPage />} />
-      <Route path="main-groups" element={<MainGroupsPage />} />
-      <Route path="models" element={<ModelsAdminPage />} />
-      <Route path="users" element={<UsersPage />} />
-      <Route path="submissions" element={<Navigate to="/admin/subscriptions" replace />} />
-      <Route path="subscriptions" element={<SubscriptionsPage />} />
-      <Route path="subscriptions/:id" element={<SubscriptionEditPage />} />
-      <Route path="orders" element={<OrdersPage />} />
-      <Route path="payment-channels" element={<PaymentChannelsPage />} />
-      <Route path="usage" element={<UsageAdminPage />} />
-      <Route path="tickets" element={<TicketsAdminPage mode="all" />} />
-      <Route path="tickets/open" element={<TicketsAdminPage mode="open" />} />
-      <Route path="tickets/closed" element={<TicketsAdminPage mode="closed" />} />
-      <Route path="tickets/:id" element={<TicketAdminDetailPage />} />
-      <Route path="announcements" element={<AnnouncementsAdminPage />} />
-      <Route path="oauth-apps" element={<OAuthAppsAdminPage />} />
-      <Route path="oauth-apps/:id" element={<OAuthAppDetailPage />} />
-      <Route path="settings" element={<SettingsAdminPage />} />
-      <Route path="*" element={<Navigate to="/admin" replace />} />
+      {isSelfMode ? (
+        <>
+          <Route index element={<Navigate to="channels" replace />} />
+          <Route path="channels" element={<ChannelsPage />} />
+          <Route path="usage" element={<UsageAdminPage />} />
+          <Route path="*" element={<Navigate to="/admin/channels" replace />} />
+        </>
+      ) : (
+        <>
+          <Route index element={<AdminHomePage />} />
+          <Route path="channels" element={<ChannelsPage />} />
+          <Route path="channel-groups" element={<ChannelGroupsPage />} />
+          <Route path="channel-groups/:id" element={<ChannelGroupDetailPage />} />
+          <Route path="main-groups" element={<MainGroupsPage />} />
+          <Route path="models" element={<ModelsAdminPage />} />
+          <Route path="users" element={<UsersPage />} />
+          <Route path="submissions" element={<Navigate to="/admin/subscriptions" replace />} />
+          <Route path="subscriptions" element={<SubscriptionsPage />} />
+          <Route path="subscriptions/:id" element={<SubscriptionEditPage />} />
+          <Route path="orders" element={<OrdersPage />} />
+          <Route path="payment-channels" element={<PaymentChannelsPage />} />
+          <Route path="usage" element={<UsageAdminPage />} />
+          <Route path="tickets" element={<TicketsAdminPage mode="all" />} />
+          <Route path="tickets/open" element={<TicketsAdminPage mode="open" />} />
+          <Route path="tickets/closed" element={<TicketsAdminPage mode="closed" />} />
+          <Route path="tickets/:id" element={<TicketAdminDetailPage />} />
+          <Route path="announcements" element={<AnnouncementsAdminPage />} />
+          <Route path="oauth-apps" element={<OAuthAppsAdminPage />} />
+          <Route path="oauth-apps/:id" element={<OAuthAppDetailPage />} />
+          <Route path="settings" element={<SettingsAdminPage />} />
+          <Route path="*" element={<Navigate to="/admin" replace />} />
+        </>
+      )}
     </Routes>
   );
 }

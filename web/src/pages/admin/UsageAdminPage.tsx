@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 
+import { useAuth } from '../../auth/AuthContext';
 import {
   getAdminUsageEventDetail,
   getAdminUsagePage,
@@ -55,6 +56,9 @@ function formatUSD(raw: string): string {
 }
 
 export function UsageAdminPage() {
+  const { user } = useAuth();
+  const isSelfMode = !!user?.self_mode;
+
   const [data, setData] = useState<AdminUsagePage | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
@@ -572,63 +576,65 @@ export function UsageAdminPage() {
           </div>
 
           <div className="col-12">
-            <div className="card border-0 p-0 overflow-hidden">
-              <div className="card-header bg-white py-3 border-bottom-0 px-4">
-                <h5 className="mb-0 fw-bold">
-                  <i className="ri-group-line me-2"></i>消费排行用户（统计区间）
-                </h5>
-              </div>
-              <div className="card-body p-0">
-                <div className="table-responsive">
-                  <table className="table table-hover align-middle mb-0 border-0">
-                    <thead className="table-light text-muted smaller uppercase">
-                      <tr>
-                        <th className="ps-4 border-0">用户</th>
-                        <th className="border-0">状态</th>
-                        <th className="text-end border-0">已结算费用</th>
-                        <th className="text-end pe-4 border-0">预留中</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {topUsers.map((u) => (
-                        <tr key={u.user_id}>
-                          <td className="ps-4">
-                            <div className="d-flex align-items-center">
-                              <div
-                                className="bg-primary bg-opacity-10 text-primary rounded-circle d-flex align-items-center justify-content-center me-3"
-                                style={{ width: 32, height: 32 }}
-                              >
-                                {(u.email || '?').slice(0, 1)}
-                              </div>
-                              <div>
-                                <div className="fw-bold small">{u.email}</div>
-                                <div className="text-muted smaller">{u.role}</div>
-                              </div>
-                            </div>
-                          </td>
-                          <td>
-                            {u.status === 1 ? (
-                              <span className="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-2">正常</span>
-                            ) : (
-                              <span className="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill px-2">禁用</span>
-                            )}
-                          </td>
-                          <td className="text-end font-monospace small fw-bold text-dark">{u.committed_usd}</td>
-                          <td className="text-end font-monospace small text-muted pe-4">{u.reserved_usd}</td>
-                        </tr>
-                      ))}
-                      {topUsers.length === 0 ? (
+            {isSelfMode ? null : (
+              <div className="card border-0 p-0 overflow-hidden">
+                <div className="card-header bg-white py-3 border-bottom-0 px-4">
+                  <h5 className="mb-0 fw-bold">
+                    <i className="ri-group-line me-2"></i>消费排行用户（统计区间）
+                  </h5>
+                </div>
+                <div className="card-body p-0">
+                  <div className="table-responsive">
+                    <table className="table table-hover align-middle mb-0 border-0">
+                      <thead className="table-light text-muted smaller uppercase">
                         <tr>
-                          <td colSpan={4} className="text-center py-5 text-muted small">
-                            暂无用户用量数据
-                          </td>
+                          <th className="ps-4 border-0">用户</th>
+                          <th className="border-0">状态</th>
+                          <th className="text-end border-0">已结算费用</th>
+                          <th className="text-end pe-4 border-0">预留中</th>
                         </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {topUsers.map((u) => (
+                          <tr key={u.user_id}>
+                            <td className="ps-4">
+                              <div className="d-flex align-items-center">
+                                <div
+                                  className="bg-primary bg-opacity-10 text-primary rounded-circle d-flex align-items-center justify-content-center me-3"
+                                  style={{ width: 32, height: 32 }}
+                                >
+                                  {(u.email || '?').slice(0, 1)}
+                                </div>
+                                <div>
+                                  <div className="fw-bold small">{u.email}</div>
+                                  <div className="text-muted smaller">{u.role}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td>
+                              {u.status === 1 ? (
+                                <span className="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-2">正常</span>
+                              ) : (
+                                <span className="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill px-2">禁用</span>
+                              )}
+                            </td>
+                            <td className="text-end font-monospace small fw-bold text-dark">{u.committed_usd}</td>
+                            <td className="text-end font-monospace small text-muted pe-4">{u.reserved_usd}</td>
+                          </tr>
+                        ))}
+                        {topUsers.length === 0 ? (
+                          <tr>
+                            <td colSpan={4} className="text-center py-5 text-muted small">
+                              暂无用户用量数据
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
 
           <div className="col-12">
@@ -674,7 +680,7 @@ export function UsageAdminPage() {
                     <thead className="table-light text-muted smaller uppercase">
                       <tr>
                         <th className="ps-4 border-0">时间</th>
-                        <th className="border-0">用户</th>
+                        {isSelfMode ? null : <th className="border-0">用户</th>}
                         <th className="border-0">接口 / 模型</th>
                         <th className="text-center border-0">状态码</th>
                         <th className="text-end border-0">耗时</th>
@@ -703,10 +709,12 @@ export function UsageAdminPage() {
                               <i className={`ri-arrow-right-s-line text-muted me-1 align-middle ${expandedID === e.id ? 'rotate-90' : ''}`}></i>
                               <span className="align-middle">{e.time}</span>
                             </td>
-                            <td className="text-nowrap">
-                              <div className="fw-bold small">{e.user_email}</div>
-                              <div className="text-muted smaller">ID: {e.user_id}</div>
-                            </td>
+                            {isSelfMode ? null : (
+                              <td className="text-nowrap">
+                                <div className="fw-bold small">{e.user_email}</div>
+                                <div className="text-muted smaller">ID: {e.user_id}</div>
+                              </td>
+                            )}
                             <td className="text-nowrap">
                               <div className="badge bg-light text-dark border fw-normal">{e.account && e.account !== '-' ? e.account : e.model}</div>
                               <div className="text-muted smaller mt-1 font-monospace">{e.endpoint}</div>
@@ -761,7 +769,7 @@ export function UsageAdminPage() {
                           </tr>
                           {expandedID === e.id ? (
                             <tr key={`${e.id}-detail`} className="rlm-usage-detail-row">
-                              <td colSpan={12} className="p-0 border-0">
+                              <td colSpan={isSelfMode ? 11 : 12} className="p-0 border-0">
                                 <div className="bg-light px-4 py-3 mt-1">
                                   {detailLoadingID === e.id ? <div className="text-muted small">加载详情中…</div> : null}
                                   {detailByEventID[e.id] ? (
@@ -808,7 +816,7 @@ export function UsageAdminPage() {
                       ))}
                       {events.length === 0 ? (
                         <tr>
-                          <td colSpan={12} className="text-center py-5 text-muted small">
+                          <td colSpan={isSelfMode ? 11 : 12} className="text-center py-5 text-muted small">
                             暂无请求记录
                           </td>
                         </tr>

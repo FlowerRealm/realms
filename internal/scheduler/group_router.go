@@ -56,7 +56,16 @@ func NewGroupRouter(st ChannelGroupStore, sched *Scheduler, userID int64, routeK
 }
 
 func (r *GroupRouter) Next(ctx context.Context) (Selection, error) {
-	if r.st == nil || r.sched == nil {
+	if r.sched == nil {
+		return Selection{}, errors.New("group router 未配置")
+	}
+
+	// self_mode / minimal-config fallback:
+	// when no ordered channel groups are provided, fall back to flat channel selection.
+	if len(r.cons.AllowGroupOrder) == 0 {
+		return r.sched.SelectWithConstraints(ctx, r.userID, r.routeKeyHash, r.cons)
+	}
+	if r.st == nil {
 		return Selection{}, errors.New("group router 未配置")
 	}
 

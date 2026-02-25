@@ -165,6 +165,19 @@ CREATE TABLE IF NOT EXISTS `openai_compatible_credentials` (
 );
 CREATE INDEX IF NOT EXISTS `idx_openai_credentials_endpoint_id` ON `openai_compatible_credentials` (`endpoint_id`);
 
+CREATE TABLE IF NOT EXISTS `anthropic_credentials` (
+  `id` INTEGER PRIMARY KEY AUTOINCREMENT,
+  `endpoint_id` INTEGER NOT NULL,
+  `name` TEXT NULL,
+  `api_key_enc` BLOB NOT NULL,
+  `api_key_hint` TEXT NULL,
+  `status` INTEGER NOT NULL DEFAULT 1,
+  `last_used_at` DATETIME NULL,
+  `created_at` DATETIME NOT NULL,
+  `updated_at` DATETIME NOT NULL
+);
+CREATE INDEX IF NOT EXISTS `idx_anthropic_credentials_endpoint_id` ON `anthropic_credentials` (`endpoint_id`);
+
 CREATE TABLE IF NOT EXISTS `codex_oauth_accounts` (
   `id` INTEGER PRIMARY KEY AUTOINCREMENT,
   `endpoint_id` INTEGER NOT NULL,

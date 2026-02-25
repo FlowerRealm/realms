@@ -56,3 +56,15 @@ func TestLoad_EnvOverridesDBDriver(t *testing.T) {
 		t.Fatalf("expected sqlite_path to be set")
 	}
 }
+
+func TestLoad_SelfModeEnable(t *testing.T) {
+	t.Setenv("REALMS_SELF_MODE_ENABLE", "true")
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	if !cfg.SelfMode.Enable {
+		t.Fatalf("expected self_mode.enable=true")
+	}
+}

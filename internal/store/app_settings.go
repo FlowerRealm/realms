@@ -3,7 +3,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
@@ -13,6 +15,10 @@ import (
 )
 
 const SettingEmailVerificationEnable = "email_verification_enable"
+
+// SettingSelfModeKeyHash 存储自用模式鉴权 Key 的 SHA256（hex 编码）。
+// 注意：仅存 hash，不存明文 Key。
+const SettingSelfModeKeyHash = "self_mode_key_hash"
 
 const (
 	SettingFeatureDisableWebAnnouncements = "feature_disable_web_announcements"
@@ -59,6 +65,60 @@ const (
 	SettingBillingCreditUSDPerCNY           = "billing_credit_usd_per_cny"
 	SettingBillingPayAsYouGoPriceMultiplier = "billing_paygo_price_multiplier"
 )
+
+func (s *Store) GetSelfModeKeyHash(ctx context.Context) ([]byte, bool, error) {
+	raw, ok, err := s.GetStringAppSetting(ctx, SettingSelfModeKeyHash)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, false, nil
+	}
+	b, err := hex.DecodeString(raw)
+	if err != nil {
+		return nil, false, fmt.Errorf("解析 app_settings[%s] 失败: %w", SettingSelfModeKeyHash, err)
+	}
+	if len(b) != sha256.Size {
+		return nil, false, fmt.Errorf("解析 app_settings[%s] 失败: hash 长度不合法", SettingSelfModeKeyHash)
+	}
+	return b, true, nil
+}
+
+// InsertAppSettingIfAbsent 仅当 key 不存在时写入（不会覆盖已有值）。
+// 返回 inserted=true 表示本次写入成功；inserted=false 表示 key 已存在。
+func (s *Store) InsertAppSettingIfAbsent(ctx context.Context, key string, value string) (inserted bool, err error) {
+	if s.db == nil {
+		return false, errors.New("db 为空")
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false, errors.New("key 不能为空")
+	}
+	value = strings.TrimSpace(value)
+
+	var stmt string
+	switch s.dialect {
+	case DialectSQLite:
+		stmt = "INSERT INTO app_settings(`key`, value, created_at, updated_at)\n" +
+			"VALUES(?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)\n" +
+			"ON CONFLICT(`key`) DO NOTHING"
+	default:
+		// MySQL: INSERT IGNORE 会在 key 已存在时不报错且不更新任何字段。
+		stmt = "INSERT IGNORE INTO app_settings(`key`, value, created_at, updated_at)\n" +
+			"VALUES(?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+	}
+	res, err := s.db.ExecContext(ctx, stmt, key, value)
+	if err != nil {
+		return false, fmt.Errorf("写入 app_settings 失败: %w", err)
+	}
+	aff, err := res.RowsAffected()
+	if err != nil {
+		// 兜底：若无法获取 RowsAffected，就按“已插入”处理（避免误判导致无法初始化）。
+		return true, nil
+	}
+	return aff > 0, nil
+}
 
 func (s *Store) GetAppSetting(ctx context.Context, key string) (string, bool, error) {
 	if s.db == nil {

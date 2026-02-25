@@ -14,7 +14,7 @@ type ChartInstance = {
 type ChartConstructor = new (ctx: CanvasRenderingContext2D, config: unknown) => ChartInstance;
 
 export function AdminHomePage() {
-  const { user } = useAuth();
+  const { user, selfMode } = useAuth();
   const [data, setData] = useState<AdminHome | null>(null);
   const [err, setErr] = useState('');
   const detailTimeLineRef = useRef<HTMLCanvasElement | null>(null);
@@ -359,9 +359,11 @@ export function AdminHomePage() {
                   <Link to="/admin/channels" className="btn btn-outline-primary text-start border-light shadow-sm text-dark hover-white">
                     <i className="ri-git-merge-line me-2 text-primary"></i> 管理上游渠道
                   </Link>
-                  <Link to="/admin/users" className="btn btn-outline-primary text-start border-light shadow-sm text-dark hover-white">
-                    <i className="ri-user-settings-line me-2 text-primary"></i> 管理用户与权限
-                  </Link>
+                  {!selfMode ? (
+                    <Link to="/admin/users" className="btn btn-outline-primary text-start border-light shadow-sm text-dark hover-white">
+                      <i className="ri-user-settings-line me-2 text-primary"></i> 管理用户与权限
+                    </Link>
+                  ) : null}
                 </div>
               </div>
             </div>

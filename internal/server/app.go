@@ -60,7 +60,9 @@ func NewApp(opts AppOptions) (*App, error) {
 	st.SetDialect(store.Dialect(opts.Config.DB.Driver))
 	st.SetAppSettingsDefaults(opts.Config.AppSettingsDefaults)
 
-	sched := scheduler.New(st)
+	sched := scheduler.NewWithOptions(st, scheduler.Options{
+		DisableCodexOAuth: opts.Config.SelfMode.Enable,
+	})
 	sched.SetGroupPointerStore(st)
 	exec := upstream.NewExecutor(st, opts.Config)
 
@@ -74,7 +76,10 @@ func NewApp(opts AppOptions) (*App, error) {
 		sessionSecret = randomSecret(32)
 	}
 
-	oauthFlow := codexoauth.NewFlow(st, sessionCookieName, sessionSecret, localBaseURL(opts.Config), codexOAuthRedirectURI(opts.Config.Server.Addr))
+	var oauthFlow *codexoauth.Flow
+	if !opts.Config.SelfMode.Enable {
+		oauthFlow = codexoauth.NewFlow(st, sessionCookieName, sessionSecret, localBaseURL(opts.Config), codexOAuthRedirectURI(opts.Config.Server.Addr))
+	}
 
 	ticketStorage := tickets.NewStorage(opts.Config.Tickets.AttachmentsDir)
 	proxyLog := proxylog.New(proxylog.Config{
@@ -127,13 +132,13 @@ func NewApp(opts AppOptions) (*App, error) {
 		frontendFS = root.WebDistFS
 	}
 
-	router.SetRouter(engine, router.Options{
-		Store:                           st,
-		SelfMode:                        opts.Config.SelfMode.Enable,
-		AllowOpenRegistration:           opts.Config.Security.AllowOpenRegistration,
-		EmailVerificationEnabledDefault: opts.Config.EmailVerif.Enable,
-		PublicBaseURLDefault:            publicBaseURL,
-		AdminTimeZoneDefault:            opts.Config.AppSettingsDefaults.AdminTimeZone,
+		router.SetRouter(engine, router.Options{
+			Store:                           st,
+			SelfMode:                        opts.Config.SelfMode.Enable,
+			AllowOpenRegistration:           opts.Config.Security.AllowOpenRegistration,
+			EmailVerificationEnabledDefault: opts.Config.EmailVerif.Enable,
+			PublicBaseURLDefault:            publicBaseURL,
+			AdminTimeZoneDefault:            opts.Config.AppSettingsDefaults.AdminTimeZone,
 		BillingDefault:                  opts.Config.Billing,
 		SMTPDefault:                     opts.Config.SMTP,
 		TicketStorage:                   ticketStorage,
@@ -147,6 +152,9 @@ func NewApp(opts AppOptions) (*App, error) {
 		ChannelTestCLIConcurrency:       opts.Config.ChannelTestCLIConcurrency,
 
 		CodexOAuthHandler: func() http.Handler {
+			if oauthFlow == nil {
+				return nil
+			}
 			return oauthFlow.Handler()
 		}(),
 

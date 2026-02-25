@@ -35,13 +35,36 @@ func setWebSPARoutes(r *gin.Engine, opts Options) {
 	fallbackIndexPage := defaultIndexPage()
 
 	r.NoRoute(func(c *gin.Context) {
-		if isAPIPrefix(c.Request.URL.Path) {
-			c.AbortWithStatus(http.StatusNotFound)
+		p := strings.TrimSpace(c.Request.URL.Path)
+		if opts.SelfMode && strings.HasPrefix(p, "/oauth") {
+			c.Data(http.StatusNotFound, "text/plain; charset=utf-8", []byte("Not Found"))
+			return
+		}
+		if isAPIPrefix(p) {
+			c.Data(http.StatusNotFound, "text/plain; charset=utf-8", []byte("Not Found"))
+			return
+		}
+		if opts.SelfMode && !isSelfModeAllowedWebPath(p) {
+			c.Data(http.StatusNotFound, "text/plain; charset=utf-8", []byte("Not Found"))
 			return
 		}
 		c.Header("Cache-Control", "no-cache")
 		c.Data(http.StatusOK, "text/html; charset=utf-8", resolveSPAIndexPage(opts, fallbackIndexPage))
 	})
+}
+
+func isSelfModeAllowedWebPath(p string) bool {
+	p = strings.TrimSpace(p)
+	switch {
+	case p == "/":
+		return true
+	case p == "/login":
+		return true
+	case strings.HasPrefix(p, "/admin"):
+		return true
+	default:
+		return false
+	}
 }
 
 func resolveSPAIndexPage(opts Options, fallback []byte) []byte {

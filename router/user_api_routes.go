@@ -1,6 +1,7 @@
 package router
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -29,6 +30,11 @@ type userRegisterRequest struct {
 }
 
 func setUserAPIRoutes(r gin.IRoutes, opts Options) {
+	if opts.SelfMode {
+		r.GET("/user/self", userSelfHandler(opts))
+		return
+	}
+
 	r.POST("/user/register", userRegisterHandler(opts))
 	r.POST("/user/login", userLoginHandler(opts))
 	r.GET("/user/logout", userLogoutHandler())
@@ -37,6 +43,10 @@ func setUserAPIRoutes(r gin.IRoutes, opts Options) {
 
 func userLoginHandler(opts Options) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if opts.SelfMode {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "自用模式不支持账号登录"})
+			return
+		}
 		if opts.Store == nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
@@ -97,6 +107,10 @@ func userLoginHandler(opts Options) gin.HandlerFunc {
 
 func userRegisterHandler(opts Options) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if opts.SelfMode {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "自用模式不支持注册"})
+			return
+		}
 		if !opts.AllowOpenRegistration {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "当前环境未开放注册"})
 			return
@@ -214,6 +228,64 @@ func userSelfHandler(opts Options) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if opts.Store == nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			return
+		}
+
+		if opts.SelfMode {
+			raw := extractBearer(c.GetHeader("Authorization"))
+			if raw == "" {
+				raw = c.GetHeader("x-api-key")
+			}
+			if raw == "" {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "未提供 Key"})
+				return
+			}
+
+			expectHash, ok, err := opts.Store.GetSelfModeKeyHash(c.Request.Context())
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "鉴权失败"})
+				return
+			}
+			if !ok {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "自用模式尚未设置 Key"})
+				return
+			}
+			if subtle.ConstantTimeCompare(crypto.TokenHash(raw), expectHash) != 1 {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "Key 无效"})
+				return
+			}
+
+			emailVerifEnabled := opts.EmailVerificationEnabledDefault
+			if v, ok, err := opts.Store.GetBoolAppSetting(c.Request.Context(), store.SettingEmailVerificationEnable); err == nil && ok {
+				emailVerifEnabled = v
+			}
+			features := opts.Store.FeatureStateEffective(c.Request.Context(), opts.SelfMode)
+
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"message": "",
+				"data": gin.H{
+					"id":                         selfModeVirtualUserID,
+					"username":                   "self",
+					"role":                       store.UserRoleRoot,
+					"status":                     1,
+					"self_mode":                  true,
+					"email_verification_enabled": emailVerifEnabled,
+					"features": gin.H{
+						"web_announcements_disabled":    features.WebAnnouncementsDisabled,
+						"web_tokens_disabled":           features.WebTokensDisabled,
+						"web_usage_disabled":            features.WebUsageDisabled,
+						"models_disabled":               features.ModelsDisabled,
+						"billing_disabled":              features.BillingDisabled,
+						"tickets_disabled":              features.TicketsDisabled,
+						"admin_channels_disabled":       features.AdminChannelsDisabled,
+						"admin_channel_groups_disabled": features.AdminChannelGroupsDisabled,
+						"admin_users_disabled":          features.AdminUsersDisabled,
+						"admin_usage_disabled":          features.AdminUsageDisabled,
+						"admin_announcements_disabled":  features.AdminAnnouncementsDisabled,
+					},
+				},
+			})
 			return
 		}
 

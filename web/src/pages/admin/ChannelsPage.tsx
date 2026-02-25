@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 
+import { useAuth } from '../../auth/AuthContext';
 import { BootstrapModal } from '../../components/BootstrapModal';
 import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { closeModalById } from '../../components/modal';
@@ -93,6 +94,10 @@ type ChannelPointerTarget = {
 };
 
 export function ChannelsPage() {
+  const { user } = useAuth();
+  const isSelfMode = !!user?.self_mode;
+  const allowCodexOAuth = !isSelfMode;
+
   const [channels, setChannels] = useState<ChannelAdminItem[]>([]);
   const channelsRef = useRef<ChannelAdminItem[]>([]);
 
@@ -365,7 +370,7 @@ export function ChannelsPage() {
 
       if (!pageRes.success) throw new Error(pageRes.message || '加载渠道失败');
       const pageChannels = pageRes.data?.channels || [];
-      const normalizedChannels = normalizeChannelSections(pageChannels);
+      const normalizedChannels = normalizeChannelSections(pageChannels).filter((ch) => (allowCodexOAuth ? true : ch.type !== 'codex_oauth'));
       channelsRef.current = normalizedChannels;
       setUsageStart(pageRes.data?.start || '');
       setUsageEnd(pageRes.data?.end || '');
@@ -375,7 +380,7 @@ export function ChannelsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [allowCodexOAuth]);
 
   useEffect(() => {
     void refresh();
@@ -425,6 +430,7 @@ export function ChannelsPage() {
 
   useEffect(() => {
     void (async () => {
+      if (isSelfMode) return;
       try {
         const res = await listAdminChannelGroups();
         if (res.success) setChannelGroups(res.data || []);
@@ -432,7 +438,7 @@ export function ChannelsPage() {
         // ignore
       }
     })();
-  }, []);
+  }, [isSelfMode]);
 
   const defaultGroupName = useMemo(() => {
     const byDefault = (channelGroups.find((g) => g.is_default)?.name || '').trim();
@@ -519,12 +525,13 @@ export function ChannelsPage() {
 
   useEffect(() => {
     if (!expandedChannelID) return;
+    if (!allowCodexOAuth) return;
     const target = channels.find((item) => item.id === expandedChannelID);
     if (!target || target.type !== 'codex_oauth') return;
     const panel = detailPanelByChannel[expandedChannelID] || 'stats';
     if (panel !== 'accounts') return;
     void loadCodexAccountsForChannel(expandedChannelID);
-  }, [channels, detailPanelByChannel, expandedChannelID, loadCodexAccountsForChannel]);
+  }, [allowCodexOAuth, channels, detailPanelByChannel, expandedChannelID, loadCodexAccountsForChannel]);
 
   const openChannelSettingsModal = useCallback((ch: { id: number; name?: string }, tab: 'common' | 'keys' | 'models' | 'advanced' = 'common') => {
     setSettingsTab(tab);
@@ -540,6 +547,7 @@ export function ChannelsPage() {
   }, []);
 
   useEffect(() => {
+    if (!allowCodexOAuth) return;
     if (oauthQueryHandled.current || loading) return;
     if (typeof window === 'undefined') return;
     oauthQueryHandled.current = true;
@@ -565,9 +573,10 @@ export function ChannelsPage() {
       const nextURL = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ''}${window.location.hash || ''}`;
       window.history.replaceState({}, '', nextURL);
     }
-  }, [channels, loading, openChannelSettingsModal]);
+  }, [allowCodexOAuth, channels, loading, openChannelSettingsModal]);
 
   useEffect(() => {
+    if (!allowCodexOAuth) return;
     if (typeof window === 'undefined') return;
     const onMessage = (event: MessageEvent) => {
       const payload = event.data as { type?: string; redirectURL?: string } | null;
@@ -597,7 +606,7 @@ export function ChannelsPage() {
     return () => {
       window.removeEventListener('message', onMessage);
     };
-  }, [channels, openChannelSettingsModal, settingsChannel, settingsChannelID]);
+  }, [allowCodexOAuth, channels, openChannelSettingsModal, settingsChannel, settingsChannelID]);
 
   const applyChannelModelBindings = useCallback((items: ChannelModelBinding[]) => {
     setBindings(items);
@@ -1005,11 +1014,11 @@ export function ChannelsPage() {
                       const codexPanelLoading = !!codexAccountsLoadingByChannel[ch.id];
                       const codexPanelErr = codexAccountsErrByChannel[ch.id] || '';
                       const rowBaseClassName = ['rlm-channel-row-main', channelDisabled ? 'table-secondary opacity-75' : ''].filter((v) => v).join(' ');
-                      const groupNames = parseGroupsCSV(ch.groups || '');
-                      const pointerGroups = groupNames
-                        .map((name) => channelGroupByName.get(name))
-                        .filter((g): g is AdminChannelGroup => !!g && g.status === 1);
-                      const canSetPointer = !channelDisabled && pointerGroups.length > 0;
+                      const groupNames = isSelfMode ? [] : parseGroupsCSV(ch.groups || '');
+                      const pointerGroups = isSelfMode
+                        ? []
+                        : groupNames.map((name) => channelGroupByName.get(name)).filter((g): g is AdminChannelGroup => !!g && g.status === 1);
+                      const canSetPointer = !isSelfMode && !channelDisabled && pointerGroups.length > 0;
                       const setPointerTitle = channelDisabled ? '禁用渠道不可设为指针' : pointerGroups.length === 0 ? '该渠道未加入任何启用的渠道组' : '设为指针';
 
                       return (
@@ -1207,21 +1216,23 @@ export function ChannelsPage() {
                                 {ch.status === 1 ? '禁用' : '启用'}
                               </button>
 
-                              <button
-                                className="btn btn-sm btn-light border text-warning"
-                                type="button"
-                                title={setPointerTitle}
-                                disabled={loading || !canSetPointer}
-                                data-bs-toggle="modal"
-                                data-bs-target="#setChannelPointerModal"
-                                onClick={() => {
-                                  if (!canSetPointer) return;
-                                  setPointerTarget({ id: ch.id, name: ch.name || `渠道 #${ch.id}`, groups: ch.groups || '' });
-                                  setPointerGroupID(String(pointerGroups[0].id));
-                                }}
-                              >
-                                <i className="ri-pushpin-2-line me-1"></i>指针
-                              </button>
+                              {isSelfMode ? null : (
+                                <button
+                                  className="btn btn-sm btn-light border text-warning"
+                                  type="button"
+                                  title={setPointerTitle}
+                                  disabled={loading || !canSetPointer}
+                                  data-bs-toggle="modal"
+                                  data-bs-target="#setChannelPointerModal"
+                                  onClick={() => {
+                                    if (!canSetPointer) return;
+                                    setPointerTarget({ id: ch.id, name: ch.name || `渠道 #${ch.id}`, groups: ch.groups || '' });
+                                    setPointerGroupID(String(pointerGroups[0].id));
+                                  }}
+                                >
+                                  <i className="ri-pushpin-2-line me-1"></i>指针
+                                </button>
+                              )}
 
                               <button
                                 className="btn btn-sm btn-primary"
@@ -1275,7 +1286,7 @@ export function ChannelsPage() {
                                 >
                                   测试
                                 </button>
-                                {ch.type === 'codex_oauth' ? (
+                                {allowCodexOAuth && ch.type === 'codex_oauth' ? (
                                   <button
                                     type="button"
                                     className={`btn btn-sm ${detailPanel === 'accounts' ? 'btn-primary' : 'btn-light border'}`}
@@ -1327,7 +1338,7 @@ export function ChannelsPage() {
                                     <div className="text-muted small mt-2">暂无测试记录，点击上方“测试”按钮可触发探测。</div>
                                   )}
                                 </div>
-                              ) : detailPanel === 'accounts' && ch.type === 'codex_oauth' ? (
+                              ) : detailPanel === 'accounts' && allowCodexOAuth && ch.type === 'codex_oauth' ? (
                                 <div className="border rounded-3 p-3 bg-white">
                                   <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
                                     <span className="fw-semibold text-dark">账号统计</span>
@@ -1572,67 +1583,69 @@ export function ChannelsPage() {
         </div>
       </SegmentedFrame>
 
-      <BootstrapModal
-        id="setChannelPointerModal"
-        title={pointerTarget ? `设为指针：${pointerTarget.name || `#${pointerTarget.id}`}` : '设为指针'}
-        dialogClassName="modal-dialog-centered"
-        onHidden={() => {
-          setPointerTarget(null);
-          setPointerGroupID('');
-        }}
-      >
-        {!pointerTarget ? (
-          <div className="text-muted">未选择渠道。</div>
-        ) : pointerGroupOptions.length === 0 ? (
-          <div className="text-muted">该渠道未加入任何启用的渠道组，无法设为指针。</div>
-        ) : (
-          <form
-            className="row g-3"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              if (!pointerTarget) return;
-              const groupID = Number.parseInt(pointerGroupID, 10) || 0;
-              if (groupID <= 0) {
-                setErr('请选择渠道组');
-                return;
-              }
-              const g = pointerGroupOptions.find((x) => x.id === groupID) || null;
-              if (!window.confirm(`确认将渠道 ${pointerTarget.name || pointerTarget.id} 设为渠道组 ${g?.name || groupID} 的指针？`)) return;
-              setErr('');
-              setNotice('');
-              try {
-                const res = await upsertAdminChannelGroupPointer(groupID, { channel_id: pointerTarget.id, pinned: true });
-                if (!res.success) throw new Error(res.message || '设置失败');
-                setNotice(`已设置指针：${g?.name || groupID} → ${pointerTarget.name || pointerTarget.id}`);
-                closeModalById('setChannelPointerModal');
-              } catch (e) {
-                setErr(e instanceof Error ? e.message : '设置失败');
-              }
-            }}
-          >
-            <div className="col-12">
-              <label className="form-label">选择渠道组</label>
-              <select className="form-select" value={pointerGroupID} onChange={(e) => setPointerGroupID(e.target.value)}>
-                {pointerGroupOptions.map((g) => (
-                  <option key={g.id} value={String(g.id)}>
-                    {g.name} #{g.id}
-                  </option>
-                ))}
-              </select>
-              <div className="form-text small text-muted">指针会固定到该渠道，直到被重新设置。</div>
-            </div>
+      {isSelfMode ? null : (
+        <BootstrapModal
+          id="setChannelPointerModal"
+          title={pointerTarget ? `设为指针：${pointerTarget.name || `#${pointerTarget.id}`}` : '设为指针'}
+          dialogClassName="modal-dialog-centered"
+          onHidden={() => {
+            setPointerTarget(null);
+            setPointerGroupID('');
+          }}
+        >
+          {!pointerTarget ? (
+            <div className="text-muted">未选择渠道。</div>
+          ) : pointerGroupOptions.length === 0 ? (
+            <div className="text-muted">该渠道未加入任何启用的渠道组，无法设为指针。</div>
+          ) : (
+            <form
+              className="row g-3"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!pointerTarget) return;
+                const groupID = Number.parseInt(pointerGroupID, 10) || 0;
+                if (groupID <= 0) {
+                  setErr('请选择渠道组');
+                  return;
+                }
+                const g = pointerGroupOptions.find((x) => x.id === groupID) || null;
+                if (!window.confirm(`确认将渠道 ${pointerTarget.name || pointerTarget.id} 设为渠道组 ${g?.name || groupID} 的指针？`)) return;
+                setErr('');
+                setNotice('');
+                try {
+                  const res = await upsertAdminChannelGroupPointer(groupID, { channel_id: pointerTarget.id, pinned: true });
+                  if (!res.success) throw new Error(res.message || '设置失败');
+                  setNotice(`已设置指针：${g?.name || groupID} → ${pointerTarget.name || pointerTarget.id}`);
+                  closeModalById('setChannelPointerModal');
+                } catch (e) {
+                  setErr(e instanceof Error ? e.message : '设置失败');
+                }
+              }}
+            >
+              <div className="col-12">
+                <label className="form-label">选择渠道组</label>
+                <select className="form-select" value={pointerGroupID} onChange={(e) => setPointerGroupID(e.target.value)}>
+                  {pointerGroupOptions.map((g) => (
+                    <option key={g.id} value={String(g.id)}>
+                      {g.name} #{g.id}
+                    </option>
+                  ))}
+                </select>
+                <div className="form-text small text-muted">指针会固定到该渠道，直到被重新设置。</div>
+              </div>
 
-            <div className="modal-footer border-top-0 px-0 pb-0">
-              <button type="button" className="btn btn-light" data-bs-dismiss="modal">
-                取消
-              </button>
-              <button type="submit" className="btn btn-primary px-4">
-                保存
-              </button>
-            </div>
-          </form>
-        )}
-      </BootstrapModal>
+              <div className="modal-footer border-top-0 px-0 pb-0">
+                <button type="button" className="btn btn-light" data-bs-dismiss="modal">
+                  取消
+                </button>
+                <button type="submit" className="btn btn-primary px-4">
+                  保存
+                </button>
+              </div>
+            </form>
+          )}
+        </BootstrapModal>
+      )}
 
       <BootstrapModal
         id="createChannelModal"
@@ -1686,6 +1699,7 @@ export function ChannelsPage() {
               value={createType}
               onChange={(e) => {
                 const t = e.target.value as 'openai_compatible' | 'anthropic' | 'codex_oauth';
+                if (!allowCodexOAuth && t === 'codex_oauth') return;
                 setCreateType(t);
                 if (t === 'openai_compatible') setCreateBaseURL('https://api.openai.com');
                 if (t === 'anthropic') setCreateBaseURL('https://api.anthropic.com');
@@ -1697,7 +1711,7 @@ export function ChannelsPage() {
             >
               <option value="openai_compatible">openai_compatible（OpenAI 兼容）</option>
               <option value="anthropic">anthropic（Anthropic）</option>
-              <option value="codex_oauth">codex_oauth（Codex OAuth）</option>
+              {allowCodexOAuth ? <option value="codex_oauth">codex_oauth（Codex OAuth）</option> : null}
             </select>
           </div>
           <div className="col-md-8">
@@ -1712,15 +1726,17 @@ export function ChannelsPage() {
             <label className="form-label">优先级</label>
             <input className="form-control" value={createPriority} onChange={(e) => setCreatePriority(e.target.value)} inputMode="numeric" placeholder="0" />
           </div>
-          <div className="col-md-8">
-	            <label className="form-label">渠道组（groups，逗号分隔）</label>
-            <input
-              className="form-control font-monospace"
-              value={createGroups}
-              onChange={(e) => setCreateGroups(e.target.value)}
-              placeholder={defaultGroupName || 'default'}
-            />
-          </div>
+          {isSelfMode ? null : (
+            <div className="col-md-8">
+              <label className="form-label">渠道组（groups，逗号分隔）</label>
+              <input
+                className="form-control font-monospace"
+                value={createGroups}
+                onChange={(e) => setCreateGroups(e.target.value)}
+                placeholder={defaultGroupName || 'default'}
+              />
+            </div>
+          )}
           <div className="col-md-4 d-flex align-items-end">
             <div className="form-check">
               <input className="form-check-input" type="checkbox" id="createPromotion" checked={createPromotion} onChange={(e) => setCreatePromotion(e.target.checked)} />
@@ -1730,7 +1746,7 @@ export function ChannelsPage() {
             </div>
           </div>
 
-          {createType === 'codex_oauth' ? (
+          {allowCodexOAuth && createType === 'codex_oauth' ? (
             <div className="col-12">
               <div className="alert alert-light border mb-0">
                 <div className="fw-semibold">codex_oauth 不需要 API Key</div>
@@ -1924,33 +1940,37 @@ export function ChannelsPage() {
                       </div>
 
                       <div className="col-12">
-	                        <label className="form-label fw-medium">渠道组设置</label>
-                        <div className="card p-2" style={{ maxHeight: 260, overflowY: 'auto' }}>
-                          {channelGroups.length === 0 ? (
-	                            <div className="text-muted small px-2 py-1">暂无渠道组（请先到“渠道组”创建）。</div>
-                          ) : (
-                            channelGroups.map((g) => {
-                              const selected = parseGroupsCSV(editGroups).includes(g.name);
-                              const disabled = g.status !== 1 && !selected;
-                              return (
-                                <div className="form-check" key={g.id}>
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                    id={`group_edit_${settingsChannelID}_${g.name}`}
-                                    checked={selected}
-                                    disabled={disabled}
-                                    onChange={(e) => setEditGroups(toggleGroupsCSV(editGroups, g.name, e.target.checked))}
-                                  />
-                                  <label className="form-check-label w-100" htmlFor={`group_edit_${settingsChannelID}_${g.name}`}>
-                                    {g.name} {g.status !== 1 ? <span className="badge bg-secondary ms-1 smaller">禁用</span> : null}
-                                  </label>
-                                </div>
-                              );
-                            })
-                          )}
-                        </div>
-                        <div className="form-text small text-muted mt-2">用于上游调度选择渠道。</div>
+                        {isSelfMode ? null : (
+                          <>
+                            <label className="form-label fw-medium">渠道组设置</label>
+                            <div className="card p-2" style={{ maxHeight: 260, overflowY: 'auto' }}>
+                              {channelGroups.length === 0 ? (
+                                <div className="text-muted small px-2 py-1">暂无渠道组（请先到“渠道组”创建）。</div>
+                              ) : (
+                                channelGroups.map((g) => {
+                                  const selected = parseGroupsCSV(editGroups).includes(g.name);
+                                  const disabled = g.status !== 1 && !selected;
+                                  return (
+                                    <div className="form-check" key={g.id}>
+                                      <input
+                                        className="form-check-input"
+                                        type="checkbox"
+                                        id={`group_edit_${settingsChannelID}_${g.name}`}
+                                        checked={selected}
+                                        disabled={disabled}
+                                        onChange={(e) => setEditGroups(toggleGroupsCSV(editGroups, g.name, e.target.checked))}
+                                      />
+                                      <label className="form-check-label w-100" htmlFor={`group_edit_${settingsChannelID}_${g.name}`}>
+                                        {g.name} {g.status !== 1 ? <span className="badge bg-secondary ms-1 smaller">禁用</span> : null}
+                                      </label>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                            <div className="form-text small text-muted mt-2">用于上游调度选择渠道。</div>
+                          </>
+                        )}
                       </div>
 
                       <div className="col-md-6">
@@ -2053,7 +2073,7 @@ export function ChannelsPage() {
               <div className="d-flex flex-column gap-3">
                 <div className="card border-0 shadow-sm">
                   <div className="card-body">
-                    {settingsChannel.type === 'codex_oauth' ? (
+                    {allowCodexOAuth && settingsChannel.type === 'codex_oauth' ? (
                       <div className="d-flex flex-column gap-3">
                         <div className="p-3 border rounded bg-white">
                                 <div className="fw-semibold mb-2">OAuth 授权</div>
@@ -2319,7 +2339,7 @@ export function ChannelsPage() {
                   </div>
                 </div>
 
-                {settingsChannel.type === 'codex_oauth' ? null : (
+                {allowCodexOAuth && settingsChannel.type === 'codex_oauth' ? null : (
                   <div className="card border-0 shadow-sm">
                     <div className="card-header bg-white fw-bold py-3">查看明文 Key（可选）</div>
                     <div className="card-body">

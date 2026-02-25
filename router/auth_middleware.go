@@ -1,6 +1,7 @@
 package router
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strconv"
 	"strings"
@@ -9,10 +10,87 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"realms/internal/auth"
+	rlmcrypto "realms/internal/crypto"
 	"realms/internal/store"
 )
 
 const sessionUserUpdatedAtKey = "user_updated_at_unix"
+
+const (
+	selfModeVirtualUserID  int64 = 1
+	selfModeVirtualTokenID int64 = 1
+)
+
+func extractBearer(v string) string {
+	if v == "" {
+		return ""
+	}
+	parts := strings.SplitN(v, " ", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	if !strings.EqualFold(parts[0], "bearer") {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
+}
+
+func requireSelfModeKey(opts Options) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		raw := extractBearer(c.GetHeader("Authorization"))
+		if raw == "" {
+			raw = c.GetHeader("x-api-key")
+		}
+		if raw == "" {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "未提供 Key"})
+			c.Abort()
+			return
+		}
+
+		if opts.Store == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			c.Abort()
+			return
+		}
+		expectHash, ok, err := opts.Store.GetSelfModeKeyHash(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "鉴权失败"})
+			c.Abort()
+			return
+		}
+		if !ok {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "自用模式尚未设置 Key"})
+			c.Abort()
+			return
+		}
+		if subtle.ConstantTimeCompare(rlmcrypto.TokenHash(raw), expectHash) != 1 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "Key 无效"})
+			c.Abort()
+			return
+		}
+
+		role := store.UserRoleRoot
+		tokenID := selfModeVirtualTokenID
+		p := auth.Principal{
+			ActorType: auth.ActorTypeToken,
+			UserID:    selfModeVirtualUserID,
+			TokenID:   &tokenID,
+			Role:      role,
+		}
+		c.Request = c.Request.WithContext(auth.WithPrincipal(c.Request.Context(), p))
+
+		c.Set("rlm_user_id", selfModeVirtualUserID)
+		c.Set("rlm_user_role", role)
+		c.Next()
+	}
+}
+
+func requireRoot(opts Options) gin.HandlerFunc {
+	if opts.SelfMode {
+		return requireSelfModeKey(opts)
+	}
+	return requireRootSession(opts)
+}
 
 func requireUserSession(opts Options) gin.HandlerFunc {
 	return func(c *gin.Context) {

@@ -62,22 +62,22 @@ func (s *Store) FeatureStateEffective(ctx context.Context, selfMode bool) Featur
 		}
 	}
 
-	out := FeatureState{
-		WebAnnouncementsDisabled: defaultB(SettingFeatureDisableWebAnnouncements),
-		WebTokensDisabled:        defaultB(SettingFeatureDisableWebTokens),
-		WebUsageDisabled:         defaultB(SettingFeatureDisableWebUsage),
+		out := FeatureState{
+			WebAnnouncementsDisabled: defaultB(SettingFeatureDisableWebAnnouncements),
+			WebTokensDisabled:        defaultB(SettingFeatureDisableWebTokens),
+			WebUsageDisabled:         defaultB(SettingFeatureDisableWebUsage),
 
-		ModelsDisabled: defaultB(SettingFeatureDisableModels),
+			ModelsDisabled: defaultB(SettingFeatureDisableModels),
 
-		BillingDisabled: selfMode || defaultB(SettingFeatureDisableBilling),
-		TicketsDisabled: selfMode || defaultB(SettingFeatureDisableTickets),
+			BillingDisabled: selfMode || defaultB(SettingFeatureDisableBilling),
+			TicketsDisabled: selfMode || defaultB(SettingFeatureDisableTickets),
 
-		AdminChannelsDisabled:      defaultB(SettingFeatureDisableAdminChannels),
-		AdminChannelGroupsDisabled: defaultB(SettingFeatureDisableAdminChannelGroups),
-		AdminUsersDisabled:         defaultB(SettingFeatureDisableAdminUsers),
-		AdminUsageDisabled:         defaultB(SettingFeatureDisableAdminUsage),
-		AdminAnnouncementsDisabled: defaultB(SettingFeatureDisableAdminAnnouncements),
-	}
+			AdminChannelsDisabled:      defaultB(SettingFeatureDisableAdminChannels),
+			AdminChannelGroupsDisabled: defaultB(SettingFeatureDisableAdminChannelGroups),
+			AdminUsersDisabled:         selfMode || defaultB(SettingFeatureDisableAdminUsers),
+			AdminUsageDisabled:         defaultB(SettingFeatureDisableAdminUsage),
+			AdminAnnouncementsDisabled: defaultB(SettingFeatureDisableAdminAnnouncements),
+		}
 
 	keys := []string{
 		SettingFeatureDisableWebAnnouncements,
@@ -136,9 +136,9 @@ func (s *Store) FeatureStateEffective(ctx context.Context, selfMode bool) Featur
 	if v, ok := parseBool(SettingFeatureDisableAdminChannelGroups); ok {
 		out.AdminChannelGroupsDisabled = v
 	}
-	if v, ok := parseBool(SettingFeatureDisableAdminUsers); ok {
-		out.AdminUsersDisabled = v
-	}
+		if v, ok := parseBool(SettingFeatureDisableAdminUsers); ok {
+			out.AdminUsersDisabled = selfMode || v
+		}
 	if v, ok := parseBool(SettingFeatureDisableAdminUsage); ok {
 		out.AdminUsageDisabled = v
 	}

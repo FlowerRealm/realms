@@ -123,11 +123,14 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ags := allowGroupsFromPrincipal(p)
-	if len(ags.Order) == 0 {
-		http.Error(w, "Token 未配置渠道组", http.StatusBadRequest)
-		return
-	}
 	allowSet := ags.Set
+	if len(ags.Order) == 0 {
+		if !h.selfMode {
+			http.Error(w, "Token 未配置渠道组", http.StatusBadRequest)
+			return
+		}
+		allowSet = nil
+	}
 
 	type item struct {
 		ID      string `json:"id"`
@@ -146,8 +149,10 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		groupName := managedModelGroupName(m)
-		if _, ok := allowSet[groupName]; !ok {
-			continue
+		if allowSet != nil {
+			if _, ok := allowSet[groupName]; !ok {
+				continue
+			}
 		}
 		ownedBy := "realms"
 		if m.OwnedBy != nil && strings.TrimSpace(*m.OwnedBy) != "" {
@@ -234,8 +239,18 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 
 	ags := allowGroupsFromPrincipal(p)
 	allowSet := ags.Set
-	cons.AllowGroups = allowSet
-	cons.AllowGroupOrder = ags.Order
+	if h.selfMode {
+		allowSet = nil
+		cons.AllowGroups = nil
+		cons.AllowGroupOrder = nil
+	} else {
+		if len(ags.Order) == 0 {
+			http.Error(w, "Token 未配置渠道组", http.StatusBadRequest)
+			return
+		}
+		cons.AllowGroups = allowSet
+		cons.AllowGroupOrder = ags.Order
+	}
 
 	var rewriteBody func(sel scheduler.Selection) ([]byte, error)
 
@@ -255,9 +270,11 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			groupName := managedModelGroupName(mm)
-			if _, ok := allowSet[groupName]; !ok {
-				http.Error(w, "无权限使用该模型", http.StatusBadRequest)
-				return
+			if allowSet != nil {
+				if _, ok := allowSet[groupName]; !ok {
+					http.Error(w, "无权限使用该模型", http.StatusBadRequest)
+					return
+				}
 			}
 		}
 		// passthrough 模式下仍尝试使用“渠道绑定模型”做 model 转发（best-effort）；
@@ -329,9 +346,11 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		groupName := managedModelGroupName(mm)
-		if _, ok := allowSet[groupName]; !ok {
-			http.Error(w, "无权限使用该模型", http.StatusBadRequest)
-			return
+		if allowSet != nil {
+			if _, ok := allowSet[groupName]; !ok {
+				http.Error(w, "无权限使用该模型", http.StatusBadRequest)
+				return
+			}
 		}
 		bindings, err = h.models.ListEnabledChannelModelBindingsByPublicID(r.Context(), publicModel)
 		if err != nil {
@@ -450,7 +469,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	reqBytes := int64(len(body))
 
-	if h.groups == nil {
+	if h.groups == nil && !h.selfMode {
 		if usageID != 0 && h.quota != nil {
 			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_ = h.quota.Void(bookCtx, usageID)
