@@ -37,13 +37,13 @@ git clone "https://github.com/FlowerRealm/realms.git"
 cd "realms"
 
 cp ".env.example" ".env"
-docker compose pull realms
-docker compose up -d
+	docker compose pull realms
+	docker compose up -d
 
-curl -fsS "http://127.0.0.1:18080/healthz"
-```
+	curl -fsS "http://127.0.0.1:8080/healthz"
+	```
 
-默认端口是 `127.0.0.1:18080`（可用 `.env` 的 `REALMS_HTTP_PORT` 覆盖；见 `docker-compose.yml`）。
+	默认端口是 `127.0.0.1:8080`（可用 `.env` 的 `REALMS_HTTP_PORT` 覆盖；见 `docker-compose.yml`）。
 
 ---
 
@@ -90,33 +90,33 @@ make desktop-dist
 
 Linux/macOS（bash/zsh）：
 
-```bash
-export OPENAI_BASE_URL="http://127.0.0.1:18080/v1" # Desktop 改为 http://127.0.0.1:8080/v1
-export OPENAI_API_KEY="sk_..."
-```
+	```bash
+	export OPENAI_BASE_URL="http://127.0.0.1:8080/v1"
+	export OPENAI_API_KEY="sk_..."
+	```
 
 Windows（PowerShell）：
 
-```powershell
-$env:OPENAI_BASE_URL = "http://127.0.0.1:18080/v1" # Desktop 改为 http://127.0.0.1:8080/v1
-$env:OPENAI_API_KEY = "sk_..."
-```
+	```powershell
+	$env:OPENAI_BASE_URL = "http://127.0.0.1:8080/v1"
+	$env:OPENAI_API_KEY = "sk_..."
+	```
 
 ### 3.2 （可选）Codex 配置文件示例
 
 Linux/macOS：`~/.codex/config.toml`；Windows：`%USERPROFILE%\\.codex\\config.toml`
 
-```toml
-disable_response_storage = true
-model_provider = "realms"
-model = "gpt-5.2"
+	```toml
+	disable_response_storage = true
+	model_provider = "realms"
+	model = "gpt-5.2"
 
-[model_providers.realms]
-name = "Realms"
-base_url = "http://127.0.0.1:18080/v1" # Desktop 改为 http://127.0.0.1:8080/v1
-wire_api = "responses"
-requires_openai_auth = true
-```
+	[model_providers.realms]
+	name = "Realms"
+	base_url = "http://127.0.0.1:8080/v1"
+	wire_api = "responses"
+	requires_openai_auth = true
+	```
 
 ---
 

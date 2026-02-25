@@ -64,19 +64,19 @@ make desktop-dist
 git clone "https://github.com/FlowerRealm/realms.git"
 cd "realms"
 
-cp ".env.example" ".env"
-docker compose pull realms
-docker compose up -d
+	cp ".env.example" ".env"
+	docker compose pull realms
+	docker compose up -d
 
-curl -fsS "http://127.0.0.1:18080/healthz"
-```
+	curl -fsS "http://127.0.0.1:8080/healthz"
+	```
 
 首次初始化（必须做一次）：
 
-1) 打开：`http://127.0.0.1:18080/`  
-2) 注册并登录（`REALMS_ALLOW_OPEN_REGISTRATION=true` 时允许注册）  
-3) **第一个注册用户会成为 `root`**  
-4) 初始化完成后建议把 `REALMS_ALLOW_OPEN_REGISTRATION` 改为 `false`，并重启：
+	1) 打开：`http://127.0.0.1:8080/`  
+	2) 注册并登录（`REALMS_ALLOW_OPEN_REGISTRATION=true` 时允许注册）  
+	3) **第一个注册用户会成为 `root`**  
+	4) 初始化完成后建议把 `REALMS_ALLOW_OPEN_REGISTRATION` 改为 `false`，并重启：
 
 ```bash
 docker compose up -d
@@ -152,16 +152,16 @@ docker compose down
 
 ### 5) 验证服务可用
 
-```bash
-curl -fsS "http://127.0.0.1:18080/healthz"
-```
+	```bash
+	curl -fsS "http://127.0.0.1:8080/healthz"
+	```
 
 ### 6) 首次初始化（必须做一次）
 
-1) 打开：`http://127.0.0.1:18080/`  
-2) 注册并登录（`REALMS_ALLOW_OPEN_REGISTRATION=true` 时允许注册）  
-3) **第一个注册用户会成为 `root`**  
-4) 初始化完成后，建议把 `REALMS_ALLOW_OPEN_REGISTRATION` 改为 `false`，并重启：
+	1) 打开：`http://127.0.0.1:8080/`  
+	2) 注册并登录（`REALMS_ALLOW_OPEN_REGISTRATION=true` 时允许注册）  
+	3) **第一个注册用户会成为 `root`**  
+	4) 初始化完成后，建议把 `REALMS_ALLOW_OPEN_REGISTRATION` 改为 `false`，并重启：
 
 ```bash
 docker compose up -d
