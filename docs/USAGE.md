@@ -49,6 +49,14 @@ make desktop-dist
 - macOS 通常需要签名/公证后，自动更新与安装体验才会稳定。
 - Windows 建议签名；Linux 分发形态（AppImage 等）更新策略依发行方式而异。
 
+### 发布（Tag → 打包 → Release）
+
+本仓库提供桌面端的 Tag 发布链路：当你推送 Git tag 到 GitHub 时，会自动构建三平台安装包并发布到同名 GitHub Release（用于下载与 `electron-updater` 更新源）。
+
+- 工作流：`.github/workflows/desktop.yml`
+- 触发：`push` 到任意 tag（与 Docker 发布链路一致）
+- 产物：`desktop/dist/` 下的安装包 + `latest*.yml` / `*.blockmap` 等更新元数据文件（会作为 Release assets 上传）
+
 ## 从 0 开始（Docker Compose，一键）
 
 ```bash

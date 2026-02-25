@@ -2,6 +2,9 @@ name: desktop
 
 on:
   workflow_dispatch: {}
+  push:
+    tags:
+      - "*"
 
 jobs:
   build:
@@ -15,6 +18,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -29,6 +34,7 @@ jobs:
           cache: npm
           cache-dependency-path: |
             web/package-lock.json
+            desktop/package-lock.json
 
       - name: Build web/dist
         if: runner.os != 'Windows'
@@ -48,13 +54,13 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          npm --prefix "desktop" install
+          npm --prefix "desktop" ci
 
       - name: Install desktop deps (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          npm --prefix "desktop" install
+          npm --prefix "desktop" ci
 
       - name: Build desktop installer
         if: runner.os != 'Windows'
@@ -74,3 +80,24 @@ jobs:
           name: realms-desktop-${{ matrix.os }}
           path: desktop/dist/*
           if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/**/*
