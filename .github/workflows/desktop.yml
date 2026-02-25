@@ -1,0 +1,76 @@
+name: desktop
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+
+      - name: Build web/dist
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          npm --prefix "web" ci
+          npm --prefix "web" run build
+
+      - name: Build web/dist (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          npm --prefix "web" ci
+          npm --prefix "web" run build
+
+      - name: Install desktop deps
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          npm --prefix "desktop" install
+
+      - name: Install desktop deps (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          npm --prefix "desktop" install
+
+      - name: Build desktop installer
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          npm --prefix "desktop" run dist
+
+      - name: Build desktop installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          npm --prefix "desktop" run dist
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: realms-desktop-${{ matrix.os }}
+          path: desktop/dist/*
+          if-no-files-found: error

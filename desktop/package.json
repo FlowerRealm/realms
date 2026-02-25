@@ -1,0 +1,70 @@
+{
+  "name": "realms-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Realms Desktop（Electron，自用模式）",
+  "type": "module",
+  "main": "src/main.mjs",
+  "scripts": {
+    "dev": "node ./scripts/dev.mjs",
+    "build:backend": "node ./scripts/build-backend.mjs",
+    "dist": "node ./scripts/dist.mjs"
+  },
+  "dependencies": {
+    "auto-launch": "^5.0.6",
+    "electron-updater": "^6.6.2"
+  },
+  "devDependencies": {
+    "electron": "^36.8.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.flowerrealm.realms",
+    "productName": "Realms",
+    "files": [
+      "src/**/*"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "extraResources": [
+      {
+        "from": "build/backend",
+        "to": "backend"
+      }
+    ],
+    "protocols": [
+      {
+        "name": "Realms Desktop",
+        "schemes": [
+          "realms"
+        ]
+      }
+    ],
+    "publish": [
+      {
+        "provider": "github"
+      }
+    ],
+    "mac": {
+      "target": [
+        "dmg"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ]
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/FlowerRealm/realms.git"
+  }
+}
+

@@ -13,6 +13,42 @@ Realms 的前端工程位于 `web/`，后端提供 `/api/*` 与 `/v1/*`；但对
 
 更多说明见：[前后端分离](frontend.md)。
 
+## 桌面版（Electron，自用模式）
+
+桌面版用于把 Realms 以“自用模式”封装成桌面应用（启动本地后端并打开页面）。
+
+关键约束：
+- 固定监听：`127.0.0.1:8080`（端口写死不变；占用则启动失败）
+- 固定 base_url：`http://127.0.0.1:8080/v1`
+- 后端强制启用自用模式：`REALMS_SELF_MODE_ENABLE=true`
+
+### 开发运行（本机）
+
+前置：Go + Node.js + npm
+
+```bash
+make desktop-dev
+```
+
+Linux 提示：
+- 若你看到 Electron 报错 `chrome-sandbox ... is not configured correctly`，桌面版 dev 脚本会自动追加 `--no-sandbox` 以便在非特权环境运行。
+
+### 打包安装包（当前平台）
+
+```bash
+make desktop-dist
+```
+
+产物默认输出到：`desktop/dist/`
+
+### 自动更新（GitHub Releases）
+
+桌面版集成了 `electron-updater`，默认以 GitHub Releases 作为更新源。
+
+注意：
+- macOS 通常需要签名/公证后，自动更新与安装体验才会稳定。
+- Windows 建议签名；Linux 分发形态（AppImage 等）更新策略依发行方式而异。
+
 ## 从 0 开始（Docker Compose，一键）
 
 ```bash

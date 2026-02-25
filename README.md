@@ -17,6 +17,7 @@ Realms 是一个 Go 单体服务（Gin），对外提供 **OpenAI 兼容** 的 A
 
 - 文档站点：使用 MkDocs 本地预览（`mkdocs serve`）或构建静态站点（`mkdocs build`，可自行部署）
 - 环境变量示例：[`.env.example`](.env.example)
+- 桌面版（Electron，自用模式）：见 `docs/USAGE.md`（“桌面版”章节）
 - 贡献指南：[`CONTRIBUTING.md`](CONTRIBUTING.md)
 - 安全政策：[`SECURITY.md`](SECURITY.md)
 - 行为准则：[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)

@@ -13,6 +13,10 @@ dist/
 web/node_modules/
 web/dist/
 
+# Desktop (Electron)
+desktop/node_modules/
+desktop/build/
+
 # Frontend (Playwright)
 web/playwright-report/
 web/test-results/
