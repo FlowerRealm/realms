@@ -2516,6 +2516,58 @@ func TestResponses_ModelPassthrough_AllowsDisabledModelWithoutBindings(t *testin
 	}
 }
 
+func TestResponses_ModelPassthrough_AliasRewriteIfBindingExists(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"alias": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "alias", UpstreamModel: "real-model", Status: 1},
+			},
+		},
+	}
+
+	sched := scheduler.New(fs)
+	doer := &fakeDoer{}
+	features := staticFeatures{fs: store.FeatureState{ModelsDisabled: true, BillingDisabled: true}}
+	h := NewHandler(fs, fs, sched, doer, nil, features, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"alias","input":"hi","stream":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(doer.bodies) == 0 {
+		t.Fatalf("expected upstream call")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(doer.bodies[0], &payload); err != nil {
+		t.Fatalf("unmarshal rewritten body: %v", err)
+	}
+	if payload["model"] != "real-model" {
+		t.Fatalf("expected rewritten model=real-model, got=%v", payload["model"])
+	}
+}
+
 func TestResponses_AliasRewrite(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{

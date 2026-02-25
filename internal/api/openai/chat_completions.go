@@ -63,6 +63,7 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 		freeMode = fs.BillingDisabled
 		modelPassthrough = fs.ModelsDisabled
 	}
+	modelPassthrough = modelPassthrough || h.selfMode
 
 	if publicModel == "" {
 		http.Error(w, "model 不能为空", http.StatusBadRequest)
@@ -121,11 +122,38 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 				return
 			}
 		}
+		// passthrough 模式下仍尝试使用“渠道绑定模型”做 model 转发（best-effort）；
+		// 但不强制要求存在绑定（无绑定时直接透传 model）。
+		if bindings, err := h.models.ListEnabledChannelModelBindingsByPublicID(r.Context(), publicModel); err == nil {
+			requireType := strings.TrimSpace(cons.RequireChannelType)
+			m := make(map[int64]string, len(bindings))
+			for _, b := range bindings {
+				if requireType != "" && strings.TrimSpace(b.ChannelType) != requireType {
+					continue
+				}
+				if strings.TrimSpace(b.UpstreamModel) == "" {
+					continue
+				}
+				m[b.ChannelID] = b.UpstreamModel
+			}
+			if len(m) > 0 {
+				upstreamByChannel = m
+				cons.AllowChannelIDs = make(map[int64]struct{}, len(upstreamByChannel))
+				for id := range upstreamByChannel {
+					cons.AllowChannelIDs[id] = struct{}{}
+				}
+			}
+		}
 		rewriteBody = func(sel scheduler.Selection) ([]byte, error) {
 			if sel.PassThroughBodyEnabled {
 				return rawBody, nil
 			}
 			out := clonePayload(payload)
+			if upstreamByChannel != nil {
+				if up, ok := upstreamByChannel[sel.ChannelID]; ok && strings.TrimSpace(up) != "" {
+					out["model"] = up
+				}
+			}
 			applyChannelSystemPromptToChatCompletionsPayload(out, sel)
 			raw, err := json.Marshal(out)
 			if err != nil {

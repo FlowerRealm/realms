@@ -64,7 +64,7 @@ func featureBanGroups(selfMode bool, fs store.FeatureState) []featureBanGroupVie
 				b(store.SettingFeatureDisableWebAnnouncements, "公告（Web）", "隐藏侧边栏入口，并对 /announcements* 返回 404。", fs.WebAnnouncementsDisabled, false, false),
 				b(store.SettingFeatureDisableWebTokens, "API 令牌（Web）", "隐藏侧边栏入口，并对 /tokens* 返回 404。", fs.WebTokensDisabled, false, false),
 				b(store.SettingFeatureDisableWebUsage, "用量统计（Web）", "隐藏侧边栏入口，并对 /usage、/api/usage/* 返回 404。", fs.WebUsageDisabled, false, false),
-				b(store.SettingFeatureDisableModels, "模型（全禁）", "隐藏入口，并对 /models、/admin/models*、/v1/models 返回 404；同时数据面进入模型穿透（model passthrough）。", fs.ModelsDisabled, false, false),
+				b(store.SettingFeatureDisableModels, "模型（全禁）", "隐藏入口，并对 /models、/admin/models*、/v1/models 返回 404；同时数据面进入模型穿透（model passthrough）：默认透传 model；如配置了“渠道绑定模型”，则仍会按选中渠道改写 model（alias/upstream_model）。", fs.ModelsDisabled, false, false),
 			},
 		},
 		{

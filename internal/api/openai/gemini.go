@@ -116,6 +116,7 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 		freeMode = fs.BillingDisabled
 		modelPassthrough = fs.ModelsDisabled
 	}
+	modelPassthrough = modelPassthrough || h.selfMode
 
 	if h.models == nil {
 		http.Error(w, "服务未配置模型目录", http.StatusBadGateway)
@@ -185,6 +186,28 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		// passthrough 模式下仍尝试使用“渠道绑定模型”做 model 转发（best-effort）；
+		// 但不强制要求存在绑定（无绑定时直接透传 model）。
+		if bindings, err := h.models.ListEnabledChannelModelBindingsByPublicID(r.Context(), publicModel); err == nil {
+			requireType := strings.TrimSpace(cons.RequireChannelType)
+			m := make(map[int64]string, len(bindings))
+			for _, b := range bindings {
+				if requireType != "" && strings.TrimSpace(b.ChannelType) != requireType {
+					continue
+				}
+				if strings.TrimSpace(b.UpstreamModel) == "" {
+					continue
+				}
+				m[b.ChannelID] = b.UpstreamModel
+			}
+			if len(m) > 0 {
+				upstreamByChannel = m
+				cons.AllowChannelIDs = make(map[int64]struct{}, len(upstreamByChannel))
+				for id := range upstreamByChannel {
+					cons.AllowChannelIDs[id] = struct{}{}
+				}
+			}
+		}
 	}
 
 	routeKey := extractRouteKeyFromRawBody(body)
@@ -243,11 +266,9 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 
 		upstreamModel := publicModel
 		if upstreamByChannel != nil {
-			up, ok := upstreamByChannel[sel.ChannelID]
-			if !ok {
-				continue
+			if up, ok := upstreamByChannel[sel.ChannelID]; ok && strings.TrimSpace(up) != "" {
+				upstreamModel = up
 			}
-			upstreamModel = up
 		}
 
 		// 重写 path：/v1beta/models/{public}:{action} -> /v1beta/models/{upstream}:{action}
