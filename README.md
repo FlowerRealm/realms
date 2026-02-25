@@ -1,3 +1,13 @@
+<p>
+  <a href="https://www.su8.codes/s/106567c37fc0">
+    <img src="https://www.su8.codes/brand/logo-wide.png" alt="SU8 Codes" height="24" />
+  </a>
+  <br />
+  <strong>赞助商</strong>：<a href="https://www.su8.codes/s/106567c37fc0">SU8 Codes</a>
+  <br />
+  感谢 SU8 Codes 对本项目的赞助与支持。SU8 Codes 提供专业、高性价比的大模型 API，兼容主流工具，接入快捷、成本可控。
+</p>
+
 # Realms（OpenAI 兼容 API 中转 + Web 控制台）
 
 Realms 是一个 Go 单体服务（Gin），对外提供 **OpenAI 兼容** 的 `/v1/*`（数据面），并提供一个 Web 控制台（管理面）用于配置上游渠道、路由策略与用量查询等。
