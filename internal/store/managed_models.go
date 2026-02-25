@@ -571,9 +571,34 @@ WHERE public_id=?
 }
 
 func (s *Store) DeleteManagedModel(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM managed_models WHERE id=?`, id)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("开始事务失败: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var publicID string
+	if err := tx.QueryRowContext(ctx, `SELECT public_id FROM managed_models WHERE id=?`, id).Scan(&publicID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("查询 managed_model public_id 失败: %w", err)
+	}
+	publicID = strings.TrimSpace(publicID)
+
+	// 删除模型目录条目时，联动清理所有渠道绑定（channel_models），避免旧渠道仍残留不可选模型。
+	if publicID != "" {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM channel_models WHERE public_id=?`, publicID); err != nil {
+			return fmt.Errorf("联动删除 channel_models 失败: %w", err)
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM managed_models WHERE id=?`, id); err != nil {
 		return fmt.Errorf("删除 managed_model 失败: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("提交事务失败: %w", err)
 	}
 	return nil
 }
