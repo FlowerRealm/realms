@@ -434,7 +434,8 @@ func TestAdminUsagePage_CodexOAuthKeepsModelAndSetsAccount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUpstreamEndpoint: %v", err)
 	}
-	codexAccountID, err := st.CreateCodexOAuthAccount(ctx, codexEndpointID, "acct_team_001", nil, "at", "rt", nil, nil)
+	codexAccountEmail := "team001@example.com"
+	codexAccountID, err := st.CreateCodexOAuthAccount(ctx, codexEndpointID, "acct_team_001", &codexAccountEmail, "at", "rt", nil, nil)
 	if err != nil {
 		t.Fatalf("CreateCodexOAuthAccount: %v", err)
 	}
@@ -595,8 +596,8 @@ func TestAdminUsagePage_CodexOAuthKeepsModelAndSetsAccount(t *testing.T) {
 	if codexModelGot != codexModel {
 		t.Fatalf("expected codex event model=%q, got %q", codexModel, codexModelGot)
 	}
-	if codexAccountGot != "acct_team_001" {
-		t.Fatalf("expected codex event account=acct_team_001, got %q", codexAccountGot)
+	if codexAccountGot != codexAccountEmail {
+		t.Fatalf("expected codex event account=%q, got %q", codexAccountEmail, codexAccountGot)
 	}
 	if !openAIFound {
 		t.Fatalf("expected openai event in response")

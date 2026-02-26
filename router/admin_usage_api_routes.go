@@ -298,7 +298,7 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 			}
 		}
 
-		codexAccountByCredentialID := make(map[int64]string)
+		codexAccountEmailByCredentialID := make(map[int64]string)
 		eventViews := make([]adminUsageEventView, 0, len(events))
 		for _, row := range events {
 			e := row.Event
@@ -394,17 +394,19 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 			account := "-"
 			if upstreamChannelType == store.UpstreamTypeCodexOAuth && e.UpstreamCredID != nil && *e.UpstreamCredID > 0 {
 				credID := *e.UpstreamCredID
-				if v, ok := codexAccountByCredentialID[credID]; ok {
+				if v, ok := codexAccountEmailByCredentialID[credID]; ok {
 					account = v
 				} else {
 					resolved := "-"
 					acc, err := opts.Store.GetCodexOAuthAccountByID(c.Request.Context(), credID)
 					if err == nil {
-						if id := strings.TrimSpace(acc.AccountID); id != "" {
-							resolved = id
+						if acc.Email != nil {
+							if email := strings.TrimSpace(*acc.Email); email != "" {
+								resolved = email
+							}
 						}
 					}
-					codexAccountByCredentialID[credID] = resolved
+					codexAccountEmailByCredentialID[credID] = resolved
 					account = resolved
 				}
 			}
