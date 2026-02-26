@@ -1,5 +1,5 @@
 {
-  "name": "realms",
+  "name": "@flowerrealm/realms",
   "version": "0.0.0",
   "description": "Install & run Realms personal app (realms-app) via npm",
   "license": "MIT",

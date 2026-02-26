@@ -5,7 +5,7 @@
 ## 安装
 
 ```bash
-npm install -g realms
+npm install -g @flowerrealm/realms
 ```
 
 安装完成后会自动下载对应平台的 `realms-app`（来自 GitHub Releases），并提供命令 `realms`。
@@ -35,4 +35,3 @@ node "$(npm root -g)/realms/scripts/postinstall.js"
 ```
 
 2) 下载失败：可配置 `REALMS_APP_BASE_URL` 指向镜像/CDN，并重试安装。
-
