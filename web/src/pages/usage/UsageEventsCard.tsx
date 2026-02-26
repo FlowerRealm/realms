@@ -61,8 +61,8 @@ export function UsageEventsCard({
         </div>
       </div>
       <div className="card-body p-0 border-top">
-        <div className="table-responsive">
-          <table className="table table-hover align-middle mb-0 border-0">
+        <div className="table-responsive rlm-table-responsive-no-x">
+          <table className="table table-hover align-middle mb-0 border-0 rlm-table-fit">
             <thead className="table-light text-muted smaller uppercase">
               <tr>
                 <th className="ps-4 border-0">时间</th>

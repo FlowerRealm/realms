@@ -673,14 +673,14 @@ export function UsageAdminPage() {
                     下一页
                   </button>
                 </div>
-              </div>
-              <div className="card-body p-0 border-top">
-                <div className="table-responsive">
-                  <table className="table table-hover align-middle mb-0 border-0">
-                    <thead className="table-light text-muted smaller uppercase">
-                      <tr>
-                        <th className="ps-4 border-0">时间</th>
-                        {isPersonalMode ? null : <th className="border-0">用户</th>}
+	              </div>
+	              <div className="card-body p-0 border-top">
+	                <div className="table-responsive rlm-table-responsive-no-x">
+	                  <table className="table table-hover align-middle mb-0 border-0 rlm-table-fit">
+	                    <thead className="table-light text-muted smaller uppercase">
+	                      <tr>
+	                        <th className="ps-4 border-0">时间</th>
+	                        {isPersonalMode ? null : <th className="border-0">用户</th>}
                         <th className="border-0">接口 / 模型</th>
                         <th className="text-center border-0">状态码</th>
                         <th className="text-end border-0">耗时</th>
