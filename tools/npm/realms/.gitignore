@@ -1,0 +1,5 @@
+vendor/
+
+# root .gitignore has `bin/` (for Go); unignore our npm bin script
+!bin/
+!bin/**
