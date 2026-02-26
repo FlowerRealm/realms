@@ -10,7 +10,7 @@ import (
 )
 
 func setAuthAndPublicRoutes(r *gin.Engine, opts Options) {
-	selfMode := opts.SelfMode
+	personalMode := opts.PersonalMode
 
 	publicChain := func(h http.Handler) gin.HandlerFunc {
 		return wrapHTTP(middleware.Chain(h,
@@ -24,12 +24,12 @@ func setAuthAndPublicRoutes(r *gin.Engine, opts Options) {
 		return wrapHTTP(middleware.Chain(h,
 			middleware.RequestID,
 			middleware.AccessLog,
-			middleware.FeatureGateEffective(opts.Store, selfMode, featureKey),
+			middleware.FeatureGateEffective(opts.Store, personalMode, featureKey),
 			middleware.BodyCache(0),
 		))
 	}
 
-	if !selfMode {
+	if !personalMode {
 		r.POST("/oauth/token", publicChain(http.HandlerFunc(oauthTokenHandler(opts))))
 		r.POST("/api/email/verification/send", publicChain(http.HandlerFunc(emailVerificationSendHandler(opts))))
 
@@ -39,7 +39,7 @@ func setAuthAndPublicRoutes(r *gin.Engine, opts Options) {
 	}
 
 	// webhooks & notify
-	if !selfMode {
+	if !personalMode {
 		if opts.SubscriptionOrderPaidWebhook != nil {
 			r.POST("/api/webhooks/subscription-orders/:order_id/paid", publicFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(opts.SubscriptionOrderPaidWebhook)))
 		}

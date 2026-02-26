@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "build:self": "tsc -b && vite build --mode self && node scripts/postbuild-self.mjs",
+    "build:personal": "tsc -b && vite build --mode personal && node scripts/postbuild-personal.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "check:theme": "node scripts/check-theme-colors.js"

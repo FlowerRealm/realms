@@ -10,7 +10,7 @@ import (
 // FeatureState 表示“对外可见”的功能开关最终状态。
 // 说明：
 // - *_Disabled=true 表示该功能应隐藏入口并拒绝访问。
-// - 该状态会合并自用模式（self_mode）的硬禁用。
+// - personal 模式会对部分功能进行硬禁用（即使数据库/配置文件设置为启用）。
 type FeatureState struct {
 	WebAnnouncementsDisabled bool
 	WebTokensDisabled        bool
@@ -28,7 +28,7 @@ type FeatureState struct {
 	AdminAnnouncementsDisabled bool
 }
 
-func (s *Store) FeatureStateEffective(ctx context.Context, selfMode bool) FeatureState {
+func (s *Store) FeatureStateEffective(ctx context.Context, personalMode bool) FeatureState {
 	defaultB := func(key string) bool {
 		if !s.hasAppSettingsDefaults {
 			return false
@@ -62,22 +62,22 @@ func (s *Store) FeatureStateEffective(ctx context.Context, selfMode bool) Featur
 		}
 	}
 
-		out := FeatureState{
-			WebAnnouncementsDisabled: defaultB(SettingFeatureDisableWebAnnouncements),
-			WebTokensDisabled:        defaultB(SettingFeatureDisableWebTokens),
-			WebUsageDisabled:         defaultB(SettingFeatureDisableWebUsage),
+	out := FeatureState{
+		WebAnnouncementsDisabled: defaultB(SettingFeatureDisableWebAnnouncements),
+		WebTokensDisabled:        defaultB(SettingFeatureDisableWebTokens),
+		WebUsageDisabled:         defaultB(SettingFeatureDisableWebUsage),
 
-			ModelsDisabled: defaultB(SettingFeatureDisableModels),
+		ModelsDisabled: defaultB(SettingFeatureDisableModels),
 
-			BillingDisabled: selfMode || defaultB(SettingFeatureDisableBilling),
-			TicketsDisabled: selfMode || defaultB(SettingFeatureDisableTickets),
+		BillingDisabled: personalMode || defaultB(SettingFeatureDisableBilling),
+		TicketsDisabled: personalMode || defaultB(SettingFeatureDisableTickets),
 
-			AdminChannelsDisabled:      defaultB(SettingFeatureDisableAdminChannels),
-			AdminChannelGroupsDisabled: defaultB(SettingFeatureDisableAdminChannelGroups),
-			AdminUsersDisabled:         selfMode || defaultB(SettingFeatureDisableAdminUsers),
-			AdminUsageDisabled:         defaultB(SettingFeatureDisableAdminUsage),
-			AdminAnnouncementsDisabled: defaultB(SettingFeatureDisableAdminAnnouncements),
-		}
+		AdminChannelsDisabled:      defaultB(SettingFeatureDisableAdminChannels),
+		AdminChannelGroupsDisabled: defaultB(SettingFeatureDisableAdminChannelGroups),
+		AdminUsersDisabled:         personalMode || defaultB(SettingFeatureDisableAdminUsers),
+		AdminUsageDisabled:         defaultB(SettingFeatureDisableAdminUsage),
+		AdminAnnouncementsDisabled: defaultB(SettingFeatureDisableAdminAnnouncements),
+	}
 
 	keys := []string{
 		SettingFeatureDisableWebAnnouncements,
@@ -124,10 +124,10 @@ func (s *Store) FeatureStateEffective(ctx context.Context, selfMode bool) Featur
 	}
 
 	if v, ok := parseBool(SettingFeatureDisableBilling); ok {
-		out.BillingDisabled = selfMode || v
+		out.BillingDisabled = personalMode || v
 	}
 	if v, ok := parseBool(SettingFeatureDisableTickets); ok {
-		out.TicketsDisabled = selfMode || v
+		out.TicketsDisabled = personalMode || v
 	}
 
 	if v, ok := parseBool(SettingFeatureDisableAdminChannels); ok {
@@ -136,9 +136,9 @@ func (s *Store) FeatureStateEffective(ctx context.Context, selfMode bool) Featur
 	if v, ok := parseBool(SettingFeatureDisableAdminChannelGroups); ok {
 		out.AdminChannelGroupsDisabled = v
 	}
-		if v, ok := parseBool(SettingFeatureDisableAdminUsers); ok {
-			out.AdminUsersDisabled = selfMode || v
-		}
+	if v, ok := parseBool(SettingFeatureDisableAdminUsers); ok {
+		out.AdminUsersDisabled = personalMode || v
+	}
 	if v, ok := parseBool(SettingFeatureDisableAdminUsage); ok {
 		out.AdminUsageDisabled = v
 	}

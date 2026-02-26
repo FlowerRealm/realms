@@ -40,14 +40,14 @@ jobs:
         shell: bash
         run: |
           npm --prefix "web" ci
-          npm --prefix "web" run build:self
+          npm --prefix "web" run build:personal
 
       - name: Build web/dist (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           npm --prefix "web" ci
-          npm --prefix "web" run build:self
+          npm --prefix "web" run build:personal
 
       - name: Build realms-app
         if: runner.os != 'Windows'
@@ -56,7 +56,7 @@ jobs:
           set -euo pipefail
           mkdir -p "dist"
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          go build -tags embed_web_self \
+          go build -tags embed_web_personal \
             -ldflags "-X realms/internal/version.Version=${GITHUB_REF_NAME} -X realms/internal/version.Date=${DATE}" \
             -o "dist/realms-app" \
             "./cmd/realms-app"
@@ -67,7 +67,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path "dist" | Out-Null
           $date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-          go build -tags embed_web_self `
+          go build -tags embed_web_personal `
             -ldflags "-X realms/internal/version.Version=${env:GITHUB_REF_NAME} -X realms/internal/version.Date=$date" `
             -o "dist/realms-app.exe" `
             "./cmd/realms-app"

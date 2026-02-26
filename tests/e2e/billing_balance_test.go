@@ -152,7 +152,7 @@ func TestBilling_PaygBalanceDebitsByTokensPricing_E2E(t *testing.T) {
 		t.Fatalf("LoadFromEnv: %v", err)
 	}
 	appCfg.Env = "dev"
-	appCfg.SelfMode.Enable = false
+	appCfg.Mode = config.ModeBusiness
 	appCfg.DB.Driver = "sqlite"
 	appCfg.DB.DSN = ""
 	appCfg.DB.SQLitePath = dbPath

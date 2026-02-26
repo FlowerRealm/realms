@@ -15,7 +15,7 @@ import (
 
 type Config struct {
 	Env        string           `yaml:"env"`
-	SelfMode   SelfModeConfig   `yaml:"self_mode"`
+	Mode       Mode             `yaml:"mode"`
 	Server     ServerConfig     `yaml:"server"`
 	DB         DBConfig         `yaml:"db"`
 	Security   SecurityConfig   `yaml:"security"`
@@ -38,6 +38,15 @@ type Config struct {
 	AppSettingsDefaults AppSettingsDefaultsConfig `yaml:"app_settings_defaults"`
 }
 
+type Mode string
+
+const (
+	ModeBusiness Mode = "business"
+	ModePersonal Mode = "personal"
+)
+
+func (c Config) IsPersonalMode() bool { return c.Mode == ModePersonal }
+
 type AppSettingsDefaultsConfig struct {
 	SiteBaseURL   string `yaml:"site_base_url"`
 	AdminTimeZone string `yaml:"admin_time_zone"`
@@ -56,12 +65,6 @@ type AppSettingsDefaultsConfig struct {
 	FeatureDisableAdminUsers         bool `yaml:"feature_disable_admin_users"`
 	FeatureDisableAdminUsage         bool `yaml:"feature_disable_admin_usage"`
 	FeatureDisableAdminAnnouncements bool `yaml:"feature_disable_admin_announcements"`
-}
-
-type SelfModeConfig struct {
-	// Enable 开启后进入“自用模式”：会禁用计费/支付/工单等不需要的功能域，
-	// 并放宽数据面配额策略（不再要求订阅已激活）。
-	Enable bool `yaml:"enable"`
 }
 
 type ServerConfig struct {
@@ -144,6 +147,12 @@ func LoadFromEnv() (Config, error) {
 }
 
 func normalizeAndValidate(cfg Config) (Config, error) {
+	mode, err := canonicalizeMode(cfg.Mode)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Mode = mode
+
 	publicBaseURL, err := NormalizeHTTPBaseURL(cfg.Server.PublicBaseURL, "server.public_base_url")
 	if err != nil {
 		return Config{}, err
@@ -220,6 +229,20 @@ func normalizeAndValidate(cfg Config) (Config, error) {
 	return cfg, nil
 }
 
+func canonicalizeMode(mode Mode) (Mode, error) {
+	raw := strings.ToLower(strings.TrimSpace(string(mode)))
+	switch raw {
+	case "":
+		return ModeBusiness, nil
+	case string(ModeBusiness):
+		return ModeBusiness, nil
+	case string(ModePersonal):
+		return ModePersonal, nil
+	default:
+		return "", fmt.Errorf("mode 不支持：%s（仅支持 business/personal）", raw)
+	}
+}
+
 func NormalizeHTTPBaseURL(raw string, label string) (string, error) {
 	v := strings.TrimRight(strings.TrimSpace(raw), "/")
 	if v == "" {
@@ -270,10 +293,8 @@ func parseDecimalNonNeg(raw string, scale int32) (decimal.Decimal, error) {
 
 func defaultConfig() Config {
 	return Config{
-		Env: "dev",
-		SelfMode: SelfModeConfig{
-			Enable: false,
-		},
+		Env:  "dev",
+		Mode: ModeBusiness,
 		Server: ServerConfig{
 			Addr: ":8080",
 		},
@@ -317,10 +338,8 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("REALMS_ENV"); v != "" {
 		cfg.Env = v
 	}
-	if v := os.Getenv("REALMS_SELF_MODE_ENABLE"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.SelfMode.Enable = b
-		}
+	if v := strings.TrimSpace(os.Getenv("REALMS_MODE")); v != "" {
+		cfg.Mode = Mode(v)
 	}
 	if v := os.Getenv("REALMS_ADDR"); v != "" {
 		cfg.Server.Addr = v

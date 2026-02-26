@@ -16,9 +16,9 @@ import (
 
 const SettingEmailVerificationEnable = "email_verification_enable"
 
-// SettingSelfModeKeyHash 存储自用模式鉴权 Key 的 SHA256（hex 编码）。
+// SettingPersonalModeKeyHash 存储 personal 模式鉴权 Key 的 SHA256（hex 编码）。
 // 注意：仅存 hash，不存明文 Key。
-const SettingSelfModeKeyHash = "self_mode_key_hash"
+const SettingPersonalModeKeyHash = "personal_mode_key_hash"
 
 const (
 	SettingFeatureDisableWebAnnouncements = "feature_disable_web_announcements"
@@ -66,8 +66,8 @@ const (
 	SettingBillingPayAsYouGoPriceMultiplier = "billing_paygo_price_multiplier"
 )
 
-func (s *Store) GetSelfModeKeyHash(ctx context.Context) ([]byte, bool, error) {
-	raw, ok, err := s.GetStringAppSetting(ctx, SettingSelfModeKeyHash)
+func (s *Store) GetPersonalModeKeyHash(ctx context.Context) ([]byte, bool, error) {
+	raw, ok, err := s.GetStringAppSetting(ctx, SettingPersonalModeKeyHash)
 	if err != nil || !ok {
 		return nil, ok, err
 	}
@@ -77,10 +77,10 @@ func (s *Store) GetSelfModeKeyHash(ctx context.Context) ([]byte, bool, error) {
 	}
 	b, err := hex.DecodeString(raw)
 	if err != nil {
-		return nil, false, fmt.Errorf("解析 app_settings[%s] 失败: %w", SettingSelfModeKeyHash, err)
+		return nil, false, fmt.Errorf("解析 app_settings[%s] 失败: %w", SettingPersonalModeKeyHash, err)
 	}
 	if len(b) != sha256.Size {
-		return nil, false, fmt.Errorf("解析 app_settings[%s] 失败: hash 长度不合法", SettingSelfModeKeyHash)
+		return nil, false, fmt.Errorf("解析 app_settings[%s] 失败: hash 长度不合法", SettingPersonalModeKeyHash)
 	}
 	return b, true, nil
 }

@@ -118,10 +118,10 @@ else
   echo "检测到 FRONTEND_DIST_DIR=${FRONTEND_DIST_DIR}（非 ./web/dist），跳过自动前端构建" >&2
 fi
 
-# 本地开发：固定 8080 + 正常模式（非 self_mode）
+# 本地开发：固定 8080 + business 模式
 export REALMS_ENV="dev"
 export REALMS_ADDR=":8080"
-export REALMS_SELF_MODE_ENABLE="false"
+export REALMS_MODE="business"
 
 "${AIR_BIN}" &
 AIR_PID=$!

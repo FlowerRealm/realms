@@ -7,12 +7,12 @@ import type { APIResponse } from '../../api/types'
 import { ProjectFooter } from '../ProjectFooter'
 
 export type PublicLayoutContext = {
-  selfModeKeySet: boolean
-  setSelfModeKeySet: Dispatch<SetStateAction<boolean>>
+  personalModeKeySet: boolean
+  setPersonalModeKeySet: Dispatch<SetStateAction<boolean>>
 }
 
 export function PublicLayout() {
-  const [selfModeKeySet, setSelfModeKeySet] = useState(false)
+  const [personalModeKeySet, setPersonalModeKeySet] = useState(false)
 
   useEffect(() => {
     document.documentElement.classList.remove('admin-html')
@@ -25,12 +25,14 @@ export function PublicLayout() {
     let mounted = true
     ;(async () => {
       try {
-        const res = await api.get<APIResponse<{ self_mode?: boolean; self_mode_key_set?: boolean }>>('/api/meta')
+        const res = await api.get<APIResponse<{ mode?: 'business' | 'personal'; personal_mode_key_set?: boolean }>>('/api/meta')
         if (!mounted) return
-        if (res.data?.success && res.data?.data?.self_mode) {
-          setSelfModeKeySet(!!res.data?.data?.self_mode_key_set)
+        const data = res.data?.data
+        const isPersonal = data?.mode === 'personal'
+        if (res.data?.success && isPersonal) {
+          setPersonalModeKeySet(!!data?.personal_mode_key_set)
         } else {
-          setSelfModeKeySet(false)
+          setPersonalModeKeySet(false)
         }
       } catch {
         // ignore
@@ -54,7 +56,7 @@ export function PublicLayout() {
         <ul className="nav nav-pills me-4">
           <li className="nav-item">
             <NavLink to="/login" className={({ isActive }) => `nav-link${isActive ? ' active rounded-pill px-4' : ' text-secondary'}`}>
-              {selfModeKeySet ? '解锁' : '初始化'}
+              {personalModeKeySet ? '解锁' : '初始化'}
             </NavLink>
           </li>
         </ul>
@@ -62,7 +64,7 @@ export function PublicLayout() {
 
       <main className="flex-fill d-flex flex-column justify-content-center align-items-center">
         <div className="w-100" style={{ maxWidth: 520 }}>
-          <Outlet context={{ selfModeKeySet, setSelfModeKeySet } satisfies PublicLayoutContext} />
+          <Outlet context={{ personalModeKeySet, setPersonalModeKeySet } satisfies PublicLayoutContext} />
         </div>
       </main>
 
@@ -70,3 +72,4 @@ export function PublicLayout() {
     </div>
   )
 }
+

@@ -1,5 +1,5 @@
 // realms-app 提供一个“可双击启动”的启动器形态：
-// - 默认启用自用模式（REALMS_SELF_MODE_ENABLE=true）
+// - 默认启用 personal 模式（REALMS_MODE=personal）
 // - 默认监听 :8080（多人访问）
 // - 默认启用 CORS（REALMS_CORS_ALLOW_ORIGINS=*）
 // - 启动后等待 /healthz 就绪并打开默认浏览器到 /login
@@ -143,7 +143,7 @@ func setDefaultEnv(key string, value string) {
 
 func applyAppDefaults() error {
 	setDefaultEnv("REALMS_ENV", "app")
-	setDefaultEnv("REALMS_SELF_MODE_ENABLE", "true")
+	setDefaultEnv("REALMS_MODE", "personal")
 	setDefaultEnv("REALMS_ADDR", ":8080")
 	setDefaultEnv("REALMS_DB_DRIVER", "sqlite")
 	setDefaultEnv("REALMS_DISABLE_SECURE_COOKIES", "true")

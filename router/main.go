@@ -12,9 +12,9 @@ func SetRouter(r *gin.Engine, opts Options) {
 
 	api := r.Group("/api")
 	api.Use(gzip.Gzip(gzip.DefaultCompression))
-	if opts.SelfMode {
-		// 自用模式最小可用：仅保留上游渠道 + 用量统计所需 API。
-		// - 鉴权：/v1/* 与 /api/admin/* 走 self-mode key
+	if opts.PersonalMode {
+		// personal 模式最小可用：仅保留上游渠道 + 用量统计所需 API。
+		// - 鉴权：/v1/* 与 /api/admin/* 走管理 Key
 		// - 管理面：前端仍通过 /api/user/self 获取虚拟用户态
 		setUserAPIRoutes(api, opts)
 		setChannelAPIRoutes(api, opts)

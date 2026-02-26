@@ -15,7 +15,7 @@ import (
 type Options struct {
 	Store    *store.Store
 	Sched    *scheduler.Scheduler
-	SelfMode bool
+	PersonalMode bool
 
 	AllowOpenRegistration           bool
 	EmailVerificationEnabledDefault bool
@@ -46,7 +46,7 @@ type Options struct {
 	RealmsIconSVG http.HandlerFunc
 	FaviconICO    http.HandlerFunc
 
-	// payments/webhooks (only mounted when !SelfMode in current routing)
+	// payments/webhooks (only mounted when !PersonalMode in current routing)
 	SubscriptionOrderPaidWebhook  http.HandlerFunc
 	StripeWebhookByPaymentChannel http.HandlerFunc
 	EPayNotifyByPaymentChannel    http.HandlerFunc

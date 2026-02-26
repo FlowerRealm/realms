@@ -8,7 +8,7 @@ export type FeatureBanItem = {
   disabled: boolean;
   override: boolean;
   editable: boolean;
-  forced_by_self_mode: boolean;
+  forced_by_personal_mode: boolean;
   forced_by_build: boolean;
 };
 
@@ -18,7 +18,7 @@ export type FeatureBanGroup = {
 };
 
 export type AdminSettings = {
-  self_mode: boolean;
+  personal_mode: boolean;
   features: Record<string, unknown>;
   feature_ban_groups: FeatureBanGroup[];
   startup_config_keys: string[];

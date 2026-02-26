@@ -90,12 +90,12 @@ func TestChannels_PageAndInUse_RootFlow(t *testing.T) {
 	})
 	engine.Use(sessions.Sessions(cookieName, sessionStore))
 
-	SetRouter(engine, Options{
-		Store:                st,
-		SelfMode:             false,
-		AdminTimeZoneDefault: "UTC",
-		FrontendIndexPage:    []byte("<!doctype html><html><body>INDEX</body></html>"),
-	})
+		SetRouter(engine, Options{
+			Store:                st,
+			PersonalMode:         false,
+			AdminTimeZoneDefault: "UTC",
+			FrontendIndexPage:    []byte("<!doctype html><html><body>INDEX</body></html>"),
+		})
 
 	// login
 	loginBody, _ := json.Marshal(map[string]any{
@@ -413,7 +413,7 @@ func TestChannels_PageAndInUse_RootFlow(t *testing.T) {
 	}
 }
 
-func TestChannels_Reorder_SelfMode(t *testing.T) {
+func TestChannels_Reorder_PersonalMode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	dir := t.TempDir()
@@ -431,9 +431,9 @@ func TestChannels_Reorder_SelfMode(t *testing.T) {
 	st.SetDialect(store.DialectSQLite)
 
 	ctx := context.Background()
-	key := "k_self_mode_test_123"
+	key := "k_personal_mode_test_123"
 	hashHex := hex.EncodeToString(rlmcrypto.TokenHash(key))
-	if _, err := st.InsertAppSettingIfAbsent(ctx, store.SettingSelfModeKeyHash, hashHex); err != nil {
+	if _, err := st.InsertAppSettingIfAbsent(ctx, store.SettingPersonalModeKeyHash, hashHex); err != nil {
 		t.Fatalf("InsertAppSettingIfAbsent: %v", err)
 	}
 
@@ -450,7 +450,7 @@ func TestChannels_Reorder_SelfMode(t *testing.T) {
 	engine.Use(gin.Recovery())
 	SetRouter(engine, Options{
 		Store:                st,
-		SelfMode:             true,
+		PersonalMode:         true,
 		AdminTimeZoneDefault: "UTC",
 		FrontendIndexPage:    []byte("<!doctype html><html><body>INDEX</body></html>"),
 	})
@@ -545,11 +545,11 @@ func TestChannels_SettingsAndCredentials_RootFlow(t *testing.T) {
 	})
 	engine.Use(sessions.Sessions(cookieName, sessionStore))
 
-	SetRouter(engine, Options{
-		Store:             st,
-		SelfMode:          false,
-		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
-	})
+		SetRouter(engine, Options{
+			Store:             st,
+			PersonalMode:      false,
+			FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+		})
 
 	// login
 	loginBody, _ := json.Marshal(map[string]any{
@@ -823,13 +823,13 @@ func TestChannels_CodexOAuthAccounts_RootFlow(t *testing.T) {
 	})
 	engine.Use(sessions.Sessions(cookieName, sessionStore))
 
-	SetRouter(engine, Options{
-		Store:             st,
-		SelfMode:          false,
-		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
-		StartCodexOAuth: func(_ context.Context, endpointID int64, actorUserID int64) (string, error) {
-			startEndpointID = endpointID
-			startActorUserID = actorUserID
+		SetRouter(engine, Options{
+			Store:             st,
+			PersonalMode:      false,
+			FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+			StartCodexOAuth: func(_ context.Context, endpointID int64, actorUserID int64) (string, error) {
+				startEndpointID = endpointID
+				startActorUserID = actorUserID
 			return "https://chatgpt.com/oauth/authorize?state=s1", nil
 		},
 		CompleteCodexOAuth: func(_ context.Context, endpointID int64, actorUserID int64, state string, code string) error {

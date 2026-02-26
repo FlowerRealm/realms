@@ -14,23 +14,23 @@ Realms 是一个 Go 单体服务（Gin），对外提供 **OpenAI 兼容** 的 `
 
 你可以用它做什么：
 - 作为 OpenAI SDK / Codex CLI 的 `base_url` 中转层（支持 `POST /v1/responses` SSE 透传）
-- 在 Web 控制台里管理 Token（正常模式）或管理 Key（自用模式），并查看用量与请求明细
+- 在 Web 控制台里管理 Token（business 模式）或管理 Key（personal 模式），并查看用量与请求明细
 - 在管理后台里管理上游渠道（OpenAI 兼容 base_url / Codex OAuth）与路由策略
 
 ---
 
 ## 0) 先选一种“运行形态”
 
-- **Server（正常模式，推荐）**：部署/多人使用，默认开启账号/Token/模型目录等完整功能域。
-- **App（自用模式）**：单二进制可执行程序，双击启动后用浏览器访问（默认监听 `:8080`，启动后自动打开页面）。
+- **Server（business 模式，推荐）**：部署/多人使用，默认开启账号/Token/模型目录等完整功能域。
+- **App（personal 模式）**：单二进制可执行程序，双击启动后用浏览器访问（默认监听 `:8080`，启动后自动打开页面）。
 
-> 说明：自用模式也可以以 Server 形态运行（`REALMS_SELF_MODE_ENABLE=true`）。App 是一个 Go 启动器形态（`cmd/realms-app`）：启动本地后端并打开浏览器页面。
+> 说明：personal 模式也可以以 Server 形态运行（`REALMS_MODE=personal`）。App 是一个 Go 启动器形态（`cmd/realms-app`）：启动本地后端并打开浏览器页面。
 
 > 迁移/历史说明：`docs/MIGRATION.md`。
 
 ---
 
-## 1) 最小开始：Server（正常模式，推荐：Docker Compose）
+## 1) 最小开始：Server（business 模式，推荐：Docker Compose）
 
 ### 1.1 一键启动（可复制运行）
 
@@ -49,15 +49,15 @@ cp ".env.example" ".env"
 
 ---
 
-## 2) 最小开始：App（自用模式，浏览器 + 端口）
+## 2) 最小开始：App（personal 模式，浏览器 + 端口）
 
-App 用于把 Realms 以“自用模式”封装成可执行程序（启动本地后端并打开浏览器页面）。
+App 用于把 Realms 以“personal 模式”封装成可执行程序（启动本地后端并打开浏览器页面）。
 
 关键约束（App 默认值）：
 - 默认监听：`:8080`（便于多人访问；如需仅本机可访问，可设置 `REALMS_ADDR=127.0.0.1:8080`）
 - 固定 base_url：`http://127.0.0.1:8080/v1`
-- 后端强制启用自用模式：`REALMS_SELF_MODE_ENABLE=true`
-- 自用模式鉴权：首次打开 `/login` 设置 **管理 Key**；之后外部客户端与管理面都使用该 Key（`Authorization: Bearer <key>` 或 `x-api-key`）
+- 后端强制启用 personal 模式：`REALMS_MODE=personal`
+- personal 模式鉴权：首次打开 `/login` 设置 **管理 Key**；之后外部客户端与管理面都使用该 Key（`Authorization: Bearer <key>` 或 `x-api-key`）
 
 跨域（CORS）：
 - App 默认启用：`REALMS_CORS_ALLOW_ORIGINS=*`
@@ -91,8 +91,8 @@ make app-dist
 
 ### 3.1 环境变量（最常用）
 
-- Server（正常模式）：`OPENAI_API_KEY` 填你在 `/tokens` 创建的 `sk_...`
-- App（自用模式）：`OPENAI_API_KEY` 填你在 `/login` 设置的管理 Key
+- Server（business 模式）：`OPENAI_API_KEY` 填你在 `/tokens` 创建的 `sk_...`
+- App（personal 模式）：`OPENAI_API_KEY` 填你在 `/login` 设置的管理 Key
 
 Linux/macOS（bash/zsh）：
 
@@ -128,7 +128,7 @@ Linux/macOS：`~/.codex/config.toml`；Windows：`%USERPROFILE%\\.codex\\config.
 
 ## 4) 本地开发（贡献者）
 
-开发热重载（正常模式，固定 `127.0.0.1:8080`）：
+开发热重载（business 模式，固定 `127.0.0.1:8080`）：
 
 ```bash
 make dev
@@ -159,12 +159,12 @@ go test ./...
 ---
 
 <details>
-<summary>深入：运行模式（正常模式 vs 自用模式）</summary>
+<summary>深入：运行模式（business vs personal）</summary>
 
-- 正常模式：`REALMS_SELF_MODE_ENABLE=false`（默认）  
+- business 模式：`REALMS_MODE=business`（默认）  
   面向完整功能（订阅/余额/支付/工单等），需要账号系统与更多配置项。
 
-- 自用模式：`REALMS_SELF_MODE_ENABLE=true`  
+- personal 模式：`REALMS_MODE=personal`  
   适合个人/小团队自用：不提供账号/Token/系统设置/OAuth 等功能域；管理后台通过 `/login` 的管理 Key 解锁；数据面与管理面 API 均要求携带该 Key。
 
 </details>

@@ -12,7 +12,7 @@ dist/
 # Frontend (Vite)
 web/node_modules/
 web/dist/
-web/dist-self/
+web/dist-personal/
 
 
 

@@ -181,7 +181,7 @@ func TestCodexOAuth_MultiAccount_UsageLimitMarksBalanceAndFailover_E2E(t *testin
 		t.Fatalf("LoadFromEnv: %v", err)
 	}
 	appCfg.Env = "dev"
-	appCfg.SelfMode.Enable = false
+	appCfg.Mode = config.ModeBusiness
 	appCfg.DB.Driver = "sqlite"
 	appCfg.DB.DSN = ""
 	appCfg.DB.SQLitePath = dbPath
@@ -422,7 +422,7 @@ func TestCodexOAuth_MultiAccount_InvalidTokenDisablesAndFailover_E2E(t *testing.
 		t.Fatalf("LoadFromEnv: %v", err)
 	}
 	appCfg.Env = "dev"
-	appCfg.SelfMode.Enable = false
+	appCfg.Mode = config.ModeBusiness
 	appCfg.DB.Driver = "sqlite"
 	appCfg.DB.DSN = ""
 	appCfg.DB.SQLitePath = dbPath

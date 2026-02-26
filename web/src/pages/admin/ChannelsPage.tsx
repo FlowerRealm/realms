@@ -177,9 +177,9 @@ type ChannelPointerTarget = {
 
 export function ChannelsPage() {
   const { user } = useAuth();
-  const isSelfMode = !!user?.self_mode;
-  const allowCodexOAuth = !isSelfMode;
-  const channelTableCols = isSelfMode ? 4 : 3;
+  const isPersonalMode = user?.mode === 'personal';
+  const allowCodexOAuth = !isPersonalMode;
+  const channelTableCols = isPersonalMode ? 4 : 3;
 
   const [channels, setChannels] = useState<ChannelAdminItem[]>([]);
   const channelsRef = useRef<ChannelAdminItem[]>([]);
@@ -316,7 +316,7 @@ export function ChannelsPage() {
   }, []);
 
   useEffect(() => {
-    if (!isSelfMode) return;
+    if (!isPersonalMode) return;
     if (draggingID === null) return;
     const prevCursor = document.body.style.cursor;
     const prevUserSelect = document.body.style.userSelect;
@@ -328,7 +328,7 @@ export function ChannelsPage() {
       document.body.style.userSelect = prevUserSelect;
       document.body.classList.remove('rlm-dnd-sorting');
     };
-  }, [draggingID, isSelfMode]);
+  }, [draggingID, isPersonalMode]);
   const selectableModelIDs = useMemo(() => {
     const uniq = new Set<string>();
     for (const id of managedModelIDs) {
@@ -552,7 +552,7 @@ export function ChannelsPage() {
 
   useEffect(() => {
     void (async () => {
-      if (isSelfMode) return;
+      if (isPersonalMode) return;
       try {
         const res = await listAdminChannelGroups();
         if (res.success) setChannelGroups(res.data || []);
@@ -560,7 +560,7 @@ export function ChannelsPage() {
         // ignore
       }
     })();
-  }, [isSelfMode]);
+  }, [isPersonalMode]);
 
   const defaultGroupName = useMemo(() => {
     const byDefault = (channelGroups.find((g) => g.is_default)?.name || '').trim();
@@ -621,7 +621,7 @@ export function ChannelsPage() {
   }
 
   function handleDragStart(e: DragStartEvent) {
-    if (!isSelfMode) return;
+    if (!isPersonalMode) return;
     if (loading || reordering) return;
     const raw = e.active.id;
     const id = typeof raw === 'number' ? raw : Number.parseInt(String(raw), 10);
@@ -655,7 +655,7 @@ export function ChannelsPage() {
     setDraggingID(null);
     setDragOverlayWidth(null);
     setDragOverlayColWidths(null);
-    if (!isSelfMode) return;
+    if (!isPersonalMode) return;
     if (loading || reordering) return;
     if (!overID || !Number.isFinite(activeID) || activeID <= 0) return;
     if (activeID === overID) return;
@@ -1185,7 +1185,7 @@ export function ChannelsPage() {
               </div>
             </div>
             <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
-              {isSelfMode ? (
+              {isPersonalMode ? (
                 <PortalDragOverlay modifiers={[restrictToVerticalAxisModifier]} zIndex={2000}>
                   {draggingChannel ? (
                     <div className="rlm-channel-dnd-overlay" style={{ width: dragOverlayWidth || undefined }}>
@@ -1250,7 +1250,7 @@ export function ChannelsPage() {
                 <table className="table table-hover align-middle mb-0">
                   <thead className="table-light">
                     <tr>
-                      {isSelfMode ? <th className="text-center text-muted" style={{ width: 48 }}></th> : null}
+                      {isPersonalMode ? <th className="text-center text-muted" style={{ width: 48 }}></th> : null}
                       <th className="ps-4">渠道详情</th>
                       <th>状态</th>
                       <th className="text-end pe-4">操作</th>
@@ -1288,16 +1288,16 @@ export function ChannelsPage() {
                       const codexPanelLoading = !!codexAccountsLoadingByChannel[ch.id];
                       const codexPanelErr = codexAccountsErrByChannel[ch.id] || '';
                       const rowBaseClassName = ['rlm-channel-row-main', channelDisabled ? 'table-secondary opacity-75' : ''].filter((v) => v).join(' ');
-                      const groupNames = isSelfMode ? [] : parseGroupsCSV(ch.groups || '');
-                      const pointerGroups = isSelfMode
+                      const groupNames = isPersonalMode ? [] : parseGroupsCSV(ch.groups || '');
+                      const pointerGroups = isPersonalMode
                         ? []
                         : groupNames.map((name) => channelGroupByName.get(name)).filter((g): g is AdminChannelGroup => !!g && g.status === 1);
-                      const canSetPointer = !isSelfMode && !channelDisabled && pointerGroups.length > 0;
+                      const canSetPointer = !isPersonalMode && !channelDisabled && pointerGroups.length > 0;
                       const setPointerTitle = channelDisabled ? '禁用渠道不可设为指针' : pointerGroups.length === 0 ? '该渠道未加入任何启用的渠道组' : '设为指针';
 
                       const renderMainRowCells = (rowDragging: boolean) => (
                         <>
-                          {isSelfMode ? (
+                          {isPersonalMode ? (
                             <td className="text-center text-muted" title={loading || reordering || channelDisabled ? '不可拖动' : '拖动排序'}>
                               <span
                                 className={`d-inline-flex align-items-center justify-content-center ${channelDisabled ? 'opacity-25' : ''}`}
@@ -1484,7 +1484,7 @@ export function ChannelsPage() {
                                 {ch.status === 1 ? '禁用' : '启用'}
                               </button>
 
-                              {isSelfMode ? null : (
+                              {isPersonalMode ? null : (
                                 <button
                                   className="btn btn-sm btn-light border text-warning"
                                   type="button"
@@ -1549,7 +1549,7 @@ export function ChannelsPage() {
 	                              </td>
                             </tr>
                           ) : null}
-                          {isSelfMode && !channelDisabled ? (
+                          {isPersonalMode && !channelDisabled ? (
                             <SortableRow id={ch.id} disabled={loading || reordering}>
                               {({ attributes, listeners, setRowRef, transform, transition, isDragging, isOver }) => {
                                 const dropTarget = draggingID !== null && isOver && !isDragging;
@@ -1924,7 +1924,7 @@ export function ChannelsPage() {
 	        </div>
 	      </SegmentedFrame>
 
-      {isSelfMode ? null : (
+      {isPersonalMode ? null : (
         <BootstrapModal
           id="setChannelPointerModal"
           title={pointerTarget ? `设为指针：${pointerTarget.name || `#${pointerTarget.id}`}` : '设为指针'}
@@ -2067,7 +2067,7 @@ export function ChannelsPage() {
             <label className="form-label">优先级</label>
             <input className="form-control" value={createPriority} onChange={(e) => setCreatePriority(e.target.value)} inputMode="numeric" placeholder="0" />
           </div>
-          {isSelfMode ? null : (
+          {isPersonalMode ? null : (
             <div className="col-md-8">
               <label className="form-label">渠道组（groups，逗号分隔）</label>
               <input
@@ -2281,7 +2281,7 @@ export function ChannelsPage() {
                       </div>
 
                       <div className="col-12">
-                        {isSelfMode ? null : (
+                        {isPersonalMode ? null : (
                           <>
                             <label className="form-label fw-medium">渠道组设置</label>
                             <div className="card p-2" style={{ maxHeight: 260, overflowY: 'auto' }}>

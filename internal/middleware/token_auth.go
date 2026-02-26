@@ -13,11 +13,11 @@ import (
 )
 
 const (
-	selfModeVirtualUserID  int64 = 1
-	selfModeVirtualTokenID int64 = 1
+	personalModeVirtualUserID  int64 = 1
+	personalModeVirtualTokenID int64 = 1
 )
 
-func TokenAuth(st *store.Store, selfMode bool) Middleware {
+func TokenAuth(st *store.Store, personalMode bool) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			raw := extractBearer(r.Header.Get("Authorization"))
@@ -29,28 +29,28 @@ func TokenAuth(st *store.Store, selfMode bool) Middleware {
 				return
 			}
 
-			if selfMode {
+			if personalMode {
 				if st == nil {
 					http.Error(w, "鉴权失败", http.StatusInternalServerError)
 					return
 				}
-				expectHash, ok, err := st.GetSelfModeKeyHash(r.Context())
+				expectHash, ok, err := st.GetPersonalModeKeyHash(r.Context())
 				if err != nil {
 					http.Error(w, "鉴权失败", http.StatusInternalServerError)
 					return
 				}
 				if !ok {
-					http.Error(w, "自用模式尚未设置 Key", http.StatusUnauthorized)
+					http.Error(w, "personal 模式尚未设置 Key", http.StatusUnauthorized)
 					return
 				}
 				if subtle.ConstantTimeCompare(rlmcrypto.TokenHash(raw), expectHash) != 1 {
 					http.Error(w, "Token 无效", http.StatusUnauthorized)
 					return
 				}
-				tokenID := selfModeVirtualTokenID
+				tokenID := personalModeVirtualTokenID
 				p := auth.Principal{
 					ActorType: auth.ActorTypeToken,
-					UserID:    selfModeVirtualUserID,
+					UserID:    personalModeVirtualUserID,
 					TokenID:   &tokenID,
 					Role:      store.UserRoleRoot,
 				}

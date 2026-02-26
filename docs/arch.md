@@ -12,8 +12,7 @@
 ## 关键路径（简述）
 
 1) 下游请求进入数据面 handler
-2) 完成鉴权与配额/计费逻辑（默认模式或 self_mode/free mode）
+2) 完成鉴权与配额/计费逻辑（business 或 personal/free mode）
 3) 选择可用上游（支持 failover）
 4) 转发请求到上游并进行最小必要的字段处理
 5) 记录用量事件（`usage_events`）用于统计与排障
-

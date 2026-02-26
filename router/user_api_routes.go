@@ -30,7 +30,7 @@ type userRegisterRequest struct {
 }
 
 func setUserAPIRoutes(r gin.IRoutes, opts Options) {
-	if opts.SelfMode {
+	if opts.PersonalMode {
 		r.GET("/user/self", userSelfHandler(opts))
 		return
 	}
@@ -43,8 +43,8 @@ func setUserAPIRoutes(r gin.IRoutes, opts Options) {
 
 func userLoginHandler(opts Options) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if opts.SelfMode {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "自用模式不支持账号登录"})
+		if opts.PersonalMode {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "personal 模式不支持账号登录"})
 			return
 		}
 		if opts.Store == nil {
@@ -107,8 +107,8 @@ func userLoginHandler(opts Options) gin.HandlerFunc {
 
 func userRegisterHandler(opts Options) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if opts.SelfMode {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "自用模式不支持注册"})
+		if opts.PersonalMode {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "personal 模式不支持注册"})
 			return
 		}
 		if !opts.AllowOpenRegistration {
@@ -231,7 +231,7 @@ func userSelfHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
-		if opts.SelfMode {
+		if opts.PersonalMode {
 			raw := extractBearer(c.GetHeader("Authorization"))
 			if raw == "" {
 				raw = c.GetHeader("x-api-key")
@@ -241,13 +241,13 @@ func userSelfHandler(opts Options) gin.HandlerFunc {
 				return
 			}
 
-			expectHash, ok, err := opts.Store.GetSelfModeKeyHash(c.Request.Context())
+			expectHash, ok, err := opts.Store.GetPersonalModeKeyHash(c.Request.Context())
 			if err != nil {
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "鉴权失败"})
 				return
 			}
 			if !ok {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "自用模式尚未设置 Key"})
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "personal 模式尚未设置 Key"})
 				return
 			}
 			if subtle.ConstantTimeCompare(crypto.TokenHash(raw), expectHash) != 1 {
@@ -259,17 +259,17 @@ func userSelfHandler(opts Options) gin.HandlerFunc {
 			if v, ok, err := opts.Store.GetBoolAppSetting(c.Request.Context(), store.SettingEmailVerificationEnable); err == nil && ok {
 				emailVerifEnabled = v
 			}
-			features := opts.Store.FeatureStateEffective(c.Request.Context(), opts.SelfMode)
+			features := opts.Store.FeatureStateEffective(c.Request.Context(), opts.PersonalMode)
 
 			c.JSON(http.StatusOK, gin.H{
 				"success": true,
 				"message": "",
 				"data": gin.H{
-					"id":                         selfModeVirtualUserID,
-					"username":                   "self",
+					"id":                         personalModeVirtualUserID,
+					"username":                   "personal",
 					"role":                       store.UserRoleRoot,
 					"status":                     1,
-					"self_mode":                  true,
+					"mode":                       "personal",
 					"email_verification_enabled": emailVerifEnabled,
 					"features": gin.H{
 						"web_announcements_disabled":    features.WebAnnouncementsDisabled,
@@ -305,8 +305,12 @@ func userSelfHandler(opts Options) gin.HandlerFunc {
 		if v, ok, err := opts.Store.GetBoolAppSetting(c.Request.Context(), store.SettingEmailVerificationEnable); err == nil && ok {
 			emailVerifEnabled = v
 		}
-		features := opts.Store.FeatureStateEffective(c.Request.Context(), opts.SelfMode)
+		features := opts.Store.FeatureStateEffective(c.Request.Context(), opts.PersonalMode)
 
+		mode := "business"
+		if opts.PersonalMode {
+			mode = "personal"
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "",
@@ -316,7 +320,7 @@ func userSelfHandler(opts Options) gin.HandlerFunc {
 				"username":                   u.Username,
 				"role":                       u.Role,
 				"status":                     u.Status,
-				"self_mode":                  opts.SelfMode,
+				"mode":                       mode,
 				"email_verification_enabled": emailVerifEnabled,
 				"features": gin.H{
 					"web_announcements_disabled":    features.WebAnnouncementsDisabled,

@@ -34,7 +34,7 @@ func setWebSPARoutes(r *gin.Engine, opts Options) {
 
 	r.NoRoute(func(c *gin.Context) {
 		p := strings.TrimSpace(c.Request.URL.Path)
-		if opts.SelfMode && strings.HasPrefix(p, "/oauth") {
+		if opts.PersonalMode && strings.HasPrefix(p, "/oauth") {
 			c.Data(http.StatusNotFound, "text/plain; charset=utf-8", []byte("Not Found"))
 			return
 		}
@@ -42,7 +42,7 @@ func setWebSPARoutes(r *gin.Engine, opts Options) {
 			c.Data(http.StatusNotFound, "text/plain; charset=utf-8", []byte("Not Found"))
 			return
 		}
-		if opts.SelfMode && !isSelfModeAllowedWebPath(p) {
+		if opts.PersonalMode && !isPersonalModeAllowedWebPath(p) {
 			c.Data(http.StatusNotFound, "text/plain; charset=utf-8", []byte("Not Found"))
 			return
 		}
@@ -51,7 +51,7 @@ func setWebSPARoutes(r *gin.Engine, opts Options) {
 	})
 }
 
-func isSelfModeAllowedWebPath(p string) bool {
+func isPersonalModeAllowedWebPath(p string) bool {
 	p = strings.TrimSpace(p)
 	switch {
 	case p == "/":

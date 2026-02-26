@@ -31,8 +31,8 @@ export function AdminLayout() {
   const closeSidebar = () => setSidebarOpen(false)
   const loginLabel = useMemo(() => userEmail(user?.email, user?.username), [user?.email, user?.username])
 
-  const logoutSelf = () => {
-    localStorage.removeItem('self_mode_key')
+  const logout = () => {
+    localStorage.removeItem('personal_mode_key')
     localStorage.removeItem('user')
     void refresh()
   }
@@ -101,7 +101,7 @@ export function AdminLayout() {
                   <hr className="dropdown-divider" />
                 </li>
                 <li>
-                  <button className="dropdown-item rounded-2 text-danger" type="button" disabled={loading} onClick={logoutSelf}>
+                  <button className="dropdown-item rounded-2 text-danger" type="button" disabled={loading} onClick={logout}>
                     <span className="me-2 material-symbols-rounded">logout</span>退出登录
                   </button>
                 </li>
@@ -120,3 +120,4 @@ export function AdminLayout() {
     </div>
   )
 }
+

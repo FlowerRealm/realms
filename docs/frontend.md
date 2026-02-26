@@ -49,14 +49,14 @@ go run ./cmd/realms
 - `http://<host>:<port>/login`
 
 相关环境变量：
-- `FRONTEND_DIST_DIR`：静态资源目录（默认：正常模式 `./web/dist`；自用模式 `./web/dist-self`）
+- `FRONTEND_DIST_DIR`：静态资源目录（默认：business `./web/dist`；personal `./web/dist-personal`）
 - `FRONTEND_BASE_URL`：留空（表示同源提供前端）
 
-自用模式（`REALMS_SELF_MODE_ENABLE=true`）下，如需同源提供前端，请构建自用前端产物：
+personal 模式（`REALMS_MODE=personal`）下，如需同源提供前端，请构建 personal 前端产物：
 
 ```bash
 cd web
-npm run build:self
+npm run build:personal
 ```
 
 ---

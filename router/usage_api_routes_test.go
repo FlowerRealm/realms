@@ -124,11 +124,11 @@ func TestUsageEvents_UserResponse_HidesUpstreamChannel(t *testing.T) {
 	})
 	engine.Use(sessions.Sessions(cookieName, sessionStore))
 
-	SetRouter(engine, Options{
-		Store:             st,
-		SelfMode:          false,
-		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
-	})
+		SetRouter(engine, Options{
+			Store:             st,
+			PersonalMode:      false,
+			FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+		})
 
 	// login
 	loginBody, _ := json.Marshal(map[string]any{
@@ -281,11 +281,11 @@ func TestUsageTimeSeries_UserResponse_ReturnsPoints(t *testing.T) {
 	})
 	engine.Use(sessions.Sessions(cookieName, sessionStore))
 
-	SetRouter(engine, Options{
-		Store:             st,
-		SelfMode:          false,
-		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
-	})
+		SetRouter(engine, Options{
+			Store:             st,
+			PersonalMode:      false,
+			FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+		})
 
 	loginBody, _ := json.Marshal(map[string]any{
 		"login":    "series@example.com",
@@ -467,11 +467,11 @@ func TestUsageEvents_TokenFilter_WorksAndChecksOwnership(t *testing.T) {
 	})
 	engine.Use(sessions.Sessions(cookieName, sessionStore))
 
-	SetRouter(engine, Options{
-		Store:             st,
-		SelfMode:          false,
-		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
-	})
+		SetRouter(engine, Options{
+			Store:             st,
+			PersonalMode:      false,
+			FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+		})
 
 	// login (user1)
 	loginBody, _ := json.Marshal(map[string]any{
@@ -649,11 +649,11 @@ func TestUsageWindows_TokenFilter_WorksAndChecksOwnership(t *testing.T) {
 	})
 	engine.Use(sessions.Sessions(cookieName, sessionStore))
 
-	SetRouter(engine, Options{
-		Store:             st,
-		SelfMode:          false,
-		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
-	})
+		SetRouter(engine, Options{
+			Store:             st,
+			PersonalMode:      false,
+			FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+		})
 
 	// login (user1)
 	loginBody, _ := json.Marshal(map[string]any{
@@ -830,11 +830,11 @@ func TestV1Usage_TokenAuth_IsSingleKeyAndCannotAccessOtherTokenEvents(t *testing
 
 	engine := gin.New()
 	engine.Use(gin.Recovery())
-	SetRouter(engine, Options{
-		Store:             st,
-		SelfMode:          false,
-		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
-	})
+		SetRouter(engine, Options{
+			Store:             st,
+			PersonalMode:      false,
+			FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+		})
 
 	// list /v1/usage/events with token1 should only see token1 events
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/v1/usage/events", nil)
@@ -995,11 +995,11 @@ func TestUsageEventDetail_UserResponse_IncludesPricingBreakdown(t *testing.T) {
 	})
 	engine.Use(sessions.Sessions(cookieName, sessionStore))
 
-	SetRouter(engine, Options{
-		Store:             st,
-		SelfMode:          false,
-		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
-	})
+		SetRouter(engine, Options{
+			Store:             st,
+			PersonalMode:      false,
+			FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+		})
 
 	loginBody, _ := json.Marshal(map[string]any{
 		"login":    "detail@example.com",

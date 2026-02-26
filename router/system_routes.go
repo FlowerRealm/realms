@@ -15,18 +15,22 @@ func setSystemRoutes(r *gin.Engine, opts Options) {
 	r.GET("/healthz", wrapHTTPFunc(opts.Healthz))
 
 	r.GET("/api/meta", func(c *gin.Context) {
-		selfModeKeySet := false
-		if opts.SelfMode && opts.Store != nil {
-			if _, ok, err := opts.Store.GetSelfModeKeyHash(c.Request.Context()); err == nil && ok {
-				selfModeKeySet = true
+		personalModeKeySet := false
+		if opts.PersonalMode && opts.Store != nil {
+			if _, ok, err := opts.Store.GetPersonalModeKeyHash(c.Request.Context()); err == nil && ok {
+				personalModeKeySet = true
 			}
+		}
+		mode := "business"
+		if opts.PersonalMode {
+			mode = "personal"
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "",
 			"data": gin.H{
-				"self_mode":         opts.SelfMode,
-				"self_mode_key_set": selfModeKeySet,
+				"mode":                  mode,
+				"personal_mode_key_set": personalModeKeySet,
 			},
 		})
 	})
@@ -34,8 +38,8 @@ func setSystemRoutes(r *gin.Engine, opts Options) {
 	type bootstrapReq struct {
 		Key string `json:"key"`
 	}
-	r.POST("/api/self-mode/bootstrap", func(c *gin.Context) {
-		if !opts.SelfMode {
+	bootstrap := func(c *gin.Context) {
+		if !opts.PersonalMode {
 			c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "not found"})
 			return
 		}
@@ -43,11 +47,11 @@ func setSystemRoutes(r *gin.Engine, opts Options) {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		if _, ok, err := opts.Store.GetSelfModeKeyHash(c.Request.Context()); err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "自用模式 Key 状态异常"})
+		if _, ok, err := opts.Store.GetPersonalModeKeyHash(c.Request.Context()); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "personal 模式 Key 状态异常"})
 			return
 		} else if ok {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "自用模式 Key 已设置"})
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "personal 模式 Key 已设置"})
 			return
 		}
 
@@ -62,17 +66,20 @@ func setSystemRoutes(r *gin.Engine, opts Options) {
 			return
 		}
 		hashHex := hex.EncodeToString(rlmcrypto.TokenHash(key))
-		inserted, err := opts.Store.InsertAppSettingIfAbsent(c.Request.Context(), store.SettingSelfModeKeyHash, hashHex)
+		inserted, err := opts.Store.InsertAppSettingIfAbsent(c.Request.Context(), store.SettingPersonalModeKeyHash, hashHex)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入失败"})
 			return
 		}
 		if !inserted {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "自用模式 Key 已设置"})
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "personal 模式 Key 已设置"})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
-	})
+	}
+
+	// 新命名：personal 模式初始化 Key。
+	r.POST("/api/personal/bootstrap", bootstrap)
 
 	r.GET("/assets/realms_icon.svg", wrapHTTPFunc(opts.RealmsIconSVG))
 	r.HEAD("/assets/realms_icon.svg", wrapHTTPFunc(opts.RealmsIconSVG))

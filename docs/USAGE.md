@@ -9,20 +9,20 @@ Realms 的前端工程位于 `web/`，后端提供 `/api/*` 与 `/v1/*`；但对
 
 - 使用官方 Docker 镜像：已内置前端构建产物（同源可直接访问 `/login`）
 - 前后端分离（外置前端）时：使用后端专用镜像 `flowerrealm/realms:backend`（或固定版本 `flowerrealm/realms:<TAG>-backend`），并设置 `FRONTEND_BASE_URL`
-- 使用源码构建（二进制）：需要自行构建前端（正常模式：`web/dist`；自用模式：`web/dist-self`），或设置 `FRONTEND_BASE_URL` 外置前端
+- 使用源码构建（二进制）：需要自行构建前端（business：`web/dist`；personal：`web/dist-personal`），或设置 `FRONTEND_BASE_URL` 外置前端
 
 更多说明见：[前后端分离](frontend.md)。
 
-## App（自用模式，浏览器 + 端口）
+## App（personal 模式，浏览器 + 端口）
 
-App 用于把 Realms 以“自用模式”封装成可执行程序（启动本地后端并打开浏览器页面）。
+App 用于把 Realms 以“personal 模式”封装成可执行程序（启动本地后端并打开浏览器页面）。
 
 关键约束：
 - 默认监听：`:8080`（便于多人访问；如需仅本机可访问，可设置 `REALMS_ADDR=127.0.0.1:8080`）
 - 固定 base_url：`http://127.0.0.1:8080/v1`
-- 后端强制启用自用模式：`REALMS_SELF_MODE_ENABLE=true`
+- 后端强制启用 personal 模式：`REALMS_MODE=personal`
 - App 默认启用跨域：`REALMS_CORS_ALLOW_ORIGINS=*`
-- App 前端构建产物：`web/dist-self`（对应 `npm --prefix "web" run build:self`）
+- App 前端构建产物：`web/dist-personal`（对应 `npm --prefix "web" run build:personal`）
 
 ### 开发运行（本机）
 

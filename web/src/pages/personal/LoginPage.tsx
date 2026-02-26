@@ -5,7 +5,7 @@ import { api } from '../../api/client'
 import type { APIResponse } from '../../api/types'
 import { useAuth } from '../../auth/AuthContext'
 import { SegmentedFrame } from '../../components/SegmentedFrame'
-import type { PublicLayoutContext } from '../../layout/self/PublicLayout'
+import type { PublicLayoutContext } from '../../layout/personal/PublicLayout'
 
 type LocationState = {
   from?: string
@@ -17,7 +17,7 @@ export function LoginPage() {
   const { user, loading, refresh } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const { selfModeKeySet, setSelfModeKeySet } = useOutletContext<PublicLayoutContext>()
+  const { personalModeKeySet, setPersonalModeKeySet } = useOutletContext<PublicLayoutContext>()
 
   const [form, setForm] = useState({ key: '', confirm: '' })
   const [err, setErr] = useState('')
@@ -42,7 +42,7 @@ export function LoginPage() {
     <SegmentedFrame>
       <div className="card border-0 mb-0">
         <div className="card-body p-4">
-          <h2 className="h4 card-title text-center mb-4">{selfModeKeySet ? '解锁 Realms' : '初始化 Realms'}</h2>
+          <h2 className="h4 card-title text-center mb-4">{personalModeKeySet ? '解锁 Realms' : '初始化 Realms'}</h2>
 
           {notice ? (
             <div className="alert alert-success py-2" role="alert">
@@ -66,7 +66,7 @@ export function LoginPage() {
                   setErr('Key 不能为空')
                   return
                 }
-                if (!selfModeKeySet) {
+                if (!personalModeKeySet) {
                   const confirm = (form.confirm || '').trim()
                   if (!confirm) {
                     setErr('请再次输入 Key 确认')
@@ -78,15 +78,15 @@ export function LoginPage() {
                   }
                 }
 
-                if (!selfModeKeySet) {
-                  const res = await api.post<APIResponse<unknown>>('/api/self-mode/bootstrap', { key })
+                if (!personalModeKeySet) {
+                  const res = await api.post<APIResponse<unknown>>('/api/personal/bootstrap', { key })
                   if (!res.data?.success) {
                     throw new Error(res.data?.message || '设置 Key 失败')
                   }
-                  setSelfModeKeySet(true)
+                  setPersonalModeKeySet(true)
                 }
 
-                localStorage.setItem('self_mode_key', key)
+                localStorage.setItem('personal_mode_key', key)
                 await refresh()
                 navigate(from, { replace: true })
               } catch (e) {
@@ -95,21 +95,21 @@ export function LoginPage() {
             }}
           >
             <div className="mb-3">
-              <label className="form-label">{selfModeKeySet ? '管理 Key' : '设置管理 Key'}</label>
+              <label className="form-label">{personalModeKeySet ? '管理 Key' : '设置管理 Key'}</label>
               <input
                 className="form-control"
                 name="key"
                 type="password"
                 autoComplete="off"
                 required
-                placeholder={selfModeKeySet ? '输入你设置的 Key' : '输入一个新的 Key'}
+                placeholder={personalModeKeySet ? '输入你设置的 Key' : '输入一个新的 Key'}
                 value={form.key}
                 onChange={(e) => setForm((p) => ({ ...p, key: e.target.value }))}
               />
-              <div className="form-text">自用模式下使用 Key 作为鉴权，不需要账号系统。</div>
+              <div className="form-text">personal 模式下使用 Key 作为鉴权，不需要账号系统。</div>
             </div>
 
-            {!selfModeKeySet ? (
+            {!personalModeKeySet ? (
               <div className="mb-3">
                 <label className="form-label">确认 Key</label>
                 <input
@@ -127,7 +127,7 @@ export function LoginPage() {
 
             <div className="d-grid mt-4">
               <button type="submit" className="btn btn-primary" disabled={loading}>
-                {loading ? (selfModeKeySet ? '解锁中…' : '初始化中…') : selfModeKeySet ? '进入管理后台' : '完成初始化'}
+                {loading ? (personalModeKeySet ? '解锁中…' : '初始化中…') : personalModeKeySet ? '进入管理后台' : '完成初始化'}
               </button>
             </div>
           </form>
@@ -136,3 +136,4 @@ export function LoginPage() {
     </SegmentedFrame>
   )
 }
+

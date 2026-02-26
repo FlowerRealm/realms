@@ -27,7 +27,7 @@ export type User = {
   status?: number;
   groups?: string[];
 
-  self_mode?: boolean;
+  mode?: 'business' | 'personal';
   email_verification_enabled?: boolean;
   features?: FeatureFlags;
 };

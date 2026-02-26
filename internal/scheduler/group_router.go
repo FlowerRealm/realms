@@ -60,7 +60,7 @@ func (r *GroupRouter) Next(ctx context.Context) (Selection, error) {
 		return Selection{}, errors.New("group router 未配置")
 	}
 
-	// self_mode / minimal-config fallback:
+	// personal 模式 / minimal-config fallback:
 	// when no ordered channel groups are provided, fall back to flat channel selection.
 	if len(r.cons.AllowGroupOrder) == 0 {
 		return r.sched.SelectWithConstraints(ctx, r.userID, r.routeKeyHash, r.cons)

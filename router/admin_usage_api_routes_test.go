@@ -107,7 +107,7 @@ func TestAdminUsagePage_EventIncludesFirstTokenLatencyAndTokensPerSecond(t *test
 
 	SetRouter(engine, Options{
 		Store:             st,
-		SelfMode:          false,
+		PersonalMode:      false,
 		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
 	})
 
@@ -326,7 +326,7 @@ func TestAdminUsagePage_UpstreamUnavailable_ShowsDetailedErrorMessage(t *testing
 
 	SetRouter(engine, Options{
 		Store:             st,
-		SelfMode:          false,
+		PersonalMode:      false,
 		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
 	})
 
@@ -514,7 +514,7 @@ func TestAdminUsagePage_CodexOAuthKeepsModelAndSetsAccount(t *testing.T) {
 
 	SetRouter(engine, Options{
 		Store:             st,
-		SelfMode:          false,
+		PersonalMode:      false,
 		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
 	})
 

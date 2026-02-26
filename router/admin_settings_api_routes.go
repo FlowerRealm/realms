@@ -19,7 +19,7 @@ type featureBanItemView struct {
 	Disabled         bool   `json:"disabled"`
 	Override         bool   `json:"override"`
 	Editable         bool   `json:"editable"`
-	ForcedBySelfMode bool   `json:"forced_by_self_mode"`
+	ForcedByPersonalMode bool `json:"forced_by_personal_mode"`
 	ForcedByBuild    bool   `json:"forced_by_build"`
 }
 
@@ -42,18 +42,18 @@ var featureBanKeys = []string{
 	store.SettingFeatureDisableAdminAnnouncements,
 }
 
-func featureBanGroups(selfMode bool, fs store.FeatureState) []featureBanGroupView {
-	b := func(key, label, hint string, disabled, forcedBySelfMode, forcedByBuild bool) featureBanItemView {
-		forced := forcedBySelfMode || forcedByBuild
+func featureBanGroups(personalMode bool, fs store.FeatureState) []featureBanGroupView {
+	b := func(key, label, hint string, disabled, forcedByPersonalMode, forcedByBuild bool) featureBanItemView {
+		forced := forcedByPersonalMode || forcedByBuild
 		return featureBanItemView{
-			Key:              key,
-			Label:            label,
-			Hint:             hint,
-			Disabled:         disabled,
-			Override:         disabled && !forced,
-			Editable:         !forced,
-			ForcedBySelfMode: forcedBySelfMode,
-			ForcedByBuild:    forcedByBuild,
+			Key:                 key,
+			Label:               label,
+			Hint:                hint,
+			Disabled:            disabled,
+			Override:            disabled && !forced,
+			Editable:            !forced,
+			ForcedByPersonalMode: forcedByPersonalMode,
+			ForcedByBuild:       forcedByBuild,
 		}
 	}
 
@@ -70,13 +70,13 @@ func featureBanGroups(selfMode bool, fs store.FeatureState) []featureBanGroupVie
 		{
 			Title: "计费与支付",
 			Items: []featureBanItemView{
-				b(store.SettingFeatureDisableBilling, "订阅/充值/支付", "隐藏入口，并对 /subscription、/topup、/pay、/admin/subscriptions|orders|payment-channels 及支付回调返回 404；同时数据面进入 free mode（不校验订阅/余额）。", fs.BillingDisabled, selfMode, false),
+				b(store.SettingFeatureDisableBilling, "订阅/充值/支付", "隐藏入口，并对 /subscription、/topup、/pay、/admin/subscriptions|orders|payment-channels 及支付回调返回 404；同时数据面进入 free mode（不校验订阅/余额）。", fs.BillingDisabled, personalMode, false),
 			},
 		},
 		{
 			Title: "工单",
 			Items: []featureBanItemView{
-				b(store.SettingFeatureDisableTickets, "工单", "隐藏入口，并对 /tickets*、/admin/tickets* 返回 404。", fs.TicketsDisabled, selfMode, false),
+				b(store.SettingFeatureDisableTickets, "工单", "隐藏入口，并对 /tickets*、/admin/tickets* 返回 404。", fs.TicketsDisabled, personalMode, false),
 			},
 		},
 		{
@@ -94,6 +94,7 @@ func featureBanGroups(selfMode bool, fs store.FeatureState) []featureBanGroupVie
 
 var startupConfigKeys = []string{
 	"REALMS_ENV",
+	"REALMS_MODE",
 	"REALMS_DB_DSN",
 	"REALMS_DB_DRIVER",
 	"REALMS_SQLITE_PATH",
@@ -121,7 +122,6 @@ var startupConfigKeys = []string{
 	"REALMS_SMTP_TOKEN",
 	"REALMS_EMAIL_VERIFICATION_ENABLE",
 	"REALMS_TICKETS_ATTACHMENTS_DIR",
-	"REALMS_SELF_MODE_ENABLE",
 	"REALMS_APP_SETTINGS_DEFAULTS_SITE_BASE_URL",
 	"REALMS_APP_SETTINGS_DEFAULTS_ADMIN_TIME_ZONE",
 	"REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_WEB_ANNOUNCEMENTS",
@@ -139,7 +139,7 @@ var startupConfigKeys = []string{
 }
 
 type adminSettingsResponse struct {
-	SelfMode          bool                  `json:"self_mode"`
+	Mode              string                `json:"mode"`
 	Features          store.FeatureState    `json:"features"`
 	FeatureBanGroups  []featureBanGroupView `json:"feature_ban_groups"`
 	StartupConfigKeys []string              `json:"startup_config_keys"`
@@ -216,7 +216,7 @@ func adminSettingsGetHandler(opts Options) gin.HandlerFunc {
 
 		ctx := c.Request.Context()
 
-		fs := opts.Store.FeatureStateEffective(ctx, opts.SelfMode)
+		fs := opts.Store.FeatureStateEffective(ctx, opts.PersonalMode)
 
 		siteBaseURL := strings.TrimSpace(opts.PublicBaseURLDefault)
 		if siteBaseURL == "" {
@@ -381,10 +381,14 @@ func adminSettingsGetHandler(opts Options) gin.HandlerFunc {
 		billingEffective.MinTopupCNY = billingEffective.MinTopupCNY.Truncate(store.CNYScale)
 		billingEffective.CreditUSDPerCNY = billingEffective.CreditUSDPerCNY.Truncate(store.USDScale)
 
+		mode := "business"
+		if opts.PersonalMode {
+			mode = "personal"
+		}
 		resp := adminSettingsResponse{
-			SelfMode:          opts.SelfMode,
+			Mode:              mode,
 			Features:          fs,
-			FeatureBanGroups:  featureBanGroups(opts.SelfMode, fs),
+			FeatureBanGroups:  featureBanGroups(opts.PersonalMode, fs),
 			StartupConfigKeys: startupConfigKeys,
 
 			SiteBaseURL:          siteBaseURL,
@@ -678,7 +682,7 @@ func adminSettingsUpdateHandler(opts Options) gin.HandlerFunc {
 		}
 
 		for _, key := range featureBanKeys {
-			if opts.SelfMode && (key == store.SettingFeatureDisableBilling || key == store.SettingFeatureDisableTickets) {
+			if opts.PersonalMode && (key == store.SettingFeatureDisableBilling || key == store.SettingFeatureDisableTickets) {
 				continue
 			}
 			enabled := false

@@ -56,12 +56,14 @@ type App struct {
 }
 
 func NewApp(opts AppOptions) (*App, error) {
+	personalMode := opts.Config.IsPersonalMode()
+
 	st := store.New(opts.DB)
 	st.SetDialect(store.Dialect(opts.Config.DB.Driver))
 	st.SetAppSettingsDefaults(opts.Config.AppSettingsDefaults)
 
 	sched := scheduler.NewWithOptions(st, scheduler.Options{
-		DisableCodexOAuth: opts.Config.SelfMode.Enable,
+		DisableCodexOAuth: personalMode,
 	})
 	sched.SetGroupPointerStore(st)
 	exec := upstream.NewExecutor(st, opts.Config)
@@ -70,14 +72,14 @@ func NewApp(opts AppOptions) (*App, error) {
 	if strings.TrimSpace(opts.Config.AppSettingsDefaults.SiteBaseURL) != "" {
 		publicBaseURL = strings.TrimRight(strings.TrimSpace(opts.Config.AppSettingsDefaults.SiteBaseURL), "/")
 	}
-	sessionCookieName := SessionCookieNameForSelfMode(opts.Config.SelfMode.Enable)
+	sessionCookieName := SessionCookieNameForPersonalMode(personalMode)
 	sessionSecret := strings.TrimSpace(os.Getenv("SESSION_SECRET"))
 	if sessionSecret == "" {
 		sessionSecret = randomSecret(32)
 	}
 
 	var oauthFlow *codexoauth.Flow
-	if !opts.Config.SelfMode.Enable {
+	if !personalMode {
 		oauthFlow = codexoauth.NewFlow(st, sessionCookieName, sessionSecret, localBaseURL(opts.Config), codexOAuthRedirectURI(opts.Config.Server.Addr))
 	}
 
@@ -87,7 +89,7 @@ func NewApp(opts AppOptions) (*App, error) {
 		Dir:    opts.Config.Debug.ProxyLog.Dir,
 	})
 	qp := quotaProvider(st, opts.Config)
-	openaiHandler := openaiapi.NewHandler(st, st, sched, exec, proxyLog, st, opts.Config.SelfMode.Enable, qp, st, st, st, upstream.SSEPumpOptions{
+	openaiHandler := openaiapi.NewHandler(st, st, sched, exec, proxyLog, st, personalMode, qp, st, st, st, upstream.SSEPumpOptions{
 		InitialLineBytes: 64 << 10,
 	})
 
@@ -125,17 +127,17 @@ func NewApp(opts AppOptions) (*App, error) {
 	frontendBaseURL := strings.TrimSpace(os.Getenv("FRONTEND_BASE_URL"))
 	frontendDistDir := strings.TrimSpace(os.Getenv("FRONTEND_DIST_DIR"))
 	if frontendDistDir == "" {
-		if opts.Config.SelfMode.Enable {
-			frontendDistDir = "./web/dist-self"
+		if personalMode {
+			frontendDistDir = "./web/dist-personal"
 		} else {
 			frontendDistDir = "./web/dist"
 		}
 	}
-	frontendFS, frontendIndexPage := loadEmbeddedFrontend(opts.Config.SelfMode.Enable)
+	frontendFS, frontendIndexPage := loadEmbeddedFrontend(personalMode)
 
 	router.SetRouter(engine, router.Options{
 		Store:                           st,
-		SelfMode:                        opts.Config.SelfMode.Enable,
+		PersonalMode:                    personalMode,
 		AllowOpenRegistration:           opts.Config.Security.AllowOpenRegistration,
 		EmailVerificationEnabledDefault: opts.Config.EmailVerif.Enable,
 		PublicBaseURLDefault:            publicBaseURL,
@@ -213,9 +215,9 @@ func randomSecret(n int) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-func loadEmbeddedFrontend(selfMode bool) (fs.FS, []byte) {
-	if selfMode {
-		if dist, index := loadEmbeddedDist(root.WebSelfDistFS, "web/dist-self"); dist != nil && len(index) > 0 {
+func loadEmbeddedFrontend(personalMode bool) (fs.FS, []byte) {
+	if personalMode {
+		if dist, index := loadEmbeddedDist(root.WebPersonalDistFS, "web/dist-personal"); dist != nil && len(index) > 0 {
 			return dist, index
 		}
 		return nil, nil
@@ -244,9 +246,9 @@ func loadEmbeddedDist(rootFS fs.FS, distDir string) (fs.FS, []byte) {
 
 func quotaProvider(st *store.Store, cfg config.Config) quota.Provider {
 	reserveTTL := 2*time.Minute + 30*time.Second
-	normal := quota.NewHybridProvider(st, reserveTTL, cfg.Billing.EnablePayAsYouGo)
+	business := quota.NewHybridProvider(st, reserveTTL, cfg.Billing.EnablePayAsYouGo)
 	free := quota.NewFreeProvider(st, reserveTTL)
-	return quota.NewFeatureProvider(st, cfg.SelfMode.Enable, normal, free)
+	return quota.NewFeatureProvider(st, cfg.IsPersonalMode(), business, free)
 }
 
 func (a *App) Handler() http.Handler {
@@ -344,7 +346,7 @@ func (a *App) handleFaviconICO(w http.ResponseWriter, r *http.Request) {
 func (a *App) bootstrap() error {
 	go a.usageCleanupLoop()
 	go a.codexBalanceRefreshLoop()
-	if !a.cfg.SelfMode.Enable {
+	if !a.cfg.IsPersonalMode() {
 		go a.ticketAttachmentsCleanupLoop()
 	}
 	return nil

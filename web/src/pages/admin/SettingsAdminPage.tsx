@@ -43,7 +43,7 @@ function initForm(s: AdminSettings): UpdateAdminSettingsRequest {
 function featureToggleDisabled(item: FeatureBanItem): boolean {
   if (!item.editable) return true;
   if (item.forced_by_build) return true;
-  if (item.forced_by_self_mode) return true;
+  if (item.forced_by_personal_mode) return true;
   return false;
 }
 
@@ -220,9 +220,9 @@ export function SettingsAdminPage() {
                                     <span className="badge bg-warning-subtle text-warning-emphasis border smaller">
                                       编译期剔除
                                     </span>
-                                  ) : item.forced_by_self_mode ? (
+                                  ) : item.forced_by_personal_mode ? (
                                     <span className="badge bg-warning-subtle text-warning-emphasis border smaller">
-                                      自用模式强制
+                                      personal 模式强制
                                     </span>
                                   ) : item.override ? (
                                     <span className="badge bg-light text-dark border smaller">

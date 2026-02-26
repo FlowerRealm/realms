@@ -26,6 +26,8 @@ import (
 func newTestApp(t *testing.T, cfg config.Config) *App {
 	t.Helper()
 
+	personalMode := cfg.IsPersonalMode()
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
 	db, err := store.OpenSQLite(path)
@@ -41,7 +43,7 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 	st.SetDialect(store.DialectSQLite)
 	st.SetAppSettingsDefaults(cfg.AppSettingsDefaults)
 
-	openaiHandler := openaiapi.NewHandler(nil, nil, nil, nil, nil, nil, false, nil, nil, nil, nil, upstream.SSEPumpOptions{})
+	openaiHandler := openaiapi.NewHandler(nil, nil, nil, nil, nil, nil, personalMode, nil, nil, nil, nil, upstream.SSEPumpOptions{})
 
 	app := &App{
 		cfg:    cfg,
@@ -60,15 +62,15 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 	})
-	engine.Use(sessions.Sessions(SessionCookieNameForSelfMode(cfg.SelfMode.Enable), sessionStore))
+	engine.Use(sessions.Sessions(SessionCookieNameForPersonalMode(personalMode), sessionStore))
 
-		router.SetRouter(engine, router.Options{
-			Store:                           st,
-			SelfMode:                        cfg.SelfMode.Enable,
-			AllowOpenRegistration:           cfg.Security.AllowOpenRegistration,
-			EmailVerificationEnabledDefault: cfg.EmailVerif.Enable,
-			BillingDefault:                  cfg.Billing,
-			SMTPDefault:                     cfg.SMTP,
+	router.SetRouter(engine, router.Options{
+		Store:                           st,
+		PersonalMode:                    personalMode,
+		AllowOpenRegistration:           cfg.Security.AllowOpenRegistration,
+		EmailVerificationEnabledDefault: cfg.EmailVerif.Enable,
+		BillingDefault:                  cfg.Billing,
+		SMTPDefault:                     cfg.SMTP,
 		OpenAI:                          openaiHandler,
 		FrontendIndexPage:               []byte("<!doctype html><html><body>INDEX</body></html>"),
 
@@ -88,9 +90,9 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 	return app
 }
 
-func TestRoutes_SelfMode_DisablesBillingWebhooks(t *testing.T) {
+func TestRoutes_PersonalMode_DisablesBillingWebhooks(t *testing.T) {
 	cfg := config.Config{
-		SelfMode: config.SelfModeConfig{Enable: true},
+		Mode:     config.ModePersonal,
 		Security: config.SecurityConfig{SubscriptionOrderWebhookSecret: "secret"},
 	}
 	app := newTestApp(t, cfg)
@@ -116,7 +118,7 @@ func TestRoutes_SelfMode_DisablesBillingWebhooks(t *testing.T) {
 
 func TestRoutes_DefaultMode_KeepsSubscriptionOrderWebhook(t *testing.T) {
 	cfg := config.Config{
-		SelfMode: config.SelfModeConfig{Enable: false},
+		Mode:     config.ModeBusiness,
 		Security: config.SecurityConfig{SubscriptionOrderWebhookSecret: "secret"},
 	}
 	app := newTestApp(t, cfg)
@@ -135,7 +137,7 @@ func TestRoutes_DefaultMode_KeepsSubscriptionOrderWebhook(t *testing.T) {
 
 func TestSelfMode_KeyAuth_AllowsAdminUsageWithoutSession(t *testing.T) {
 	cfg := config.Config{
-		SelfMode:   config.SelfModeConfig{Enable: true},
+		Mode:       config.ModePersonal,
 		Security:   config.SecurityConfig{SubscriptionOrderWebhookSecret: "secret"},
 		EmailVerif: config.EmailVerifConfig{Enable: false},
 	}
@@ -153,8 +155,8 @@ func TestSelfMode_KeyAuth_AllowsAdminUsageWithoutSession(t *testing.T) {
 			t.Fatalf("unmarshal json: %v", err)
 		}
 		data, _ := payload["data"].(map[string]any)
-		if v, _ := data["self_mode_key_set"].(bool); v {
-			t.Fatalf("expected self_mode_key_set=false")
+		if v, _ := data["personal_mode_key_set"].(bool); v {
+			t.Fatalf("expected personal_mode_key_set=false")
 		}
 	})
 
@@ -176,7 +178,7 @@ func TestSelfMode_KeyAuth_AllowsAdminUsageWithoutSession(t *testing.T) {
 	})
 
 	t.Run("bootstrap sets key", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "http://example.com/api/self-mode/bootstrap", strings.NewReader(`{"key":"k_test_123"}`))
+		req := httptest.NewRequest(http.MethodPost, "http://example.com/api/personal/bootstrap", strings.NewReader(`{"key":"k_test_123"}`))
 		req.Header.Set("Content-Type", "application/json")
 		rr := httptest.NewRecorder()
 		app.Handler().ServeHTTP(rr, req)
@@ -193,7 +195,7 @@ func TestSelfMode_KeyAuth_AllowsAdminUsageWithoutSession(t *testing.T) {
 	})
 
 	t.Run("bootstrap cannot be called twice", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "http://example.com/api/self-mode/bootstrap", strings.NewReader(`{"key":"k_other"}`))
+		req := httptest.NewRequest(http.MethodPost, "http://example.com/api/personal/bootstrap", strings.NewReader(`{"key":"k_other"}`))
 		req.Header.Set("Content-Type", "application/json")
 		rr := httptest.NewRecorder()
 		app.Handler().ServeHTTP(rr, req)
@@ -229,11 +231,11 @@ func TestSelfMode_KeyAuth_AllowsAdminUsageWithoutSession(t *testing.T) {
 
 func TestSelfMode_KeyAuth_RejectsAdminUsageWithoutKey(t *testing.T) {
 	cfg := config.Config{
-		SelfMode: config.SelfModeConfig{Enable: true},
+		Mode: config.ModePersonal,
 	}
 	app := newTestApp(t, cfg)
 
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/self-mode/bootstrap", strings.NewReader(`{"key":"k_test_123"}`))
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/personal/bootstrap", strings.NewReader(`{"key":"k_test_123"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	app.Handler().ServeHTTP(rr, req)
@@ -258,11 +260,11 @@ func TestSelfMode_KeyAuth_RejectsAdminUsageWithoutKey(t *testing.T) {
 
 func TestSelfMode_KeyAuth_DataPlaneUsageEventsRequiresKey(t *testing.T) {
 	cfg := config.Config{
-		SelfMode: config.SelfModeConfig{Enable: true},
+		Mode: config.ModePersonal,
 	}
 	app := newTestApp(t, cfg)
 
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/self-mode/bootstrap", strings.NewReader(`{"key":"k_test_123"}`))
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/personal/bootstrap", strings.NewReader(`{"key":"k_test_123"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	app.Handler().ServeHTTP(rr, req)
@@ -292,7 +294,7 @@ func TestSelfMode_KeyAuth_DataPlaneUsageEventsRequiresKey(t *testing.T) {
 
 func TestRoutes_SPAFallback(t *testing.T) {
 	cfg := config.Config{
-		SelfMode: config.SelfModeConfig{Enable: false},
+		Mode:     config.ModeBusiness,
 		Security: config.SecurityConfig{SubscriptionOrderWebhookSecret: "secret"},
 	}
 	app := newTestApp(t, cfg)
@@ -324,7 +326,7 @@ func TestRoutes_SPAFallback(t *testing.T) {
 
 func TestRoutes_NoChatFeature(t *testing.T) {
 	cfg := config.Config{
-		SelfMode: config.SelfModeConfig{Enable: false},
+		Mode:     config.ModeBusiness,
 		Security: config.SecurityConfig{SubscriptionOrderWebhookSecret: "secret"},
 	}
 	app := newTestApp(t, cfg)
@@ -449,7 +451,7 @@ func TestQuotaProviderForConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("self_mode uses free provider", func(t *testing.T) {
+	t.Run("personal mode uses free provider", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
 
@@ -480,8 +482,8 @@ func TestQuotaProviderForConfig(t *testing.T) {
 		}
 
 		cfg := config.Config{
-			SelfMode: config.SelfModeConfig{Enable: true},
-			Billing:  config.BillingConfig{EnablePayAsYouGo: true},
+			Mode:    config.ModePersonal,
+			Billing: config.BillingConfig{EnablePayAsYouGo: true},
 		}
 		st.SetAppSettingsDefaults(cfg.AppSettingsDefaults)
 

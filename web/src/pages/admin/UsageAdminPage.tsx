@@ -57,7 +57,7 @@ function formatUSD(raw: string): string {
 
 export function UsageAdminPage() {
   const { user } = useAuth();
-  const isSelfMode = !!user?.self_mode;
+  const isPersonalMode = user?.mode === 'personal';
 
   const [data, setData] = useState<AdminUsagePage | null>(null);
   const [loading, setLoading] = useState(true);
@@ -576,7 +576,7 @@ export function UsageAdminPage() {
           </div>
 
           <div className="col-12">
-            {isSelfMode ? null : (
+            {isPersonalMode ? null : (
               <div className="card border-0 p-0 overflow-hidden">
                 <div className="card-header bg-white py-3 border-bottom-0 px-4">
                   <h5 className="mb-0 fw-bold">
@@ -680,7 +680,7 @@ export function UsageAdminPage() {
                     <thead className="table-light text-muted smaller uppercase">
                       <tr>
                         <th className="ps-4 border-0">时间</th>
-                        {isSelfMode ? null : <th className="border-0">用户</th>}
+                        {isPersonalMode ? null : <th className="border-0">用户</th>}
                         <th className="border-0">接口 / 模型</th>
                         <th className="text-center border-0">状态码</th>
                         <th className="text-end border-0">耗时</th>
@@ -709,7 +709,7 @@ export function UsageAdminPage() {
                               <i className={`ri-arrow-right-s-line text-muted me-1 align-middle ${expandedID === e.id ? 'rotate-90' : ''}`}></i>
                               <span className="align-middle">{e.time}</span>
                             </td>
-                            {isSelfMode ? null : (
+                            {isPersonalMode ? null : (
                               <td className="text-nowrap">
                                 <div className="fw-bold small">{e.user_email}</div>
                                 <div className="text-muted smaller">ID: {e.user_id}</div>
@@ -770,7 +770,7 @@ export function UsageAdminPage() {
                           </tr>
                           {expandedID === e.id ? (
                             <tr key={`${e.id}-detail`} className="rlm-usage-detail-row">
-                              <td colSpan={isSelfMode ? 11 : 12} className="p-0 border-0">
+                              <td colSpan={isPersonalMode ? 11 : 12} className="p-0 border-0">
                                 <div className="bg-light px-4 py-3 mt-1">
                                   {detailLoadingID === e.id ? <div className="text-muted small">加载详情中…</div> : null}
                                   {detailByEventID[e.id] ? (
@@ -817,7 +817,7 @@ export function UsageAdminPage() {
                       ))}
                       {events.length === 0 ? (
                         <tr>
-                          <td colSpan={isSelfMode ? 11 : 12} className="text-center py-5 text-muted small">
+                          <td colSpan={isPersonalMode ? 11 : 12} className="text-center py-5 text-muted small">
                             暂无请求记录
                           </td>
                         </tr>

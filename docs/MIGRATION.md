@@ -8,16 +8,16 @@
 
 ## 你需要迁移什么？
 
-如果你之前使用旧桌面壳（Electron）跑的是 **SQLite 自用模式**，通常需要迁移：
+如果你之前使用旧桌面壳（Electron）跑的是 **SQLite personal 模式**，通常需要迁移：
 
 - 数据库文件：`realms.db`
 - 附件目录：`tickets/`（如果你用过工单/附件）
 
-如果你之前使用的是 Docker Compose（MySQL）/Server（正常模式），一般不需要迁移桌面侧数据文件。
+如果你之前使用的是 Docker Compose（MySQL）/Server（business 模式），一般不需要迁移桌面侧数据文件。
 
 ---
 
-## 迁移步骤（SQLite 自用模式）
+## 迁移步骤（SQLite personal 模式）
 
 ### 1) 安装并启动 `realms-app`
 
@@ -38,7 +38,7 @@
 - `realms.db` → `Realms/realms.db`
 - `tickets/` → `Realms/tickets/`
 
-> 找不到旧数据位置时：在你的磁盘上搜索 `realms.db`，它通常位于 Electron 的 `userData` 目录下（应用名可能是 `Realms` 或 `realms-desktop`）。
+> 找不到旧数据位置时：在你的磁盘上搜索 `realms.db`，它通常位于 Electron 的 `userData` 目录下（应用名可能是 `Realms` 或 `realms-desktop`；仅供历史参考）。
 
 ### 3) 保持“仅本机访问”（可选）
 
@@ -66,9 +66,8 @@ $env:REALMS_ADDR = "127.0.0.1:8080"
 
 - `OPENAI_BASE_URL=http://127.0.0.1:8080/v1`
 
-鉴权在自用模式下仍是管理 Key（首次打开 `/login` 设置）。
+鉴权在 personal 模式下仍是管理 Key（首次打开 `/login` 设置）。
 
 ### 我可以继续使用旧桌面壳吗？
 
 不建议。旧桌面壳仅作为历史参考，不再维护，也不会再提供构建/发布指引。
-

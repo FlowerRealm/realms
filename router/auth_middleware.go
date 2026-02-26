@@ -17,8 +17,8 @@ import (
 const sessionUserUpdatedAtKey = "user_updated_at_unix"
 
 const (
-	selfModeVirtualUserID  int64 = 1
-	selfModeVirtualTokenID int64 = 1
+	personalModeVirtualUserID  int64 = 1
+	personalModeVirtualTokenID int64 = 1
 )
 
 func extractBearer(v string) string {
@@ -35,7 +35,7 @@ func extractBearer(v string) string {
 	return strings.TrimSpace(parts[1])
 }
 
-func requireSelfModeKey(opts Options) gin.HandlerFunc {
+func requirePersonalModeKey(opts Options) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		raw := extractBearer(c.GetHeader("Authorization"))
 		if raw == "" {
@@ -52,14 +52,14 @@ func requireSelfModeKey(opts Options) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		expectHash, ok, err := opts.Store.GetSelfModeKeyHash(c.Request.Context())
+		expectHash, ok, err := opts.Store.GetPersonalModeKeyHash(c.Request.Context())
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "鉴权失败"})
 			c.Abort()
 			return
 		}
 		if !ok {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "自用模式尚未设置 Key"})
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "personal 模式尚未设置 Key"})
 			c.Abort()
 			return
 		}
@@ -70,24 +70,24 @@ func requireSelfModeKey(opts Options) gin.HandlerFunc {
 		}
 
 		role := store.UserRoleRoot
-		tokenID := selfModeVirtualTokenID
+		tokenID := personalModeVirtualTokenID
 		p := auth.Principal{
 			ActorType: auth.ActorTypeToken,
-			UserID:    selfModeVirtualUserID,
+			UserID:    personalModeVirtualUserID,
 			TokenID:   &tokenID,
 			Role:      role,
 		}
 		c.Request = c.Request.WithContext(auth.WithPrincipal(c.Request.Context(), p))
 
-		c.Set("rlm_user_id", selfModeVirtualUserID)
+		c.Set("rlm_user_id", personalModeVirtualUserID)
 		c.Set("rlm_user_role", role)
 		c.Next()
 	}
 }
 
 func requireRoot(opts Options) gin.HandlerFunc {
-	if opts.SelfMode {
-		return requireSelfModeKey(opts)
+	if opts.PersonalMode {
+		return requirePersonalModeKey(opts)
 	}
 	return requireRootSession(opts)
 }

@@ -10,14 +10,14 @@ export const api = axios.create({
 
 api.interceptors.request.use((config) => {
   try {
-    const isSelfApp = import.meta.env.MODE === 'self';
-    if (isSelfApp) {
-      const selfKey = (localStorage.getItem('self_mode_key') || '').trim();
-      if (selfKey) {
+    const isPersonalApp = import.meta.env.MODE === 'personal';
+    if (isPersonalApp) {
+      const personalKey = (localStorage.getItem('personal_mode_key') || '').trim();
+      if (personalKey) {
         config.headers = config.headers ?? {};
         const headers = config.headers as Record<string, string>;
         if (!headers['Authorization'] && !headers['authorization'] && !headers['x-api-key'] && !headers['X-Api-Key']) {
-          headers['Authorization'] = `Bearer ${selfKey}`;
+          headers['Authorization'] = `Bearer ${personalKey}`;
         }
       }
     }

@@ -303,7 +303,11 @@ func newMultiplierAppServer(t *testing.T, db *sql.DB, dbPath string, paygEnabled
 		t.Fatalf("LoadFromEnv: %v", err)
 	}
 	appCfg.Env = "dev"
-	appCfg.SelfMode.Enable = selfMode
+	if selfMode {
+		appCfg.Mode = config.ModePersonal
+	} else {
+		appCfg.Mode = config.ModeBusiness
+	}
 	appCfg.DB.Driver = "sqlite"
 	appCfg.DB.DSN = ""
 	appCfg.DB.SQLitePath = dbPath

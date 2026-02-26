@@ -4,10 +4,8 @@ import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  const isSelf = mode === 'self'
-  const input = isSelf
-    ? { index: path.resolve(__dirname, './index.self.html') }
-    : { index: path.resolve(__dirname, './index.html') }
+  const isPersonal = mode === 'personal'
+  const input = isPersonal ? { index: path.resolve(__dirname, './index.personal.html') } : { index: path.resolve(__dirname, './index.html') }
   return {
     resolve: {
       alias: {
@@ -16,7 +14,7 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [react()],
     build: {
-      outDir: isSelf ? 'dist-self' : 'dist',
+      outDir: isPersonal ? 'dist-personal' : 'dist',
       rollupOptions: {
         input,
       },

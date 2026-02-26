@@ -75,7 +75,7 @@ func setChannelAPIRoutes(r gin.IRoutes, opts Options) {
 
 	r.PUT("/channel", admin, updateChannelHandler(opts))
 	r.PUT("/channel/", admin, updateChannelHandler(opts))
-	if opts.SelfMode {
+	if opts.PersonalMode {
 		r.POST("/channel/reorder", admin, reorderChannelsHandler(opts))
 		r.POST("/channel/reorder/", admin, reorderChannelsHandler(opts))
 	}
@@ -90,7 +90,7 @@ func setChannelAPIRoutes(r gin.IRoutes, opts Options) {
 	r.GET("/channel/:channel_id/credentials", admin, listChannelCredentialsHandler(opts))
 	r.POST("/channel/:channel_id/credentials", admin, createChannelCredentialHandler(opts))
 	r.DELETE("/channel/:channel_id/credentials/:credential_id", admin, deleteChannelCredentialHandler(opts))
-	if !opts.SelfMode {
+	if !opts.PersonalMode {
 		r.GET("/channel/:channel_id/codex-accounts", admin, listChannelCodexAccountsHandler(opts))
 		r.POST("/channel/:channel_id/codex-oauth/start", admin, startChannelCodexOAuthHandler(opts))
 		r.POST("/channel/:channel_id/codex-oauth/complete", admin, completeChannelCodexOAuthHandler(opts))
@@ -616,8 +616,8 @@ func createChannelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "不支持的渠道类型"})
 			return
 		}
-		if opts.SelfMode && req.Type == store.UpstreamTypeCodexOAuth {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "自用模式不支持 codex_oauth 渠道"})
+		if opts.PersonalMode && req.Type == store.UpstreamTypeCodexOAuth {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "personal 模式不支持 codex_oauth 渠道"})
 			return
 		}
 		if req.Type == store.UpstreamTypeCodexOAuth && req.Key != nil {
@@ -675,7 +675,7 @@ type updateChannelRequest struct {
 
 func reorderChannelsHandler(opts Options) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !opts.SelfMode {
+		if !opts.PersonalMode {
 			c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "not found"})
 			return
 		}
@@ -734,8 +734,8 @@ func updateChannelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询 channel 失败"})
 			return
 		}
-		if opts.SelfMode && ch.Type == store.UpstreamTypeCodexOAuth {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "自用模式不支持 codex_oauth 渠道（建议删除）"})
+		if opts.PersonalMode && ch.Type == store.UpstreamTypeCodexOAuth {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "personal 模式不支持 codex_oauth 渠道（建议删除）"})
 			return
 		}
 		if ch.Type == store.UpstreamTypeCodexOAuth && req.Key != nil && strings.TrimSpace(*req.Key) != "" {
@@ -2007,8 +2007,8 @@ func streamChannelCLITestHandler(c *gin.Context, opts Options, channelID int64) 
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel 不存在"})
 		return
 	}
-	if opts.SelfMode && ch.Type == store.UpstreamTypeCodexOAuth {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": "自用模式不支持 codex_oauth 渠道测试"})
+	if opts.PersonalMode && ch.Type == store.UpstreamTypeCodexOAuth {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "personal 模式不支持 codex_oauth 渠道测试"})
 		return
 	}
 
