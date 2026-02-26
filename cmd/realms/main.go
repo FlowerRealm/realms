@@ -42,7 +42,10 @@ func main() {
 
 	switch dialect {
 	case store.DialectMySQL:
-		if err := store.ApplyMigrations(db); err != nil {
+		if err := store.ApplyMigrations(context.Background(), db, store.MigrationOptions{
+			LockName:    cfg.DB.MigrationLockName,
+			LockTimeout: time.Duration(cfg.DB.MigrationLockTimeoutSeconds) * time.Second,
+		}); err != nil {
 			slog.Error("执行数据库迁移失败", "err", err)
 			os.Exit(1)
 		}

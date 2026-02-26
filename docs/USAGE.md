@@ -180,6 +180,12 @@ docker compose up -d
 docker compose logs -f realms
 ```
 
+> 说明：Realms 在启动时会自动执行 MySQL 迁移（`internal/store/migrations/*.sql`）。  
+> 多实例并发启动场景下，会通过 MySQL `GET_LOCK` 做互斥，避免多个实例同时跑迁移导致冲突。  
+> 如需调整锁行为，可设置：
+> - `REALMS_DB_MIGRATION_LOCK_NAME`（默认 `realms.schema_migrations`）
+> - `REALMS_DB_MIGRATION_LOCK_TIMEOUT_SECONDS`（默认 `30`；`0` 表示不等待）
+
 ### 回滚到某个版本
 
 > 注意：如果新版本已经执行了数据库迁移，回滚代码不一定能兼容当前库结构。稳妥做法是先备份数据库（见下方），必要时恢复备份。

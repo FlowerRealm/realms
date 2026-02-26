@@ -14,4 +14,4 @@ Realms 会记录每次数据面请求的用量/状态等信息，主要用途：
 
 - SQLite：首次启动会初始化 schema
 - MySQL：启动时应用迁移（`internal/store/migrations/*.sql`）
-
+  - 多实例并发启动时会通过 MySQL `GET_LOCK` 做互斥，避免多个实例同时跑迁移导致冲突

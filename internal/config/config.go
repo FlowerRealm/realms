@@ -78,6 +78,12 @@ type DBConfig struct {
 	DSN string `yaml:"dsn"`
 	// SQLitePath 是 SQLite 数据库文件路径（可包含 DSN query，如 ?_busy_timeout=30000）。
 	SQLitePath string `yaml:"sqlite_path"`
+
+	// MigrationLockName 是 MySQL 启动迁移的全局互斥锁名（用于多实例并发启动）。
+	MigrationLockName string `yaml:"migration_lock_name"`
+	// MigrationLockTimeoutSeconds 是 MySQL 启启动迁移等待锁的超时（秒）。
+	// - 0 表示不等待（立即失败）
+	MigrationLockTimeoutSeconds int `yaml:"migration_lock_timeout_seconds"`
 }
 
 type SecurityConfig struct {
@@ -144,6 +150,13 @@ func normalizeAndValidate(cfg Config) (Config, error) {
 	cfg.DB.Driver = strings.ToLower(strings.TrimSpace(cfg.DB.Driver))
 	cfg.DB.DSN = strings.TrimSpace(cfg.DB.DSN)
 	cfg.DB.SQLitePath = strings.TrimSpace(cfg.DB.SQLitePath)
+	cfg.DB.MigrationLockName = strings.TrimSpace(cfg.DB.MigrationLockName)
+	if cfg.DB.MigrationLockName == "" {
+		cfg.DB.MigrationLockName = "realms.schema_migrations"
+	}
+	if cfg.DB.MigrationLockTimeoutSeconds < 0 {
+		return Config{}, errors.New("db.migration_lock_timeout_seconds 不能为负数")
+	}
 
 	// 兼容旧配置：历史仅配置 db.dsn（无 db.driver）。
 	if cfg.DB.Driver == "" {
@@ -249,14 +262,14 @@ func parseDecimalNonNeg(raw string, scale int32) (decimal.Decimal, error) {
 }
 
 func defaultConfig() Config {
-		return Config{
-			Env: "dev",
-			SelfMode: SelfModeConfig{
-				Enable: false,
-			},
-			Server: ServerConfig{
-				Addr: ":8080",
-			},
+	return Config{
+		Env: "dev",
+		SelfMode: SelfModeConfig{
+			Enable: false,
+		},
+		Server: ServerConfig{
+			Addr: ":8080",
+		},
 		Debug: DebugConfig{
 			ProxyLog: ProxyLogConfig{
 				Enable: false,
@@ -273,7 +286,9 @@ func defaultConfig() Config {
 			TrustProxyHeaders:     false,
 		},
 		DB: DBConfig{
-			SQLitePath: "./data/realms.db?_busy_timeout=30000",
+			SQLitePath:                  "./data/realms.db?_busy_timeout=30000",
+			MigrationLockName:           "realms.schema_migrations",
+			MigrationLockTimeoutSeconds: 30,
 		},
 		SMTP: SMTPConfig{
 			SMTPPort: 587,
@@ -314,6 +329,14 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("REALMS_SQLITE_PATH"); v != "" {
 		cfg.DB.SQLitePath = v
+	}
+	if v := os.Getenv("REALMS_DB_MIGRATION_LOCK_NAME"); v != "" {
+		cfg.DB.MigrationLockName = v
+	}
+	if v := os.Getenv("REALMS_DB_MIGRATION_LOCK_TIMEOUT_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.DB.MigrationLockTimeoutSeconds = n
+		}
 	}
 	if v := os.Getenv("REALMS_ALLOW_OPEN_REGISTRATION"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
