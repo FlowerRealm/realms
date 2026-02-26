@@ -111,6 +111,7 @@ func NewApp(opts AppOptions) (*App, error) {
 	}
 	engine := gin.New()
 	engine.Use(gin.Recovery())
+	engine.Use(CORSMiddleware(opts.Config.Server.CORSAllowOrigins))
 	sessionStore := cookie.NewStore([]byte(sessionSecret))
 	sessionStore.Options(sessions.Options{
 		Path:     "/",

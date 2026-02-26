@@ -5,7 +5,12 @@ ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 TOOLS_BIN := $(ROOT_DIR)/.tmp/bin
 AIR := $(TOOLS_BIN)/air
 
-.PHONY: help tools dev test ci ci-real fmt tidy desktop-dev desktop-dist
+EXE :=
+ifeq ($(OS),Windows_NT)
+  EXE := .exe
+endif
+
+.PHONY: help tools dev test ci ci-real fmt tidy app-dev app-dist desktop-dev desktop-dist
 
 help:
 	@echo "Targets:"
@@ -14,8 +19,8 @@ help:
 	@echo "  make test    运行测试"
 	@echo "  make ci      运行 CI 检查集（本地/CI 同口径；如设置 REALMS_CI_* 则默认跑 real upstream）"
 	@echo "  make ci-real 运行真实上游集成回归（需要 REALMS_CI_*）"
-	@echo "  make desktop-dev  桌面版开发运行（Electron，自用模式；固定 127.0.0.1:8080）"
-	@echo "  make desktop-dist 桌面版打包（当前平台安装包）"
+	@echo "  make app-dev  App 开发运行（浏览器 + 端口；自用模式默认 :8080）"
+	@echo "  make app-dist App 打包（当前平台二进制）"
 	@echo "  make fmt     gofmt（按包目录）"
 	@echo "  make tidy    go mod tidy"
 
@@ -29,16 +34,24 @@ $(AIR):
 dev: tools
 	@PATH="$(TOOLS_BIN):$$PATH" bash ./scripts/dev.sh
 
-desktop-dev:
+app-dev:
 	@npm --prefix "web" install
 	@npm --prefix "web" run build:self
-	@npm --prefix "desktop" install
-	@npm --prefix "desktop" run dev
+	@go run -tags embed_web_self ./cmd/realms-app
+
+app-dist:
+	@npm --prefix "web" install
+	@npm --prefix "web" run build:self
+	@mkdir -p "dist"
+	@go build -tags embed_web_self -ldflags "-X realms/internal/version.Version=$(VERSION) -X realms/internal/version.Date=$(DATE)" -o "dist/realms-app$(EXE)" ./cmd/realms-app
+
+desktop-dev:
+	@echo "⚠️ desktop-dev 已废弃：Electron Desktop 将被移除；已自动切换为 app-dev"
+	@$(MAKE) app-dev
 
 desktop-dist:
-	@npm --prefix "web" install
-	@npm --prefix "desktop" install
-	@npm --prefix "desktop" run dist
+	@echo "⚠️ desktop-dist 已废弃：Electron Desktop 将被移除；已自动切换为 app-dist"
+	@$(MAKE) app-dist
 
 test:
 	go test ./...

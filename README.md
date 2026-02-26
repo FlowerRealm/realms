@@ -22,9 +22,11 @@ Realms 是一个 Go 单体服务（Gin），对外提供 **OpenAI 兼容** 的 `
 ## 0) 先选一种“运行形态”
 
 - **Server（正常模式，推荐）**：部署/多人使用，默认开启账号/Token/模型目录等完整功能域。
-- **Desktop（自用模式）**：Electron 桌面版，适合个人自用（固定 `127.0.0.1:8080`，启动内置后端并打开页面）。
+- **App（自用模式）**：单二进制可执行程序，双击启动后用浏览器访问（默认监听 `:8080`，启动后自动打开页面）。
 
-> 说明：自用模式也可以以 Server 形态运行（`REALMS_SELF_MODE_ENABLE=true`）。Desktop 只是把“自用模式 Server”封装成桌面应用。
+> 说明：自用模式也可以以 Server 形态运行（`REALMS_SELF_MODE_ENABLE=true`）。App 只是把“自用模式 Server”封装成可执行启动器（原 Electron Desktop 弃用中）。
+
+> ⚠️ 说明：原 Electron Desktop 已进入弃用流程（目录仍保留），后续将以 `cmd/realms-app` 替代。
 
 ---
 
@@ -47,37 +49,41 @@ cp ".env.example" ".env"
 
 ---
 
-## 2) 最小开始：Desktop（自用模式）
+## 2) 最小开始：App（自用模式，浏览器 + 端口）
 
-Desktop 用于把 Realms 以“自用模式”封装成桌面应用（启动本地后端并打开页面）。
+App 用于把 Realms 以“自用模式”封装成可执行程序（启动本地后端并打开浏览器页面）。
 
-关键约束（Desktop）：
-- 固定监听：`127.0.0.1:8080`（端口占用则启动失败，端口不会自动改动）
+关键约束（App 默认值）：
+- 默认监听：`:8080`（便于多人访问；如需仅本机可访问，可设置 `REALMS_ADDR=127.0.0.1:8080`）
 - 固定 base_url：`http://127.0.0.1:8080/v1`
 - 后端强制启用自用模式：`REALMS_SELF_MODE_ENABLE=true`
 - 自用模式鉴权：首次打开 `/login` 设置 **管理 Key**；之后外部客户端与管理面都使用该 Key（`Authorization: Bearer <key>` 或 `x-api-key`）
 
-### 2.1 直接使用安装包（推荐）
+跨域（CORS）：
+- App 默认启用：`REALMS_CORS_ALLOW_ORIGINS=*`
+- Server 默认关闭；如需开启：设置 `REALMS_CORS_ALLOW_ORIGINS`（`*` 或逗号分隔白名单）
 
-从 GitHub Releases 下载并安装对应平台的安装包，打开应用即可（更新源也默认使用 GitHub Releases）。
+### 2.1 直接使用二进制（推荐）
+
+从 GitHub Releases 下载对应平台的 `realms-app`（或压缩包），双击运行即可。
 
 ### 2.2 从源码开发运行（本机）
 
 前置：Go + Node.js + npm
 
 ```bash
-make desktop-dev
+make app-dev
 ```
 
-### 2.3 打包当前平台安装包
+### 2.3 打包当前平台二进制
 
 ```bash
-make desktop-dist
+make app-dist
 ```
 
-产物默认输出到：`desktop/dist/`。
+产物默认输出到：`dist/`。
 
-更多细节见：`docs/USAGE.md`（“桌面版（Electron，自用模式）”章节）与 `desktop/README.md`。
+更多细节见：`docs/USAGE.md` 与 `desktop/README.md`（旧 Electron Desktop，弃用中）。
 
 ---
 
@@ -143,7 +149,7 @@ go test ./...
 - 环境变量示例：`.env.example`
 - 可直接复制运行的部署命令：`docs/USAGE.md`
 - 前后端分离说明：`docs/frontend.md`
-- 桌面版说明：`desktop/README.md`
+- App 说明：`docs/USAGE.md`
 - 贡献指南：`CONTRIBUTING.md`
 - 安全政策：`SECURITY.md`
 - 行为准则：`CODE_OF_CONDUCT.md`

@@ -13,50 +13,42 @@ Realms 的前端工程位于 `web/`，后端提供 `/api/*` 与 `/v1/*`；但对
 
 更多说明见：[前后端分离](frontend.md)。
 
-## 桌面版（Electron，自用模式）
+## App（自用模式，浏览器 + 端口）
 
-桌面版用于把 Realms 以“自用模式”封装成桌面应用（启动本地后端并打开页面）。
+App 用于把 Realms 以“自用模式”封装成可执行程序（启动本地后端并打开浏览器页面）。
 
 关键约束：
-- 固定监听：`127.0.0.1:8080`（端口写死不变；占用则启动失败）
+- 默认监听：`:8080`（便于多人访问；如需仅本机可访问，可设置 `REALMS_ADDR=127.0.0.1:8080`）
 - 固定 base_url：`http://127.0.0.1:8080/v1`
 - 后端强制启用自用模式：`REALMS_SELF_MODE_ENABLE=true`
-- 桌面前端构建产物：`web/dist-self`（对应 `npm --prefix "web" run build:self`）
+- App 默认启用跨域：`REALMS_CORS_ALLOW_ORIGINS=*`
+- App 前端构建产物：`web/dist-self`（对应 `npm --prefix "web" run build:self`）
 
 ### 开发运行（本机）
 
 前置：Go + Node.js + npm
 
 ```bash
-make desktop-dev
+make app-dev
 ```
 
-Linux 提示：
-- 若你看到 Electron 报错 `chrome-sandbox ... is not configured correctly`，桌面版 dev 脚本会自动追加 `--no-sandbox` 以便在非特权环境运行。
-
-### 打包安装包（当前平台）
+### 打包二进制（当前平台）
 
 ```bash
-make desktop-dist
+make app-dist
 ```
 
-产物默认输出到：`desktop/dist/`
-
-### 自动更新（GitHub Releases）
-
-桌面版集成了 `electron-updater`，默认以 GitHub Releases 作为更新源。
-
-注意：
-- macOS 通常需要签名/公证后，自动更新与安装体验才会稳定。
-- Windows 建议签名；Linux 分发形态（AppImage 等）更新策略依发行方式而异。
+产物默认输出到：`dist/`
 
 ### 发布（Tag → 打包 → Release）
 
-本仓库提供桌面端的 Tag 发布链路：当你推送 Git tag 到 GitHub 时，会自动构建三平台安装包并发布到同名 GitHub Release（用于下载与 `electron-updater` 更新源）。
+本仓库提供 App 的 Tag 发布链路：当你推送 Git tag 到 GitHub 时，会自动构建三平台二进制并发布到同名 GitHub Release（用于下载）。
 
 - 工作流：`.github/workflows/desktop.yml`
 - 触发：`push` 到任意 tag（与 Docker 发布链路一致）
-- 产物：`desktop/dist/` 下的安装包 + `latest*.yml` / `*.blockmap` 等更新元数据文件（会作为 Release assets 上传）
+- 产物：`dist/` 下的 `realms-app*`（会作为 Release assets 上传）
+
+> ⚠️ 说明：旧 Electron Desktop 已进入弃用流程（目录仍保留），后续将以 `cmd/realms-app` 替代。
 
 ## 从 0 开始（Docker Compose，一键）
 

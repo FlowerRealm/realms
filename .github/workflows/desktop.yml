@@ -34,7 +34,6 @@ jobs:
           cache: npm
           cache-dependency-path: |
             web/package-lock.json
-            desktop/package-lock.json
 
       - name: Build web/dist
         if: runner.os != 'Windows'
@@ -50,35 +49,34 @@ jobs:
           npm --prefix "web" ci
           npm --prefix "web" run build:self
 
-      - name: Install desktop deps
+      - name: Build realms-app
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          npm --prefix "desktop" ci
+          set -euo pipefail
+          mkdir -p "dist"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          go build -tags embed_web_self \
+            -ldflags "-X realms/internal/version.Version=${GITHUB_REF_NAME} -X realms/internal/version.Date=${DATE}" \
+            -o "dist/realms-app" \
+            "./cmd/realms-app"
 
-      - name: Install desktop deps (Windows)
+      - name: Build realms-app (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          npm --prefix "desktop" ci
-
-      - name: Build desktop installer
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          npm --prefix "desktop" run dist
-
-      - name: Build desktop installer (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          npm --prefix "desktop" run dist
+          New-Item -ItemType Directory -Force -Path "dist" | Out-Null
+          $date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+          go build -tags embed_web_self `
+            -ldflags "-X realms/internal/version.Version=${env:GITHUB_REF_NAME} -X realms/internal/version.Date=$date" `
+            -o "dist/realms-app.exe" `
+            "./cmd/realms-app"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: realms-desktop-${{ matrix.os }}
-          path: desktop/dist/*
+          name: realms-app-${{ matrix.os }}
+          path: dist/*
           if-no-files-found: error
 
   release:

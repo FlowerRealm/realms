@@ -67,6 +67,12 @@ type SelfModeConfig struct {
 type ServerConfig struct {
 	Addr          string `yaml:"addr"`
 	PublicBaseURL string `yaml:"public_base_url"`
+
+	// CORSAllowOrigins 控制是否启用 CORS（浏览器跨域访问）。
+	// - 为空：禁用 CORS（默认）
+	// - "*": 允许任意 Origin（不启用 credentials）
+	// - 逗号分隔列表：精确匹配并回显 Origin（建议包含 scheme+host+port）
+	CORSAllowOrigins string `yaml:"cors_allow_origins"`
 }
 
 type DBConfig struct {
@@ -146,6 +152,7 @@ func normalizeAndValidate(cfg Config) (Config, error) {
 	if cfg.Server.Addr == "" {
 		return Config{}, errors.New("server.addr 不能为空")
 	}
+	cfg.Server.CORSAllowOrigins = strings.TrimSpace(cfg.Server.CORSAllowOrigins)
 
 	cfg.DB.Driver = strings.ToLower(strings.TrimSpace(cfg.DB.Driver))
 	cfg.DB.DSN = strings.TrimSpace(cfg.DB.DSN)
@@ -320,6 +327,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("REALMS_PUBLIC_BASE_URL"); v != "" {
 		cfg.Server.PublicBaseURL = v
+	}
+	if v := os.Getenv("REALMS_CORS_ALLOW_ORIGINS"); v != "" {
+		cfg.Server.CORSAllowOrigins = v
 	}
 	if v := os.Getenv("REALMS_DB_DRIVER"); v != "" {
 		cfg.DB.Driver = v
