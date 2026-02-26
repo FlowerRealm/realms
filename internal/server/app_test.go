@@ -370,6 +370,52 @@ func TestRoutes_SPAFallback(t *testing.T) {
 	})
 }
 
+func TestRoutes_PersonalMode_SPAAllowedPaths(t *testing.T) {
+	cfg := config.Config{
+		Mode: config.ModePersonal,
+	}
+	app := newTestApp(t, cfg)
+
+	t.Run("allowed paths serve index", func(t *testing.T) {
+		paths := []string{
+			"/",
+			"/login",
+			"/admin",
+			"/admin?tab=channels",
+			"/admin?tab=usage",
+			"/admin?tab=settings",
+			"/admin/channels",
+			"/admin/usage",
+			"/admin/settings",
+			"/admin/api-keys",
+		}
+
+		for _, p := range paths {
+			req := httptest.NewRequest(http.MethodGet, "http://example.com"+p, nil)
+			rr := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("GET %s expected status %d, got %d", p, http.StatusOK, rr.Code)
+			}
+			if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+				t.Fatalf("GET %s expected Content-Type text/html, got %q", p, ct)
+			}
+			if body := rr.Body.String(); !strings.Contains(body, "INDEX") {
+				t.Fatalf("GET %s expected index html body, got %q", p, body)
+			}
+		}
+	})
+
+	t.Run("disallowed paths return 404", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://example.com/usage", nil)
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("expected status %d, got %d", http.StatusNotFound, rr.Code)
+		}
+	})
+}
+
 func TestRoutes_NoChatFeature(t *testing.T) {
 	cfg := config.Config{
 		Mode:     config.ModeBusiness,

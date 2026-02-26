@@ -67,6 +67,14 @@ export function SettingsAdminPage() {
     return !(typeof v === 'boolean' && v);
   }, [settings]);
 
+  const visibleFeatureBanGroups = useMemo(() => {
+    const groups = settings?.feature_ban_groups || [];
+    if (!isPersonalMode) return groups;
+    return groups
+      .map((g) => ({ ...g, items: (g.items || []).filter((it) => !it.forced_by_personal_mode) }))
+      .filter((g) => (g.items || []).length > 0);
+  }, [isPersonalMode, settings?.feature_ban_groups]);
+
   async function refresh() {
     setErr('');
     setNotice('');
@@ -89,6 +97,13 @@ export function SettingsAdminPage() {
   useEffect(() => {
     void refresh();
   }, []);
+
+  useEffect(() => {
+    if (!isPersonalMode) return;
+    if (tab === 'base' || tab === 'email' || tab === 'billing') {
+      setTab('features');
+    }
+  }, [isPersonalMode, tab]);
 
   return (
     <div className="fade-in-up">
@@ -133,17 +148,21 @@ export function SettingsAdminPage() {
                   </button>
                 </li>
               ) : null}
-              <li className="nav-item" role="presentation">
-                <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'base' ? 'active' : ''}`} type="button" onClick={() => setTab('base')}>
-                  <i className="ri-settings-4-line"></i> 基础设置
-                </button>
-              </li>
-              <li className="nav-item" role="presentation">
-                <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'email' ? 'active' : ''}`} type="button" onClick={() => setTab('email')}>
-                  <i className="ri-mail-settings-line"></i> 邮件服务
-                </button>
-              </li>
-              {showBillingTab ? (
+              {!isPersonalMode ? (
+                <li className="nav-item" role="presentation">
+                  <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'base' ? 'active' : ''}`} type="button" onClick={() => setTab('base')}>
+                    <i className="ri-settings-4-line"></i> 基础设置
+                  </button>
+                </li>
+              ) : null}
+              {!isPersonalMode ? (
+                <li className="nav-item" role="presentation">
+                  <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'email' ? 'active' : ''}`} type="button" onClick={() => setTab('email')}>
+                    <i className="ri-mail-settings-line"></i> 邮件服务
+                  </button>
+                </li>
+              ) : null}
+              {!isPersonalMode && showBillingTab ? (
                 <li className="nav-item" role="presentation">
                   <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'billing' ? 'active' : ''}`} type="button" onClick={() => setTab('billing')}>
                     <i className="ri-bank-card-line"></i> 计费支付
@@ -210,7 +229,7 @@ export function SettingsAdminPage() {
                   <div className="text-muted small">开关默认开启（功能启用）；关闭则表示禁用该功能（隐藏入口并在后端返回 404）。</div>
                 </div>
 
-                {settings.feature_ban_groups.map((g) => (
+                {visibleFeatureBanGroups.map((g) => (
                   <div key={g.title} className="mb-4">
                     <h6 className="fw-medium text-dark border-bottom pb-2 mb-3">{g.title}</h6>
                     <div className="row g-3">

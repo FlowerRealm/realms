@@ -51,11 +51,11 @@ export function PersonalAPIKeysPanel() {
       <div className="col-12">
         <div className="card">
           <div className="card-body">
-            <div className="d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-2 mb-3">
+              <div className="d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-2 mb-3">
               <div>
-                <h5 className="fw-semibold mb-1">数据面 API Key（/v1）</h5>
+                <h5 className="fw-semibold mb-1">API Key</h5>
                 <div className="text-muted small">
-                  用于下游客户端调用 <code>/v1/*</code>。可创建多个、可随时撤销；Key 明文仅创建时返回一次。
+                  可创建多个、可随时撤销；Key 明文仅创建时返回一次。
                 </div>
               </div>
 
@@ -143,7 +143,7 @@ export function PersonalAPIKeysPanel() {
                     {keys.length === 0 ? (
                       <tr>
                         <td colSpan={6} className="text-muted">
-                          暂无 Key。点击“新建 Key”生成一个用于 <code>/v1</code> 的 Key。
+                          暂无 Key。点击“新建 Key”生成一个 Key。
                         </td>
                       </tr>
                     ) : null}
@@ -222,7 +222,7 @@ export function PersonalAPIKeysPanel() {
                   </button>
                 </div>
                 <div className="mt-2 text-muted small">
-                  调用示例：<code>Authorization: Bearer {createState.key}</code>（或 header <code>x-api-key</code>）。
+                  使用示例：<code>Authorization: Bearer {createState.key}</code>（或 <code>x-api-key</code>）。
                 </div>
                 <div className="mt-2">
                   <button
@@ -240,7 +240,7 @@ export function PersonalAPIKeysPanel() {
           ) : (
             <div className="col-12">
               <div className="text-muted small">
-                提示：不要把“管理 Key”分发给下游客户端；数据面 Key 仅用于调用 <code>/v1/*</code>，不具备管理权限。
+                提示：不要把“管理 Key”分发给下游客户端；API Key 不具备管理权限。
               </div>
             </div>
           )}
@@ -249,4 +249,3 @@ export function PersonalAPIKeysPanel() {
     </div>
   );
 }
-
