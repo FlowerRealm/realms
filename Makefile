@@ -10,7 +10,7 @@ ifeq ($(OS),Windows_NT)
   EXE := .exe
 endif
 
-.PHONY: help tools dev test ci ci-real fmt tidy app-dev app-dist desktop-dev desktop-dist
+.PHONY: help tools dev test ci ci-real fmt tidy app-dev app-dist
 
 help:
 	@echo "Targets:"
@@ -44,14 +44,6 @@ app-dist:
 	@npm --prefix "web" run build:self
 	@mkdir -p "dist"
 	@go build -tags embed_web_self -ldflags "-X realms/internal/version.Version=$(VERSION) -X realms/internal/version.Date=$(DATE)" -o "dist/realms-app$(EXE)" ./cmd/realms-app
-
-desktop-dev:
-	@echo "⚠️ desktop-dev 已废弃：Electron Desktop 将被移除；已自动切换为 app-dev"
-	@$(MAKE) app-dev
-
-desktop-dist:
-	@echo "⚠️ desktop-dist 已废弃：Electron Desktop 将被移除；已自动切换为 app-dist"
-	@$(MAKE) app-dist
 
 test:
 	go test ./...

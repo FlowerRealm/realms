@@ -14,9 +14,7 @@ web/node_modules/
 web/dist/
 web/dist-self/
 
-# Desktop (Electron)
-desktop/node_modules/
-desktop/build/
+
 
 # Frontend (Playwright)
 web/playwright-report/

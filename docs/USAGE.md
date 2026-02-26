@@ -44,11 +44,11 @@ make app-dist
 
 本仓库提供 App 的 Tag 发布链路：当你推送 Git tag 到 GitHub 时，会自动构建三平台二进制并发布到同名 GitHub Release（用于下载）。
 
-- 工作流：`.github/workflows/desktop.yml`
+- 工作流：`.github/workflows/app.yml`
 - 触发：`push` 到任意 tag（与 Docker 发布链路一致）
-- 产物：`dist/` 下的 `realms-app*`（会作为 Release assets 上传）
+- 产物：Release assets 中的 `realms-app`（Windows 为 `realms-app.exe`）
 
-> ⚠️ 说明：旧 Electron Desktop 已进入弃用流程（目录仍保留），后续将以 `cmd/realms-app` 替代。
+迁移/历史说明见：[MIGRATION.md](MIGRATION.md)。
 
 ## 从 0 开始（Docker Compose，一键）
 

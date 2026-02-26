@@ -24,9 +24,9 @@ Realms 是一个 Go 单体服务（Gin），对外提供 **OpenAI 兼容** 的 `
 - **Server（正常模式，推荐）**：部署/多人使用，默认开启账号/Token/模型目录等完整功能域。
 - **App（自用模式）**：单二进制可执行程序，双击启动后用浏览器访问（默认监听 `:8080`，启动后自动打开页面）。
 
-> 说明：自用模式也可以以 Server 形态运行（`REALMS_SELF_MODE_ENABLE=true`）。App 只是把“自用模式 Server”封装成可执行启动器（原 Electron Desktop 弃用中）。
+> 说明：自用模式也可以以 Server 形态运行（`REALMS_SELF_MODE_ENABLE=true`）。App 是一个 Go 启动器形态（`cmd/realms-app`）：启动本地后端并打开浏览器页面。
 
-> ⚠️ 说明：原 Electron Desktop 已进入弃用流程（目录仍保留），后续将以 `cmd/realms-app` 替代。
+> 迁移/历史说明：`docs/MIGRATION.md`。
 
 ---
 
@@ -83,7 +83,7 @@ make app-dist
 
 产物默认输出到：`dist/`。
 
-更多细节见：`docs/USAGE.md` 与 `desktop/README.md`（旧 Electron Desktop，弃用中）。
+更多细节见：`docs/USAGE.md`；迁移/历史说明见：`docs/MIGRATION.md`。
 
 ---
 
@@ -92,7 +92,7 @@ make app-dist
 ### 3.1 环境变量（最常用）
 
 - Server（正常模式）：`OPENAI_API_KEY` 填你在 `/tokens` 创建的 `sk_...`
-- Desktop / 自用模式：`OPENAI_API_KEY` 填你在 `/login` 设置的管理 Key
+- App（自用模式）：`OPENAI_API_KEY` 填你在 `/login` 设置的管理 Key
 
 Linux/macOS（bash/zsh）：
 
@@ -150,6 +150,7 @@ go test ./...
 - 可直接复制运行的部署命令：`docs/USAGE.md`
 - 前后端分离说明：`docs/frontend.md`
 - App 说明：`docs/USAGE.md`
+- 迁移/历史说明：`docs/MIGRATION.md`
 - 贡献指南：`CONTRIBUTING.md`
 - 安全政策：`SECURITY.md`
 - 行为准则：`CODE_OF_CONDUCT.md`

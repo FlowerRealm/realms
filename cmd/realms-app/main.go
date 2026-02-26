@@ -142,7 +142,7 @@ func setDefaultEnv(key string, value string) {
 }
 
 func applyAppDefaults() error {
-	setDefaultEnv("REALMS_ENV", "desktop")
+	setDefaultEnv("REALMS_ENV", "app")
 	setDefaultEnv("REALMS_SELF_MODE_ENABLE", "true")
 	setDefaultEnv("REALMS_ADDR", ":8080")
 	setDefaultEnv("REALMS_DB_DRIVER", "sqlite")

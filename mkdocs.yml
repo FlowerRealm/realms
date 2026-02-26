@@ -15,6 +15,7 @@ theme:
 nav:
   - 首页: index.md
   - 部署指南: USAGE.md
+  - 迁移说明: MIGRATION.md
   - 前后端分离: frontend.md
   - API 手册: api.md
   - 架构: arch.md
