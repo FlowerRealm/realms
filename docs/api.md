@@ -12,11 +12,34 @@ Realms 提供 OpenAI 兼容（Responses）与 Anthropic 兼容（Messages）的 
   - `user_api_key` 可在 Web 控制台 `/tokens` 创建与管理（示例：`sk_...`）
 - **上游访问（本服务调用上游）:** 由管理后台配置并注入（OpenAI 兼容 API Key / Anthropic API Key / Codex OAuth 凭据）
 
+### personal 模式补充（REALMS_MODE=personal）
+
+- **管理 Key（必需）**：首次打开 `/login` 设置（对应 `POST /api/personal/bootstrap`），用于解锁管理面（`/api/admin/*`、`/api/channel*` 等）。
+- **数据面 API Key（建议，可创建多个）**：通过 `POST /api/personal/keys` 创建，生成后仅返回一次明文；之后用这些 Key 调用数据面 `/v1/*`（`Authorization: Bearer ...` 或 `x-api-key`）。
+  - 说明：数据面 API Key **不具备**管理权限（不能访问 `/api/admin/*`），且默认不使用“管理 Key”调用 `/v1/*`（避免把管理权限的 Key 分发给下游客户端）。
+
 ## 常用端点
 
 ### [GET] /healthz
 
 健康检查（公开），包含 DB 状态与构建信息（版本/构建时间）。
+
+### personal 模式：Key 管理（需要管理 Key）
+
+> 说明：以下端点仅在 `REALMS_MODE=personal` 下挂载。  
+> 认证：`Authorization: Bearer <管理 Key>`（或 `x-api-key`）。
+
+#### [POST] /api/personal/keys
+
+创建一个“数据面 API Key”（用于调用 `/v1/*`）。创建成功后 Key 明文只返回一次。
+
+#### [GET] /api/personal/keys
+
+列出已创建的“数据面 API Key”（仅返回 hint，不返回明文）。
+
+#### [POST] /api/personal/keys/{key_id}/revoke
+
+撤销一个“数据面 API Key”。
 
 ### Realms 扩展：Usage（按当前 API key）
 

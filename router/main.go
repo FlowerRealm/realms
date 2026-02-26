@@ -17,6 +17,7 @@ func SetRouter(r *gin.Engine, opts Options) {
 		// - 鉴权：/v1/* 与 /api/admin/* 走管理 Key
 		// - 管理面：前端仍通过 /api/user/self 获取虚拟用户态
 		setUserAPIRoutes(api, opts)
+		setPersonalAPIKeyAPIRoutes(api, opts)
 		setChannelAPIRoutes(api, opts)
 		setModelAPIRoutes(api, opts)
 		setAdminAPIRoutes(api, opts)

@@ -2,7 +2,6 @@
 package middleware
 
 import (
-	"crypto/subtle"
 	"database/sql"
 	"net/http"
 	"strings"
@@ -15,6 +14,10 @@ import (
 const (
 	personalModeVirtualUserID  int64 = 1
 	personalModeVirtualTokenID int64 = 1
+
+	// personal 模式下的“数据面 API Key”（personal_api_keys）使用独立 token_id 区间，
+	// 避免与管理 Key（virtual token id=1）混淆。
+	personalModeAPIKeyTokenIDOffset int64 = 1_000_000
 )
 
 func TokenAuth(st *store.Store, personalMode bool) Middleware {
@@ -34,20 +37,17 @@ func TokenAuth(st *store.Store, personalMode bool) Middleware {
 					http.Error(w, "鉴权失败", http.StatusInternalServerError)
 					return
 				}
-				expectHash, ok, err := st.GetPersonalModeKeyHash(r.Context())
+				gotHash := rlmcrypto.TokenHash(raw)
+				id, err := st.GetPersonalAPIKeyIDByHash(r.Context(), gotHash)
 				if err != nil {
+					if err == sql.ErrNoRows {
+						http.Error(w, "Token 无效", http.StatusUnauthorized)
+						return
+					}
 					http.Error(w, "鉴权失败", http.StatusInternalServerError)
 					return
 				}
-				if !ok {
-					http.Error(w, "personal 模式尚未设置 Key", http.StatusUnauthorized)
-					return
-				}
-				if subtle.ConstantTimeCompare(rlmcrypto.TokenHash(raw), expectHash) != 1 {
-					http.Error(w, "Token 无效", http.StatusUnauthorized)
-					return
-				}
-				tokenID := personalModeVirtualTokenID
+				tokenID := personalModeAPIKeyTokenIDOffset + id
 				p := auth.Principal{
 					ActorType: auth.ActorTypeToken,
 					UserID:    personalModeVirtualUserID,

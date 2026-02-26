@@ -281,13 +281,59 @@ func TestSelfMode_KeyAuth_DataPlaneUsageEventsRequiresKey(t *testing.T) {
 		}
 	})
 
-	t.Run("valid key returns 200", func(t *testing.T) {
+	t.Run("admin key is not accepted by data plane", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "http://example.com/v1/usage/events", nil)
+		req.Header.Set("Authorization", "Bearer k_test_123")
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, rr.Code)
+		}
+	})
+
+	t.Run("personal api key allows data plane but not admin", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "http://example.com/api/personal/keys", strings.NewReader(`{"name":"cli"}`))
+		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer k_test_123")
 		rr := httptest.NewRecorder()
 		app.Handler().ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("unmarshal json: %v", err)
+		}
+		if ok, _ := payload["success"].(bool); !ok {
+			t.Fatalf("expected success=true, got %v", payload["success"])
+		}
+		data, _ := payload["data"].(map[string]any)
+		pk, _ := data["key"].(string)
+		if pk == "" {
+			t.Fatalf("expected key, got empty")
+		}
+
+		req = httptest.NewRequest(http.MethodGet, "http://example.com/v1/usage/events", nil)
+		req.Header.Set("Authorization", "Bearer "+pk)
+		rr = httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+		}
+
+		req = httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage", nil)
+		req.Header.Set("Authorization", "Bearer "+pk)
+		rr = httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+		}
+		payload = nil
+		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("unmarshal json: %v", err)
+		}
+		if ok, _ := payload["success"].(bool); ok {
+			t.Fatalf("expected success=false for admin, got %v", payload["success"])
 		}
 	})
 }

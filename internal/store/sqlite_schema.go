@@ -53,6 +53,9 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 		if err := ensureSQLiteUserTokensPlainColumn(db); err != nil {
 			return err
 		}
+		if err := ensureSQLitePersonalAPIKeysTable(db); err != nil {
+			return err
+		}
 		if err := ensureSQLiteUsersUsernameRules(db); err != nil {
 			return err
 		}
@@ -101,6 +104,9 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 		return fmt.Errorf("提交 SQLite schema 初始化失败: %w", err)
 	}
 	if err := ensureSQLiteUsersUsernameRules(db); err != nil {
+		return err
+	}
+	if err := ensureSQLitePersonalAPIKeysTable(db); err != nil {
 		return err
 	}
 	if err := ensureSQLiteUsersMainGroupColumn(db); err != nil {

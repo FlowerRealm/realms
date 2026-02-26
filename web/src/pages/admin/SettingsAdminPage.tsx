@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { getAdminSettings, resetAdminSettings, updateAdminSettings, type AdminSettings, type FeatureBanItem, type UpdateAdminSettingsRequest } from '../../api/admin/settings';
+import { useAuth } from '../../auth/AuthContext';
 import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { TimeZoneInput } from '../../components/TimeZoneInput';
+import { PersonalAPIKeysPanel } from './PersonalAPIKeysPanel';
 
-type TabKey = 'features' | 'base' | 'email' | 'billing';
+type TabKey = 'features' | 'api_keys' | 'base' | 'email' | 'billing';
 
 function boolBadge(on: boolean): string {
   return on ? 'badge bg-light text-secondary border' : 'badge bg-light text-secondary border';
@@ -48,6 +50,9 @@ function featureToggleDisabled(item: FeatureBanItem): boolean {
 }
 
 export function SettingsAdminPage() {
+  const { user } = useAuth();
+  const isPersonalMode = user?.mode === 'personal';
+
   const [tab, setTab] = useState<TabKey>('features');
 
   const [settings, setSettings] = useState<AdminSettings | null>(null);
@@ -121,6 +126,13 @@ export function SettingsAdminPage() {
                   <i className="ri-function-line"></i> 功能开关
                 </button>
               </li>
+              {isPersonalMode ? (
+                <li className="nav-item" role="presentation">
+                  <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'api_keys' ? 'active' : ''}`} type="button" onClick={() => setTab('api_keys')}>
+                    <i className="ri-key-2-line"></i> API Keys
+                  </button>
+                </li>
+              ) : null}
               <li className="nav-item" role="presentation">
                 <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'base' ? 'active' : ''}`} type="button" onClick={() => setTab('base')}>
                   <i className="ri-settings-4-line"></i> 基础设置
@@ -253,6 +265,8 @@ export function SettingsAdminPage() {
                 ))}
               </div>
             ) : null}
+
+            {tab === 'api_keys' ? <PersonalAPIKeysPanel /> : null}
 
             {tab === 'base' ? (
               <div className="row g-4">
