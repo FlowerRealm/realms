@@ -142,6 +142,64 @@ jobs:
           cd "dist"
           sha256sum realms-app_* > "realms-app_${GITHUB_REF_NAME}_checksums.txt"
 
+      - name: Delete existing release assets (rerun-safe)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          python -X utf8 - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          owner = os.environ["OWNER"]
+          repo = os.environ["REPO"]
+          tag = os.environ["TAG"]
+          token = os.environ["GH_TOKEN"]
+
+          prefix = f"realms-app_{tag}_"
+          keep = set()
+
+          def request(method: str, url: str):
+            req = urllib.request.Request(url, method=method)
+            req.add_header("Accept", "application/vnd.github+json")
+            req.add_header("Authorization", f"Bearer {token}")
+            with urllib.request.urlopen(req) as resp:
+              return resp.getcode(), resp.read()
+
+          try:
+            _, body = request("GET", f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}")
+          except urllib.error.HTTPError as e:
+            if e.code == 404:
+              print("no existing release, skip asset deletion")
+              raise SystemExit(0)
+            raise
+
+          rel = json.loads(body.decode("utf-8"))
+          assets = rel.get("assets") or []
+
+          to_delete = []
+          for a in assets:
+            name = a.get("name") or ""
+            if name == f"realms-app_{tag}_checksums.txt" or name.startswith(prefix):
+              to_delete.append((a.get("id"), name))
+
+          if not to_delete:
+            print("no matching assets to delete")
+            raise SystemExit(0)
+
+          for asset_id, name in to_delete:
+            if not asset_id:
+              continue
+            print(f"deleting asset: {name} ({asset_id})")
+            request("DELETE", f"https://api.github.com/repos/{owner}/{repo}/releases/assets/{asset_id}")
+          PY
+
       - name: Create GitHub Release and upload assets
         uses: softprops/action-gh-release@v2
         with:
