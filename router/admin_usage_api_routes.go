@@ -144,6 +144,7 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 		q := c.Request.URL.Query()
 		startStr := strings.TrimSpace(q.Get("start"))
 		endStr := strings.TrimSpace(q.Get("end"))
+		allTime := queryBool(q.Get("all_time"))
 
 		limit := 50
 		if v := strings.TrimSpace(q.Get("limit")); v != "" {
@@ -161,6 +162,18 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 			limit = 200
 		}
 
+		if allTime {
+			first, has, err := opts.Store.GetFirstUsageEventTimeGlobal(c.Request.Context())
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
+				return
+			}
+			if has {
+				firstLocal := first.In(loc)
+				startStr = time.Date(firstLocal.Year(), firstLocal.Month(), firstLocal.Day(), 0, 0, 0, 0, loc).Format("2006-01-02")
+				endStr = todayStr
+			}
+		}
 		if startStr == "" {
 			startStr = todayStr
 		}
@@ -555,6 +568,7 @@ func adminUsageTimeSeriesHandler(opts Options) gin.HandlerFunc {
 		q := c.Request.URL.Query()
 		startStr := strings.TrimSpace(q.Get("start"))
 		endStr := strings.TrimSpace(q.Get("end"))
+		allTime := queryBool(q.Get("all_time"))
 		granularity := strings.TrimSpace(strings.ToLower(q.Get("granularity")))
 		if granularity == "" {
 			granularity = "hour"
@@ -562,6 +576,18 @@ func adminUsageTimeSeriesHandler(opts Options) gin.HandlerFunc {
 		if granularity != "hour" && granularity != "day" {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "granularity 仅支持 hour/day"})
 			return
+		}
+		if allTime {
+			first, has, err := opts.Store.GetFirstUsageEventTimeGlobal(c.Request.Context())
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
+				return
+			}
+			if has {
+				firstLocal := first.In(loc)
+				startStr = time.Date(firstLocal.Year(), firstLocal.Month(), firstLocal.Day(), 0, 0, 0, 0, loc).Format("2006-01-02")
+				endStr = todayStr
+			}
 		}
 		if startStr == "" {
 			startStr = todayStr

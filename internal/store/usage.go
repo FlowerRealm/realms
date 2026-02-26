@@ -403,6 +403,48 @@ WHERE token_id=? AND time >= ? AND time < ? AND (state=? OR state=?)
 	return committedUSD, reservedUSD, nil
 }
 
+func (s *Store) firstUsageEventTime(ctx context.Context, where string, args ...any) (time.Time, bool, error) {
+	q := "SELECT time FROM usage_events"
+	if strings.TrimSpace(where) != "" {
+		q += " WHERE " + where
+	}
+	q += " ORDER BY time ASC LIMIT 1"
+
+	var t time.Time
+	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&t); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return time.Time{}, false, nil
+		}
+		return time.Time{}, false, fmt.Errorf("查询最早用量时间失败: %w", err)
+	}
+	return t, true, nil
+}
+
+func (s *Store) GetFirstUsageEventTimeByUser(ctx context.Context, userID int64) (time.Time, bool, error) {
+	if userID <= 0 {
+		return time.Time{}, false, fmt.Errorf("userID 不合法")
+	}
+	return s.firstUsageEventTime(ctx, "user_id=?", userID)
+}
+
+func (s *Store) GetFirstUsageEventTimeByToken(ctx context.Context, tokenID int64) (time.Time, bool, error) {
+	if tokenID <= 0 {
+		return time.Time{}, false, fmt.Errorf("tokenID 不合法")
+	}
+	return s.firstUsageEventTime(ctx, "token_id=?", tokenID)
+}
+
+func (s *Store) GetFirstUsageEventTimeGlobal(ctx context.Context) (time.Time, bool, error) {
+	return s.firstUsageEventTime(ctx, "")
+}
+
+func (s *Store) GetFirstUsageEventTimeByChannel(ctx context.Context, channelID int64) (time.Time, bool, error) {
+	if channelID <= 0 {
+		return time.Time{}, false, fmt.Errorf("channelID 不合法")
+	}
+	return s.firstUsageEventTime(ctx, "upstream_channel_id=?", channelID)
+}
+
 func (s *Store) GetUsageEvent(ctx context.Context, id int64) (UsageEvent, error) {
 	var e UsageEvent
 	var model sql.NullString

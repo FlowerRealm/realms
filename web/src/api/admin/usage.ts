@@ -130,7 +130,14 @@ export type UsageEventPricingBreakdown = {
   diff_from_source_usd: string;
 };
 
-export async function getAdminUsagePage(params: { start?: string; end?: string; limit?: number; before_id?: number; after_id?: number }) {
+export async function getAdminUsagePage(params: {
+  start?: string;
+  end?: string;
+  all_time?: boolean;
+  limit?: number;
+  before_id?: number;
+  after_id?: number;
+}) {
   const res = await api.get<APIResponse<AdminUsagePage>>('/api/admin/usage', { params });
   return res.data;
 }
@@ -140,7 +147,7 @@ export async function getAdminUsageEventDetail(eventID: number) {
   return res.data;
 }
 
-export async function getAdminUsageTimeSeries(params?: { start?: string; end?: string; granularity?: 'hour' | 'day' }) {
+export async function getAdminUsageTimeSeries(params?: { start?: string; end?: string; all_time?: boolean; granularity?: 'hour' | 'day' }) {
   const res = await api.get<APIResponse<AdminUsageTimeSeriesResponse>>('/api/admin/usage/timeseries', { params });
   return res.data;
 }

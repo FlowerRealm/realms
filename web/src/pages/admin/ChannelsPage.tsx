@@ -201,6 +201,10 @@ export function ChannelsPage() {
 
   const [usageStart, setUsageStart] = useState('');
   const [usageEnd, setUsageEnd] = useState('');
+  const [usageAllTime, setUsageAllTime] = useState(false);
+  const usageAllTimeRef = useRef(false);
+  const [usageResolvedStart, setUsageResolvedStart] = useState('');
+  const [usageResolvedEnd, setUsageResolvedEnd] = useState('');
   const [usageRangeDirty, setUsageRangeDirty] = useState(false);
   const detailTimeLineRef = useRef<HTMLCanvasElement | null>(null);
   const detailTimeLineChartRef = useRef<ChartInstance | null>(null);
@@ -481,7 +485,12 @@ export function ChannelsPage() {
     setNotice('');
     setLoading(true);
     try {
-      const [pageRes, modelsRes] = await Promise.all([getChannelsPage(params), listManagedModelsAdmin(1, 1000)]);
+      const startValue = (params?.start ?? '').trim();
+      const endValue = (params?.end ?? '').trim();
+      const allTimeActive = usageAllTimeRef.current && !startValue && !endValue;
+      const pageParams = allTimeActive ? { all_time: true } : { start: startValue || undefined, end: endValue || undefined };
+
+      const [pageRes, modelsRes] = await Promise.all([getChannelsPage(pageParams), listManagedModelsAdmin(1, 1000)]);
       if (!modelsRes.success) throw new Error(modelsRes.message || '加载模型失败');
       setManagedModelIDs(
         (modelsRes.data?.items || [])
@@ -494,8 +503,12 @@ export function ChannelsPage() {
       const pageChannels = pageRes.data?.channels || [];
       const normalizedChannels = normalizeChannelSections(pageChannels).filter((ch) => (allowCodexOAuth ? true : ch.type !== 'codex_oauth'));
       channelsRef.current = normalizedChannels;
-      setUsageStart(pageRes.data?.start || '');
-      setUsageEnd(pageRes.data?.end || '');
+      setUsageResolvedStart(pageRes.data?.start || '');
+      setUsageResolvedEnd(pageRes.data?.end || '');
+      if (!allTimeActive) {
+        setUsageStart(pageRes.data?.start || '');
+        setUsageEnd(pageRes.data?.end || '');
+      }
       setChannels(normalizedChannels);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败');
@@ -507,6 +520,10 @@ export function ChannelsPage() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    usageAllTimeRef.current = usageAllTime;
+  }, [usageAllTime]);
 
   useEffect(() => {
     if (!usageRangeDirty) return;
@@ -529,9 +546,11 @@ export function ChannelsPage() {
       setDetailSeriesErr('');
       setDetailSeriesLoading(true);
       try {
+        const allTimeActive = usageAllTime && !usageStart.trim() && !usageEnd.trim();
         const res = await getChannelTimeSeries(expandedChannelID, {
-          start: usageStart.trim() || undefined,
-          end: usageEnd.trim() || undefined,
+          start: allTimeActive ? undefined : usageStart.trim() || undefined,
+          end: allTimeActive ? undefined : usageEnd.trim() || undefined,
+          all_time: allTimeActive ? true : undefined,
           granularity: detailGranularity,
         });
         if (!res.success) throw new Error(res.message || '加载时间序列失败');
@@ -548,7 +567,7 @@ export function ChannelsPage() {
     return () => {
       active = false;
     };
-  }, [expandedChannelID, usageStart, usageEnd, detailGranularity]);
+  }, [expandedChannelID, usageAllTime, usageStart, usageEnd, detailGranularity]);
 
   useEffect(() => {
     void (async () => {
@@ -1115,6 +1134,9 @@ export function ChannelsPage() {
               start={usageStart}
               end={usageEnd}
               onChange={(r) => {
+                const isAll = !r.start.trim() && !r.end.trim();
+                setUsageAllTime(isAll);
+                if (isAll) setDetailGranularity('day');
                 setUsageStart(r.start);
                 setUsageEnd(r.end);
                 setUsageRangeDirty(true);
@@ -1167,6 +1189,7 @@ export function ChannelsPage() {
               type="button"
               disabled={loading}
               onClick={() => {
+                setUsageAllTime(false);
                 setUsageStart('');
                 setUsageEnd('');
                 setUsageRangeDirty(true);
@@ -1893,7 +1916,9 @@ export function ChannelsPage() {
                                         </div>
                                       </div>
                                     </div>
-                                    <div className="small text-muted mb-2">时间区间：{usageStart || '-'} ~ {usageEnd || '-'}</div>
+                                    <div className="small text-muted mb-2">
+                                      时间区间：{(usageAllTime ? usageResolvedStart : usageStart) || '-'} ~ {(usageAllTime ? usageResolvedEnd : usageEnd) || '-'}
+                                    </div>
                                     {detailSeriesErr ? <div className="alert alert-danger py-2 mb-2">{detailSeriesErr}</div> : null}
                                     {detailSeriesLoading ? (
                                       <div className="text-muted small py-4">时间序列加载中…</div>

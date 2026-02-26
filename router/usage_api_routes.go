@@ -142,10 +142,46 @@ func usageWindowsHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 		now := time.Now().UTC()
-		since, until, sinceLocal, untilLocal, ok := parseDateRangeInLocation(now, strings.TrimSpace(c.Query("start")), strings.TrimSpace(c.Query("end")), loc)
-		if !ok {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "start/end 不合法（格式：YYYY-MM-DD）"})
-			return
+		startStr := strings.TrimSpace(c.Query("start"))
+		endStr := strings.TrimSpace(c.Query("end"))
+		allTime := queryBool(c.Query("all_time"))
+		var err error
+
+		var since time.Time
+		var until time.Time
+		var sinceLocal time.Time
+		var untilLocal time.Time
+		if allTime {
+			var first time.Time
+			var has bool
+			if tokenID > 0 {
+				first, has, err = opts.Store.GetFirstUsageEventTimeByToken(c.Request.Context(), tokenID)
+			} else {
+				first, has, err = opts.Store.GetFirstUsageEventTimeByUser(c.Request.Context(), userID)
+			}
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
+				return
+			}
+			if has {
+				firstLocal := first.In(loc)
+				sinceLocal = time.Date(firstLocal.Year(), firstLocal.Month(), firstLocal.Day(), 0, 0, 0, 0, loc)
+				untilLocal = now.In(loc)
+				since = sinceLocal.UTC()
+				until = untilLocal.UTC()
+			} else {
+				since, until, sinceLocal, untilLocal, ok = parseDateRangeInLocation(now, startStr, endStr, loc)
+				if !ok {
+					c.JSON(http.StatusOK, gin.H{"success": false, "message": "start/end 不合法（格式：YYYY-MM-DD）"})
+					return
+				}
+			}
+		} else {
+			since, until, sinceLocal, untilLocal, ok = parseDateRangeInLocation(now, startStr, endStr, loc)
+			if !ok {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "start/end 不合法（格式：YYYY-MM-DD）"})
+				return
+			}
 		}
 
 		subs, err := opts.Store.ListActiveSubscriptionsWithPlans(c.Request.Context(), userID, now)
@@ -487,10 +523,44 @@ func usageTimeSeriesHandler(opts Options) gin.HandlerFunc {
 		now := time.Now().UTC()
 		startStr := strings.TrimSpace(c.Query("start"))
 		endStr := strings.TrimSpace(c.Query("end"))
-		since, until, sinceLocal, untilLocal, ok := parseDateRangeInLocation(now, startStr, endStr, loc)
-		if !ok {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "start/end 不合法（格式：YYYY-MM-DD）"})
-			return
+		allTime := queryBool(c.Query("all_time"))
+		var err error
+
+		var since time.Time
+		var until time.Time
+		var sinceLocal time.Time
+		var untilLocal time.Time
+		if allTime {
+			var first time.Time
+			var has bool
+			if tokenID > 0 {
+				first, has, err = opts.Store.GetFirstUsageEventTimeByToken(c.Request.Context(), tokenID)
+			} else {
+				first, has, err = opts.Store.GetFirstUsageEventTimeByUser(c.Request.Context(), userID)
+			}
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
+				return
+			}
+			if has {
+				firstLocal := first.In(loc)
+				sinceLocal = time.Date(firstLocal.Year(), firstLocal.Month(), firstLocal.Day(), 0, 0, 0, 0, loc)
+				untilLocal = now.In(loc)
+				since = sinceLocal.UTC()
+				until = untilLocal.UTC()
+			} else {
+				since, until, sinceLocal, untilLocal, ok = parseDateRangeInLocation(now, startStr, endStr, loc)
+				if !ok {
+					c.JSON(http.StatusOK, gin.H{"success": false, "message": "start/end 不合法（格式：YYYY-MM-DD）"})
+					return
+				}
+			}
+		} else {
+			since, until, sinceLocal, untilLocal, ok = parseDateRangeInLocation(now, startStr, endStr, loc)
+			if !ok {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "start/end 不合法（格式：YYYY-MM-DD）"})
+				return
+			}
 		}
 		startResp := sinceLocal.Format("2006-01-02")
 		endResp := untilLocal.Add(-time.Second).Format("2006-01-02")
@@ -505,7 +575,6 @@ func usageTimeSeriesHandler(opts Options) gin.HandlerFunc {
 		}
 
 		var rows []store.ChannelTimeSeriesUsageStats
-		var err error
 		if tokenID > 0 {
 			rows, err = opts.Store.GetTokenUsageTimeSeriesRange(c.Request.Context(), tokenID, since, until, granularity)
 		} else {

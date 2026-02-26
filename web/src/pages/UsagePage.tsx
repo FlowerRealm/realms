@@ -36,6 +36,7 @@ export function UsagePage() {
 
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
+  const [allTime, setAllTime] = useState(false);
   const [limit, setLimit] = useState(50);
 
   const [seriesStart, setSeriesStart] = useState('');
@@ -75,9 +76,10 @@ export function UsagePage() {
     try {
       const startValue = (override?.start ?? start).trim();
       const endValue = (override?.end ?? end).trim();
+      const allTimeActive = allTime && !startValue && !endValue;
       const [w, e] = await Promise.all([
-        getUsageWindows(startValue || undefined, endValue || undefined),
-        getUsageEvents(limit, currentBeforeID, startValue || undefined, endValue || undefined),
+        getUsageWindows(startValue || undefined, endValue || undefined, undefined, allTimeActive),
+        getUsageEvents(limit, currentBeforeID, allTimeActive ? undefined : startValue || undefined, allTimeActive ? undefined : endValue || undefined),
       ]);
       if (!w.success) throw new Error(w.message || '加载失败');
       if (!e.success) throw new Error(e.message || '加载失败');
@@ -88,12 +90,18 @@ export function UsagePage() {
       setNextBeforeID(e.data?.next_before_id ?? null);
 
       const day0 = window0 ? formatLocalDate(String(window0.since)) : '';
-      const effectiveStart = startValue || day0 || '';
-      const effectiveEnd = endValue || (startValue ? startValue : day0) || '';
-      setSeriesStart(effectiveStart);
-      setSeriesEnd(effectiveEnd);
+      const day1 = window0 ? formatLocalDate(String(window0.until)) : '';
+      if (allTimeActive) {
+        setSeriesStart(day0 || '');
+        setSeriesEnd(day1 || '');
+      } else {
+        const effectiveStart = startValue || day0 || '';
+        const effectiveEnd = endValue || (startValue ? startValue : day0) || '';
+        setSeriesStart(effectiveStart);
+        setSeriesEnd(effectiveEnd);
+      }
 
-      if (window0) {
+      if (window0 && !allTimeActive) {
         if (!startValue && day0) setStart(day0);
         if (!endValue && (startValue || day0)) setEnd(startValue || day0);
       }
@@ -265,6 +273,9 @@ export function UsagePage() {
                 start={start}
                 end={end}
                 onChange={(r) => {
+                  const isAll = !r.start.trim() && !r.end.trim();
+                  setAllTime(isAll);
+                  if (isAll) setDetailGranularity('day');
                   setStart(r.start);
                   setEnd(r.end);
                   setBeforeStack([]);
@@ -342,6 +353,7 @@ export function UsagePage() {
                 type="button"
                 disabled={loading}
                 onClick={() => {
+                  setAllTime(false);
                   setStart('');
                   setEnd('');
                   setBeforeStack([]);

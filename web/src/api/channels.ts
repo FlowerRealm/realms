@@ -130,12 +130,12 @@ type UpdateChannelRequest = {
   allow_safety_identifier?: boolean;
 };
 
-export async function getChannelsPage(params?: { start?: string; end?: string }) {
+export async function getChannelsPage(params?: { start?: string; end?: string; all_time?: boolean }) {
   const res = await api.get<APIResponse<ChannelsPageResponse>>('/api/channel/page', { params });
   return res.data;
 }
 
-export async function getChannelTimeSeries(channelID: number, params?: { start?: string; end?: string; granularity?: 'hour' | 'day' }) {
+export async function getChannelTimeSeries(channelID: number, params?: { start?: string; end?: string; all_time?: boolean; granularity?: 'hour' | 'day' }) {
   const res = await api.get<APIResponse<ChannelTimeSeriesResponse>>(`/api/channel/${channelID}/timeseries`, { params });
   return res.data;
 }

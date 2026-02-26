@@ -95,12 +95,13 @@ type UsageTimeSeriesResponse = {
   points: UsageTimeSeriesPoint[];
 };
 
-export async function getUsageWindows(start?: string, end?: string, tokenID?: number) {
+export async function getUsageWindows(start?: string, end?: string, tokenID?: number, allTime?: boolean) {
   const res = await api.get<APIResponse<UsageWindowsResponse>>('/api/usage/windows', {
     params: {
       start: start || undefined,
       end: end || undefined,
       token_id: tokenID || undefined,
+      all_time: allTime ? true : undefined,
       tz: browserTimeZone(),
     },
   });
@@ -121,13 +122,14 @@ export async function getUsageEvents(limit = 100, beforeID?: number, start?: str
   return res.data;
 }
 
-export async function getUsageTimeSeries(start?: string, end?: string, granularity?: 'hour' | 'day', tokenID?: number) {
+export async function getUsageTimeSeries(start?: string, end?: string, granularity?: 'hour' | 'day', tokenID?: number, allTime?: boolean) {
   const res = await api.get<APIResponse<UsageTimeSeriesResponse>>('/api/usage/timeseries', {
     params: {
       start: start || undefined,
       end: end || undefined,
       granularity: granularity || undefined,
       token_id: tokenID || undefined,
+      all_time: allTime ? true : undefined,
       tz: browserTimeZone(),
     },
   });
