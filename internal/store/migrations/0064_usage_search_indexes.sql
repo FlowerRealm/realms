@@ -60,7 +60,7 @@ SET @idx_exists := (
 );
 SET @ddl := IF(
   @idx_exists = 0,
-  'CREATE INDEX `idx_usage_events_model` ON `usage_events` (`model`(191))',
+  'CREATE INDEX `idx_usage_events_model` ON `usage_events` (`model`)',
   'SELECT 1'
 );
 PREPARE stmt FROM @ddl;
