@@ -51,3 +51,18 @@ PREPARE stmt FROM @ddl;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+SET @idx_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.STATISTICS
+  WHERE table_schema = DATABASE()
+    AND table_name = 'usage_events'
+    AND index_name = 'idx_usage_events_model'
+);
+SET @ddl := IF(
+  @idx_exists = 0,
+  'CREATE INDEX `idx_usage_events_model` ON `usage_events` (`model`(191))',
+  'SELECT 1'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;

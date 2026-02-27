@@ -313,6 +313,7 @@ CREATE INDEX IF NOT EXISTS `idx_usage_events_user_id_id` ON `usage_events` (`use
 CREATE INDEX IF NOT EXISTS `idx_usage_events_time_id` ON `usage_events` (`time`, `id`);
 CREATE INDEX IF NOT EXISTS `idx_usage_events_token_time_id` ON `usage_events` (`token_id`, `time`, `id`);
 CREATE INDEX IF NOT EXISTS `idx_usage_events_upstream_channel_time_id` ON `usage_events` (`upstream_channel_id`, `time`, `id`);
+CREATE INDEX IF NOT EXISTS `idx_usage_events_model` ON `usage_events` (`model`);
 
 CREATE TABLE IF NOT EXISTS `subscription_plans` (
   `id` INTEGER PRIMARY KEY AUTOINCREMENT,
