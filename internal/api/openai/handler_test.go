@@ -21,6 +21,8 @@ import (
 	"realms/internal/scheduler"
 	"realms/internal/store"
 	"realms/internal/upstream"
+
+	"github.com/tidwall/gjson"
 )
 
 type fakeDoer struct {
@@ -1679,6 +1681,170 @@ func TestResponses_CodexSessionCompletion_FillsPromptCacheKeyAndSessionHeader(t 
 	}
 	if promptCacheKey != sessionHeader {
 		t.Fatalf("expected prompt_cache_key and Session_id to be aligned, got body=%q header=%q", promptCacheKey, sessionHeader)
+	}
+}
+
+func TestResponses_CodexSession_ResetOnSelectionChange_StripsCompaction(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 0},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+			2: {
+				{ID: 22, ChannelID: 2, BaseURL: "https://b.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+			},
+			22: {
+				{ID: 222, EndpointID: 22, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+				{ID: 2, ChannelID: 2, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	var gotCh2Body []byte
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, body []byte) (*http.Response, error) {
+		if sel.ChannelID == 2 {
+			gotCh2Body = append([]byte(nil), body...)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+
+	req1 := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses",
+		bytes.NewReader([]byte(`{"model":"gpt-5.2","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":false,"prompt_cache_key":"rk1"}`)))
+	req1.Header.Set("Content-Type", "application/json")
+	req1 = req1.WithContext(auth.WithPrincipal(req1.Context(), p))
+	rr1 := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr1, req1)
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr1.Code, rr1.Body.String())
+	}
+
+	fs.channels = []store.UpstreamChannel{
+		{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 0},
+		{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+	}
+
+	req2 := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses",
+		bytes.NewReader([]byte(`{"model":"gpt-5.2","input":[{"type":"item_reference","id":"ref1"},{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}],"stream":false,"prompt_cache_key":"rk1","previous_response_id":"resp_123","compaction":{"encrypted_content":"mRYQ...71fD"}}`)))
+	req2.Header.Set("Content-Type", "application/json")
+	req2 = req2.WithContext(auth.WithPrincipal(req2.Context(), p))
+	rr2 := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr2.Code, rr2.Body.String())
+	}
+	if got := rr2.Header().Get("X-Realms-Codex-Session-Reset"); got != "1" {
+		t.Fatalf("expected reset header, got=%q", got)
+	}
+	if got := rr2.Header().Get("X-Realms-Codex-Session-Reset-Reason"); got != "upstream_selection_changed" {
+		t.Fatalf("expected reset reason upstream_selection_changed, got=%q", got)
+	}
+	if len(gotCh2Body) == 0 {
+		t.Fatalf("expected upstream call to channel 2 to be captured")
+	}
+	if gjson.GetBytes(gotCh2Body, "compaction").Exists() {
+		t.Fatalf("expected compaction to be removed, got=%s", string(gotCh2Body))
+	}
+	if gjson.GetBytes(gotCh2Body, "previous_response_id").Exists() {
+		t.Fatalf("expected previous_response_id to be removed, got=%s", string(gotCh2Body))
+	}
+	if t0 := gjson.GetBytes(gotCh2Body, "input.0.type").String(); t0 == "item_reference" {
+		t.Fatalf("expected item_reference to be removed from input, got=%s", string(gotCh2Body))
+	}
+}
+
+func TestResponses_CodexSession_ResetNoUserText_Returns409(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 0},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+			2: {
+				{ID: 22, ChannelID: 2, BaseURL: "https://b.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+			},
+			22: {
+				{ID: 222, EndpointID: 22, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+				{ID: 2, ChannelID: 2, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	sched := scheduler.New(fs)
+	doer := &okDoer{}
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+
+	req1 := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses",
+		bytes.NewReader([]byte(`{"model":"gpt-5.2","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":false,"prompt_cache_key":"rk1"}`)))
+	req1.Header.Set("Content-Type", "application/json")
+	req1 = req1.WithContext(auth.WithPrincipal(req1.Context(), p))
+	rr1 := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr1, req1)
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr1.Code, rr1.Body.String())
+	}
+
+	fs.channels = []store.UpstreamChannel{
+		{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 0},
+		{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+	}
+
+	req2 := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses",
+		bytes.NewReader([]byte(`{"model":"gpt-5.2","input":[{"type":"item_reference","id":"ref1"}],"stream":false,"prompt_cache_key":"rk1","compaction":{"encrypted_content":"mRYQ...71fD"}}`)))
+	req2.Header.Set("Content-Type", "application/json")
+	req2 = req2.WithContext(auth.WithPrincipal(req2.Context(), p))
+	rr2 := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got=%d body=%s", rr2.Code, rr2.Body.String())
+	}
+	if got := gjson.GetBytes(rr2.Body.Bytes(), "error.type").String(); got != "session_reset_required" {
+		t.Fatalf("expected error.type=session_reset_required, got=%q body=%s", got, rr2.Body.String())
 	}
 }
 

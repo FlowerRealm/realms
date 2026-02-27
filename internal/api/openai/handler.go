@@ -52,6 +52,8 @@ type Handler struct {
 	refs OpenAIObjectRefStore
 
 	sseOpts upstream.SSEPumpOptions
+
+	codexRouteCache *codexSessionRouteCache
 }
 
 type Doer interface {
@@ -103,6 +105,7 @@ func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *
 		usage:    usage,
 		refs:     refs,
 		sseOpts:  sseOpts,
+		codexRouteCache: newCodexSessionRouteCache(),
 	}
 }
 
@@ -503,6 +506,9 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	if shouldEnableStickyRouting(payload, r, routeKeySource) {
 		stickyRouteKeyHash = routeKeyHash
 	}
+	if stickyRouteKeyHash != "" {
+		r = r.WithContext(withCodexStickyRouteKeyHash(r.Context(), stickyRouteKeyHash))
+	}
 	usageID := int64(0)
 	if h.quota != nil && r != nil && r.URL != nil && r.URL.Path == "/v1/responses" {
 		res, err := h.quota.Reserve(r.Context(), quota.ReserveInput{
@@ -545,6 +551,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	router := scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
 	var lastSel *scheduler.Selection
 	bestFailure := proxyFailureInfo{}
+	prevRoute, prevOK := h.getCodexLastSuccessRoute(stickyRouteKeyHash, time.Now())
 	const absoluteMaxAttempts = 1000
 	for i := 0; i < absoluteMaxAttempts; i++ {
 		sel, err := router.Next(r.Context())
@@ -568,6 +575,29 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			h.finalizeUsageEvent(r, usageID, &sel, http.StatusInternalServerError, "rewrite_body", "请求体处理失败", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
 			return
 		}
+
+		if prevOK && stickyRouteKeyHash != "" && prevRoute.differs(sel) && codexHasStatefulContinuationSignalsFromBody(rewritten) {
+			resetRes, rErr := resetCodexStatefulContinuation(rewritten)
+			if rErr == nil && resetRes.changed {
+				if !resetRes.hasUserText {
+					if usageID != 0 && h.quota != nil {
+						bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+						_ = h.quota.Void(bookCtx, usageID)
+						cancel()
+					}
+					h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, optionalString(publicModel), http.StatusConflict, "session_reset_required", 0)
+					cw := &countingResponseWriter{ResponseWriter: w}
+					writeOpenAIError(cw, http.StatusConflict, "session_reset_required", "上游渠道已切换：该请求仅包含续链上下文（compaction/item_reference/previous_response_id），无法跨上游复用。请在 Codex CLI 重启会话/新开对话后重试。")
+					h.maybeLogProxyFailure(r.Context(), r, p, &sel, optionalString(publicModel), http.StatusConflict, "session_reset_required", "session_reset_required", time.Since(reqStart), stream)
+					h.finalizeUsageEvent(r, usageID, &sel, http.StatusConflict, "session_reset_required", "session_reset_required", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
+					return
+				}
+				w.Header().Set("X-Realms-Codex-Session-Reset", "1")
+				w.Header().Set("X-Realms-Codex-Session-Reset-Reason", "upstream_selection_changed")
+				rewritten = resetRes.body
+			}
+		}
+
 		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), usageID, reqStart, reqBytes, 2, &bestFailure) {
 			return
 		}
@@ -676,7 +706,9 @@ func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p aut
 
 func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel scheduler.Selection, body []byte, wantStream bool, model *string, p auth.Principal, usageID int64, reqStart time.Time, reqBytes int64) (proxyAttemptDecision, proxyFailureInfo) {
 	attemptStart := time.Now()
+	resetTried := false
 
+doRequest:
 	resp, err := h.exec.Do(r.Context(), sel, r, body)
 	if err != nil {
 		if h.finalizeIfCanceled(r, usageID, &sel, reqStart, wantStream, reqBytes) {
@@ -713,6 +745,17 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 	// 失败分支：根据状态码决定是否 failover。
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes := readPrefixBestEffort(resp.Body, upstreamErrorBodyMaxBytes)
+		if !resetTried && isInvalidEncryptedContentUpstreamError(bodyBytes) {
+			resetRes, rErr := resetCodexStatefulContinuation(body)
+			if rErr == nil && resetRes.changed && resetRes.hasUserText {
+				w.Header().Set("X-Realms-Codex-Session-Reset", "1")
+				w.Header().Set("X-Realms-Codex-Session-Reset-Reason", "invalid_encrypted_content")
+				body = resetRes.body
+				resetTried = true
+				_ = resp.Body.Close()
+				goto doRequest
+			}
+		}
 		codexErr := classifyCodexOAuthUpstreamError(sel, resp.StatusCode, bodyBytes)
 		retriable := isRetriableStatus(resp.StatusCode) || codexErr.retriable()
 		errorClass := "upstream_status"
@@ -913,6 +956,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		// SSE 已写回后不再 failover，但仍记录结果以用于后续调度权重。
 		if pumpRes.ErrorClass == "" || pumpRes.ErrorClass == "client_disconnect" || pumpRes.ErrorClass == "stream_max_duration" {
 			h.sched.Report(sel, scheduler.Result{Success: true})
+			h.rememberCodexLastSuccessRoute(r, sel)
 		} else {
 			retriable := pumpRes.ErrorClass == "stream_idle_timeout" || pumpRes.ErrorClass == "stream_read_error"
 			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: retriable, StatusCode: resp.StatusCode, ErrorClass: pumpRes.ErrorClass})
@@ -1004,6 +1048,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		}
 		h.sched.Report(sel, scheduler.Result{Success: true})
 	}
+	h.rememberCodexLastSuccessRoute(r, sel)
 	h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "", "", time.Since(reqStart), 0, false, reqBytes, respBytes)
 	return proxyAttemptDone, proxyFailureInfo{}
 }
