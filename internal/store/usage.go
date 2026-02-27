@@ -1106,7 +1106,7 @@ func (s *Store) ListUsageEventsWithUserRangeFiltered(ctx context.Context, since,
 
 	if idx.Key && f.Key != "" {
 		joins += "LEFT JOIN user_tokens ut ON ut.id=ue.token_id\n"
-		extraWhere.WriteString(" AND ut.name IS NOT NULL AND TRIM(ut.name) <> '' AND LOWER(ut.name) LIKE LOWER(?)\n")
+		extraWhere.WriteString(" AND ut.name LIKE ?\n")
 		args = append(args, "%"+f.Key+"%")
 	}
 	if idx.Channel && f.Channel != "" {
@@ -1115,16 +1115,16 @@ func (s *Store) ListUsageEventsWithUserRangeFiltered(ctx context.Context, since,
 			args = append(args, n)
 		} else {
 			joins += "LEFT JOIN upstream_channels uc ON uc.id=ue.upstream_channel_id\n"
-			extraWhere.WriteString(" AND uc.name IS NOT NULL AND TRIM(uc.name) <> '' AND LOWER(uc.name) LIKE LOWER(?)\n")
+			extraWhere.WriteString(" AND uc.name LIKE ?\n")
 			args = append(args, "%"+f.Channel+"%")
 		}
 	}
 	if idx.Model && f.Model != "" {
-		extraWhere.WriteString(" AND ue.model IS NOT NULL AND TRIM(ue.model) <> '' AND LOWER(ue.model) LIKE LOWER(?)\n")
+		extraWhere.WriteString(" AND ue.model LIKE ?\n")
 		args = append(args, "%"+f.Model+"%")
 	}
 	if idx.User && f.User != "" {
-		extraWhere.WriteString(" AND ((u.email IS NOT NULL AND TRIM(u.email) <> '' AND LOWER(u.email) LIKE LOWER(?)) OR (u.username IS NOT NULL AND TRIM(u.username) <> '' AND LOWER(u.username) LIKE LOWER(?)))\n")
+		extraWhere.WriteString(" AND (u.email LIKE ? OR u.username LIKE ?)\n")
 		args = append(args, "%"+f.User+"%", "%"+f.User+"%")
 	}
 
@@ -1206,11 +1206,11 @@ func (s *Store) listUsageEventsByUserFiltered(ctx context.Context, userID int64,
 
 	if idx.Key && f.Key != "" {
 		joins += "LEFT JOIN user_tokens ut ON ut.id=ue.token_id\n"
-		extraWhere.WriteString(" AND ut.name IS NOT NULL AND TRIM(ut.name) <> '' AND LOWER(ut.name) LIKE LOWER(?)\n")
+		extraWhere.WriteString(" AND ut.name LIKE ?\n")
 		filterArgs = append(filterArgs, "%"+f.Key+"%")
 	}
 	if idx.Model && f.Model != "" {
-		extraWhere.WriteString(" AND ue.model IS NOT NULL AND TRIM(ue.model) <> '' AND LOWER(ue.model) LIKE LOWER(?)\n")
+		extraWhere.WriteString(" AND ue.model LIKE ?\n")
 		filterArgs = append(filterArgs, "%"+f.Model+"%")
 	}
 
