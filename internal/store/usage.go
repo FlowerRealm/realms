@@ -1206,8 +1206,6 @@ func (s *Store) listUsageEventsByUserFiltered(ctx context.Context, userID int64,
 
 	if idx.Key && f.Key != "" {
 		joins += "LEFT JOIN user_tokens ut ON ut.id=ue.token_id\n"
-		extraWhere.WriteString(" AND ut.user_id = ?\n")
-		filterArgs = append(filterArgs, userID)
 		extraWhere.WriteString(" AND ut.name IS NOT NULL AND TRIM(ut.name) <> '' AND LOWER(ut.name) LIKE LOWER(?)\n")
 		filterArgs = append(filterArgs, "%"+f.Key+"%")
 	}
