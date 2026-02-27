@@ -413,12 +413,15 @@ func adminMCPPutHandler(opts Options) gin.HandlerFunc {
 		}
 		finalized = true
 
-		outJSON, _ := mcp.PrettyStoreV2JSON(storeV2)
+		storeJSON := "{}"
+		if pretty, err := mcp.PrettyStoreV2JSON(storeV2); err == nil && strings.TrimSpace(pretty) != "" {
+			storeJSON = pretty
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "",
 			"data": gin.H{
-				"store_json":    outJSON,
+				"store_json":    storeJSON,
 				"server_count":  len(storeV2.Servers),
 				"store":         storeV2,
 				"apply_results": applyResults,

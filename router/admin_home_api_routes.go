@@ -37,9 +37,21 @@ func adminHomeHandler(opts Options) gin.HandlerFunc {
 		}
 
 		ctx := c.Request.Context()
-		usersCount, _ := opts.Store.CountUsers(ctx)
-		channelsCount, _ := opts.Store.CountUpstreamChannels(ctx)
-		endpointsCount, _ := opts.Store.CountUpstreamEndpoints(ctx)
+		usersCount, err := opts.Store.CountUsers(ctx)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "读取统计失败"})
+			return
+		}
+		channelsCount, err := opts.Store.CountUpstreamChannels(ctx)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "读取统计失败"})
+			return
+		}
+		endpointsCount, err := opts.Store.CountUpstreamEndpoints(ctx)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "读取统计失败"})
+			return
+		}
 
 		loc, tzName := adminTimeLocation(ctx, opts)
 		nowUTC := time.Now().UTC()
@@ -47,7 +59,11 @@ func adminHomeHandler(opts Options) gin.HandlerFunc {
 		todayStartLocal := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 		todayStartUTC := todayStartLocal.UTC()
 
-		usageStats, _ := opts.Store.GetGlobalUsageStats(ctx, todayStartUTC)
+		usageStats, err := opts.Store.GetGlobalUsageStats(ctx, todayStartUTC)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "读取统计失败"})
+			return
+		}
 
 		out := adminHomeResponse{
 			AdminTimeZone: tzName,
