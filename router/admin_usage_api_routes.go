@@ -163,15 +163,13 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 		}
 
 		if allTime {
-			first, has, err := opts.Store.GetFirstUsageEventTimeGlobal(c.Request.Context())
-			if err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
+			s, e, has, ok := resolveAllTimeGlobalStartEnd(c, opts, loc, todayStr)
+			if !ok {
 				return
 			}
 			if has {
-				firstLocal := first.In(loc)
-				startStr = time.Date(firstLocal.Year(), firstLocal.Month(), firstLocal.Day(), 0, 0, 0, 0, loc).Format("2006-01-02")
-				endStr = todayStr
+				startStr = s
+				endStr = e
 			}
 		}
 		if startStr == "" {
@@ -578,15 +576,13 @@ func adminUsageTimeSeriesHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 		if allTime {
-			first, has, err := opts.Store.GetFirstUsageEventTimeGlobal(c.Request.Context())
-			if err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
+			s, e, has, ok := resolveAllTimeGlobalStartEnd(c, opts, loc, todayStr)
+			if !ok {
 				return
 			}
 			if has {
-				firstLocal := first.In(loc)
-				startStr = time.Date(firstLocal.Year(), firstLocal.Month(), firstLocal.Day(), 0, 0, 0, 0, loc).Format("2006-01-02")
-				endStr = todayStr
+				startStr = s
+				endStr = e
 			}
 		}
 		if startStr == "" {
