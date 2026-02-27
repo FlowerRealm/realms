@@ -1,10 +1,12 @@
 package mcp
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"syscall"
 )
 
 func ensureDir(path string) error {
@@ -13,6 +15,28 @@ func ensureDir(path string) error {
 		return nil
 	}
 	return os.MkdirAll(dir, 0o755)
+}
+
+func isIgnorableDirSyncErr(err error) bool {
+	// Some platforms/filesystems don't support fsync on directories (e.g. macOS often returns EINVAL).
+	// Treat these as best-effort so we don't break normal writes.
+	return errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.EPERM)
+}
+
+func syncDirBestEffort(dir string) error {
+	df, err := os.Open(dir)
+	if err != nil {
+		return nil
+	}
+	syncErr := df.Sync()
+	closeErr := df.Close()
+	if syncErr != nil && !isIgnorableDirSyncErr(syncErr) {
+		return fmt.Errorf("fsync dir: %w", syncErr)
+	}
+	if closeErr != nil && !isIgnorableDirSyncErr(closeErr) {
+		return fmt.Errorf("close dir: %w", closeErr)
+	}
+	return nil
 }
 
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
@@ -57,10 +81,8 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	tmpName = ""
 
 	if runtime.GOOS != "windows" {
-		df, err := os.Open(dir)
-		if err == nil {
-			_ = df.Sync()
-			_ = df.Close()
+		if err := syncDirBestEffort(dir); err != nil {
+			return err
 		}
 	}
 	return nil
