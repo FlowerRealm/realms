@@ -83,16 +83,20 @@ export function UsagePage() {
   const canPrev = beforeStack.length > 0;
   const canNext = useMemo(() => !!nextBeforeID && events.length === limit, [events.length, limit, nextBeforeID]);
 
-  async function refresh(currentBeforeID?: number, override?: { start?: string; end?: string }) {
+  async function refresh(
+    currentBeforeID?: number,
+    override?: { start?: string; end?: string; allTime?: boolean; filterKey?: string; filterModel?: string },
+  ) {
     setErr('');
     setLoading(true);
     try {
       const startValue = (override?.start ?? start).trim();
       const endValue = (override?.end ?? end).trim();
-      const allTimeActive = allTime && !startValue && !endValue;
+      const allTimeValue = !!(override?.allTime ?? allTime);
+      const allTimeActive = allTimeValue && !startValue && !endValue;
       const indexParts: string[] = [];
-      const q_key = filterKey.trim();
-      const q_model = filterModel.trim();
+      const q_key = (override?.filterKey ?? filterKey).trim();
+      const q_model = (override?.filterModel ?? filterModel).trim();
       if (q_key) indexParts.push('key');
       if (q_model) indexParts.push('model');
       const index = indexParts.length ? indexParts.join(',') : undefined;
@@ -442,7 +446,7 @@ export function UsagePage() {
                       setFilterModel('');
                       setBeforeStack([]);
                       setExpandedID(null);
-                      void refresh(undefined, { start: '', end: '' });
+                      void refresh(undefined, { start: '', end: '', allTime: false, filterKey: '', filterModel: '' });
                     }}
                   >
                     重置

@@ -113,18 +113,30 @@ export function UsageAdminPage() {
     { value: 'day', label: '按天' },
   ];
 
-  async function refresh(opts?: { keepCursor?: boolean }) {
+  async function refresh(opts?: {
+    keepCursor?: boolean;
+    override?: Partial<{
+      start: string;
+      end: string;
+      allTime: boolean;
+      filterUser: string;
+      filterKey: string;
+      filterChannel: string;
+      filterModel: string;
+    }>;
+  }) {
     setErr('');
     setLoading(true);
     try {
-      const startValue = start.trim();
-      const endValue = end.trim();
-      const allTimeActive = allTime && !startValue && !endValue;
+      const startValue = (opts?.override?.start ?? start).trim();
+      const endValue = (opts?.override?.end ?? end).trim();
+      const allTimeValue = !!(opts?.override?.allTime ?? allTime);
+      const allTimeActive = allTimeValue && !startValue && !endValue;
       const indexParts: string[] = [];
-      const q_user = filterUser.trim();
-      const q_key = filterKey.trim();
-      const q_channel = filterChannel.trim();
-      const q_model = filterModel.trim();
+      const q_user = (opts?.override?.filterUser ?? filterUser).trim();
+      const q_key = (opts?.override?.filterKey ?? filterKey).trim();
+      const q_channel = (opts?.override?.filterChannel ?? filterChannel).trim();
+      const q_model = (opts?.override?.filterModel ?? filterModel).trim();
       if (q_user) indexParts.push('user');
       if (q_key) indexParts.push('key');
       if (q_channel) indexParts.push('channel');
@@ -566,7 +578,17 @@ export function UsageAdminPage() {
                       setFilterModel('');
                       setBeforeID(undefined);
                       setAfterID(undefined);
-                      void refresh();
+                      void refresh({
+                        override: {
+                          start: '',
+                          end: '',
+                          allTime: false,
+                          filterUser: '',
+                          filterKey: '',
+                          filterChannel: '',
+                          filterModel: '',
+                        },
+                      });
                     }}
                   >
                     重置
