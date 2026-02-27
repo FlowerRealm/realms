@@ -309,17 +309,18 @@ func StoreV2ToRegistry(s StoreV2) Registry {
 
 func parseTimeoutsFromLegacySpec(spec map[string]any) TimeoutsV2 {
 	var out TimeoutsV2
-	if v, ok := numberToUint64Any(spec["startup_timeout_ms"]); ok && v > 0 {
-		out.StartupMS = v
-	}
-	if v, ok := numberToUint64Any(spec["tool_timeout_ms"]); ok && v > 0 {
-		out.ToolMS = v
-	}
 	if v, ok := numberToUint64Any(spec["startup_timeout_sec"]); ok && v > 0 {
 		out.StartupMS = v * 1000
 	}
 	if v, ok := numberToUint64Any(spec["tool_timeout_sec"]); ok && v > 0 {
 		out.ToolMS = v * 1000
+	}
+	// Prefer ms fields when both are present (more precise than sec).
+	if v, ok := numberToUint64Any(spec["startup_timeout_ms"]); ok && v > 0 {
+		out.StartupMS = v
+	}
+	if v, ok := numberToUint64Any(spec["tool_timeout_ms"]); ok && v > 0 {
+		out.ToolMS = v
 	}
 	// Gemini stores timeout(ms).
 	if v, ok := numberToUint64Any(spec["timeout"]); ok && v > 0 {

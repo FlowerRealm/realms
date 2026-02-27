@@ -81,3 +81,19 @@ func TestDisabledServerIDsForTarget(t *testing.T) {
 		t.Fatalf("unexpected ids: %#v", ids)
 	}
 }
+
+func TestParseTimeoutsFromLegacySpec_PreferMSOverSec(t *testing.T) {
+	spec := map[string]any{
+		"startup_timeout_ms":  5500,
+		"startup_timeout_sec": 5,
+		"tool_timeout_ms":     12345,
+		"tool_timeout_sec":    12,
+	}
+	out := parseTimeoutsFromLegacySpec(spec)
+	if out.StartupMS != 5500 {
+		t.Fatalf("StartupMS=%d", out.StartupMS)
+	}
+	if out.ToolMS != 12345 {
+		t.Fatalf("ToolMS=%d", out.ToolMS)
+	}
+}
