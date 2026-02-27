@@ -1435,11 +1435,13 @@ func (s *Store) PatchCodexOAuthAccountQuota(ctx context.Context, accountID int64
 	sets = append(sets, "quota_updated_at=?")
 	args = append(args, updatedAt)
 
+	// Avoid updating updated_at (MySQL ON UPDATE).
+	sets = append(sets, "updated_at=updated_at")
+
 	args = append(args, accountID)
 	q := fmt.Sprintf(`
 UPDATE codex_oauth_accounts
-SET %s,
-    updated_at=updated_at
+SET %s
 WHERE id=?
 `, strings.Join(sets, ",\n    "))
 

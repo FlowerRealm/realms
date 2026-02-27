@@ -10,6 +10,15 @@ import (
 	"realms/internal/store"
 )
 
+const (
+	// maxMinutesFor5hWindow provides some buffer for the 5-hour (300 minutes) window.
+	// Codex upstream may not always return exactly 300, so we treat anything <= 6h as "5h window".
+	maxMinutesFor5hWindow = 360
+	// minMinutesFor7dWindow is a lower bound for the 7-day (10080 minutes) window.
+	// We use a slightly smaller threshold to avoid false negatives caused by upstream variations.
+	minMinutesFor7dWindow = 10000
+)
+
 type codexQuotaWindow struct {
 	usedPercent   *int
 	resetAt       *time.Time
@@ -78,14 +87,14 @@ func isCodex5hWindow(windowMinutes *int) bool {
 	if windowMinutes == nil {
 		return false
 	}
-	return *windowMinutes > 0 && *windowMinutes <= 360
+	return *windowMinutes > 0 && *windowMinutes <= maxMinutesFor5hWindow
 }
 
 func isCodex7dWindow(windowMinutes *int) bool {
 	if windowMinutes == nil {
 		return false
 	}
-	return *windowMinutes >= 10000
+	return *windowMinutes >= minMinutesFor7dWindow
 }
 
 func pickCodexWindows(primary, secondary codexQuotaWindow) (fiveH codexQuotaWindow, sevenD codexQuotaWindow, ok bool) {
@@ -149,8 +158,5 @@ func codexQuotaPatchFromResponseHeaders(headers http.Header, now time.Time) (sto
 		SecondaryResetAt:     sevenD.resetAt,
 	}
 
-	if patch.PrimaryUsedPercent == nil && patch.PrimaryResetAt == nil && patch.SecondaryUsedPercent == nil && patch.SecondaryResetAt == nil {
-		return store.CodexOAuthQuotaPatch{}, false
-	}
 	return patch, true
 }
