@@ -733,9 +733,7 @@ h6,
 .rlm-usage-col-cost {
   width: clamp(80px, 6vw, 104px);
 }
-.rlm-usage-col-key {
-  width: clamp(88px, 7vw, 120px);
-}
+.rlm-usage-col-key,
 .rlm-usage-col-channel {
   width: clamp(88px, 7vw, 120px);
 }
