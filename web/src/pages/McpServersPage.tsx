@@ -1,118 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 
-import { deleteAdminMcp, getAdminMcp, updateAdminMcp, scanAdminMcp, parseAdminMcp, type AdminMcpApplyResult, type McpServerV2, type McpStoreV2 } from '../api/admin/mcp';
+import { parseAdminMcp, type McpServerV2 } from '../api/admin/mcp';
 import { useAuth } from '../auth/AuthContext';
 import { BootstrapModal } from '../components/BootstrapModal';
 import { closeModalById } from '../components/modal';
 
-type TargetKey = 'codex' | 'claude' | 'gemini';
-type McpType = 'stdio' | 'http' | 'sse';
-type ImportSource = TargetKey | 'realms';
-type ImportPick = 'keep' | 'imported';
-
-type Row = {
-  id: string;
-  server: McpServerV2;
-};
-
-type PerTarget = Partial<Record<TargetKey, McpServerV2>>;
-
-type UnionRow = {
-  id: string;
-  desired?: McpServerV2;
-  chosen?: McpServerV2;
-  actualByTarget: PerTarget;
-  hasActual: boolean;
-  actualConflict: boolean;
-  status: 'synced' | 'new' | 'missing' | 'conflict' | 'disabled';
-};
-
-function typeBadge(t: string) {
-  if (t === 'stdio') return 'badge bg-light text-primary border';
-  if (t === 'http') return 'badge bg-light text-success border';
-  if (t === 'sse') return 'badge bg-light text-info border';
-  return 'badge bg-light text-secondary border';
-}
-
-function serverType(s: McpServerV2 | undefined): McpType {
-  if (!s) return 'stdio';
-  return s.transport;
-}
-
-function mainSummary(s: McpServerV2 | undefined): string {
-  if (!s) return '-';
-  const t = serverType(s);
-  if (t === 'stdio') return s.stdio?.command || '-';
-  return s.http?.url || '-';
-}
-
-function stableStringify(v: unknown): string {
-  const seen = new WeakSet<object>();
-  const walk = (x: unknown): unknown => {
-    if (!x || typeof x !== 'object') return x;
-    if (seen.has(x as object)) return null;
-    seen.add(x as object);
-    if (Array.isArray(x)) return x.map(walk);
-    const obj = x as Record<string, unknown>;
-    const keys = Object.keys(obj).sort();
-    const out: Record<string, unknown> = {};
-    for (const k of keys) out[k] = walk(obj[k]);
-    return out;
-  };
-  return JSON.stringify(walk(v));
-}
-
-function equalSpec(a: unknown, b: unknown): boolean {
-  return stableStringify(a) === stableStringify(b);
-}
-
-function targetEnabledForServer(s: McpServerV2 | undefined, k: TargetKey): boolean {
-  if (!s?.targets) return true;
-  const v = s.targets[k];
-  if (typeof v !== 'boolean') return true;
-  return v;
-}
-
-function withoutTargets(s: McpServerV2 | undefined): unknown {
-  if (!s) return s;
-  // Only strip the top-level `targets`; the rest is the actual spec.
-  const { targets: _t, ...rest } = s as McpServerV2 & { targets?: unknown };
-  return rest;
-}
-
-function equalServerCore(a: McpServerV2 | undefined, b: McpServerV2 | undefined): boolean {
-  return equalSpec(withoutTargets(a), withoutTargets(b));
-}
-
-function stableHash(v: unknown): string {
-  // Simple stable hash for "did something materially change" checks.
-  // Not cryptographic; just avoids repeated auto-fix loops.
-  const s = stableStringify(v);
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i += 1) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return (h >>> 0).toString(16);
-}
-
-function chooseActualServer(actualByTarget: PerTarget): McpServerV2 | undefined {
-  for (const k of ['codex', 'claude', 'gemini'] as const) {
-    const s = actualByTarget[k];
-    if (s) return s;
-  }
-  return undefined;
-}
-
-function chooseActualServerForTargets(actualByTarget: PerTarget, enabled: Record<TargetKey, boolean>): McpServerV2 | undefined {
-  for (const k of ['codex', 'claude', 'gemini'] as const) {
-    if (!enabled[k]) continue;
-    const s = actualByTarget[k];
-    if (s) return s;
-  }
-  return chooseActualServer(actualByTarget);
-}
+import type { ImportPick, ImportSource, McpType, Row, TargetKey, UnionRow } from './mcp/mcpTypes';
+import { chooseActualServer, equalServerCore, mainSummary, serverType, targetEnabledForServer, typeBadge } from './mcp/mcpUtils';
+import { useMcpManager } from './mcp/useMcpManager';
 
 type KVRow = { k: string; v: string };
 
@@ -223,36 +119,37 @@ export function McpServersPage() {
   const isReady = !authLoading;
   const isPersonalBuild = import.meta.env.MODE === 'personal';
 
-  const [loading, setLoading] = useState(true);
-  const [scanning, setScanning] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [applyResults, setApplyResults] = useState<AdminMcpApplyResult[]>([]);
-  const initialScanDone = useRef(false);
-  const lastAutoFixSig = useRef<string>('');
-  const conflictModalOpen = useRef(false);
-  const desiredServersRef = useRef<Record<string, McpServerV2>>({});
+  const {
+    loading,
+    scanning,
+    saving: mcpSaving,
+    applyResults,
+    err,
+    notice,
+    setErr,
+    setNotice,
+    targetInfo,
+    desiredServers,
+    unionRows,
+    diffSummary,
+    conflicts,
+    conflictChoice,
+    setConflictChoice,
+    conflictModalRequested,
+    ackConflictModalRequested,
+    onConflictModalHidden,
+    scanNow,
+    saveDesired,
+    removeServer,
+    confirmConflicts: confirmConflictsCore,
+    getDesiredServersSnapshot,
+  } = useMcpManager();
 
-  const [err, setErr] = useState('');
-  const [notice, setNotice] = useState('');
-
-  const [targetInfo, setTargetInfo] = useState<Record<TargetKey, { path: string; exists: boolean; parse_error?: string; server_count?: number }>>({
-    codex: { path: '', exists: false },
-    claude: { path: '', exists: false },
-    gemini: { path: '', exists: false },
-  });
-  const [scannedTargets, setScannedTargets] = useState<Record<TargetKey, { servers?: Record<string, McpServerV2> }>>({
-    codex: {},
-    claude: {},
-    gemini: {},
-  });
-
-  const [desiredServers, setDesiredServers] = useState<Record<string, McpServerV2>>({});
+  const [importBusy, setImportBusy] = useState(false);
+  const saving = mcpSaving || importBusy;
 
   const [editing, setEditing] = useState<Row | null>(null);
   const [form, setForm] = useState<EditFormState>(() => initForm(null));
-
-  const [conflicts, setConflicts] = useState<string[]>([]);
-  const [conflictChoice, setConflictChoice] = useState<Record<string, 'codex' | 'claude' | 'gemini' | 'desired'>>({});
 
   const [createMode, setCreateMode] = useState<'manual' | 'import'>('import');
   const [importSource, setImportSource] = useState<ImportSource>('claude');
@@ -262,344 +159,10 @@ export function McpServersPage() {
   const [importConflictChoice, setImportConflictChoice] = useState<Record<string, ImportPick>>({});
 
   useEffect(() => {
-    desiredServersRef.current = desiredServers || {};
-  }, [desiredServers]);
-
-  const unionRows = useMemo(() => {
-    const ids = new Set<string>();
-    for (const id of Object.keys(desiredServers || {})) ids.add(id);
-    for (const t of ['codex', 'claude', 'gemini'] as const) {
-      const servers = (scannedTargets[t]?.servers || {}) as Record<string, McpServerV2>;
-      for (const id of Object.keys(servers)) ids.add(id);
-    }
-
-    const out: UnionRow[] = [];
-    for (const id of Array.from(ids)) {
-      const desired = desiredServers[id];
-      const actualByTarget: PerTarget = {};
-      for (const t of ['codex', 'claude', 'gemini'] as const) {
-        const servers = (scannedTargets[t]?.servers || {}) as Record<string, McpServerV2>;
-        const sv = servers[id];
-        if (sv && typeof sv === 'object') actualByTarget[t] = sv;
-      }
-      const hasActual = Object.keys(actualByTarget).length > 0;
-
-      const desiredEnabled: Record<TargetKey, boolean> = {
-        codex: desired ? targetEnabledForServer(desired, 'codex') : true,
-        claude: desired ? targetEnabledForServer(desired, 'claude') : true,
-        gemini: desired ? targetEnabledForServer(desired, 'gemini') : true,
-      };
-      const enabledTargets: Record<TargetKey, boolean> = desired
-        ? desiredEnabled
-        : {
-            codex: !!actualByTarget.codex,
-            claude: !!actualByTarget.claude,
-            gemini: !!actualByTarget.gemini,
-          };
-
-      const chosen = chooseActualServerForTargets(actualByTarget, enabledTargets);
-
-      const enabledActualSpecs: McpServerV2[] = [];
-      for (const t of ['codex', 'claude', 'gemini'] as const) {
-        if (!enabledTargets[t]) continue;
-        const sv = actualByTarget[t];
-        if (sv) enabledActualSpecs.push(sv);
-      }
-      const actualConflict = (() => {
-        if (enabledActualSpecs.length <= 1) return false;
-        const first = enabledActualSpecs[0];
-        for (const s of enabledActualSpecs.slice(1)) {
-          if (!equalServerCore(first, s)) return true;
-        }
-        return false;
-      })();
-
-      let status: UnionRow['status'] = 'synced';
-      if (!desired && hasActual) {
-        status = 'new';
-      } else if (!desired && !hasActual) {
-        continue;
-      } else if (desired && !enabledTargets.codex && !enabledTargets.claude && !enabledTargets.gemini) {
-        status = 'disabled';
-      } else if (desired) {
-        let missing = false;
-        for (const t of ['codex', 'claude', 'gemini'] as const) {
-          if (!enabledTargets[t]) continue;
-          if (!actualByTarget[t]) {
-            missing = true;
-            break;
-          }
-        }
-        if (missing) {
-          status = 'missing';
-        } else if (actualConflict) {
-          status = 'conflict';
-        } else if (chosen && !equalServerCore(desired, chosen)) {
-          status = 'conflict';
-        } else {
-          status = 'synced';
-        }
-      }
-
-      out.push({
-        id,
-        desired,
-        chosen,
-        actualByTarget,
-        hasActual,
-        actualConflict,
-        status,
-      });
-    }
-    return out.sort((a, b) => a.id.localeCompare(b.id));
-  }, [desiredServers, scannedTargets]);
-
-  const diffSummary = useMemo(() => {
-    let nNew = 0;
-    let nMissing = 0;
-    let nConflict = 0;
-    for (const r of unionRows) {
-      if (r.status === 'new') nNew += 1;
-      if (r.status === 'missing') nMissing += 1;
-      if (r.status === 'conflict') nConflict += 1;
-    }
-    return { nNew, nMissing, nConflict };
-  }, [unionRows]);
-
-  function getParseOKTargets(info: Record<TargetKey, { parse_error?: string }>): Record<TargetKey, boolean> {
-    return {
-      codex: !(info.codex?.parse_error || '').trim(),
-      claude: !(info.claude?.parse_error || '').trim(),
-      gemini: !(info.gemini?.parse_error || '').trim(),
-    };
-  }
-
-  function buildActualByID(
-    targets: Record<TargetKey, { servers?: Record<string, McpServerV2> }>,
-    parseOK: Record<TargetKey, boolean>,
-  ): Record<string, PerTarget> {
-    const out: Record<string, PerTarget> = {};
-    for (const t of ['codex', 'claude', 'gemini'] as const) {
-      if (!parseOK[t]) continue;
-      const servers = (targets[t]?.servers || {}) as Record<string, McpServerV2>;
-      for (const [id, sv] of Object.entries(servers)) {
-        if (!id.trim()) continue;
-        if (!sv || typeof sv !== 'object') continue;
-        out[id] = out[id] || {};
-        out[id][t] = sv;
-      }
-    }
-    return out;
-  }
-
-  function computeConflictsAndAutoMerge(
-    desired: Record<string, McpServerV2>,
-    targets: Record<TargetKey, { servers?: Record<string, McpServerV2> }>,
-    info: Record<TargetKey, { parse_error?: string }>,
-  ): { conflictIDs: string[]; nextDesired: Record<string, McpServerV2>; defaultChoice: Record<string, 'codex' | 'claude' | 'gemini' | 'desired'>; hasAnyFix: boolean } {
-    const parseOK = getParseOKTargets(info);
-    const actualByID = buildActualByID(targets, parseOK);
-
-    const nextDesired: Record<string, McpServerV2> = { ...(desired || {}) };
-    const conflictIDs: string[] = [];
-    const defaultChoice: Record<string, 'codex' | 'claude' | 'gemini' | 'desired'> = {};
-
-    // Merge new IDs (no user action).
-    for (const [id, per] of Object.entries(actualByID)) {
-      if (Object.prototype.hasOwnProperty.call(nextDesired, id)) continue;
-      const chosen = chooseActualServer(per);
-      if (!chosen) continue;
-      const present: Record<TargetKey, boolean> = {
-        codex: !!per.codex,
-        claude: !!per.claude,
-        gemini: !!per.gemini,
-      };
-      const disable: Partial<Record<TargetKey, boolean>> = {};
-      for (const t of ['codex', 'claude', 'gemini'] as const) {
-        if (!present[t]) disable[t] = false;
-      }
-      nextDesired[id] = Object.keys(disable).length ? { ...chosen, targets: disable } : chosen;
-    }
-
-    // Conflicts: (1) actual differs across targets; (2) actual differs from desired.
-    for (const [id, per] of Object.entries(actualByID)) {
-      const desiredSpec = nextDesired[id];
-      const enabled: Record<TargetKey, boolean> = {
-        codex: desiredSpec ? targetEnabledForServer(desiredSpec, 'codex') : true,
-        claude: desiredSpec ? targetEnabledForServer(desiredSpec, 'claude') : true,
-        gemini: desiredSpec ? targetEnabledForServer(desiredSpec, 'gemini') : true,
-      };
-      if (!enabled.codex && !enabled.claude && !enabled.gemini) continue;
-
-      const actualSpecs: McpServerV2[] = [];
-      for (const t of ['codex', 'claude', 'gemini'] as const) {
-        if (!enabled[t]) continue;
-        const sv = per[t];
-        if (sv) actualSpecs.push(sv);
-      }
-      let conflict = false;
-      if (actualSpecs.length > 1) {
-        const first = actualSpecs[0];
-        for (const s of actualSpecs.slice(1)) {
-          if (!equalServerCore(first, s)) {
-            conflict = true;
-            break;
-          }
-        }
-      }
-      const chosen = chooseActualServerForTargets(per, enabled);
-      if (!conflict && chosen && desiredSpec && !equalServerCore(desiredSpec, chosen)) conflict = true;
-      if (!conflict) continue;
-      conflictIDs.push(id);
-      if (enabled.codex && per.codex) defaultChoice[id] = 'codex';
-      else if (enabled.claude && per.claude) defaultChoice[id] = 'claude';
-      else if (enabled.gemini && per.gemini) defaultChoice[id] = 'gemini';
-      else if (per.codex) defaultChoice[id] = 'codex';
-      else if (per.claude) defaultChoice[id] = 'claude';
-      else if (per.gemini) defaultChoice[id] = 'gemini';
-      else defaultChoice[id] = 'desired';
-    }
-
-    // Missing-only differences: desired has IDs not in parse-ok actual; these can be fixed by applying desired to enabled targets.
-    // We don't need to modify desired, but we still need an apply. We mark hasAnyFix so caller can decide.
-    let hasMissing = false;
-    for (const [id, ds] of Object.entries(desired || {})) {
-      const enabled: Record<TargetKey, boolean> = {
-        codex: targetEnabledForServer(ds, 'codex'),
-        claude: targetEnabledForServer(ds, 'claude'),
-        gemini: targetEnabledForServer(ds, 'gemini'),
-      };
-      if (!enabled.codex && !enabled.claude && !enabled.gemini) continue;
-      const per = actualByID[id] || {};
-      for (const t of ['codex', 'claude', 'gemini'] as const) {
-        if (!enabled[t]) continue;
-        if (!per[t]) {
-          hasMissing = true;
-          break;
-        }
-      }
-      if (hasMissing) break;
-    }
-
-    const hasNew = stableHash(nextDesired) !== stableHash(desired || {});
-    const hasAnyFix = hasNew || hasMissing;
-    return { conflictIDs, nextDesired, defaultChoice, hasAnyFix };
-  }
-
-  async function refresh() {
-    setErr('');
-    setNotice('');
-    setLoading(true);
-    try {
-      const res = await getAdminMcp();
-      if (!res.success) throw new Error(res.message || '加载失败');
-      const d = res.data;
-      setApplyResults(d?.apply_results || []);
-
-      const targets = d?.targets || {};
-      setTargetInfo({
-        codex: { path: targets.codex?.path || '', exists: !!targets.codex?.exists },
-        claude: { path: targets.claude?.path || '', exists: !!targets.claude?.exists },
-        gemini: { path: targets.gemini?.path || '', exists: !!targets.gemini?.exists },
-      });
-
-      const servers = ((d?.store?.servers || {}) as Record<string, McpServerV2>) || {};
-      setDesiredServers(servers);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '加载失败');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function scanNow(silent?: boolean) {
-    if (!silent) {
-      setErr('');
-      setNotice('');
-    }
-    setScanning(true);
-    try {
-      const res = await scanAdminMcp();
-      if (!res.success) throw new Error(res.message || '刷新失败');
-      const t = (res.data?.targets || {}) as any;
-      const nextInfo: Record<TargetKey, { path: string; exists: boolean; parse_error?: string; server_count?: number }> = {
-        codex: { path: t.codex?.path || targetInfo.codex.path, exists: !!t.codex?.exists, parse_error: t.codex?.parse_error || '', server_count: t.codex?.server_count || 0 },
-        claude: { path: t.claude?.path || targetInfo.claude.path, exists: !!t.claude?.exists, parse_error: t.claude?.parse_error || '', server_count: t.claude?.server_count || 0 },
-        gemini: { path: t.gemini?.path || targetInfo.gemini.path, exists: !!t.gemini?.exists, parse_error: t.gemini?.parse_error || '', server_count: t.gemini?.server_count || 0 },
-      };
-      const parseOK = getParseOKTargets(nextInfo as any);
-      const nextTargets: Record<TargetKey, { servers?: Record<string, McpServerV2> }> = {
-        codex: { servers: parseOK.codex ? (t.codex?.servers || {}) : {} },
-        claude: { servers: parseOK.claude ? (t.claude?.servers || {}) : {} },
-        gemini: { servers: parseOK.gemini ? (t.gemini?.servers || {}) : {} },
-      };
-
-      setScannedTargets(nextTargets);
-      setTargetInfo(nextInfo);
-
-      // User-side "无感": auto-fix anything that doesn't require a decision.
-      // Only show UI when there are real conflicts to resolve.
-      if (!saving) {
-        const desired = desiredServersRef.current || {};
-        const { conflictIDs, nextDesired, defaultChoice, hasAnyFix } = computeConflictsAndAutoMerge(desired, nextTargets, nextInfo as any);
-        if (conflictIDs.length > 0) {
-          if (!conflictModalOpen.current) {
-            conflictModalOpen.current = true;
-            setConflicts(conflictIDs);
-            setConflictChoice(defaultChoice);
-            showModal('mcpConflictModal');
-          }
-        } else if (hasAnyFix) {
-          const sig = stableHash({ desired, nextDesired, targets: nextTargets });
-          if (sig && sig !== lastAutoFixSig.current) {
-            lastAutoFixSig.current = sig;
-            // Silent apply: keep UI quiet unless there's an error.
-            void saveDesired(nextDesired, true);
-          }
-        }
-      }
-
-      if (!silent) setNotice('已刷新集成状态');
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '刷新失败');
-    } finally {
-      setScanning(false);
-    }
-  }
-
-  async function saveDesired(next: Record<string, McpServerV2>, silent?: boolean) {
-    if (!silent) {
-      setErr('');
-      setNotice('');
-    }
-    setSaving(true);
-    try {
-      const res = await updateAdminMcp({
-        store: { version: 2, servers: next || {} } satisfies McpStoreV2,
-        apply_on_save: true,
-      });
-      if (!res.success) throw new Error(res.message || '保存失败');
-      setApplyResults(res.data?.apply_results || []);
-      setDesiredServers(((res.data?.store?.servers || next) as Record<string, McpServerV2>) || {});
-      await scanNow(true);
-      if (!silent) setNotice('已生效');
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '保存失败');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  useEffect(() => {
-    void refresh();
-  }, []);
-
-  useEffect(() => {
-    if (loading) return;
-    if (initialScanDone.current) return;
-    initialScanDone.current = true;
-    void scanNow(true);
-  }, [loading]);
+    if (!conflictModalRequested) return;
+    ackConflictModalRequested();
+    showModal('mcpConflictModal');
+  }, [conflictModalRequested, ackConflictModalRequested]);
 
   function openCreate() {
     setEditing(null);
@@ -618,63 +181,8 @@ export function McpServersPage() {
     showModal('mcpEditModal');
   }
 
-  function removeServer(id: string) {
-    void (async () => {
-      if (!window.confirm(`确认删除 MCP：${id}？`)) return;
-      setErr('');
-      setNotice('');
-      setSaving(true);
-      try {
-        const res = await deleteAdminMcp({ id });
-        if (!res.success) throw new Error(res.message || '删除失败');
-        setApplyResults(res.data?.apply_results || []);
-        setDesiredServers((prev) => {
-          const next = { ...(prev || {}) };
-          delete next[id];
-          return next;
-        });
-        await scanNow(true);
-        setNotice('已删除并同步生效');
-      } catch (e) {
-        setErr(e instanceof Error ? e.message : '删除失败');
-      } finally {
-        setSaving(false);
-      }
-    })();
-  }
-
-  async function confirmConflicts() {
-    const desiredMap = desiredServers as Record<string, McpServerV2>;
-    const next: Record<string, McpServerV2> = { ...(desiredMap || {}) };
-
-    for (const r of unionRows) {
-      if (!r.hasActual) continue;
-      if (!r.chosen) continue;
-      if (!r.desired) {
-        const present: Record<TargetKey, boolean> = {
-          codex: !!r.actualByTarget.codex,
-          claude: !!r.actualByTarget.claude,
-          gemini: !!r.actualByTarget.gemini,
-        };
-        const disable: Partial<Record<TargetKey, boolean>> = {};
-        for (const t of ['codex', 'claude', 'gemini'] as const) {
-          if (!present[t]) disable[t] = false;
-        }
-        next[r.id] = Object.keys(disable).length ? { ...r.chosen, targets: disable } : r.chosen;
-        continue;
-      }
-      if (!(r.actualConflict || !equalServerCore(r.desired, r.chosen))) continue;
-
-      const pick = conflictChoice[r.id] || 'desired';
-      if (pick === 'desired') continue;
-      const actual = r.actualByTarget[pick];
-      if (actual) {
-        const targets = r.desired.targets;
-        next[r.id] = targets ? { ...actual, targets } : actual;
-      }
-    }
-
-    await saveDesired(next);
+  async function confirmConflictsAndClose() {
+    await confirmConflictsCore();
     closeModalById('mcpConflictModal');
   }
 
@@ -684,8 +192,9 @@ export function McpServersPage() {
     else targets[k] = false;
     const out: McpServerV2 = { ...s };
     if (Object.keys(targets).length === 0) {
-      delete (out as any).targets;
-      return out;
+      const { targets: _targets, ...rest } = out;
+      void _targets;
+      return rest as McpServerV2;
     }
     out.targets = targets;
     return out;
@@ -696,7 +205,7 @@ export function McpServersPage() {
       setErr('');
       setNotice('');
 
-      const curDesired = desiredServersRef.current?.[id];
+      const curDesired = getDesiredServersSnapshot()[id];
       const r = unionRows.find((x) => x.id === id);
       const actualByTarget = r?.actualByTarget || {};
 
@@ -719,14 +228,16 @@ export function McpServersPage() {
         }
 
         const nextServer = Object.keys(disable).length ? { ...base, targets: disable } : base;
-        const next = { ...(desiredServersRef.current || {}) };
+        const baseDesired = getDesiredServersSnapshot();
+        const next = { ...(baseDesired || {}) };
         next[id] = nextServer;
         await saveDesired(next);
         return;
       }
 
       const nextServer = setServerTargetEnabled(curDesired, k, enabled);
-      const next = { ...(desiredServersRef.current || {}) };
+      const baseDesired = getDesiredServersSnapshot();
+      const next = { ...(baseDesired || {}) };
       next[id] = nextServer;
       await saveDesired(next);
     })();
@@ -811,12 +322,12 @@ export function McpServersPage() {
     }
     setErr('');
     setNotice('');
-    setSaving(true);
+    setImportBusy(true);
     try {
       const res = await parseAdminMcp({ source: importSource, content });
       if (!res.success) throw new Error(res.message || '解析失败');
       const imported = ((res.data?.store?.servers || {}) as Record<string, McpServerV2>) || {};
-      const desired = desiredServersRef.current || {};
+      const desired = getDesiredServersSnapshot();
 
       const conflictIDs = computeImportConflictIDs(desired, imported);
       if (conflictIDs.length > 0) {
@@ -838,7 +349,7 @@ export function McpServersPage() {
     } catch (e) {
       setErr(e instanceof Error ? e.message : '解析失败');
     } finally {
-      setSaving(false);
+      setImportBusy(false);
     }
   }
 
@@ -1055,15 +566,13 @@ export function McpServersPage() {
             <button type="button" className="btn btn-light" data-bs-dismiss="modal">
               取消
             </button>
-            <button type="button" className="btn btn-primary px-4" disabled={saving} onClick={() => void confirmConflicts()}>
+            <button type="button" className="btn btn-primary px-4" disabled={saving} onClick={() => void confirmConflictsAndClose()}>
               确认
             </button>
           </>
         }
         onHidden={() => {
-          setConflicts([]);
-          setConflictChoice({});
-          conflictModalOpen.current = false;
+          onConflictModalHidden();
         }}
       >
         <div className="text-muted small mb-2">默认选择“实际”（优先 codex，其次 claude、gemini）。</div>
