@@ -223,6 +223,15 @@ func (h *Handler) finalizeIfCanceled(r *http.Request, usageID int64, sel *schedu
 	return true
 }
 
+func (h *Handler) voidQuotaBestEffort(usageID int64) {
+	if h == nil || h.quota == nil || usageID == 0 {
+		return
+	}
+	bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = h.quota.Void(bookCtx, usageID)
+}
+
 func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	reqStart := time.Now()
 	p, ok := auth.PrincipalFromContext(r.Context())
@@ -535,11 +544,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	reqBytes := int64(len(body))
 
 	if h.groups == nil && !h.selfMode {
-		if usageID != 0 && h.quota != nil {
-			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = h.quota.Void(bookCtx, usageID)
-			cancel()
-		}
+		h.voidQuotaBestEffort(usageID)
 		h.auditUpstreamError(r.Context(), r.URL.Path, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", 0)
 		cw := &countingResponseWriter{ResponseWriter: w}
 		http.Error(cw, "上游不可用", http.StatusBadGateway)
@@ -565,11 +570,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		lastSel = &selCopy
 		rewritten, err := rewriteBody(sel)
 		if err != nil {
-			if usageID != 0 && h.quota != nil {
-				bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				_ = h.quota.Void(bookCtx, usageID)
-			}
+			h.voidQuotaBestEffort(usageID)
 			cw := &countingResponseWriter{ResponseWriter: w}
 			http.Error(cw, "请求体处理失败", http.StatusInternalServerError)
 			h.finalizeUsageEvent(r, usageID, &sel, http.StatusInternalServerError, "rewrite_body", "请求体处理失败", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
@@ -580,11 +581,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			resetRes, rErr := resetCodexStatefulContinuation(rewritten)
 			if rErr == nil && resetRes.changed {
 				if !resetRes.hasUserText {
-					if usageID != 0 && h.quota != nil {
-						bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-						defer cancel()
-						_ = h.quota.Void(bookCtx, usageID)
-					}
+					h.voidQuotaBestEffort(usageID)
 					h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, optionalString(publicModel), http.StatusConflict, "session_reset_required", 0)
 					cw := &countingResponseWriter{ResponseWriter: w}
 					writeOpenAIError(cw, http.StatusConflict, "session_reset_required", "上游渠道已切换：该请求仅包含续链上下文（compaction/item_reference/previous_response_id），无法跨上游复用。请在 Codex CLI 重启会话/新开对话后重试。")
@@ -603,11 +600,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if usageID != 0 && h.quota != nil {
-		bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = h.quota.Void(bookCtx, usageID)
-	}
+	h.voidQuotaBestEffort(usageID)
 	h.auditUpstreamError(r.Context(), r.URL.Path, p, lastSel, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", 0)
 	cw := &countingResponseWriter{ResponseWriter: w}
 	http.Error(cw, "上游不可用", http.StatusBadGateway)

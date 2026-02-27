@@ -55,6 +55,24 @@ func newCodexSessionRouteCache() *codexSessionRouteCache {
 	}
 }
 
+func (c *codexSessionRouteCache) sweepLocked(now time.Time) {
+	if c == nil || c.sweepEvery <= 0 {
+		return
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if !c.lastSweepAt.IsZero() && now.Sub(c.lastSweepAt) < c.sweepEvery {
+		return
+	}
+	for k, v := range c.data {
+		if !v.expiresAt.IsZero() && now.After(v.expiresAt) {
+			delete(c.data, k)
+		}
+	}
+	c.lastSweepAt = now
+}
+
 func (c *codexSessionRouteCache) Get(key string, now time.Time) (codexLastSuccessRoute, bool) {
 	if c == nil || strings.TrimSpace(key) == "" {
 		return codexLastSuccessRoute{}, false
@@ -66,14 +84,7 @@ func (c *codexSessionRouteCache) Get(key string, now time.Time) (codexLastSucces
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.sweepEvery > 0 && (c.lastSweepAt.IsZero() || now.Sub(c.lastSweepAt) >= c.sweepEvery) {
-		for k, v := range c.data {
-			if !v.expiresAt.IsZero() && now.After(v.expiresAt) {
-				delete(c.data, k)
-			}
-		}
-		c.lastSweepAt = now
-	}
+	c.sweepLocked(now)
 
 	v, ok := c.data[key]
 	if !ok {
@@ -103,20 +114,13 @@ func (c *codexSessionRouteCache) Set(key string, sel scheduler.Selection, expire
 	}
 
 	c.mu.Lock()
-	if now := time.Now(); c.sweepEvery > 0 && (c.lastSweepAt.IsZero() || now.Sub(c.lastSweepAt) >= c.sweepEvery) {
-		for k, v := range c.data {
-			if !v.expiresAt.IsZero() && now.After(v.expiresAt) {
-				delete(c.data, k)
-			}
-		}
-		c.lastSweepAt = now
-	}
+	defer c.mu.Unlock()
+	c.sweepLocked(time.Now())
 	c.data[key] = codexLastSuccessRoute{
 		channelID:     sel.ChannelID,
 		credentialKey: credKey,
 		expiresAt:     expiresAt,
 	}
-	c.mu.Unlock()
 }
 
 func (h *Handler) getCodexLastSuccessRoute(stickyRouteKeyHash string, now time.Time) (codexLastSuccessRoute, bool) {
