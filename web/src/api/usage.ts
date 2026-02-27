@@ -1,15 +1,6 @@
 import { api } from './client';
 import type { APIResponse } from './types';
-
-function browserTimeZone(): string | undefined {
-  try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (!tz || !tz.trim()) return undefined;
-    return tz.trim();
-  } catch {
-    return undefined;
-  }
-}
+import { browserTimeZone } from './timezone';
 
 export type UsageWindow = {
   window: string;
