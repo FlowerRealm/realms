@@ -405,11 +405,12 @@ func isWSLPathForWindows(platform string, path string) bool {
 		return false
 	}
 	p := filepath.Clean(path)
+	pl := strings.ToLower(p)
 	// UNC prefix; filepath on Windows uses backslashes.
-	if strings.HasPrefix(p, `\\wsl$\`) || strings.HasPrefix(strings.ToLower(p), `\\wsl$\`) {
+	if strings.HasPrefix(pl, `\\wsl$\`) {
 		return true
 	}
-	if strings.HasPrefix(strings.ToLower(p), `\\wsl.localhost\`) {
+	if strings.HasPrefix(pl, `\\wsl.localhost\`) {
 		return true
 	}
 	return false
