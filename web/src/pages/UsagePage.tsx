@@ -175,7 +175,14 @@ export function UsagePage() {
       setDetailSeriesErr('');
       setDetailSeriesLoading(true);
       try {
-        const res = await getUsageTimeSeries(seriesStart || undefined, seriesEnd || undefined, detailGranularity);
+        const allTimeActive = allTime && !start.trim() && !end.trim();
+        const res = await getUsageTimeSeries(
+          allTimeActive ? undefined : seriesStart || undefined,
+          allTimeActive ? undefined : seriesEnd || undefined,
+          detailGranularity,
+          undefined, // tokenID
+          allTimeActive,
+        );
         if (!res.success) throw new Error(res.message || '加载时间序列失败');
         if (!active) return;
         setDetailSeries(res.data?.points || []);
@@ -190,7 +197,7 @@ export function UsagePage() {
     return () => {
       active = false;
     };
-  }, [detailGranularity, hasSeriesSource, seriesEnd, seriesStart]);
+  }, [allTime, detailGranularity, end, hasSeriesSource, seriesEnd, seriesStart, start]);
 
   const rangeSinceText = data ? formatLocalDateTimeMinute(String(data.since)) : '';
   const rangeUntilText = data ? formatLocalDateTimeMinute(String(data.until)) : '';
