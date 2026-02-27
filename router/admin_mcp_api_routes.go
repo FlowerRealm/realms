@@ -695,7 +695,7 @@ func adminMCPExportClaudeHandler(opts Options) gin.HandlerFunc {
 		}
 		reg := mcp.StoreV2ToRegistryForTarget(sv2, mcp.TargetClaude)
 		platform := strings.TrimSpace(c.Query("platform"))
-		cfg, err := mcp.ExportClaudeConfig(reg, platform)
+		cfg, err := mcp.ExportClaudeConfig(reg, platform, strings.EqualFold(platform, "windows"))
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "导出失败"})
 			return

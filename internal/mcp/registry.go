@@ -77,15 +77,17 @@ func PrettyJSON(reg Registry) (string, error) {
 	return strings.TrimSpace(string(b)), nil
 }
 
-func ExportClaudeConfig(reg Registry, platform string) (map[string]any, error) {
+func ExportClaudeConfig(reg Registry, platform string, wrapCommands bool) (map[string]any, error) {
 	servers := make(map[string]any, len(reg))
 	for id, spec := range reg {
 		copied, err := deepCopyObject(spec)
 		if err != nil {
 			return nil, err
 		}
-		if strings.EqualFold(platform, "windows") {
-			wrapCommandForWindows(copied)
+		if wrapCommands {
+			if err := wrapCommandForWindows(copied); err != nil {
+				return nil, err
+			}
 		}
 		servers[id] = copied
 	}
@@ -126,7 +128,9 @@ func ExportCodexConfigTOML(reg Registry, platform string) (string, error) {
 			return "", err
 		}
 		if strings.EqualFold(platform, "windows") {
-			wrapCommandForWindows(copied)
+			if err := wrapCommandForWindows(copied); err != nil {
+				return "", err
+			}
 		}
 		if err := writeCodexServerTOML(&b, id, copied, i != 0); err != nil {
 			return "", err
@@ -228,21 +232,21 @@ var windowsWrapCommands = map[string]struct{}{
 
 // wrapCommandForWindows transforms `command: npx` into `command: cmd, args: ["/c","npx",...]`.
 // It only applies to stdio servers, and skips when command is already cmd/cmd.exe.
-func wrapCommandForWindows(spec map[string]any) {
+func wrapCommandForWindows(spec map[string]any) error {
 	typ := strings.TrimSpace(stringFromAny(spec["type"]))
 	if typ == "" {
 		typ = "stdio"
 	}
 	if typ != "stdio" {
-		return
+		return nil
 	}
 
 	cmd := strings.TrimSpace(stringFromAny(spec["command"]))
 	if cmd == "" {
-		return
+		return nil
 	}
 	if strings.EqualFold(cmd, "cmd") || strings.EqualFold(cmd, "cmd.exe") {
-		return
+		return nil
 	}
 
 	base := filepath.Base(cmd)
@@ -251,10 +255,13 @@ func wrapCommandForWindows(spec map[string]any) {
 		stem = base
 	}
 	if _, ok := windowsWrapCommands[strings.ToLower(stem)]; !ok {
-		return
+		return nil
 	}
 
-	origArgs := toStringSlice(spec["args"])
+	origArgs, ok := toStringArray(spec["args"])
+	if !ok && spec["args"] != nil {
+		return fmt.Errorf("args for command '%s' contains non-string values", cmd)
+	}
 	newArgs := make([]any, 0, 2+len(origArgs))
 	newArgs = append(newArgs, "/c", cmd)
 	for _, a := range origArgs {
@@ -262,6 +269,7 @@ func wrapCommandForWindows(spec map[string]any) {
 	}
 	spec["command"] = "cmd"
 	spec["args"] = newArgs
+	return nil
 }
 
 func toStringSlice(v any) []string {

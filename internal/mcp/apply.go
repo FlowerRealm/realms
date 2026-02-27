@@ -147,8 +147,10 @@ func applyJSONConfigServersKey(path string, serverKey string, newServers map[str
 	}
 	changed := !bytes.Equal(bytes.TrimSpace(before), bytes.TrimSpace(after))
 
-	if err := writeFileAtomic(path, append(bytes.TrimSpace(after), '\n'), 0o600); err != nil {
-		return false, err
+	if changed {
+		if err := writeFileAtomic(path, append(bytes.TrimSpace(after), '\n'), 0o600); err != nil {
+			return false, err
+		}
 	}
 	return changed, nil
 }
@@ -188,7 +190,9 @@ func ApplyCodexConfig(path string, reg Registry, removeIDs []string, platform st
 			return false, err
 		}
 		if strings.EqualFold(platform, "windows") && !isWSLTarget {
-			wrapCommandForWindows(copied)
+			if err := wrapCommandForWindows(copied); err != nil {
+				return false, err
+			}
 		}
 		out, err := codexServerFromSpec(copied)
 		if err != nil {
@@ -208,8 +212,10 @@ func ApplyCodexConfig(path string, reg Registry, removeIDs []string, platform st
 	}
 	changed := !bytes.Equal(bytes.TrimSpace(before), bytes.TrimSpace(after))
 
-	if err := writeFileAtomic(path, append(bytes.TrimSpace(after), '\n'), 0o600); err != nil {
-		return false, err
+	if changed {
+		if err := writeFileAtomic(path, append(bytes.TrimSpace(after), '\n'), 0o600); err != nil {
+			return false, err
+		}
 	}
 	return changed, nil
 }
@@ -296,36 +302,17 @@ func ApplyClaudeConfig(path string, reg Registry, removeIDs []string, platform s
 	}
 
 	isWSLTarget := isWSLPathForWindows(platform, path)
-	cfg, err := ExportClaudeConfig(reg, platform)
+	wrapCommands := strings.EqualFold(platform, "windows") && !isWSLTarget
+	cfg, err := ExportClaudeConfig(reg, platform, wrapCommands)
 	if err != nil {
 		return false, err
 	}
 	serversAny := cfg["mcpServers"]
-	if strings.EqualFold(platform, "windows") && isWSLTarget {
-		// If target is WSL path, ExportClaudeConfig will have wrapped; undo by re-export without wrapping.
-		// Simpler: rebuild servers without wrapping.
-		serversAny, err = exportClaudeServersNoWrap(reg)
-		if err != nil {
-			return false, err
-		}
-	}
 	servers := map[string]any{}
 	if ns, ok := serversAny.(map[string]any); ok && len(ns) > 0 {
 		servers = ns
 	}
 	return applyJSONConfigServersKey(path, "mcpServers", servers, removeIDs, force, "invalid claude config json")
-}
-
-func exportClaudeServersNoWrap(reg Registry) (map[string]any, error) {
-	servers := make(map[string]any, len(reg))
-	for id, spec := range reg {
-		copied, err := deepCopyObject(spec)
-		if err != nil {
-			return nil, err
-		}
-		servers[id] = copied
-	}
-	return servers, nil
 }
 
 func ApplyGeminiConfig(path string, reg Registry, removeIDs []string, force bool) (bool, error) {

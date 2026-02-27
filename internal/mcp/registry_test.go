@@ -41,7 +41,7 @@ func TestExportClaudeConfig_WindowsWrap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseRegistryJSON error: %v", err)
 	}
-	cfg, err := ExportClaudeConfig(reg, "windows")
+	cfg, err := ExportClaudeConfig(reg, "windows", true)
 	if err != nil {
 		t.Fatalf("ExportClaudeConfig error: %v", err)
 	}
