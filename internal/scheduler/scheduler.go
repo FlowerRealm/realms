@@ -4,11 +4,13 @@ package scheduler
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -279,6 +281,15 @@ func (s *Scheduler) RouteKeyHash(routeKey string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+func rendezvousScore64(routeKeyHash, kind string, id int64) uint64 {
+	if routeKeyHash == "" || kind == "" || id <= 0 {
+		return 0
+	}
+	key := routeKeyHash + ":" + kind + ":" + strconv.FormatInt(id, 10)
+	sum := sha256.Sum256([]byte(key))
+	return binary.BigEndian.Uint64(sum[:8])
+}
+
 func (s *Scheduler) SelectWithConstraints(ctx context.Context, userID int64, routeKeyHash string, cons Constraints) (Selection, error) {
 	return s.selectWithConstraints(ctx, userID, routeKeyHash, cons, false)
 }
@@ -336,6 +347,18 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 	ordered := orderChannels(candidates, affinityChannelID, affinityOK, func(channelID int64) bool {
 		return s.state.IsChannelProbePending(channelID, now)
 	}, s.state.ChannelFailScore)
+	if routeKeyHash != "" && len(ordered) > 1 {
+		// 粘性路由：对“同一会话”的请求做稳定排序，减少跨上游漂移。
+		// 注意：可用性仍由候选集过滤与 probe/ban/cooldown 机制保证。
+		sort.SliceStable(ordered, func(i, j int) bool {
+			si := rendezvousScore64(routeKeyHash, "channel", ordered[i].ID)
+			sj := rendezvousScore64(routeKeyHash, "channel", ordered[j].ID)
+			if si != sj {
+				return si > sj
+			}
+			return ordered[i].ID > ordered[j].ID
+		})
+	}
 
 	// 2) 选择 endpoint + credential
 	for _, ch := range ordered {
@@ -367,7 +390,7 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 			return eps[i].ID > eps[j].ID
 		})
 		for _, ep := range eps {
-			sel, ok, err := s.selectCredential(ctx, ch, ep, now)
+			sel, ok, err := s.selectCredential(ctx, ch, ep, now, routeKeyHash)
 			if err != nil {
 				if claimedProbe {
 					s.state.ReleaseChannelProbeClaim(ch.ID)
@@ -376,7 +399,10 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 			}
 			if ok {
 				s.state.RecordRPM(sel.CredentialKey(), now)
-				s.state.SetAffinity(userID, ch.ID, now.Add(s.affinityTTL))
+				// routeKeyHash 非空时，调度优先满足“同一会话粘性”，避免把 affinity（user 级）扩散成跨会话副作用。
+				if routeKeyHash == "" {
+					s.state.SetAffinity(userID, ch.ID, now.Add(s.affinityTTL))
+				}
 				return sel, nil
 			}
 		}
@@ -405,7 +431,7 @@ func selectionMatchesConstraints(sel Selection, c Constraints) bool {
 	return true
 }
 
-func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChannel, ep store.UpstreamEndpoint, now time.Time) (Selection, bool, error) {
+func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChannel, ep store.UpstreamEndpoint, now time.Time, routeKeyHash string) (Selection, bool, error) {
 	switch ch.Type {
 	case store.UpstreamTypeOpenAICompatible:
 		creds, err := s.st.ListOpenAICompatibleCredentialsByEndpoint(ctx, ep.ID)
@@ -426,16 +452,27 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 		if len(ids) == 0 {
 			return Selection{}, false, nil
 		}
-		sort.SliceStable(ids, func(i, j int) bool {
-			ki := fmt.Sprintf("%s:%d", CredentialTypeOpenAI, ids[i])
-			kj := fmt.Sprintf("%s:%d", CredentialTypeOpenAI, ids[j])
-			ri := s.state.RPM(ki, now, s.rpmWindow)
-			rj := s.state.RPM(kj, now, s.rpmWindow)
-			if ri != rj {
-				return ri < rj
-			}
-			return ids[i] > ids[j]
-		})
+		if routeKeyHash != "" && len(ids) > 1 {
+			sort.SliceStable(ids, func(i, j int) bool {
+				si := rendezvousScore64(routeKeyHash, string(CredentialTypeOpenAI), ids[i])
+				sj := rendezvousScore64(routeKeyHash, string(CredentialTypeOpenAI), ids[j])
+				if si != sj {
+					return si > sj
+				}
+				return ids[i] > ids[j]
+			})
+		} else {
+			sort.SliceStable(ids, func(i, j int) bool {
+				ki := fmt.Sprintf("%s:%d", CredentialTypeOpenAI, ids[i])
+				kj := fmt.Sprintf("%s:%d", CredentialTypeOpenAI, ids[j])
+				ri := s.state.RPM(ki, now, s.rpmWindow)
+				rj := s.state.RPM(kj, now, s.rpmWindow)
+				if ri != rj {
+					return ri < rj
+				}
+				return ids[i] > ids[j]
+			})
+		}
 		return Selection{
 			ChannelID:              ch.ID,
 			ChannelType:            ch.Type,
@@ -482,16 +519,27 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 		if len(ids) == 0 {
 			return Selection{}, false, nil
 		}
-		sort.SliceStable(ids, func(i, j int) bool {
-			ki := fmt.Sprintf("%s:%d", CredentialTypeAnthropic, ids[i])
-			kj := fmt.Sprintf("%s:%d", CredentialTypeAnthropic, ids[j])
-			ri := s.state.RPM(ki, now, s.rpmWindow)
-			rj := s.state.RPM(kj, now, s.rpmWindow)
-			if ri != rj {
-				return ri < rj
-			}
-			return ids[i] > ids[j]
-		})
+		if routeKeyHash != "" && len(ids) > 1 {
+			sort.SliceStable(ids, func(i, j int) bool {
+				si := rendezvousScore64(routeKeyHash, string(CredentialTypeAnthropic), ids[i])
+				sj := rendezvousScore64(routeKeyHash, string(CredentialTypeAnthropic), ids[j])
+				if si != sj {
+					return si > sj
+				}
+				return ids[i] > ids[j]
+			})
+		} else {
+			sort.SliceStable(ids, func(i, j int) bool {
+				ki := fmt.Sprintf("%s:%d", CredentialTypeAnthropic, ids[i])
+				kj := fmt.Sprintf("%s:%d", CredentialTypeAnthropic, ids[j])
+				ri := s.state.RPM(ki, now, s.rpmWindow)
+				rj := s.state.RPM(kj, now, s.rpmWindow)
+				if ri != rj {
+					return ri < rj
+				}
+				return ids[i] > ids[j]
+			})
+		}
 		return Selection{
 			ChannelID:              ch.ID,
 			ChannelType:            ch.Type,
@@ -541,24 +589,37 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 		if len(eligible) == 0 {
 			return Selection{}, false, nil
 		}
-		sort.SliceStable(eligible, func(i, j int) bool {
-			ai := eligible[i]
-			aj := eligible[j]
-			if codexLastUsedBefore(ai.LastUsedAt, aj.LastUsedAt) {
-				return true
-			}
-			if codexLastUsedBefore(aj.LastUsedAt, ai.LastUsedAt) {
-				return false
-			}
-			ki := fmt.Sprintf("%s:%d", CredentialTypeCodex, ai.ID)
-			kj := fmt.Sprintf("%s:%d", CredentialTypeCodex, aj.ID)
-			ri := s.state.RPM(ki, now, s.rpmWindow)
-			rj := s.state.RPM(kj, now, s.rpmWindow)
-			if ri != rj {
-				return ri < rj
-			}
-			return ai.ID > aj.ID
-		})
+		if routeKeyHash != "" && len(eligible) > 1 {
+			sort.SliceStable(eligible, func(i, j int) bool {
+				ai := eligible[i]
+				aj := eligible[j]
+				si := rendezvousScore64(routeKeyHash, string(CredentialTypeCodex), ai.ID)
+				sj := rendezvousScore64(routeKeyHash, string(CredentialTypeCodex), aj.ID)
+				if si != sj {
+					return si > sj
+				}
+				return ai.ID > aj.ID
+			})
+		} else {
+			sort.SliceStable(eligible, func(i, j int) bool {
+				ai := eligible[i]
+				aj := eligible[j]
+				if codexLastUsedBefore(ai.LastUsedAt, aj.LastUsedAt) {
+					return true
+				}
+				if codexLastUsedBefore(aj.LastUsedAt, ai.LastUsedAt) {
+					return false
+				}
+				ki := fmt.Sprintf("%s:%d", CredentialTypeCodex, ai.ID)
+				kj := fmt.Sprintf("%s:%d", CredentialTypeCodex, aj.ID)
+				ri := s.state.RPM(ki, now, s.rpmWindow)
+				rj := s.state.RPM(kj, now, s.rpmWindow)
+				if ri != rj {
+					return ri < rj
+				}
+				return ai.ID > aj.ID
+			})
+		}
 		return Selection{
 			ChannelID:              ch.ID,
 			ChannelType:            ch.Type,
