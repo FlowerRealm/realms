@@ -89,6 +89,70 @@ func ApplyTargetWithRemovals(t Target, path string, reg Registry, removeIDs []st
 	}
 }
 
+func mergeServersMap(curAny any, removeIDs []string, newServers map[string]any) map[string]any {
+	merged := map[string]any{}
+	if curAny != nil {
+		if cur, ok := curAny.(map[string]any); ok {
+			for k, v := range cur {
+				merged[k] = v
+			}
+		}
+	}
+	for _, id := range removeIDs {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			delete(merged, id)
+		}
+	}
+	for k, v := range newServers {
+		merged[k] = v
+	}
+	return merged
+}
+
+func applyJSONConfigServersKey(path string, serverKey string, newServers map[string]any, removeIDs []string, force bool, invalidErrPrefix string) (bool, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false, errors.New("path is empty")
+	}
+
+	exists := fileExists(path)
+	root := map[string]any{}
+	if exists {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return false, err
+		}
+		raw = bytes.TrimSpace(raw)
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &root); err != nil {
+				if !force {
+					return false, fmt.Errorf("%s: %w", invalidErrPrefix, err)
+				}
+				root = map[string]any{}
+			}
+		}
+	}
+
+	before, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return false, err
+	}
+
+	root[serverKey] = mergeServersMap(root[serverKey], removeIDs, newServers)
+
+	after, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return false, err
+	}
+	changed := !bytes.Equal(bytes.TrimSpace(before), bytes.TrimSpace(after))
+
+	if err := writeFileAtomic(path, append(bytes.TrimSpace(after), '\n'), 0o600); err != nil {
+		return false, err
+	}
+	return changed, nil
+}
+
 func ApplyCodexConfig(path string, reg Registry, removeIDs []string, platform string, force bool) (bool, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -137,24 +201,7 @@ func ApplyCodexConfig(path string, reg Registry, removeIDs []string, platform st
 	if err != nil {
 		return false, err
 	}
-	merged := map[string]any{}
-	if curAny, ok := root["mcp_servers"]; ok {
-		if cur, ok := curAny.(map[string]any); ok {
-			for k, v := range cur {
-				merged[k] = v
-			}
-		}
-	}
-	for _, id := range removeIDs {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			delete(merged, id)
-		}
-	}
-	for k, v := range newServers {
-		merged[k] = v
-	}
-	root["mcp_servers"] = merged
+	root["mcp_servers"] = mergeServersMap(root["mcp_servers"], removeIDs, newServers)
 	after, err := toml.Marshal(root)
 	if err != nil {
 		return false, err
@@ -248,24 +295,6 @@ func ApplyClaudeConfig(path string, reg Registry, removeIDs []string, platform s
 		return false, errors.New("path is empty")
 	}
 
-	exists := fileExists(path)
-	root := map[string]any{}
-	if exists {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return false, err
-		}
-		raw = bytes.TrimSpace(raw)
-		if len(raw) > 0 {
-			if err := json.Unmarshal(raw, &root); err != nil {
-				if !force {
-					return false, fmt.Errorf("invalid claude config json: %w", err)
-				}
-				root = map[string]any{}
-			}
-		}
-	}
-
 	isWSLTarget := isWSLPathForWindows(platform, path)
 	cfg, err := ExportClaudeConfig(reg, platform)
 	if err != nil {
@@ -280,41 +309,11 @@ func ApplyClaudeConfig(path string, reg Registry, removeIDs []string, platform s
 			return false, err
 		}
 	}
-
-	before, err := json.MarshalIndent(root, "", "  ")
-	if err != nil {
-		return false, err
+	servers := map[string]any{}
+	if ns, ok := serversAny.(map[string]any); ok && len(ns) > 0 {
+		servers = ns
 	}
-	merged := map[string]any{}
-	if curAny, ok := root["mcpServers"]; ok {
-		if cur, ok := curAny.(map[string]any); ok {
-			for k, v := range cur {
-				merged[k] = v
-			}
-		}
-	}
-	for _, id := range removeIDs {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			delete(merged, id)
-		}
-	}
-	if ns, ok := serversAny.(map[string]any); ok {
-		for k, v := range ns {
-			merged[k] = v
-		}
-	}
-	root["mcpServers"] = merged
-	after, err := json.MarshalIndent(root, "", "  ")
-	if err != nil {
-		return false, err
-	}
-	changed := !bytes.Equal(bytes.TrimSpace(before), bytes.TrimSpace(after))
-
-	if err := writeFileAtomic(path, append(bytes.TrimSpace(after), '\n'), 0o600); err != nil {
-		return false, err
-	}
-	return changed, nil
+	return applyJSONConfigServersKey(path, "mcpServers", servers, removeIDs, force, "invalid claude config json")
 }
 
 func exportClaudeServersNoWrap(reg Registry) (map[string]any, error) {
@@ -335,63 +334,15 @@ func ApplyGeminiConfig(path string, reg Registry, removeIDs []string, force bool
 		return false, errors.New("path is empty")
 	}
 
-	exists := fileExists(path)
-	root := map[string]any{}
-	if exists {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return false, err
-		}
-		raw = bytes.TrimSpace(raw)
-		if len(raw) > 0 {
-			if err := json.Unmarshal(raw, &root); err != nil {
-				if !force {
-					return false, fmt.Errorf("invalid gemini config json: %w", err)
-				}
-				root = map[string]any{}
-			}
-		}
-	}
-
 	cfg, err := ExportGeminiConfig(reg)
 	if err != nil {
 		return false, err
 	}
-
-	before, err := json.MarshalIndent(root, "", "  ")
-	if err != nil {
-		return false, err
+	servers := map[string]any{}
+	if ns, ok := cfg["mcpServers"].(map[string]any); ok && len(ns) > 0 {
+		servers = ns
 	}
-	merged := map[string]any{}
-	if curAny, ok := root["mcpServers"]; ok {
-		if cur, ok := curAny.(map[string]any); ok {
-			for k, v := range cur {
-				merged[k] = v
-			}
-		}
-	}
-	for _, id := range removeIDs {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			delete(merged, id)
-		}
-	}
-	if ns, ok := cfg["mcpServers"].(map[string]any); ok {
-		for k, v := range ns {
-			merged[k] = v
-		}
-	}
-	root["mcpServers"] = merged
-	after, err := json.MarshalIndent(root, "", "  ")
-	if err != nil {
-		return false, err
-	}
-	changed := !bytes.Equal(bytes.TrimSpace(before), bytes.TrimSpace(after))
-
-	if err := writeFileAtomic(path, append(bytes.TrimSpace(after), '\n'), 0o600); err != nil {
-		return false, err
-	}
-	return changed, nil
+	return applyJSONConfigServersKey(path, "mcpServers", servers, removeIDs, force, "invalid gemini config json")
 }
 
 func fileExists(path string) bool {
