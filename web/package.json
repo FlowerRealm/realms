@@ -9,6 +9,7 @@
     "build:personal": "tsc -b && vite build --mode personal && node scripts/postbuild-personal.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
+    "test:playwright": "node scripts/playwright-smoke.mjs",
     "check:theme": "node scripts/check-theme-colors.js"
   },
   "dependencies": {

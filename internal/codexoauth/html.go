@@ -62,12 +62,9 @@ func writeCallbackHTML(w http.ResponseWriter, status int, title string, message 
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>%s</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
   <style>
     :root { color-scheme: light dark; }
-    body { font-family: 'Fira Code', 'Noto Sans SC', monospace, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin: 0; padding: 24px; }
+    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'; margin: 0; padding: 24px; }
     .card { max-width: 720px; margin: 0 auto; padding: 18px 20px; border: 1px solid rgba(127,127,127,.25); border-radius: 12px; }
     h1 { font-size: 18px; margin: 0 0 8px; }
     p { margin: 8px 0; line-height: 1.5; }

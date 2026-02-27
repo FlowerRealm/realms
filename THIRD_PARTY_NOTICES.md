@@ -51,3 +51,82 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## Bootstrap
+
+Files:
+- `web/public/vendor/bootstrap/bootstrap.min.css`
+- `web/public/vendor/bootstrap/bootstrap.bundle.min.js`
+
+Source:
+- Bootstrap: https://getbootstrap.com
+- CDN (pinned): https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/
+
+License:
+- MIT License (see upstream `LICENSE`).
+
+## Flatpickr
+
+Files:
+- `web/public/vendor/flatpickr/flatpickr.min.css`
+- `web/public/vendor/flatpickr/flatpickr.min.js`
+- `web/public/vendor/flatpickr/zh.js`
+
+Source:
+- Flatpickr: https://flatpickr.js.org
+- CDN (pinned): https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/
+
+License:
+- MIT License (see upstream `LICENSE.md`).
+
+## Chart.js
+
+Files:
+- `web/public/vendor/chart.js/chart.umd.min.js`
+
+Source:
+- Chart.js: https://www.chartjs.org
+- CDN (pinned): https://cdn.jsdelivr.net/npm/chart.js@4.5.1/
+
+License:
+- MIT License (see upstream `LICENSE.md`).
+
+## Remix Icon
+
+Files:
+- `web/public/vendor/remixicon/fonts/remixicon.css`
+- `web/public/vendor/remixicon/fonts/remixicon.eot`
+- `web/public/vendor/remixicon/fonts/remixicon.ttf`
+- `web/public/vendor/remixicon/fonts/remixicon.woff`
+- `web/public/vendor/remixicon/fonts/remixicon.woff2`
+- `web/public/vendor/remixicon/fonts/remixicon.svg`
+
+Source:
+- Remix Icon: https://remixicon.com
+- CDN (pinned): https://cdn.jsdelivr.net/npm/remixicon@4.1.0/
+
+License:
+- Apache License 2.0 (see upstream `License`).
+
+## Google Fonts (Inter, JetBrains Mono, Material Symbols Rounded)
+
+Files:
+- `web/public/vendor/fonts/fonts.css`
+- `web/public/vendor/fonts/*.woff2`
+
+Source:
+- Google Fonts: https://fonts.google.com
+
+License:
+- See the corresponding font licenses on Google Fonts.
+
+## LobeHub Icons (Static SVG)
+
+Files:
+- `web/public/assets/model-icons/*.svg`
+
+Source:
+- LobeHub Icons: https://github.com/lobehub/lobe-icons
+- CDN (pinned): https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.77.0/
+
+License:
+- MIT License (per `package.json` for `@lobehub/icons-static-svg@1.77.0`).
