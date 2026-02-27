@@ -1358,6 +1358,13 @@ type CodexOAuthQuota struct {
 	SecondaryResetAt     *time.Time
 }
 
+type CodexOAuthQuotaPatch struct {
+	PrimaryUsedPercent   *int
+	PrimaryResetAt       *time.Time
+	SecondaryUsedPercent *int
+	SecondaryResetAt     *time.Time
+}
+
 func (s *Store) UpdateCodexOAuthAccountQuota(ctx context.Context, accountID int64, q CodexOAuthQuota, updatedAt time.Time, errMsg *string) error {
 	var errVal any
 	if errMsg != nil && strings.TrimSpace(*errMsg) != "" {
@@ -1396,10 +1403,57 @@ WHERE id=?
 	return nil
 }
 
+func (s *Store) PatchCodexOAuthAccountQuota(ctx context.Context, accountID int64, patch CodexOAuthQuotaPatch, updatedAt time.Time) error {
+	if accountID <= 0 {
+		return nil
+	}
+
+	sets := make([]string, 0, 8)
+	args := make([]any, 0, 8)
+
+	if patch.PrimaryUsedPercent != nil {
+		sets = append(sets, "quota_primary_used_percent=?")
+		args = append(args, nullableIntPtr(patch.PrimaryUsedPercent))
+	}
+	if patch.PrimaryResetAt != nil {
+		sets = append(sets, "quota_primary_reset_at=?")
+		args = append(args, *patch.PrimaryResetAt)
+	}
+	if patch.SecondaryUsedPercent != nil {
+		sets = append(sets, "quota_secondary_used_percent=?")
+		args = append(args, nullableIntPtr(patch.SecondaryUsedPercent))
+	}
+	if patch.SecondaryResetAt != nil {
+		sets = append(sets, "quota_secondary_reset_at=?")
+		args = append(args, *patch.SecondaryResetAt)
+	}
+
+	if len(sets) == 0 {
+		return nil
+	}
+
+	sets = append(sets, "quota_updated_at=?")
+	args = append(args, updatedAt)
+
+	args = append(args, accountID)
+	q := fmt.Sprintf(`
+UPDATE codex_oauth_accounts
+SET %s,
+    updated_at=updated_at
+WHERE id=?
+`, strings.Join(sets, ",\n    "))
+
+	_, err := s.db.ExecContext(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("更新 codex_oauth_account quota 失败: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) SetCodexOAuthAccountCooldown(ctx context.Context, accountID int64, cooldownUntil time.Time) error {
 	_, err := s.db.ExecContext(ctx, `
-	UPDATE codex_oauth_accounts
-	SET cooldown_until=?, updated_at=CURRENT_TIMESTAMP
+		UPDATE codex_oauth_accounts
+		SET cooldown_until=?, updated_at=CURRENT_TIMESTAMP
 	WHERE id=?
 	`, cooldownUntil, accountID)
 	if err != nil {
