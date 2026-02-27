@@ -3,108 +3,15 @@ import { Navigate } from 'react-router-dom';
 
 import { parseAdminMcp, type McpServerV2 } from '../api/admin/mcp';
 import { useAuth } from '../auth/AuthContext';
-import { BootstrapModal } from '../components/BootstrapModal';
 import { closeModalById } from '../components/modal';
 
-import type { ImportPick, ImportSource, McpType, Row, TargetKey, UnionRow } from './mcp/mcpTypes';
+import type { ImportPick, ImportSource, Row, TargetKey, UnionRow } from './mcp/mcpTypes';
 import { chooseActualServer, equalServerCore, mainSummary, serverType, targetEnabledForServer, typeBadge } from './mcp/mcpUtils';
+import { buildServer, initForm, parseTimeoutFieldMs, type EditFormState } from './mcp/mcpEditForm';
 import { useMcpManager } from './mcp/useMcpManager';
-
-type KVRow = { k: string; v: string };
-
-type EditFormState = {
-  id: string;
-  type: McpType;
-
-  command: string;
-  args: string[];
-  cwd: string;
-  env: KVRow[];
-
-  url: string;
-  bearer_token_env_var: string;
-  http_headers: KVRow[];
-
-  startup_timeout_ms: string;
-  tool_timeout_ms: string;
-};
-
-function parseTimeoutFieldMs(raw: string): number {
-  const v = raw.trim();
-  if (!v) return 0;
-  if (!/^[0-9]+$/.test(v)) return -1;
-  const n = Number(v);
-  if (!Number.isFinite(n) || n < 0) return -1;
-  return Math.floor(n);
-}
-
-function buildServer(type: McpType, form: EditFormState): McpServerV2 {
-  const startup = parseTimeoutFieldMs(form.startup_timeout_ms);
-  const tool = parseTimeoutFieldMs(form.tool_timeout_ms);
-  const timeouts =
-    (startup > 0 || tool > 0) && startup >= 0 && tool >= 0 ? { startup_ms: startup > 0 ? startup : undefined, tool_ms: tool > 0 ? tool : undefined } : undefined;
-
-  if (type === 'stdio') {
-    const args = form.args.map((x) => x.trim()).filter(Boolean);
-    const env: Record<string, string> = {};
-    for (const row of form.env) {
-      const k = row.k.trim();
-      const v = row.v;
-      if (!k) continue;
-      env[k] = v;
-    }
-    return {
-      transport: 'stdio',
-      stdio: {
-        command: form.command.trim(),
-        args: args.length ? args : undefined,
-        cwd: form.cwd.trim() ? form.cwd.trim() : undefined,
-        env: Object.keys(env).length ? env : undefined,
-      },
-      timeouts,
-    };
-  }
-
-  const headers: Record<string, string> = {};
-  for (const row of form.http_headers) {
-    const k = row.k.trim();
-    const v = row.v;
-    if (!k) continue;
-    headers[k] = v;
-  }
-  return {
-    transport: type,
-    http: {
-      url: form.url.trim(),
-      bearer_token_env_var: form.bearer_token_env_var.trim() ? form.bearer_token_env_var.trim() : undefined,
-      headers: Object.keys(headers).length ? headers : undefined,
-    },
-    timeouts,
-  };
-}
-
-function initForm(row: Row | null): EditFormState {
-  const s = row?.server;
-  const t = serverType(s);
-  const env = s?.transport === 'stdio' ? s.stdio?.env : undefined;
-  const headers = s?.transport === 'http' || s?.transport === 'sse' ? s.http?.headers : undefined;
-  return {
-    id: row?.id || '',
-    type: t,
-
-    command: s?.stdio?.command || '',
-    args: s?.stdio?.args || [],
-    cwd: s?.stdio?.cwd || '',
-    env: Object.entries(env || {}).map(([k, v]) => ({ k, v })),
-
-    url: s?.http?.url || '',
-    bearer_token_env_var: s?.http?.bearer_token_env_var || '',
-    http_headers: Object.entries(headers || {}).map(([k, v]) => ({ k, v })),
-
-    startup_timeout_ms: s?.timeouts?.startup_ms ? String(s.timeouts.startup_ms) : '',
-    tool_timeout_ms: s?.timeouts?.tool_ms ? String(s.timeouts.tool_ms) : '',
-  };
-}
+import { McpConflictModal } from './mcp/modals/McpConflictModal';
+import { McpImportConflictModal } from './mcp/modals/McpImportConflictModal';
+import { McpServerEditModal } from './mcp/modals/McpServerEditModal';
 
 function showModal(id: string) {
   const modalRoot = document.getElementById(id);
@@ -557,435 +464,49 @@ export function McpServersPage() {
         </div>
       </div>
 
-      <BootstrapModal
-        id="mcpConflictModal"
-        title="检测到冲突：请选择要保留的版本"
-        dialogClassName="modal-lg modal-dialog-scrollable"
-        footer={
-          <>
-            <button type="button" className="btn btn-light" data-bs-dismiss="modal">
-              取消
-            </button>
-            <button type="button" className="btn btn-primary px-4" disabled={saving} onClick={() => void confirmConflictsAndClose()}>
-              确认
-            </button>
-          </>
-        }
-        onHidden={() => {
-          onConflictModalHidden();
-        }}
-      >
-        <div className="text-muted small mb-2">默认选择“实际”（优先 codex，其次 claude、gemini）。</div>
-        <div className="d-flex flex-column gap-3">
-          {conflicts.map((id) => {
-            const r = unionRows.find((x) => x.id === id);
-            if (!r) return null;
-            const desired = r.desired;
-            const codex = r.actualByTarget.codex;
-            const claude = r.actualByTarget.claude;
-            const gemini = r.actualByTarget.gemini;
-            const pick = conflictChoice[id] || 'desired';
-            return (
-              <div key={id} className="border rounded-3 p-3">
-                <div className="d-flex justify-content-between align-items-center">
-                  <div className="fw-semibold font-monospace">{id}</div>
-                  <span className="badge bg-light text-danger border">conflict</span>
-                </div>
-                <div className="row g-2 mt-2">
-                  {(['codex', 'claude', 'gemini'] as const).map((k) => {
-                    const s = r.actualByTarget[k];
-                    if (!s) return null;
-                    return (
-                      <div key={k} className="col-12 col-md-6">
-                        <label className="form-check d-flex gap-2 align-items-start">
-                          <input
-                            className="form-check-input mt-1"
-                            type="radio"
-                            name={`conf-${id}`}
-                            checked={pick === k}
-                            onChange={() => setConflictChoice((p) => ({ ...p, [id]: k }))}
-                          />
-                          <div className="flex-grow-1">
-                            <div className="fw-medium text-capitalize">{k} 实际</div>
-                            <div className="text-muted small font-monospace text-truncate">{mainSummary(s)}</div>
-                          </div>
-                        </label>
-                      </div>
-                    );
-                  })}
-                  <div className="col-12">
-                    <label className="form-check d-flex gap-2 align-items-start">
-                      <input
-                        className="form-check-input mt-1"
-                        type="radio"
-                        name={`conf-${id}`}
-                        checked={pick === 'desired'}
-                        onChange={() => setConflictChoice((p) => ({ ...p, [id]: 'desired' }))}
-                      />
-                      <div className="flex-grow-1">
-                        <div className="fw-medium">Realms 记录</div>
-                        <div className="text-muted small font-monospace text-truncate">{mainSummary(desired)}</div>
-                      </div>
-                    </label>
-                  </div>
-                  {!codex && !claude && !gemini ? <div className="text-muted small">未找到实际项，保留 Realms 记录。</div> : null}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </BootstrapModal>
+      <McpConflictModal
+        saving={saving}
+        conflicts={conflicts}
+        unionRows={unionRows}
+        conflictChoice={conflictChoice}
+        setConflictChoice={setConflictChoice}
+        onConfirm={() => void confirmConflictsAndClose()}
+        onHidden={onConflictModalHidden}
+      />
 
-      <BootstrapModal
-        id="mcpEditModal"
-        title={editing ? `编辑：${editing.id}` : '新增 MCP'}
-        dialogClassName="modal-lg modal-dialog-scrollable"
-        footer={
-          <>
-            <button type="button" className="btn btn-light" data-bs-dismiss="modal">
-              取消
-            </button>
-            {isPersonalBuild && !editing && createMode === 'import' ? (
-              <button type="button" className="btn btn-primary px-4" disabled={saving} onClick={() => void startImport()}>
-                导入并生效
-              </button>
-            ) : (
-              <button type="button" className="btn btn-primary px-4" disabled={saving} onClick={() => saveFormToDesired()}>
-                保存并生效
-              </button>
-            )}
-          </>
-        }
-        onHidden={() => {
-          setEditing(null);
-          setForm(initForm(null));
-          setCreateMode('import');
-          setImportSource('claude');
-          setImportContent('');
-        }}
-      >
-        {isPersonalBuild && !editing ? (
-          <div className="btn-group w-100 mb-3" role="group" aria-label="mcp-create-mode">
-            <button type="button" className={`btn ${createMode === 'manual' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setCreateMode('manual')}>
-              手动
-            </button>
-            <button type="button" className={`btn ${createMode === 'import' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setCreateMode('import')}>
-              导入
-            </button>
-          </div>
-        ) : null}
+      <McpServerEditModal
+        isPersonalBuild={isPersonalBuild}
+        saving={saving}
+        editing={editing}
+        setEditing={setEditing}
+        form={form}
+        setForm={setForm}
+        initForm={initForm}
+        createMode={createMode}
+        setCreateMode={setCreateMode}
+        importSource={importSource}
+        setImportSource={setImportSource}
+        importContent={importContent}
+        setImportContent={setImportContent}
+        onImport={() => void startImport()}
+        onSave={saveFormToDesired}
+        onHiddenReset={() => {}}
+      />
 
-        {isPersonalBuild && !editing && createMode === 'import' ? (
-          <div className="row g-3">
-            <div className="col-12 col-lg-6">
-              <label className="form-label">source</label>
-              <select className="form-select" value={importSource} onChange={(e) => setImportSource(e.target.value as ImportSource)} disabled={saving}>
-                <option value="claude">claude (JSON)</option>
-                <option value="codex">codex (TOML/JSON)</option>
-                <option value="gemini">gemini (JSON)</option>
-                <option value="realms">realms (StoreV2 JSON)</option>
-              </select>
-            </div>
-            <div className="col-12">
-              <label className="form-label">content</label>
-              <textarea
-                className="form-control font-monospace"
-                rows={12}
-                value={importContent}
-                onChange={(e) => setImportContent(e.target.value)}
-                disabled={saving}
-                placeholder={
-                  importSource === 'codex'
-                    ? `[mcp_servers.my-mcp]
-command = "npx"
-args = ["-y", "..."]`
-                    : importSource === 'realms'
-                      ? `{
-  "version": 2,
-  "servers": {
-    "my-mcp": {
-      "transport": "sse",
-      "http": { "url": "http://127.0.0.1:9999/sse" }
-    }
-  }
-}`
-                      : `{
-  "mcpServers": {
-    "my-mcp": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "..."]
-    }
-  }
-}`
-                }
-              />
-              <div className="form-text">默认合并（merge）。只导入 MCP servers；其它字段忽略。冲突会逐项要求你选择。</div>
-            </div>
-          </div>
-        ) : (
-          <div className="row g-3">
-          <div className="col-12">
-            <label className="form-label">id</label>
-            <input className="form-control font-monospace" value={form.id} onChange={(e) => setForm((p) => ({ ...p, id: e.target.value }))} disabled={!!editing} placeholder="my-mcp" />
-          </div>
-          <div className="col-12">
-            <label className="form-label">type</label>
-            <select className="form-select" value={form.type} onChange={(e) => setForm((p) => ({ ...p, type: e.target.value as McpType }))}>
-              <option value="stdio">stdio</option>
-              <option value="http">http</option>
-              <option value="sse">sse</option>
-            </select>
-          </div>
-
-          {form.type === 'stdio' ? (
-            <>
-              <div className="col-12">
-                <label className="form-label">command</label>
-                <input className="form-control font-monospace" value={form.command} onChange={(e) => setForm((p) => ({ ...p, command: e.target.value }))} placeholder="npx @xxx/mcp" />
-              </div>
-              <div className="col-12">
-                <label className="form-label">args（可选）</label>
-                <input
-                  className="form-control font-monospace"
-                  value={(form.args || []).join(' ')}
-                  onChange={(e) => setForm((p) => ({ ...p, args: (e.target.value || '').split(' ').filter(Boolean) }))}
-                  placeholder="--foo bar"
-                />
-              </div>
-              <div className="col-12">
-                <label className="form-label">cwd（可选）</label>
-                <input className="form-control font-monospace" value={form.cwd} onChange={(e) => setForm((p) => ({ ...p, cwd: e.target.value }))} placeholder="/path/to/project" />
-              </div>
-              <div className="col-12">
-                <label className="form-label">env（可选）</label>
-                <div className="d-flex flex-column gap-2">
-                  {(form.env.length ? form.env : [{ k: '', v: '' }]).map((row, idx) => (
-                    <div key={idx} className="row g-2 align-items-center">
-                      <div className="col-md-5">
-                        <input
-                          className="form-control font-monospace"
-                          value={row.k}
-                          onChange={(e) =>
-                            setForm((p) => {
-                              const base = p.env.length ? p.env : [{ k: '', v: '' }];
-                              const next = [...base];
-                              next[idx] = { ...next[idx], k: e.target.value };
-                              return { ...p, env: next };
-                            })
-                          }
-                          placeholder="KEY"
-                        />
-                      </div>
-                      <div className="col-md-5">
-                        <input
-                          className="form-control font-monospace"
-                          value={row.v}
-                          onChange={(e) =>
-                            setForm((p) => {
-                              const base = p.env.length ? p.env : [{ k: '', v: '' }];
-                              const next = [...base];
-                              next[idx] = { ...next[idx], v: e.target.value };
-                              return { ...p, env: next };
-                            })
-                          }
-                          placeholder="value"
-                        />
-                      </div>
-                      <div className="col-md-2 d-grid">
-                        <button
-                          type="button"
-                          className="btn btn-light border"
-                          onClick={() =>
-                            setForm((p) => {
-                              const next = [...p.env];
-                              next.splice(idx, 1);
-                              return { ...p, env: next };
-                            })
-                          }
-                        >
-                          删除
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  <button type="button" className="btn btn-light border btn-sm align-self-start" onClick={() => setForm((p) => ({ ...p, env: [...(p.env || []), { k: '', v: '' }] }))}>
-                    + 添加环境变量
-                  </button>
-                </div>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="col-12">
-                <label className="form-label">url</label>
-                <input className="form-control font-monospace" value={form.url} onChange={(e) => setForm((p) => ({ ...p, url: e.target.value }))} placeholder="https://example.com/mcp" />
-              </div>
-              <div className="col-12">
-                <label className="form-label">bearer_token_env_var（可选）</label>
-                <input className="form-control font-monospace" value={form.bearer_token_env_var} onChange={(e) => setForm((p) => ({ ...p, bearer_token_env_var: e.target.value }))} placeholder="MY_TOKEN" />
-              </div>
-              <div className="col-12">
-                <label className="form-label">http_headers（可选）</label>
-                <div className="d-flex flex-column gap-2">
-                  {(form.http_headers.length ? form.http_headers : [{ k: '', v: '' }]).map((row, idx) => (
-                    <div key={idx} className="row g-2 align-items-center">
-                      <div className="col-md-5">
-                        <input
-                          className="form-control font-monospace"
-                          value={row.k}
-                          onChange={(e) =>
-                            setForm((p) => {
-                              const base = p.http_headers.length ? p.http_headers : [{ k: '', v: '' }];
-                              const next = [...base];
-                              next[idx] = { ...next[idx], k: e.target.value };
-                              return { ...p, http_headers: next };
-                            })
-                          }
-                          placeholder="Header-Name"
-                        />
-                      </div>
-                      <div className="col-md-5">
-                        <input
-                          className="form-control font-monospace"
-                          value={row.v}
-                          onChange={(e) =>
-                            setForm((p) => {
-                              const base = p.http_headers.length ? p.http_headers : [{ k: '', v: '' }];
-                              const next = [...base];
-                              next[idx] = { ...next[idx], v: e.target.value };
-                              return { ...p, http_headers: next };
-                            })
-                          }
-                          placeholder="value"
-                        />
-                      </div>
-                      <div className="col-md-2 d-grid">
-                        <button
-                          type="button"
-                          className="btn btn-light border"
-                          onClick={() =>
-                            setForm((p) => {
-                              const next = [...p.http_headers];
-                              next.splice(idx, 1);
-                              return { ...p, http_headers: next };
-                            })
-                          }
-                        >
-                          删除
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  <button type="button" className="btn btn-light border btn-sm align-self-start" onClick={() => setForm((p) => ({ ...p, http_headers: [...(p.http_headers || []), { k: '', v: '' }] }))}>
-                    + 添加 Header
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
-
-          <div className="col-12">
-            <details>
-              <summary className="text-muted small">高级：Timeout（毫秒）</summary>
-              <div className="row g-2 mt-1">
-                <div className="col-12 col-md-6">
-                  <label className="form-label small text-muted mb-1">startup_timeout_ms</label>
-                  <input
-                    className="form-control font-monospace"
-                    value={form.startup_timeout_ms}
-                    onChange={(e) => setForm((p) => ({ ...p, startup_timeout_ms: e.target.value }))}
-                    placeholder="例如 60000"
-                    disabled={saving}
-                  />
-                </div>
-                <div className="col-12 col-md-6">
-                  <label className="form-label small text-muted mb-1">tool_timeout_ms</label>
-                  <input
-                    className="form-control font-monospace"
-                    value={form.tool_timeout_ms}
-                    onChange={(e) => setForm((p) => ({ ...p, tool_timeout_ms: e.target.value }))}
-                    placeholder="例如 600000"
-                    disabled={saving}
-                  />
-                </div>
-              </div>
-            </details>
-          </div>
-        </div>
-        )}
-      </BootstrapModal>
-
-      <BootstrapModal
-        id="mcpImportConflictModal"
-        title="导入冲突：逐项选择要保留的版本"
-        dialogClassName="modal-lg modal-dialog-scrollable"
-        footer={
-          <>
-            <button type="button" className="btn btn-light" data-bs-dismiss="modal">
-              取消
-            </button>
-            <button type="button" className="btn btn-primary px-4" disabled={saving || importConfirmDisabled} onClick={() => void confirmImportConflicts()}>
-              确认并生效
-            </button>
-          </>
-        }
+      <McpImportConflictModal
+        saving={saving}
+        importPending={importPending}
+        importConflicts={importConflicts}
+        importConflictChoice={importConflictChoice}
+        setImportConflictChoice={setImportConflictChoice}
+        importConfirmDisabled={importConfirmDisabled}
+        onConfirm={() => void confirmImportConflicts()}
         onHidden={() => {
           setImportPending(null);
           setImportConflicts([]);
           setImportConflictChoice({});
         }}
-      >
-        <div className="text-muted small mb-2">没有默认选项：每一项都必须明确选择。</div>
-        <div className="d-flex flex-column gap-3">
-          {importConflicts.map((id) => {
-            const desired = importPending?.desired?.[id];
-            const imported = importPending?.imported?.[id];
-            if (!desired || !imported) return null;
-            const pick = importConflictChoice[id] || '';
-            return (
-              <div key={id} className="border rounded-3 p-3">
-                <div className="d-flex justify-content-between align-items-center">
-                  <div className="fw-semibold font-monospace">{id}</div>
-                  <span className="badge bg-light text-danger border">conflict</span>
-                </div>
-                <div className="row g-2 mt-2">
-                  <div className="col-12 col-md-6">
-                    <label className="form-check d-flex gap-2 align-items-start">
-                      <input
-                        className="form-check-input mt-1"
-                        type="radio"
-                        name={`imp-${id}`}
-                        checked={pick === 'keep'}
-                        onChange={() => setImportConflictChoice((p) => ({ ...p, [id]: 'keep' }))}
-                      />
-                      <div className="flex-grow-1">
-                        <div className="fw-medium">保留现有</div>
-                        <div className="text-muted small font-monospace text-truncate">{mainSummary(desired)}</div>
-                      </div>
-                    </label>
-                  </div>
-                  <div className="col-12 col-md-6">
-                    <label className="form-check d-flex gap-2 align-items-start">
-                      <input
-                        className="form-check-input mt-1"
-                        type="radio"
-                        name={`imp-${id}`}
-                        checked={pick === 'imported'}
-                        onChange={() => setImportConflictChoice((p) => ({ ...p, [id]: 'imported' }))}
-                      />
-                      <div className="flex-grow-1">
-                        <div className="fw-medium">使用导入</div>
-                        <div className="text-muted small font-monospace text-truncate">{mainSummary(imported)}</div>
-                      </div>
-                    </label>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </BootstrapModal>
+      />
     </div>
   );
 }
