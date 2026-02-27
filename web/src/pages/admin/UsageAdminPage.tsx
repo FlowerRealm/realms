@@ -11,9 +11,9 @@ import {
 } from '../../api/admin/usage';
 import { DateRangePicker, SelectPicker } from '../../components/DateRangePicker';
 import { SegmentedFrame } from '../../components/SegmentedFrame';
+import { UsageAdvancedFiltersDropdown, type UsageAdvancedFiltersDropdownHandle } from '../../components/UsageAdvancedFiltersDropdown';
 import { formatLatencyPairSeconds, formatSecondsFromMilliseconds } from '../../format/duration';
 import { formatIntComma } from '../../format/int';
-import { useAnchoredPopover } from '../../hooks/useAnchoredPopover';
 
 type ChartInstance = {
   destroy?: () => void;
@@ -71,19 +71,11 @@ export function UsageAdminPage() {
   const [limit, setLimit] = useState(50);
   const [beforeID, setBeforeID] = useState<number | undefined>(undefined);
   const [afterID, setAfterID] = useState<number | undefined>(undefined);
-  const [advOpen, setAdvOpen] = useState(false);
   const [filterUser, setFilterUser] = useState('');
   const [filterKey, setFilterKey] = useState('');
   const [filterChannel, setFilterChannel] = useState('');
   const [filterModel, setFilterModel] = useState('');
-  const advBtnRef = useRef<HTMLButtonElement | null>(null);
-  const advPanelRef = useRef<HTMLDivElement | null>(null);
-  const advPanelStyle = useAnchoredPopover({
-    open: advOpen,
-    onClose: () => setAdvOpen(false),
-    triggerRef: advBtnRef,
-    panelRef: advPanelRef,
-  });
+  const advRef = useRef<UsageAdvancedFiltersDropdownHandle | null>(null);
 
   const [expandedID, setExpandedID] = useState<number | null>(null);
   const [detailByEventID, setDetailByEventID] = useState<Record<number, UsageEventDetail>>({});
@@ -423,130 +415,61 @@ export function UsageAdminPage() {
                 </div>
 
                 <div className="d-flex align-items-center gap-2">
-                  <div className="position-relative">
-                    <button
-                      ref={advBtnRef}
-                      type="button"
-                      className={`btn btn-sm ${advOpen ? 'btn-primary' : 'btn-outline-secondary'}`}
-                      onClick={() => setAdvOpen((v) => !v)}
-                      disabled={loading}
-                      data-testid="admin-usage-adv-toggle"
-                    >
-                      <span className="material-symbols-rounded me-1">tune</span>
-                      高级筛选
-                    </button>
-
-                    {advOpen ? (
-                      <div
-                        ref={advPanelRef}
-                        className="rlm-usage-filter-dropdown card shadow-sm"
-                        style={advPanelStyle}
-                      >
-                        <div className="card-body p-2 rlm-usage-filter-panel">
-                          <div className="rlm-usage-filter-row">
-                            <div className="rlm-usage-filter-item">
-                              <div className="input-group input-group-sm">
-                                <span className="input-group-text rlm-usage-filter-prefix">
-                                  <span className="form-label mb-0 smaller text-muted text-truncate" title="用户名/邮箱">
-                                    用户
-                                  </span>
-                                </span>
-                                <input
-                                  id="adminUsageFilterUserValue"
-                                  type="text"
-                                  className="form-control"
-                                  placeholder="输入用户名或邮箱"
-                                  value={filterUser}
-                                  onChange={(e) => {
-                                    setFilterUser(e.target.value || '');
-                                    setBeforeID(undefined);
-                                    setAfterID(undefined);
-                                  }}
-                                  disabled={loading}
-                                />
-                              </div>
-                            </div>
-
-                            <div className="rlm-usage-filter-item">
-                              <div className="input-group input-group-sm">
-                                <span className="input-group-text rlm-usage-filter-prefix">
-                                  <span className="form-label mb-0 smaller text-muted text-truncate" title="Key 名称">
-                                    Key
-                                  </span>
-                                </span>
-                                <input
-                                  id="adminUsageFilterKeyValue"
-                                  type="text"
-                                  className="form-control"
-                                  placeholder="输入 Key 名称"
-                                  value={filterKey}
-                                  onChange={(e) => {
-                                    setFilterKey(e.target.value || '');
-                                    setBeforeID(undefined);
-                                    setAfterID(undefined);
-                                  }}
-                                  disabled={loading}
-                                />
-                              </div>
-                            </div>
-
-                            <div className="rlm-usage-filter-item">
-                              <div className="input-group input-group-sm">
-                                <span className="input-group-text rlm-usage-filter-prefix">
-                                  <span className="form-label mb-0 smaller text-muted text-truncate" title="渠道(ID/名称)">
-                                    渠道
-                                  </span>
-                                </span>
-                                <input
-                                  id="adminUsageFilterChannelValue"
-                                  type="text"
-                                  className="form-control"
-                                  placeholder="输入渠道 ID 或名称"
-                                  value={filterChannel}
-                                  onChange={(e) => {
-                                    setFilterChannel(e.target.value || '');
-                                    setBeforeID(undefined);
-                                    setAfterID(undefined);
-                                  }}
-                                  disabled={loading}
-                                />
-                              </div>
-                            </div>
-
-                            <div className="rlm-usage-filter-item">
-                              <div className="input-group input-group-sm">
-                                <span className="input-group-text rlm-usage-filter-prefix">
-                                  <span className="form-label mb-0 smaller text-muted text-truncate" title="模型">
-                                    模型
-                                  </span>
-                                </span>
-                                <input
-                                  id="adminUsageFilterModelValue"
-                                  type="text"
-                                  className="form-control"
-                                  placeholder="输入模型名"
-                                  value={filterModel}
-                                  onChange={(e) => {
-                                    setFilterModel(e.target.value || '');
-                                    setBeforeID(undefined);
-                                    setAfterID(undefined);
-                                  }}
-                                  disabled={loading}
-                                />
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="d-flex justify-content-between align-items-center mt-2">
-                            <div className="text-muted smaller">多个条件同时启用时，按交集过滤（AND）。</div>
-                            <button type="button" className="btn btn-link btn-sm p-0" onClick={() => setAdvOpen(false)}>
-                              收起
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
+                  <UsageAdvancedFiltersDropdown
+                    ref={advRef}
+                    disabled={loading}
+                    toggleTestId="admin-usage-adv-toggle"
+                    fields={[
+                      {
+                        inputId: 'adminUsageFilterUserValue',
+                        label: '用户',
+                        title: '用户名/邮箱',
+                        placeholder: '输入用户名或邮箱',
+                        value: filterUser,
+                        onChange: (v) => {
+                          setFilterUser(v);
+                          setBeforeID(undefined);
+                          setAfterID(undefined);
+                        },
+                      },
+                      {
+                        inputId: 'adminUsageFilterKeyValue',
+                        label: 'Key',
+                        title: 'Key 名称',
+                        placeholder: '输入 Key 名称',
+                        value: filterKey,
+                        onChange: (v) => {
+                          setFilterKey(v);
+                          setBeforeID(undefined);
+                          setAfterID(undefined);
+                        },
+                      },
+                      {
+                        inputId: 'adminUsageFilterChannelValue',
+                        label: '渠道',
+                        title: '渠道(ID/名称)',
+                        placeholder: '输入渠道 ID 或名称',
+                        value: filterChannel,
+                        onChange: (v) => {
+                          setFilterChannel(v);
+                          setBeforeID(undefined);
+                          setAfterID(undefined);
+                        },
+                      },
+                      {
+                        inputId: 'adminUsageFilterModelValue',
+                        label: '模型',
+                        title: '模型',
+                        placeholder: '输入模型名',
+                        value: filterModel,
+                        onChange: (v) => {
+                          setFilterModel(v);
+                          setBeforeID(undefined);
+                          setAfterID(undefined);
+                        },
+                      },
+                    ]}
+                  />
                 </div>
 
                 <div className="ms-auto d-flex gap-2">
@@ -571,7 +494,7 @@ export function UsageAdminPage() {
                       setStart('');
                       setEnd('');
                       setAllTime(false);
-                      setAdvOpen(false);
+                      advRef.current?.close();
                       setFilterUser('');
                       setFilterKey('');
                       setFilterChannel('');

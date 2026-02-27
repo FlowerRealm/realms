@@ -14,9 +14,9 @@ import {
 import { useAuth } from '../auth/AuthContext';
 import { DateRangePicker, SelectPicker } from '../components/DateRangePicker';
 import { SegmentedFrame } from '../components/SegmentedFrame';
+import { UsageAdvancedFiltersDropdown, type UsageAdvancedFiltersDropdownHandle } from '../components/UsageAdvancedFiltersDropdown';
 import { formatSecondsFromMilliseconds } from '../format/duration';
 import { formatUSDPlain } from '../format/money';
-import { useAnchoredPopover } from '../hooks/useAnchoredPopover';
 import { UsageEventsCard } from './usage/UsageEventsCard';
 import { UsageSummaryCard } from './usage/UsageSummaryCard';
 import { UsageTimeSeriesCard } from './usage/UsageTimeSeriesCard';
@@ -40,17 +40,9 @@ export function UsagePage() {
   const [end, setEnd] = useState('');
   const [allTime, setAllTime] = useState(false);
   const [limit, setLimit] = useState(50);
-  const [advOpen, setAdvOpen] = useState(false);
   const [filterKey, setFilterKey] = useState('');
   const [filterModel, setFilterModel] = useState('');
-  const advBtnRef = useRef<HTMLButtonElement | null>(null);
-  const advPanelRef = useRef<HTMLDivElement | null>(null);
-  const advPanelStyle = useAnchoredPopover({
-    open: advOpen,
-    onClose: () => setAdvOpen(false),
-    triggerRef: advBtnRef,
-    panelRef: advPanelRef,
-  });
+  const advRef = useRef<UsageAdvancedFiltersDropdownHandle | null>(null);
 
   const [seriesStart, setSeriesStart] = useState('');
   const [seriesEnd, setSeriesEnd] = useState('');
@@ -339,84 +331,37 @@ export function UsagePage() {
                 </div>
 
                 <div className="d-flex align-items-center gap-2">
-                  <div className="position-relative">
-                    <button
-                      ref={advBtnRef}
-                      type="button"
-                      className={`btn btn-sm ${advOpen ? 'btn-primary' : 'btn-outline-secondary'}`}
-                      onClick={() => setAdvOpen((v) => !v)}
-                      disabled={loading}
-                      data-testid="usage-adv-toggle"
-                    >
-                      <span className="material-symbols-rounded me-1">tune</span>
-                      高级筛选
-                    </button>
-
-                    {advOpen ? (
-                      <div
-                        ref={advPanelRef}
-                        className="rlm-usage-filter-dropdown card shadow-sm"
-                        style={advPanelStyle}
-                      >
-                        <div className="card-body p-2 rlm-usage-filter-panel">
-                          <div className="rlm-usage-filter-row">
-                            <div className="rlm-usage-filter-item">
-                              <div className="input-group input-group-sm">
-                                <span className="input-group-text rlm-usage-filter-prefix">
-                                  <span className="form-label mb-0 smaller text-muted text-truncate" title="Key 名称">
-                                    Key
-                                  </span>
-                                </span>
-                                <input
-                                  id="usageFilterKeyValue"
-                                  type="text"
-                                  className="form-control"
-                                  placeholder="输入 Key 名称"
-                                  value={filterKey}
-                                  onChange={(e) => {
-                                    setFilterKey(e.target.value || '');
-                                    setBeforeStack([]);
-                                    setExpandedID(null);
-                                  }}
-                                  disabled={loading}
-                                />
-                              </div>
-                            </div>
-
-                            <div className="rlm-usage-filter-item">
-                              <div className="input-group input-group-sm">
-                                <span className="input-group-text rlm-usage-filter-prefix">
-                                  <span className="form-label mb-0 smaller text-muted text-truncate" title="模型">
-                                    模型
-                                  </span>
-                                </span>
-                                <input
-                                  id="usageFilterModelValue"
-                                  type="text"
-                                  className="form-control"
-                                  placeholder="输入模型名"
-                                  value={filterModel}
-                                  onChange={(e) => {
-                                    setFilterModel(e.target.value || '');
-                                    setBeforeStack([]);
-                                    setExpandedID(null);
-                                  }}
-                                  disabled={loading}
-                                />
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="d-flex justify-content-between align-items-center mt-2">
-                            <div className="text-muted smaller">多个条件同时启用时，按交集过滤（AND）。</div>
-                            <button type="button" className="btn btn-link btn-sm p-0" onClick={() => setAdvOpen(false)}>
-                              收起
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
+                  <UsageAdvancedFiltersDropdown
+                    ref={advRef}
+                    disabled={loading}
+                    toggleTestId="usage-adv-toggle"
+                    fields={[
+                      {
+                        inputId: 'usageFilterKeyValue',
+                        label: 'Key',
+                        title: 'Key 名称',
+                        placeholder: '输入 Key 名称',
+                        value: filterKey,
+                        onChange: (v) => {
+                          setFilterKey(v);
+                          setBeforeStack([]);
+                          setExpandedID(null);
+                        },
+                      },
+                      {
+                        inputId: 'usageFilterModelValue',
+                        label: '模型',
+                        title: '模型',
+                        placeholder: '输入模型名',
+                        value: filterModel,
+                        onChange: (v) => {
+                          setFilterModel(v);
+                          setBeforeStack([]);
+                          setExpandedID(null);
+                        },
+                      },
+                    ]}
+                  />
                 </div>
 
                 <div className="ms-auto d-flex gap-2">
@@ -441,7 +386,7 @@ export function UsagePage() {
                       setAllTime(false);
                       setStart('');
                       setEnd('');
-                      setAdvOpen(false);
+                      advRef.current?.close();
                       setFilterKey('');
                       setFilterModel('');
                       setBeforeStack([]);
