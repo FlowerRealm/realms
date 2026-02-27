@@ -136,14 +136,14 @@ func applyJSONConfigServersKey(path string, serverKey string, newServers map[str
 
 	before, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to marshal existing config for comparison: %w", err)
 	}
 
 	root[serverKey] = mergeServersMap(root[serverKey], removeIDs, newServers)
 
 	after, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to marshal updated config: %w", err)
 	}
 	changed := !bytes.Equal(bytes.TrimSpace(before), bytes.TrimSpace(after))
 
@@ -203,12 +203,12 @@ func ApplyCodexConfig(path string, reg Registry, removeIDs []string, platform st
 
 	before, err := toml.Marshal(root)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to marshal existing codex config for comparison: %w", err)
 	}
 	root["mcp_servers"] = mergeServersMap(root["mcp_servers"], removeIDs, newServers)
 	after, err := toml.Marshal(root)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to marshal updated codex config: %w", err)
 	}
 	changed := !bytes.Equal(bytes.TrimSpace(before), bytes.TrimSpace(after))
 

@@ -48,7 +48,7 @@ export function McpConflictModal(props: {
             <div key={id} className="border rounded-3 p-3">
               <div className="d-flex justify-content-between align-items-center">
                 <div className="fw-semibold font-monospace">{id}</div>
-                <span className="badge bg-light text-danger border">conflict</span>
+                <span className="badge bg-light text-danger border">冲突</span>
               </div>
               <div className="row g-2 mt-2">
                 {(['codex', 'claude', 'gemini'] as const).map((k) => {
@@ -96,4 +96,3 @@ export function McpConflictModal(props: {
     </BootstrapModal>
   );
 }
-
