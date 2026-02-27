@@ -106,6 +106,7 @@ type fakeUpstreamStore struct {
 	setStatusCalls    int
 	setCooldownCalls  int
 	setQuotaErrCalls  int
+	patchQuotaCalls   int
 }
 
 func (f *fakeUpstreamStore) GetOpenAICompatibleCredentialSecret(_ context.Context, credentialID int64) (store.OpenAICredentialSecret, error) {
@@ -149,6 +150,11 @@ func (f *fakeUpstreamStore) SetCodexOAuthAccountCooldown(_ context.Context, _ in
 
 func (f *fakeUpstreamStore) SetCodexOAuthAccountQuotaError(_ context.Context, _ int64, _ *string) error {
 	f.setQuotaErrCalls++
+	return nil
+}
+
+func (f *fakeUpstreamStore) PatchCodexOAuthAccountQuota(_ context.Context, _ int64, _ store.CodexOAuthQuotaPatch, _ time.Time) error {
+	f.patchQuotaCalls++
 	return nil
 }
 

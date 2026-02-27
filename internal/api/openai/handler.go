@@ -70,6 +70,10 @@ type CodexQuotaErrorSetter interface {
 	SetCodexOAuthAccountQuotaError(ctx context.Context, accountID int64, msg *string) error
 }
 
+type CodexQuotaPatcher interface {
+	PatchCodexOAuthAccountQuota(ctx context.Context, accountID int64, patch store.CodexOAuthQuotaPatch, updatedAt time.Time) error
+}
+
 type AuditSink interface {
 	InsertAuditEvent(ctx context.Context, in store.AuditEventInput) error
 }
@@ -104,6 +108,29 @@ func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *
 
 func (h *Handler) Responses(w http.ResponseWriter, r *http.Request) {
 	h.proxyJSON(w, r)
+}
+
+func (h *Handler) patchCodexQuotaBestEffort(sel scheduler.Selection, headers http.Header) {
+	if h == nil || h.exec == nil {
+		return
+	}
+	if sel.CredentialType != scheduler.CredentialTypeCodex || sel.CredentialID <= 0 {
+		return
+	}
+	patcher, ok := h.exec.(CodexQuotaPatcher)
+	if !ok || patcher == nil {
+		return
+	}
+	now := time.Now()
+	patch, ok := codexQuotaPatchFromResponseHeaders(headers, now)
+	if !ok {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = patcher.PatchCodexOAuthAccountQuota(ctx, sel.CredentialID, patch, now)
+	}()
 }
 
 func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
@@ -767,6 +794,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		)
 
 		cw := &countingResponseWriter{ResponseWriter: w}
+		h.patchCodexQuotaBestEffort(sel, resp.Header)
 		copyResponseHeaders(cw.Header(), resp.Header)
 		cw.Header().Set("X-Accel-Buffering", "no")
 		if isSSE {
@@ -901,6 +929,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 	capBuf.maxBytes = upstreamNonStreamExtractMaxBytes
 
 	cw := &countingResponseWriter{ResponseWriter: w}
+	h.patchCodexQuotaBestEffort(sel, resp.Header)
 	copyResponseHeaders(cw.Header(), resp.Header)
 	cw.WriteHeader(resp.StatusCode)
 

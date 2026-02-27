@@ -37,6 +37,9 @@ type Executor struct {
 
 	refreshMu   sync.Mutex
 	lastRefresh map[int64]time.Time
+
+	quotaMu          sync.Mutex
+	lastQuotaUpdated map[int64]time.Time
 }
 
 type upstreamStore interface {
@@ -47,6 +50,7 @@ type upstreamStore interface {
 	SetCodexOAuthAccountStatus(ctx context.Context, accountID int64, status int) error
 	SetCodexOAuthAccountCooldown(ctx context.Context, accountID int64, until time.Time) error
 	SetCodexOAuthAccountQuotaError(ctx context.Context, accountID int64, msg *string) error
+	PatchCodexOAuthAccountQuota(ctx context.Context, accountID int64, patch store.CodexOAuthQuotaPatch, updatedAt time.Time) error
 }
 
 func NewExecutor(st *store.Store, cfg config.Config) *Executor {
@@ -62,11 +66,41 @@ func NewExecutor(st *store.Store, cfg config.Config) *Executor {
 		},
 	}
 	return &Executor{
-		st:              st,
-		client:          client,
-		clients:         make(map[string]*http.Client),
-		upstreamTimeout: 0,
-		lastRefresh:     make(map[int64]time.Time),
+		st:               st,
+		client:           client,
+		clients:          make(map[string]*http.Client),
+		upstreamTimeout:  0,
+		lastRefresh:      make(map[int64]time.Time),
+		lastQuotaUpdated: make(map[int64]time.Time),
+	}
+}
+
+func NewExecutorForTests(st upstreamStore, client *http.Client) *Executor {
+	if client == nil {
+		transport := defaultTransportWithProxy(http.ProxyFromEnvironment, (&net.Dialer{
+			Timeout:   0,
+			KeepAlive: 30 * time.Second,
+		}).DialContext)
+		client = &http.Client{
+			Transport: transport,
+			Timeout:   0,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+	}
+	if client.CheckRedirect == nil {
+		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	}
+	return &Executor{
+		st:               st,
+		client:           client,
+		clients:          make(map[string]*http.Client),
+		upstreamTimeout:  0,
+		lastRefresh:      make(map[int64]time.Time),
+		lastQuotaUpdated: make(map[int64]time.Time),
 	}
 }
 
@@ -916,6 +950,38 @@ func (e *Executor) shouldAttemptRefresh(accountID int64, now time.Time) bool {
 	}
 	e.lastRefresh[accountID] = now
 	return true
+}
+
+func (e *Executor) shouldPatchCodexQuota(accountID int64, now time.Time) bool {
+	e.quotaMu.Lock()
+	defer e.quotaMu.Unlock()
+	if e.lastQuotaUpdated == nil {
+		e.lastQuotaUpdated = make(map[int64]time.Time)
+	}
+	if last, ok := e.lastQuotaUpdated[accountID]; ok {
+		if now.Sub(last) < time.Minute {
+			return false
+		}
+	}
+	e.lastQuotaUpdated[accountID] = now
+	return true
+}
+
+func (e *Executor) PatchCodexOAuthAccountQuota(ctx context.Context, accountID int64, patch store.CodexOAuthQuotaPatch, updatedAt time.Time) error {
+	if e == nil || e.st == nil {
+		return nil
+	}
+	if accountID <= 0 {
+		return nil
+	}
+	now := updatedAt
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if !e.shouldPatchCodexQuota(accountID, now) {
+		return nil
+	}
+	return e.st.PatchCodexOAuthAccountQuota(ctx, accountID, patch, now)
 }
 
 func (e *Executor) recordCodexOAuthRefreshFailure(ctx context.Context, accountID int64, err error, now time.Time) {
