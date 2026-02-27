@@ -133,7 +133,10 @@ func ApplyCodexConfig(path string, reg Registry, removeIDs []string, platform st
 		newServers[id] = out
 	}
 
-	before, _ := toml.Marshal(root)
+	before, err := toml.Marshal(root)
+	if err != nil {
+		return false, err
+	}
 	merged := map[string]any{}
 	if curAny, ok := root["mcp_servers"]; ok {
 		if cur, ok := curAny.(map[string]any); ok {
@@ -278,7 +281,10 @@ func ApplyClaudeConfig(path string, reg Registry, removeIDs []string, platform s
 		}
 	}
 
-	before, _ := json.Marshal(root)
+	before, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return false, err
+	}
 	merged := map[string]any{}
 	if curAny, ok := root["mcpServers"]; ok {
 		if cur, ok := curAny.(map[string]any); ok {
@@ -352,7 +358,10 @@ func ApplyGeminiConfig(path string, reg Registry, removeIDs []string, force bool
 		return false, err
 	}
 
-	before, _ := json.Marshal(root)
+	before, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return false, err
+	}
 	merged := map[string]any{}
 	if curAny, ok := root["mcpServers"]; ok {
 		if cur, ok := curAny.(map[string]any); ok {
