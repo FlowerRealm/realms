@@ -1183,29 +1183,40 @@ LEFT JOIN users u ON u.id=ue.user_id
 }
 
 func (s *Store) ListUsageEventsByUserFiltered(ctx context.Context, userID int64, limit int, beforeID *int64, idx UsageEventsIndexFlags, f UsageEventsFilters) ([]UsageEvent, error) {
+	return s.listUsageEventsByUserFiltered(ctx, userID, nil, nil, limit, beforeID, nil, idx, f)
+}
+
+func (s *Store) listUsageEventsByUserFiltered(ctx context.Context, userID int64, since, until *time.Time, limit int, beforeID, afterID *int64, idx UsageEventsIndexFlags, f UsageEventsFilters) ([]UsageEvent, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
+	}
+	if (since == nil) != (until == nil) {
+		return nil, errors.New("since/until 必须同时提供")
+	}
+	if beforeID != nil && afterID != nil {
+		return nil, errors.New("before_id 与 after_id 不能同时使用")
 	}
 
 	f.Key = strings.TrimSpace(f.Key)
 	f.Model = strings.TrimSpace(f.Model)
 
-	args := []any{userID, UsageStateReserved}
 	var joins string
 	var extraWhere strings.Builder
+	var filterArgs []any
 
 	if idx.Key && f.Key != "" {
 		joins += "LEFT JOIN user_tokens ut ON ut.id=ue.token_id\n"
 		extraWhere.WriteString(" AND ut.user_id = ?\n")
-		args = append(args, userID)
+		filterArgs = append(filterArgs, userID)
 		extraWhere.WriteString(" AND ut.name IS NOT NULL AND TRIM(ut.name) <> '' AND LOWER(ut.name) LIKE LOWER(?)\n")
-		args = append(args, "%"+f.Key+"%")
+		filterArgs = append(filterArgs, "%"+f.Key+"%")
 	}
 	if idx.Model && f.Model != "" {
 		extraWhere.WriteString(" AND ue.model IS NOT NULL AND TRIM(ue.model) <> '' AND LOWER(ue.model) LIKE LOWER(?)\n")
-		args = append(args, "%"+f.Model+"%")
+		filterArgs = append(filterArgs, "%"+f.Model+"%")
 	}
 
+	args := []any{userID}
 	q := `
 SELECT ue.id, ue.time, ue.request_id, ue.endpoint, ue.method,
        ue.user_id, ue.subscription_id, ue.token_id,
@@ -1217,13 +1228,26 @@ SELECT ue.id, ue.time, ue.request_id, ue.endpoint, ue.method,
        ue.is_stream, ue.request_bytes, ue.response_bytes,
        ue.created_at, ue.updated_at
 FROM usage_events ue
-` + joins + `WHERE ue.user_id=? AND ue.state<>?
-` + extraWhere.String()
+` + joins + `WHERE ue.user_id=?`
+	if since != nil && until != nil {
+		q += " AND ue.time >= ? AND ue.time < ?"
+		args = append(args, *since, *until)
+	}
+	q += " AND ue.state<>?\n" + extraWhere.String()
+	args = append(args, UsageStateReserved)
+	args = append(args, filterArgs...)
+
 	if beforeID != nil && *beforeID > 0 {
 		q += " AND ue.id < ?\n"
 		args = append(args, *beforeID)
 	}
-	q += "ORDER BY ue.id DESC\nLIMIT ?\n"
+	if afterID != nil && *afterID > 0 {
+		q += " AND ue.id > ?\n"
+		args = append(args, *afterID)
+		q += "ORDER BY ue.id ASC\nLIMIT ?\n"
+	} else {
+		q += "ORDER BY ue.id DESC\nLIMIT ?\n"
+	}
 	args = append(args, limit)
 
 	rows, err := s.db.QueryContext(ctx, q, args...)
@@ -1242,6 +1266,11 @@ FROM usage_events ue
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("遍历 usage_events 失败: %w", err)
+	}
+	if afterID != nil {
+		for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+			out[i], out[j] = out[j], out[i]
+		}
 	}
 	return out, nil
 }
@@ -1420,81 +1449,7 @@ func scanUsageEventWithUserRowWithMultipliers(rows *sql.Rows) (UsageEventWithUse
 }
 
 func (s *Store) ListUsageEventsByUserRangeFiltered(ctx context.Context, userID int64, since, until time.Time, limit int, beforeID, afterID *int64, idx UsageEventsIndexFlags, f UsageEventsFilters) ([]UsageEvent, error) {
-	if limit <= 0 || limit > 200 {
-		limit = 50
-	}
-	if beforeID != nil && afterID != nil {
-		return nil, errors.New("before_id 与 after_id 不能同时使用")
-	}
-
-	f.Key = strings.TrimSpace(f.Key)
-	f.Model = strings.TrimSpace(f.Model)
-
-	args := []any{userID, since, until, UsageStateReserved}
-	var joins string
-	var extraWhere strings.Builder
-	if idx.Key && f.Key != "" {
-		joins += "LEFT JOIN user_tokens ut ON ut.id=ue.token_id\n"
-		extraWhere.WriteString(" AND ut.user_id = ?\n")
-		args = append(args, userID)
-		extraWhere.WriteString(" AND ut.name IS NOT NULL AND TRIM(ut.name) <> '' AND LOWER(ut.name) LIKE LOWER(?)\n")
-		args = append(args, "%"+f.Key+"%")
-	}
-	if idx.Model && f.Model != "" {
-		extraWhere.WriteString(" AND ue.model IS NOT NULL AND TRIM(ue.model) <> '' AND LOWER(ue.model) LIKE LOWER(?)\n")
-		args = append(args, "%"+f.Model+"%")
-	}
-
-	q := `
-SELECT ue.id, ue.time, ue.request_id, ue.endpoint, ue.method,
-       ue.user_id, ue.subscription_id, ue.token_id,
-       ue.upstream_channel_id, ue.upstream_endpoint_id, ue.upstream_credential_id,
-       ue.state, ue.model,
-       ue.input_tokens, ue.cached_input_tokens, ue.output_tokens, ue.cached_output_tokens,
-       ue.reserved_usd, ue.committed_usd, ue.price_multiplier, ue.price_multiplier_group, ue.price_multiplier_payment, ue.price_multiplier_group_name, ue.reserve_expires_at,
-       ue.status_code, ue.latency_ms, ue.first_token_latency_ms, ue.error_class, ue.error_message,
-       ue.is_stream, ue.request_bytes, ue.response_bytes,
-       ue.created_at, ue.updated_at
-FROM usage_events ue
-` + joins + `WHERE ue.user_id=? AND ue.time >= ? AND ue.time < ? AND ue.state<>?
-` + extraWhere.String()
-
-	if beforeID != nil && *beforeID > 0 {
-		q += " AND ue.id < ?\n"
-		args = append(args, *beforeID)
-	}
-	if afterID != nil && *afterID > 0 {
-		q += " AND ue.id > ?\n"
-		args = append(args, *afterID)
-		q += "ORDER BY ue.id ASC\nLIMIT ?\n"
-	} else {
-		q += "ORDER BY ue.id DESC\nLIMIT ?\n"
-	}
-	args = append(args, limit)
-
-	rows, err := s.db.QueryContext(ctx, q, args...)
-	if err != nil {
-		return nil, fmt.Errorf("查询 usage_events 失败: %w", err)
-	}
-	defer rows.Close()
-
-	var out []UsageEvent
-	for rows.Next() {
-		e, err := scanUsageEventRowWithMultipliers(rows)
-		if err != nil {
-			return nil, fmt.Errorf("扫描 usage_events 失败: %w", err)
-		}
-		out = append(out, e)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("遍历 usage_events 失败: %w", err)
-	}
-	if afterID != nil {
-		for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-			out[i], out[j] = out[j], out[i]
-		}
-	}
-	return out, nil
+	return s.listUsageEventsByUserFiltered(ctx, userID, &since, &until, limit, beforeID, afterID, idx, f)
 }
 
 type UsageSumAllWithReservedInput struct {
