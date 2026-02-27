@@ -75,6 +75,15 @@ func (s *Syncer) CurrentSHA256() string {
 	return s.currentSHA256
 }
 
+func (s *Syncer) LastWrittenSHA256() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastWrittenSHA
+}
+
 func (s *Syncer) LastError() string {
 	if s == nil {
 		return ""

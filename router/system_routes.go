@@ -24,11 +24,13 @@ func setSystemRoutes(r *gin.Engine, opts Options) {
 		personalConfigEnabled := false
 		personalConfigPath := ""
 		personalConfigSHA := ""
+		personalConfigLastWrittenSHA := ""
 		personalConfigErr := ""
 		if opts.PersonalConfig != nil && opts.PersonalConfig.Enabled() {
 			personalConfigEnabled = true
 			personalConfigPath = opts.PersonalConfig.Path()
 			personalConfigSHA = opts.PersonalConfig.CurrentSHA256()
+			personalConfigLastWrittenSHA = opts.PersonalConfig.LastWrittenSHA256()
 			personalConfigErr = opts.PersonalConfig.LastError()
 		}
 		mode := "business"
@@ -39,12 +41,13 @@ func setSystemRoutes(r *gin.Engine, opts Options) {
 			"success": true,
 			"message": "",
 			"data": gin.H{
-				"mode":                  mode,
-				"personal_mode_key_set": personalModeKeySet,
-				"personal_config_enabled":    personalConfigEnabled,
-				"personal_config_path":       personalConfigPath,
-				"personal_config_sha256":     personalConfigSHA,
-				"personal_config_last_error": personalConfigErr,
+				"mode":                                mode,
+				"personal_mode_key_set":               personalModeKeySet,
+				"personal_config_enabled":             personalConfigEnabled,
+				"personal_config_path":                personalConfigPath,
+				"personal_config_sha256":              personalConfigSHA,
+				"personal_config_last_written_sha256": personalConfigLastWrittenSHA,
+				"personal_config_last_error":          personalConfigErr,
 			},
 		})
 	})

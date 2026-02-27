@@ -17,6 +17,7 @@ func setAdminMCPAPIRoutes(r gin.IRoutes, opts Options) {
 	r.GET("/mcp", adminMCPGetHandler(opts))
 	r.GET("/mcp/scan", adminMCPScanHandler(opts))
 	r.POST("/mcp/import", adminMCPImportHandler(opts))
+	r.POST("/mcp/parse", adminMCPParseHandler(opts))
 	r.POST("/mcp/delete", adminMCPDeleteHandler(opts))
 	r.PUT("/mcp", adminMCPPutHandler(opts))
 	r.POST("/mcp/apply", adminMCPApplyHandler(opts))
@@ -48,6 +49,11 @@ type adminMCPImportReq struct {
 	Mode       string `json:"mode"`
 	ApplyAfter bool   `json:"apply_after"`
 	Force      *bool  `json:"force"`
+}
+
+type adminMCPParseReq struct {
+	Source  string `json:"source"`
+	Content string `json:"content"`
 }
 
 type adminMCPDeleteReq struct {
@@ -260,6 +266,50 @@ func adminMCPImportHandler(opts Options) gin.HandlerFunc {
 					"count":  scan.ServerCount,
 				},
 				"apply_results": applyResults,
+			},
+		})
+	}
+}
+
+func adminMCPParseHandler(opts Options) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req adminMCPParseReq
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
+			return
+		}
+		source := strings.TrimSpace(strings.ToLower(req.Source))
+		if source == "" {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "source 不能为空"})
+			return
+		}
+		if source != "codex" && source != "claude" && source != "gemini" && source != "realms" {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "不支持的 source"})
+			return
+		}
+		content := strings.TrimSpace(req.Content)
+		if content == "" {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "content 不能为空"})
+			return
+		}
+
+		storeV2, err := mcp.ParseTargetContentToStoreV2(source, content)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "解析失败: " + err.Error()})
+			return
+		}
+		outJSON, err := mcp.PrettyStoreV2JSON(storeV2)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "解析失败: " + err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data": gin.H{
+				"store_json":   outJSON,
+				"server_count": len(storeV2.Servers),
+				"store":        storeV2,
 			},
 		})
 	}

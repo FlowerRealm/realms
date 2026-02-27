@@ -123,6 +123,22 @@ export async function scanAdminMcp() {
   return res.data;
 }
 
+export type ParseAdminMcpRequest = {
+  source: 'codex' | 'claude' | 'gemini' | 'realms';
+  content: string;
+};
+
+export type ParseAdminMcpResponse = {
+  store?: McpStoreV2;
+  store_json?: string;
+  server_count?: number;
+};
+
+export async function parseAdminMcp(req: ParseAdminMcpRequest) {
+  const res = await api.post<APIResponse<ParseAdminMcpResponse>>('/api/admin/mcp/parse', req);
+  return res.data;
+}
+
 export type ImportAdminMcpRequest = {
   source: 'codex' | 'claude' | 'gemini';
   mode: 'merge' | 'replace';

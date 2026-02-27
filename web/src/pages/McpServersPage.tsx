@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 
-import { deleteAdminMcp, getAdminMcp, updateAdminMcp, scanAdminMcp, type AdminMcpApplyResult, type McpServerV2, type McpStoreV2 } from '../api/admin/mcp';
+import { deleteAdminMcp, getAdminMcp, updateAdminMcp, scanAdminMcp, parseAdminMcp, type AdminMcpApplyResult, type McpServerV2, type McpStoreV2 } from '../api/admin/mcp';
 import { useAuth } from '../auth/AuthContext';
 import { BootstrapModal } from '../components/BootstrapModal';
 import { closeModalById } from '../components/modal';
@@ -9,6 +9,8 @@ import { SegmentedFrame } from '../components/SegmentedFrame';
 
 type TargetKey = 'codex' | 'claude' | 'gemini';
 type McpType = 'stdio' | 'http' | 'sse';
+type ImportSource = TargetKey | 'realms';
+type ImportPick = 'keep' | 'imported';
 
 type Row = {
   id: string;
@@ -193,6 +195,7 @@ export function McpServersPage() {
   const { user, loading: authLoading } = useAuth();
   const isRoot = user?.role === 'root';
   const isReady = !authLoading;
+  const isPersonalBuild = import.meta.env.MODE === 'personal';
 
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
@@ -226,6 +229,13 @@ export function McpServersPage() {
 
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [conflictChoice, setConflictChoice] = useState<Record<string, 'codex' | 'claude' | 'gemini' | 'desired'>>({});
+
+  const [createMode, setCreateMode] = useState<'manual' | 'import'>('import');
+  const [importSource, setImportSource] = useState<ImportSource>('claude');
+  const [importContent, setImportContent] = useState('');
+  const [importPending, setImportPending] = useState<null | { desired: Record<string, McpServerV2>; imported: Record<string, McpServerV2> }>(null);
+  const [importConflicts, setImportConflicts] = useState<string[]>([]);
+  const [importConflictChoice, setImportConflictChoice] = useState<Record<string, ImportPick>>({});
 
   useEffect(() => {
     desiredServersRef.current = desiredServers || {};
@@ -504,6 +514,9 @@ export function McpServersPage() {
   function openCreate() {
     setEditing(null);
     setForm(initForm(null));
+    setCreateMode('import');
+    setImportSource('claude');
+    setImportContent('');
     showModal('mcpEditModal');
   }
 
@@ -600,6 +613,89 @@ export function McpServersPage() {
     next[id] = server;
     closeModalById('mcpEditModal');
     void saveDesired(next);
+  }
+
+  function computeImportConflictIDs(desired: Record<string, McpServerV2>, imported: Record<string, McpServerV2>): string[] {
+    const out: string[] = [];
+    for (const [id, sv] of Object.entries(imported || {})) {
+      const cur = desired?.[id];
+      if (!cur) continue;
+      if (!equalSpec(cur, sv)) out.push(id);
+    }
+    return out.sort((a, b) => a.localeCompare(b));
+  }
+
+  function buildNextDesiredFromImport(p: NonNullable<typeof importPending>, choices: Record<string, ImportPick>): Record<string, McpServerV2> {
+    const conflictIDs = computeImportConflictIDs(p.desired, p.imported);
+    const conflictSet = new Set(conflictIDs);
+
+    const out: Record<string, McpServerV2> = { ...(p.desired || {}) };
+    for (const [id, sv] of Object.entries(p.imported || {})) {
+      if (!conflictSet.has(id)) out[id] = sv;
+    }
+    for (const id of conflictIDs) {
+      const pick = choices[id];
+      if (pick === 'keep') {
+        if (p.desired[id]) out[id] = p.desired[id];
+      } else if (pick === 'imported') {
+        if (p.imported[id]) out[id] = p.imported[id];
+      }
+    }
+    return out;
+  }
+
+  const importConfirmDisabled = useMemo(() => {
+    if (!importPending) return true;
+    for (const id of importConflicts) {
+      if (!importConflictChoice[id]) return true;
+    }
+    return false;
+  }, [importPending, importConflicts, importConflictChoice]);
+
+  async function startImport() {
+    const content = (importContent || '').trim();
+    if (!content) {
+      setErr('导入内容不能为空');
+      return;
+    }
+    setErr('');
+    setNotice('');
+    setSaving(true);
+    try {
+      const res = await parseAdminMcp({ source: importSource, content });
+      if (!res.success) throw new Error(res.message || '解析失败');
+      const imported = ((res.data?.store?.servers || {}) as Record<string, McpServerV2>) || {};
+      const desired = desiredServersRef.current || {};
+
+      const conflictIDs = computeImportConflictIDs(desired, imported);
+      if (conflictIDs.length > 0) {
+        setImportPending({ desired, imported });
+        setImportConflicts(conflictIDs);
+        setImportConflictChoice({});
+        closeModalById('mcpEditModal');
+        showModal('mcpImportConflictModal');
+        return;
+      }
+
+      const next = { ...(desired || {}), ...(imported || {}) };
+      closeModalById('mcpEditModal');
+      await saveDesired(next);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '解析失败');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function confirmImportConflicts() {
+    if (!importPending) return;
+    if (importConfirmDisabled) return;
+    const next = buildNextDesiredFromImport(importPending, importConflictChoice);
+    closeModalById('mcpImportConflictModal');
+    setImportPending(null);
+    setImportConflicts([]);
+    setImportConflictChoice({});
+    await saveDesired(next);
   }
 
   if (!isReady) return null;
@@ -920,17 +1016,86 @@ export function McpServersPage() {
             <button type="button" className="btn btn-light" data-bs-dismiss="modal">
               取消
             </button>
-            <button type="button" className="btn btn-primary px-4" disabled={saving} onClick={() => saveFormToDesired()}>
-              保存并生效
-            </button>
+            {isPersonalBuild && !editing && createMode === 'import' ? (
+              <button type="button" className="btn btn-primary px-4" disabled={saving} onClick={() => void startImport()}>
+                导入并生效
+              </button>
+            ) : (
+              <button type="button" className="btn btn-primary px-4" disabled={saving} onClick={() => saveFormToDesired()}>
+                保存并生效
+              </button>
+            )}
           </>
         }
         onHidden={() => {
           setEditing(null);
           setForm(initForm(null));
+          setCreateMode('import');
+          setImportSource('claude');
+          setImportContent('');
         }}
       >
-        <div className="row g-3">
+        {isPersonalBuild && !editing ? (
+          <div className="btn-group w-100 mb-3" role="group" aria-label="mcp-create-mode">
+            <button type="button" className={`btn ${createMode === 'manual' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setCreateMode('manual')}>
+              手动
+            </button>
+            <button type="button" className={`btn ${createMode === 'import' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setCreateMode('import')}>
+              导入
+            </button>
+          </div>
+        ) : null}
+
+        {isPersonalBuild && !editing && createMode === 'import' ? (
+          <div className="row g-3">
+            <div className="col-12 col-lg-6">
+              <label className="form-label">source</label>
+              <select className="form-select" value={importSource} onChange={(e) => setImportSource(e.target.value as ImportSource)} disabled={saving}>
+                <option value="claude">claude (JSON)</option>
+                <option value="codex">codex (TOML/JSON)</option>
+                <option value="gemini">gemini (JSON)</option>
+                <option value="realms">realms (StoreV2 JSON)</option>
+              </select>
+            </div>
+            <div className="col-12">
+              <label className="form-label">content</label>
+              <textarea
+                className="form-control font-monospace"
+                rows={12}
+                value={importContent}
+                onChange={(e) => setImportContent(e.target.value)}
+                disabled={saving}
+                placeholder={
+                  importSource === 'codex'
+                    ? `[mcp_servers.my-mcp]
+command = "npx"
+args = ["-y", "..."]`
+                    : importSource === 'realms'
+                      ? `{
+  "version": 2,
+  "servers": {
+    "my-mcp": {
+      "transport": "sse",
+      "http": { "url": "http://127.0.0.1:9999/sse" }
+    }
+  }
+}`
+                      : `{
+  "mcpServers": {
+    "my-mcp": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "..."]
+    }
+  }
+}`
+                }
+              />
+              <div className="form-text">默认合并（merge）。只导入 MCP servers；其它字段忽略。冲突会逐项要求你选择。</div>
+            </div>
+          </div>
+        ) : (
+          <div className="row g-3">
           <div className="col-12">
             <label className="form-label">id</label>
             <input className="form-control font-monospace" value={form.id} onChange={(e) => setForm((p) => ({ ...p, id: e.target.value }))} disabled={!!editing} placeholder="my-mcp" />
@@ -1118,6 +1283,78 @@ export function McpServersPage() {
               </div>
             </details>
           </div>
+        </div>
+        )}
+      </BootstrapModal>
+
+      <BootstrapModal
+        id="mcpImportConflictModal"
+        title="导入冲突：逐项选择要保留的版本"
+        dialogClassName="modal-lg modal-dialog-scrollable"
+        footer={
+          <>
+            <button type="button" className="btn btn-light" data-bs-dismiss="modal">
+              取消
+            </button>
+            <button type="button" className="btn btn-primary px-4" disabled={saving || importConfirmDisabled} onClick={() => void confirmImportConflicts()}>
+              确认并生效
+            </button>
+          </>
+        }
+        onHidden={() => {
+          setImportPending(null);
+          setImportConflicts([]);
+          setImportConflictChoice({});
+        }}
+      >
+        <div className="text-muted small mb-2">没有默认选项：每一项都必须明确选择。</div>
+        <div className="d-flex flex-column gap-3">
+          {importConflicts.map((id) => {
+            const desired = importPending?.desired?.[id];
+            const imported = importPending?.imported?.[id];
+            if (!desired || !imported) return null;
+            const pick = importConflictChoice[id] || '';
+            return (
+              <div key={id} className="border rounded-3 p-3">
+                <div className="d-flex justify-content-between align-items-center">
+                  <div className="fw-semibold font-monospace">{id}</div>
+                  <span className="badge bg-light text-danger border">conflict</span>
+                </div>
+                <div className="row g-2 mt-2">
+                  <div className="col-12 col-md-6">
+                    <label className="form-check d-flex gap-2 align-items-start">
+                      <input
+                        className="form-check-input mt-1"
+                        type="radio"
+                        name={`imp-${id}`}
+                        checked={pick === 'keep'}
+                        onChange={() => setImportConflictChoice((p) => ({ ...p, [id]: 'keep' }))}
+                      />
+                      <div className="flex-grow-1">
+                        <div className="fw-medium">保留现有</div>
+                        <div className="text-muted small font-monospace text-truncate">{mainSummary(desired)}</div>
+                      </div>
+                    </label>
+                  </div>
+                  <div className="col-12 col-md-6">
+                    <label className="form-check d-flex gap-2 align-items-start">
+                      <input
+                        className="form-check-input mt-1"
+                        type="radio"
+                        name={`imp-${id}`}
+                        checked={pick === 'imported'}
+                        onChange={() => setImportConflictChoice((p) => ({ ...p, [id]: 'imported' }))}
+                      />
+                      <div className="flex-grow-1">
+                        <div className="fw-medium">使用导入</div>
+                        <div className="text-muted small font-monospace text-truncate">{mainSummary(imported)}</div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </BootstrapModal>
     </div>
