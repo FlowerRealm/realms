@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation, useNavigate, useOutletContext } from 'reac
 
 import { useAuth } from '../auth/AuthContext';
 import { SegmentedFrame } from '../components/SegmentedFrame';
+import { formatAuthError, type PageError } from '../format/authError';
 import type { PublicLayoutContext } from '../layout/PublicLayout';
 
 type LocationState = {
@@ -18,7 +19,7 @@ export function LoginPage() {
   const { allowOpenRegistration } = useOutletContext<PublicLayoutContext>();
 
   const [form, setForm] = useState({ login: '', password: '' });
-  const [err, setErr] = useState('');
+  const [err, setErr] = useState<PageError | null>(null);
 
   const notice = useMemo(() => {
     const state = location.state as LocationState | null;
@@ -26,11 +27,19 @@ export function LoginPage() {
     return v ? v : '';
   }, [location.state]);
 
+  const routedError = useMemo<PageError | null>(() => {
+    const state = location.state as LocationState | null;
+    const v = (state?.error || '').toString().trim();
+    return v ? formatAuthError('登录', v) : null;
+  }, [location.state]);
+
   const from = useMemo(() => {
     const state = location.state as LocationState | null;
     const next = (state?.from || '').toString().trim();
     return next || '/dashboard';
   }, [location.state]);
+
+  const effectiveError = err || routedError;
 
   if (user) {
     return <Navigate to="/dashboard" replace />;
@@ -48,21 +57,27 @@ export function LoginPage() {
             </div>
           ) : null}
 
-          {err ? (
+          {effectiveError ? (
             <div className="alert alert-danger py-2" role="alert">
-              <span className="me-1 material-symbols-rounded">warning</span> {err}
+              <span className="me-1 material-symbols-rounded">warning</span> {effectiveError.summary}
+              {effectiveError.detail ? (
+                <details className="mt-1">
+                  <summary className="small">详情</summary>
+                  <div className="small text-break">{effectiveError.detail}</div>
+                </details>
+              ) : null}
             </div>
           ) : null}
 
           <form
             onSubmit={async (e) => {
               e.preventDefault();
-              setErr('');
+              setErr(null);
               try {
                 await login(form.login, form.password);
                 navigate(from, { replace: true });
               } catch (e) {
-                setErr(e instanceof Error ? e.message : '登录失败');
+                setErr(formatAuthError('登录', e));
               }
             }}
           >
@@ -114,4 +129,3 @@ export function LoginPage() {
     </SegmentedFrame>
   );
 }
-

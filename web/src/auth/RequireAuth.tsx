@@ -4,10 +4,10 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, booting } = useAuth();
   const location = useLocation();
 
-  if (loading) {
+  if (booting) {
     return (
       <div className="container-fluid d-flex flex-column min-vh-100 p-0">
         <main className="flex-fill d-flex flex-column justify-content-center align-items-center">

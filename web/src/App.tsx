@@ -27,15 +27,15 @@ import { OAuthAuthorizePage } from './pages/OAuthAuthorizePage';
 import { UserGuidePage } from './pages/UserGuidePage';
 
 function HomeRedirect() {
-  const { user, loading } = useAuth();
-  if (loading) return null;
+  const { user, booting } = useAuth();
+  if (booting) return null;
   if (user) return <Navigate to="/dashboard" replace />;
   return <Navigate to="/login" replace state={{ from: '/dashboard' }} />;
 }
 
 export function App() {
-  const { loading } = useAuth();
-  if (loading) return null;
+  const { booting } = useAuth();
+  if (booting) return null;
 
   return (
     <Routes>

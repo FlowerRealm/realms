@@ -1,13 +1,20 @@
-import { useState } from 'react';
-import { Link, Navigate, useNavigate, useOutletContext } from 'react-router-dom';
+import { useMemo, useState } from 'react';
+import { Link, Navigate, useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 
 import { useAuth } from '../auth/AuthContext';
 import { SegmentedFrame } from '../components/SegmentedFrame';
+import { formatAuthError, type PageError } from '../format/authError';
 import type { PublicLayoutContext } from '../layout/PublicLayout';
+
+type LocationState = {
+  notice?: string;
+  error?: string;
+};
 
 export function RegisterPage() {
   const { user, register, loading } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const { allowOpenRegistration, emailVerificationEnabled } = useOutletContext<PublicLayoutContext>();
 
   const [form, setForm] = useState({
@@ -16,9 +23,17 @@ export function RegisterPage() {
     password: '',
     verificationCode: '',
   });
-  const [err, setErr] = useState('');
+  const [err, setErr] = useState<PageError | null>(null);
   const [notice, setNotice] = useState('');
   const [sendingCode, setSendingCode] = useState(false);
+
+  const routedError = useMemo<PageError | null>(() => {
+    const state = location.state as LocationState | null;
+    const v = (state?.error || '').toString().trim();
+    return v ? formatAuthError('注册', v) : null;
+  }, [location.state]);
+
+  const effectiveError = err || routedError;
 
   if (user) {
     return <Navigate to="/dashboard" replace />;
@@ -36,9 +51,15 @@ export function RegisterPage() {
             </div>
           ) : null}
 
-          {err ? (
+          {effectiveError ? (
             <div className="alert alert-danger py-2" role="alert">
-              <span className="me-1 material-symbols-rounded">warning</span> {err}
+              <span className="me-1 material-symbols-rounded">warning</span> {effectiveError.summary}
+              {effectiveError.detail ? (
+                <details className="mt-1">
+                  <summary className="small">详情</summary>
+                  <div className="small text-break">{effectiveError.detail}</div>
+                </details>
+              ) : null}
             </div>
           ) : null}
 
@@ -51,13 +72,13 @@ export function RegisterPage() {
           <form
             onSubmit={async (e) => {
               e.preventDefault();
-              setErr('');
+              setErr(null);
               setNotice('');
               try {
                 await register(form.email.trim(), form.username.trim(), form.password, form.verificationCode.trim() || undefined);
                 navigate('/dashboard', { replace: true });
               } catch (e) {
-                setErr(e instanceof Error ? e.message : '注册失败');
+                setErr(formatAuthError('注册', e));
               }
             }}
           >
@@ -113,11 +134,11 @@ export function RegisterPage() {
                   className="btn btn-outline-secondary"
                   disabled={!allowOpenRegistration || sendingCode}
                   onClick={async () => {
-                    setErr('');
+                    setErr(null);
                     setNotice('');
                     const email = form.email.trim().toLowerCase();
                     if (!email) {
-                      setErr('请先填写邮箱。');
+                      setErr(formatAuthError('注册', '请先填写邮箱。'));
                       return;
                     }
                     setSendingCode(true);
@@ -129,12 +150,12 @@ export function RegisterPage() {
                       });
                       if (!resp.ok) {
                         const txt = await resp.text();
-                        setErr((txt || '').trim() || '发送失败，请稍后重试。');
+                        setErr(formatAuthError('注册', (txt || '').trim() || '发送失败，请稍后重试。'));
                         return;
                       }
                       setNotice('验证码已发送，请查收邮箱（10 分钟内有效）。');
                     } catch {
-                      setErr('发送失败，请稍后重试。');
+                      setErr(formatAuthError('注册', '发送失败，请稍后重试。'));
                     } finally {
                       setSendingCode(false);
                     }
