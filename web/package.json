@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "npm run check:sri && tsc -b && vite build",
     "build:personal": "tsc -b && vite build --mode personal && node scripts/postbuild-personal.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
+    "check:sri": "node scripts/sri.mjs",
+    "fix:sri": "node scripts/sri.mjs --write",
     "test:playwright": "node scripts/playwright-smoke.mjs",
     "check:theme": "node scripts/check-theme-colors.js"
   },
