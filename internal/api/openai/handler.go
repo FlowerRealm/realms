@@ -176,8 +176,8 @@ func (h *Handler) finalizeClientDisconnect(r *http.Request, usageID int64, sel *
 	}
 	if usageID != 0 && h.quota != nil {
 		bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		_ = h.quota.Void(bookCtx, usageID)
-		cancel()
 	}
 	h.finalizeUsageEvent(r, usageID, sel, 0, "client_disconnect", "", time.Since(reqStart), 0, stream, reqBytes, 0)
 }
