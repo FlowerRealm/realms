@@ -29,8 +29,12 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	}
 	tmpName := tmp.Name()
 	defer func() {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
+		if tmp != nil {
+			_ = tmp.Close()
+		}
+		if tmpName != "" {
+			_ = os.Remove(tmpName)
+		}
 	}()
 
 	if perm != 0 {
@@ -46,10 +50,12 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temp file: %w", err)
 	}
+	tmp = nil
 
 	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("rename temp file: %w", err)
 	}
+	tmpName = ""
 
 	// Best-effort directory fsync (POSIX). Windows doesn't have a portable equivalent.
 	if runtime.GOOS != "windows" {
@@ -72,4 +78,3 @@ func readFileIfExists(path string) ([]byte, bool, error) {
 	}
 	return b, true, nil
 }
-

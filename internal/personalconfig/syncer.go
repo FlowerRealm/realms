@@ -294,9 +294,11 @@ func (s *Syncer) pollLoop() {
 				continue
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			_ = s.ApplyExternalChange(ctx)
-			cancel()
+			func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				_ = s.ApplyExternalChange(ctx)
+			}()
 		}
 	}
 }
