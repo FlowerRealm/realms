@@ -564,6 +564,75 @@ tr:hover .rlm-model-icon {
   content: none !important;
 }
 
+/* Usage filters: 高级筛选使用两列网格布局，但包含 col-12（响应式）会误触发 Row Stack Divider。 */
+.rlm-segment .rlm-usage-filter-panel .row > [class~='col-12']:not(:first-child) {
+  /* Keep Bootstrap gutter-y working; only override the Row Stack Divider's huge margin-top. */
+  margin-top: var(--bs-gutter-y, 0px) !important;
+}
+.rlm-segment .rlm-usage-filter-panel .row > [class~='col-12']:not(:first-child)::before {
+  content: none !important;
+}
+
+/* Usage filters dropdown: anchored to the trigger button. */
+.rlm-usage-filter-dropdown {
+  z-index: 30;
+  width: min(960px, calc(100vw - 2rem));
+  max-width: 960px;
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  overflow-x: hidden;
+}
+
+/* Usage filters dropdown: single-row layout on desktop. */
+.rlm-usage-filter-panel .rlm-usage-filter-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.rlm-usage-filter-panel .rlm-usage-filter-item {
+  flex: 1 1 180px;
+  min-width: 180px;
+}
+@media (min-width: 1200px) {
+  .rlm-usage-filter-panel .rlm-usage-filter-row {
+    flex-wrap: nowrap;
+  }
+}
+
+/* Usage filters: keep all input starts aligned by forcing a fixed prefix width. */
+.rlm-usage-filter-panel .rlm-usage-filter-prefix {
+  width: 84px;
+  flex: 0 0 84px;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  justify-content: flex-start;
+  overflow: hidden;
+}
+.rlm-usage-filter-panel .rlm-usage-filter-prefix .form-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Usage filters: make the prefix look like a real, light control (not a big grey slab). */
+.rlm-usage-filter-panel .input-group-text.rlm-usage-filter-prefix {
+  background: rgba(var(--rlm-heading-rgb), 0.03);
+  border-color: var(--rlm-border-soft);
+}
+
+/* Usage filters dropdown: slightly tighter padding (keep readable). */
+.rlm-usage-filter-dropdown .card-body.rlm-usage-filter-panel {
+  padding: 0.75rem !important;
+}
+
+/* Usage filters: disabled inputs should still look like inputs (not ugly grey blocks). */
+.rlm-usage-filter-panel .form-control:disabled,
+.rlm-usage-filter-panel .form-select:disabled {
+  background-color: var(--rlm-surface-1);
+  opacity: 0.68;
+}
+
 /* Interactive Element Transitions */
 .btn,
 .form-control,

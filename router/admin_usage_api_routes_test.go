@@ -242,6 +242,181 @@ func TestAdminUsagePage_EventIncludesFirstTokenLatencyAndTokensPerSecond(t *test
 	}
 }
 
+func TestAdminUsagePage_IndexFilters_UserKeyAndChannel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	rootID, err := st.CreateUser(ctx, "root@example.com", "root", pwHash, store.UserRoleRoot)
+	if err != nil {
+		t.Fatalf("CreateUser(root): %v", err)
+	}
+	aliceID, err := st.CreateUser(ctx, "alice@example.com", "alice", pwHash, store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser(alice): %v", err)
+	}
+
+	rootKeyName := "root-key"
+	rootTokenID, _, err := st.CreateUserToken(ctx, rootID, &rootKeyName, "tok_root")
+	if err != nil {
+		t.Fatalf("CreateUserToken(root): %v", err)
+	}
+	aliceKeyName := "alice-key"
+	aliceTokenID, _, err := st.CreateUserToken(ctx, aliceID, &aliceKeyName, "tok_alice")
+	if err != nil {
+		t.Fatalf("CreateUserToken(alice): %v", err)
+	}
+
+	ch1, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "channel-1", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel(ch1): %v", err)
+	}
+	ch2, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "channel-2", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel(ch2): %v", err)
+	}
+
+	createEvent := func(userID int64, tokenID int64, requestID string, chID int64, model string) {
+		usageID, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
+			RequestID:        requestID,
+			UserID:           userID,
+			TokenID:          tokenID,
+			Model:            &model,
+			ReservedUSD:      decimal.Zero,
+			ReserveExpiresAt: time.Now().Add(time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("ReserveUsage(%s): %v", requestID, err)
+		}
+		chRef := chID
+		if err := st.CommitUsage(ctx, store.CommitUsageInput{
+			UsageEventID:      usageID,
+			UpstreamChannelID: &chRef,
+			CommittedUSD:      decimal.Zero,
+		}); err != nil {
+			t.Fatalf("CommitUsage(%s): %v", requestID, err)
+		}
+		if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
+			UsageEventID:      usageID,
+			Endpoint:          "/v1/responses",
+			Method:            "POST",
+			StatusCode:        200,
+			UpstreamChannelID: &chRef,
+		}); err != nil {
+			t.Fatalf("FinalizeUsageEvent(%s): %v", requestID, err)
+		}
+	}
+
+	createEvent(rootID, rootTokenID, "req_filter_root_gpt", ch1, "gpt-5.2")
+	createEvent(aliceID, aliceTokenID, "req_filter_alice_gpt", ch2, "gpt-5.2")
+	createEvent(aliceID, aliceTokenID, "req_filter_alice_claude", ch2, "claude-3")
+
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+	cookieName := "realms_session"
+	sessionStore := cookie.NewStore([]byte("test-secret"))
+	sessionStore.Options(sessions.Options{
+		Path:     "/",
+		MaxAge:   2592000,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	engine.Use(sessions.Sessions(cookieName, sessionStore))
+
+	SetRouter(engine, Options{
+		Store:             st,
+		PersonalMode:      false,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
+
+	// login as root
+	loginBody, _ := json.Marshal(map[string]any{
+		"login":    "root@example.com",
+		"password": "password123",
+	})
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/user/login", bytes.NewReader(loginBody))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	sessionCookie := ""
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == cookieName {
+			sessionCookie = c.String()
+			break
+		}
+	}
+	if sessionCookie == "" {
+		t.Fatalf("expected session cookie %q", cookieName)
+	}
+
+	list := func(url string) []map[string]any {
+		req = httptest.NewRequest(http.MethodGet, url, nil)
+		req.Header.Set("Realms-User", strconv.FormatInt(rootID, 10))
+		req.Header.Set("Cookie", sessionCookie)
+		rr = httptest.NewRecorder()
+		engine.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("admin usage status=%d body=%s", rr.Code, rr.Body.String())
+		}
+		var got struct {
+			Success bool   `json:"success"`
+			Message string `json:"message"`
+			Data    struct {
+				Events []map[string]any `json:"events"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+			t.Fatalf("json.Unmarshal admin usage: %v", err)
+		}
+		if !got.Success {
+			t.Fatalf("admin usage expected success, got message=%q", got.Message)
+		}
+		return got.Data.Events
+	}
+
+	if events := list("http://example.com/api/admin/usage?index=user&q=alice"); len(events) != 2 {
+		t.Fatalf("expected 2 events for user=alice, got %d", len(events))
+	}
+	if events := list("http://example.com/api/admin/usage?index=key&q=root-key"); len(events) != 1 {
+		t.Fatalf("expected 1 event for key=root-key, got %d", len(events))
+	}
+	if events := list("http://example.com/api/admin/usage?index=channel&q=channel-2"); len(events) != 2 {
+		t.Fatalf("expected 2 events for channel-2, got %d", len(events))
+	}
+	if events := list("http://example.com/api/admin/usage?index=channel&q=999999"); len(events) != 0 {
+		t.Fatalf("expected 0 event for missing channel id, got %d", len(events))
+	}
+
+	events := list("http://example.com/api/admin/usage?index=user,key,channel,model&q_user=alice&q_key=alice-key&q_channel=channel-2&q_model=gpt")
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event for AND filters, got %d", len(events))
+	}
+	if rid, _ := events[0]["request_id"].(string); rid != "req_filter_alice_gpt" {
+		t.Fatalf("expected request_id=req_filter_alice_gpt, got %v", events[0]["request_id"])
+	}
+}
+
 func TestAdminUsagePage_UpstreamUnavailable_ShowsDetailedErrorMessage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

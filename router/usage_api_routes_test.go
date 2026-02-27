@@ -124,11 +124,11 @@ func TestUsageEvents_UserResponse_HidesUpstreamChannel(t *testing.T) {
 	})
 	engine.Use(sessions.Sessions(cookieName, sessionStore))
 
-		SetRouter(engine, Options{
-			Store:             st,
-			PersonalMode:      false,
-			FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
-		})
+	SetRouter(engine, Options{
+		Store:             st,
+		PersonalMode:      false,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
 
 	// login
 	loginBody, _ := json.Marshal(map[string]any{
@@ -199,6 +199,312 @@ func TestUsageEvents_UserResponse_HidesUpstreamChannel(t *testing.T) {
 	}
 	if v, ok := ev["error_message"]; !ok || v != "上游不可用" {
 		t.Fatalf("expected error_message to be masked as %q, got=%v (present=%v)", "上游不可用", v, ok)
+	}
+}
+
+func TestUsageEvents_User_IndexKeyFiltersByTokenName(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	userID, err := st.CreateUser(ctx, "u@example.com", "u", pwHash, store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	tokenName := "key-abc"
+	tokenID, _, err := st.CreateUserToken(ctx, userID, &tokenName, "sk-test-123")
+	if err != nil {
+		t.Fatalf("CreateUserToken: %v", err)
+	}
+	otherName := "key-xyz"
+	otherID, _, err := st.CreateUserToken(ctx, userID, &otherName, "sk-test-456")
+	if err != nil {
+		t.Fatalf("CreateUserToken(other): %v", err)
+	}
+
+	usageID1, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
+		RequestID:        "req_key_filter_1",
+		UserID:           userID,
+		TokenID:          tokenID,
+		ReservedUSD:      decimal.Zero,
+		ReserveExpiresAt: time.Now().UTC().Add(1 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("ReserveUsage(1): %v", err)
+	}
+	if err := st.CommitUsage(ctx, store.CommitUsageInput{
+		UsageEventID: usageID1,
+		CommittedUSD: decimal.Zero,
+	}); err != nil {
+		t.Fatalf("CommitUsage(1): %v", err)
+	}
+	if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
+		UsageEventID: usageID1,
+		Endpoint:     "/v1/responses",
+		Method:       "POST",
+		StatusCode:   200,
+	}); err != nil {
+		t.Fatalf("FinalizeUsageEvent(1): %v", err)
+	}
+
+	usageID2, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
+		RequestID:        "req_key_filter_2",
+		UserID:           userID,
+		TokenID:          otherID,
+		ReservedUSD:      decimal.Zero,
+		ReserveExpiresAt: time.Now().UTC().Add(1 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("ReserveUsage(2): %v", err)
+	}
+	if err := st.CommitUsage(ctx, store.CommitUsageInput{
+		UsageEventID: usageID2,
+		CommittedUSD: decimal.Zero,
+	}); err != nil {
+		t.Fatalf("CommitUsage(2): %v", err)
+	}
+	if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
+		UsageEventID: usageID2,
+		Endpoint:     "/v1/responses",
+		Method:       "POST",
+		StatusCode:   200,
+	}); err != nil {
+		t.Fatalf("FinalizeUsageEvent(2): %v", err)
+	}
+
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+
+	cookieName := "realms_session"
+	sessionStore := cookie.NewStore([]byte("test-secret"))
+	sessionStore.Options(sessions.Options{
+		Path:     "/",
+		MaxAge:   2592000,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	engine.Use(sessions.Sessions(cookieName, sessionStore))
+
+	SetRouter(engine, Options{
+		Store:             st,
+		PersonalMode:      false,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
+
+	// login
+	loginBody, _ := json.Marshal(map[string]any{
+		"login":    "u@example.com",
+		"password": "password123",
+	})
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/user/login", bytes.NewReader(loginBody))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	sessionCookie := ""
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == cookieName {
+			sessionCookie = c.String()
+			break
+		}
+	}
+	if sessionCookie == "" {
+		t.Fatalf("expected session cookie %q", cookieName)
+	}
+
+	list := func(url string) int {
+		req = httptest.NewRequest(http.MethodGet, url, nil)
+		req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+		req.Header.Set("Cookie", sessionCookie)
+		rr = httptest.NewRecorder()
+		engine.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("usage events status=%d body=%s", rr.Code, rr.Body.String())
+		}
+		var got struct {
+			Success bool   `json:"success"`
+			Message string `json:"message"`
+			Data    struct {
+				Events []map[string]any `json:"events"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+			t.Fatalf("json.Unmarshal usage events: %v", err)
+		}
+		if !got.Success {
+			t.Fatalf("usage events expected success, got message=%q", got.Message)
+		}
+		return len(got.Data.Events)
+	}
+
+	if n := list("http://example.com/api/usage/events?index=key&q=abc"); n != 1 {
+		t.Fatalf("expected 1 event for q=abc, got %d", n)
+	}
+	if n := list("http://example.com/api/usage/events?index=key&q=does-not-exist"); n != 0 {
+		t.Fatalf("expected 0 event for missing key, got %d", n)
+	}
+}
+
+func TestUsageEvents_User_IndexKeyAndModel_AND(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	userID, err := st.CreateUser(ctx, "u@example.com", "u", pwHash, store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	keyProd := "prod-key"
+	tokenProdID, _, err := st.CreateUserToken(ctx, userID, &keyProd, "tok_prod")
+	if err != nil {
+		t.Fatalf("CreateUserToken(prod): %v", err)
+	}
+	keyOther := "other-key"
+	tokenOtherID, _, err := st.CreateUserToken(ctx, userID, &keyOther, "tok_other")
+	if err != nil {
+		t.Fatalf("CreateUserToken(other): %v", err)
+	}
+
+	makeEvent := func(reqID string, tokenID int64, model string) {
+		usageID, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
+			RequestID:        reqID,
+			UserID:           userID,
+			TokenID:          tokenID,
+			Model:            &model,
+			ReservedUSD:      decimal.Zero,
+			ReserveExpiresAt: time.Now().UTC().Add(1 * time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("ReserveUsage(%s): %v", reqID, err)
+		}
+		if err := st.CommitUsage(ctx, store.CommitUsageInput{
+			UsageEventID: usageID,
+			CommittedUSD: decimal.Zero,
+		}); err != nil {
+			t.Fatalf("CommitUsage(%s): %v", reqID, err)
+		}
+		if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
+			UsageEventID: usageID,
+			Endpoint:     "/v1/responses",
+			Method:       "POST",
+			StatusCode:   200,
+		}); err != nil {
+			t.Fatalf("FinalizeUsageEvent(%s): %v", reqID, err)
+		}
+	}
+
+	makeEvent("req_prod_gpt", tokenProdID, "gpt-5.2")
+	makeEvent("req_prod_claude", tokenProdID, "claude-3")
+	makeEvent("req_other_gpt", tokenOtherID, "gpt-5.2")
+
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+
+	cookieName := "realms_session"
+	sessionStore := cookie.NewStore([]byte("test-secret"))
+	sessionStore.Options(sessions.Options{
+		Path:     "/",
+		MaxAge:   2592000,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	engine.Use(sessions.Sessions(cookieName, sessionStore))
+
+	SetRouter(engine, Options{
+		Store:             st,
+		PersonalMode:      false,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
+
+	loginBody, _ := json.Marshal(map[string]any{
+		"login":    "u@example.com",
+		"password": "password123",
+	})
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/user/login", bytes.NewReader(loginBody))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	sessionCookie := ""
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == cookieName {
+			sessionCookie = c.String()
+			break
+		}
+	}
+	if sessionCookie == "" {
+		t.Fatalf("expected session cookie %q", cookieName)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/usage/events?index=key,model&q_key=prod&q_model=gpt", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("usage events status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Events []map[string]any `json:"events"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal usage events: %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("usage events expected success, got message=%q", got.Message)
+	}
+	if len(got.Data.Events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(got.Data.Events))
+	}
+	if rid, _ := got.Data.Events[0]["request_id"].(string); rid != "req_prod_gpt" {
+		t.Fatalf("expected request_id=req_prod_gpt, got %v", got.Data.Events[0]["request_id"])
 	}
 }
 
@@ -281,11 +587,11 @@ func TestUsageTimeSeries_UserResponse_ReturnsPoints(t *testing.T) {
 	})
 	engine.Use(sessions.Sessions(cookieName, sessionStore))
 
-		SetRouter(engine, Options{
-			Store:             st,
-			PersonalMode:      false,
-			FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
-		})
+	SetRouter(engine, Options{
+		Store:             st,
+		PersonalMode:      false,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
 
 	loginBody, _ := json.Marshal(map[string]any{
 		"login":    "series@example.com",
@@ -437,13 +743,13 @@ func TestUsageEvents_TokenFilter_WorksAndChecksOwnership(t *testing.T) {
 			t.Fatalf("CommitUsage(%s): %v", reqID, err)
 		}
 		if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
-			UsageEventID: usageEventID,
-			Endpoint:     "/v1/responses",
-			Method:       "POST",
-			StatusCode:   200,
-			LatencyMS:    10,
-			IsStream:     false,
-			RequestBytes: 123,
+			UsageEventID:  usageEventID,
+			Endpoint:      "/v1/responses",
+			Method:        "POST",
+			StatusCode:    200,
+			LatencyMS:     10,
+			IsStream:      false,
+			RequestBytes:  123,
 			ResponseBytes: 456,
 		}); err != nil {
 			t.Fatalf("FinalizeUsageEvent(%s): %v", reqID, err)
@@ -467,11 +773,11 @@ func TestUsageEvents_TokenFilter_WorksAndChecksOwnership(t *testing.T) {
 	})
 	engine.Use(sessions.Sessions(cookieName, sessionStore))
 
-		SetRouter(engine, Options{
-			Store:             st,
-			PersonalMode:      false,
-			FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
-		})
+	SetRouter(engine, Options{
+		Store:             st,
+		PersonalMode:      false,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
 
 	// login (user1)
 	loginBody, _ := json.Marshal(map[string]any{
@@ -621,13 +927,13 @@ func TestUsageWindows_TokenFilter_WorksAndChecksOwnership(t *testing.T) {
 			t.Fatalf("CommitUsage(%s): %v", reqID, err)
 		}
 		if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
-			UsageEventID: usageEventID,
-			Endpoint:     "/v1/responses",
-			Method:       "POST",
-			StatusCode:   200,
-			LatencyMS:    10,
-			IsStream:     false,
-			RequestBytes: 123,
+			UsageEventID:  usageEventID,
+			Endpoint:      "/v1/responses",
+			Method:        "POST",
+			StatusCode:    200,
+			LatencyMS:     10,
+			IsStream:      false,
+			RequestBytes:  123,
 			ResponseBytes: 456,
 		}); err != nil {
 			t.Fatalf("FinalizeUsageEvent(%s): %v", reqID, err)
@@ -649,11 +955,11 @@ func TestUsageWindows_TokenFilter_WorksAndChecksOwnership(t *testing.T) {
 	})
 	engine.Use(sessions.Sessions(cookieName, sessionStore))
 
-		SetRouter(engine, Options{
-			Store:             st,
-			PersonalMode:      false,
-			FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
-		})
+	SetRouter(engine, Options{
+		Store:             st,
+		PersonalMode:      false,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
 
 	// login (user1)
 	loginBody, _ := json.Marshal(map[string]any{
@@ -811,13 +1117,13 @@ func TestV1Usage_TokenAuth_IsSingleKeyAndCannotAccessOtherTokenEvents(t *testing
 			t.Fatalf("CommitUsage(%s): %v", reqID, err)
 		}
 		if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
-			UsageEventID: usageEventID,
-			Endpoint:     "/v1/responses",
-			Method:       "POST",
-			StatusCode:   200,
-			LatencyMS:    10,
-			IsStream:     false,
-			RequestBytes: 123,
+			UsageEventID:  usageEventID,
+			Endpoint:      "/v1/responses",
+			Method:        "POST",
+			StatusCode:    200,
+			LatencyMS:     10,
+			IsStream:      false,
+			RequestBytes:  123,
 			ResponseBytes: 456,
 		}); err != nil {
 			t.Fatalf("FinalizeUsageEvent(%s): %v", reqID, err)
@@ -830,11 +1136,11 @@ func TestV1Usage_TokenAuth_IsSingleKeyAndCannotAccessOtherTokenEvents(t *testing
 
 	engine := gin.New()
 	engine.Use(gin.Recovery())
-		SetRouter(engine, Options{
-			Store:             st,
-			PersonalMode:      false,
-			FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
-		})
+	SetRouter(engine, Options{
+		Store:             st,
+		PersonalMode:      false,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
 
 	// list /v1/usage/events with token1 should only see token1 events
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/v1/usage/events", nil)
@@ -995,11 +1301,11 @@ func TestUsageEventDetail_UserResponse_IncludesPricingBreakdown(t *testing.T) {
 	})
 	engine.Use(sessions.Sessions(cookieName, sessionStore))
 
-		SetRouter(engine, Options{
-			Store:             st,
-			PersonalMode:      false,
-			FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
-		})
+	SetRouter(engine, Options{
+		Store:             st,
+		PersonalMode:      false,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
 
 	loginBody, _ := json.Marshal(map[string]any{
 		"login":    "detail@example.com",

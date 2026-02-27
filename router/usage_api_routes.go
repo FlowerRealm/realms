@@ -297,6 +297,31 @@ func usageEventsHandler(opts Options) gin.HandlerFunc {
 		endStr := strings.TrimSpace(c.Query("end"))
 		useRange := startStr != "" || endStr != ""
 
+		indexRaw := strings.TrimSpace(strings.ToLower(c.Query("index")))
+		q := strings.TrimSpace(c.Query("q"))
+		qKey := strings.TrimSpace(c.Query("q_key"))
+		qModel := strings.TrimSpace(c.Query("q_model"))
+		var idx store.UsageEventsIndexFlags
+		for _, part := range strings.Split(indexRaw, ",") {
+			p := strings.TrimSpace(part)
+			switch p {
+			case string(store.UsageEventsIndexKey):
+				idx.Key = true
+			case string(store.UsageEventsIndexModel):
+				idx.Model = true
+			}
+		}
+		filters := store.UsageEventsFilters{
+			Key:   qKey,
+			Model: qModel,
+		}
+		if idx.Key && strings.TrimSpace(filters.Key) == "" {
+			filters.Key = q
+		}
+		if idx.Model && strings.TrimSpace(filters.Model) == "" {
+			filters.Model = q
+		}
+
 		var events []store.UsageEvent
 		var err error
 		if useRange {
@@ -314,13 +339,13 @@ func usageEventsHandler(opts Options) gin.HandlerFunc {
 			if tokenID > 0 {
 				events, err = opts.Store.ListUsageEventsByTokenRange(c.Request.Context(), tokenID, since, until, limit, beforeID, nil)
 			} else {
-				events, err = opts.Store.ListUsageEventsByUserRange(c.Request.Context(), userID, since, until, limit, beforeID, nil)
+				events, err = opts.Store.ListUsageEventsByUserRangeFiltered(c.Request.Context(), userID, since, until, limit, beforeID, nil, idx, filters)
 			}
 		} else {
 			if tokenID > 0 {
 				events, err = opts.Store.ListUsageEventsByToken(c.Request.Context(), tokenID, limit, beforeID)
 			} else {
-				events, err = opts.Store.ListUsageEventsByUser(c.Request.Context(), userID, limit, beforeID)
+				events, err = opts.Store.ListUsageEventsByUserFiltered(c.Request.Context(), userID, limit, beforeID, idx, filters)
 			}
 		}
 		if err != nil {

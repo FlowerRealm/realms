@@ -70,6 +70,14 @@ export function UsageAdminPage() {
   const [limit, setLimit] = useState(50);
   const [beforeID, setBeforeID] = useState<number | undefined>(undefined);
   const [afterID, setAfterID] = useState<number | undefined>(undefined);
+  const [advOpen, setAdvOpen] = useState(false);
+  const [filterUser, setFilterUser] = useState('');
+  const [filterKey, setFilterKey] = useState('');
+  const [filterChannel, setFilterChannel] = useState('');
+  const [filterModel, setFilterModel] = useState('');
+  const advBtnRef = useRef<HTMLButtonElement | null>(null);
+  const advPanelRef = useRef<HTMLDivElement | null>(null);
+  const [advPos, setAdvPos] = useState<{ left: number; top: number } | null>(null);
 
   const [expandedID, setExpandedID] = useState<number | null>(null);
   const [detailByEventID, setDetailByEventID] = useState<Record<number, UsageEventDetail>>({});
@@ -106,7 +114,36 @@ export function UsageAdminPage() {
       const startValue = start.trim();
       const endValue = end.trim();
       const allTimeActive = allTime && !startValue && !endValue;
-      const params: { start?: string; end?: string; all_time?: boolean; limit?: number; before_id?: number; after_id?: number } = { limit };
+      const indexParts: string[] = [];
+      const q_user = filterUser.trim();
+      const q_key = filterKey.trim();
+      const q_channel = filterChannel.trim();
+      const q_model = filterModel.trim();
+      if (q_user) indexParts.push('user');
+      if (q_key) indexParts.push('key');
+      if (q_channel) indexParts.push('channel');
+      if (q_model) indexParts.push('model');
+      const index = indexParts.length ? indexParts.join(',') : undefined;
+      const params: {
+        start?: string;
+        end?: string;
+        all_time?: boolean;
+        limit?: number;
+        before_id?: number;
+        after_id?: number;
+        index?: string;
+        q_user?: string;
+        q_key?: string;
+        q_channel?: string;
+        q_model?: string;
+      } = {
+        limit,
+        index,
+        q_user: q_user || undefined,
+        q_key: q_key || undefined,
+        q_channel: q_channel || undefined,
+        q_model: q_model || undefined,
+      };
       if (allTimeActive) params.all_time = true;
       else {
         params.start = startValue || undefined;
@@ -136,6 +173,60 @@ export function UsageAdminPage() {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!advOpen) return;
+    const reposition = () => {
+      const btn = advBtnRef.current;
+      const panel = advPanelRef.current;
+      if (!btn || !panel) return;
+      const btnRect = btn.getBoundingClientRect();
+      const panelRect = panel.getBoundingClientRect();
+      const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+      const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+      const margin = 12;
+
+      const panelW = Math.max(0, panelRect.width);
+      const panelH = Math.max(0, panelRect.height);
+
+      const maxLeft = Math.max(margin, vw - panelW - margin);
+      const left = Math.min(Math.max(margin, btnRect.left), maxLeft);
+
+      const maxTop = Math.max(margin, vh - panelH - margin);
+      const top = Math.min(Math.max(margin, btnRect.bottom + 8), maxTop);
+
+      setAdvPos({ left, top });
+    };
+
+    const raf1 = requestAnimationFrame(() => {
+      reposition();
+      requestAnimationFrame(() => reposition());
+    });
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAdvOpen(false);
+    };
+    const onPointerDown = (e: MouseEvent | PointerEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (advPanelRef.current && advPanelRef.current.contains(target)) return;
+      if (advBtnRef.current && advBtnRef.current.contains(target)) return;
+      setAdvOpen(false);
+    };
+    const onResize = () => reposition();
+    const onScroll = () => reposition();
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('resize', onResize);
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('scroll', onScroll, true);
+      cancelAnimationFrame(raf1);
+    };
+  }, [advOpen]);
 
   const windowStats = data?.window;
   const topUsers = data?.top_users || [];
@@ -331,100 +422,209 @@ export function UsageAdminPage() {
             </div>
           ) : null}
 
-          <div className="d-flex flex-wrap align-items-center gap-2 mb-0 bg-white p-2 rounded-3 border-light shadow-sm" style={{ border: '1px solid #f1f3f5' }}>
-            <div className="d-flex align-items-center px-2">
-              <span className="small text-muted me-2" style={{ whiteSpace: 'nowrap', fontSize: '12px' }}>时间区间</span>
-              <DateRangePicker
-                start={start}
-                end={end}
-                onChange={(r) => {
-                  const isAll = !r.start.trim() && !r.end.trim();
-                  setAllTime(isAll);
-                  if (isAll) setDetailGranularity('day');
-                  setStart(r.start);
-                  setEnd(r.end);
-                  setBeforeID(undefined);
-                  setAfterID(undefined);
-                }}
-                loading={loading}
-              />
+          <div className="card border-0 shadow-sm mb-0">
+            <div className="card-body py-3 px-4">
+              <div className="d-flex flex-wrap align-items-end gap-3">
+                <div className="d-flex flex-wrap align-items-center gap-2">
+                  <div className="text-muted smaller fw-medium text-nowrap">时间区间</div>
+                  <DateRangePicker
+                    start={start}
+                    end={end}
+                    onChange={(r) => {
+                      const isAll = !r.start.trim() && !r.end.trim();
+                      setAllTime(isAll);
+                      if (isAll) setDetailGranularity('day');
+                      setStart(r.start);
+                      setEnd(r.end);
+                      setBeforeID(undefined);
+                      setAfterID(undefined);
+                    }}
+                    loading={loading}
+                  />
+                </div>
+
+                <div className="d-flex flex-wrap align-items-center gap-2">
+                  <div className="text-muted smaller fw-medium text-nowrap">显示条数</div>
+                  <SelectPicker
+                    value={limit}
+                    options={[
+                      { label: '20', value: 20 },
+                      { label: '50', value: 50 },
+                      { label: '100', value: 100 },
+                      { label: '200', value: 200 },
+                    ]}
+                    label="条"
+                    onChange={(val) => setLimit(val)}
+                  />
+                </div>
+
+                <div className="d-flex align-items-center gap-2">
+                  <div className="position-relative">
+                    <button
+                      ref={advBtnRef}
+                      type="button"
+                      className={`btn btn-sm ${advOpen ? 'btn-primary' : 'btn-outline-secondary'}`}
+                      onClick={() => setAdvOpen((v) => !v)}
+                      disabled={loading}
+                      data-testid="admin-usage-adv-toggle"
+                    >
+                      <span className="material-symbols-rounded me-1">tune</span>
+                      高级筛选
+                    </button>
+
+                    {advOpen ? (
+                      <div
+                        ref={advPanelRef}
+                        className="rlm-usage-filter-dropdown card shadow-sm"
+                        style={advPos ? { position: 'fixed', left: advPos.left, top: advPos.top } : { position: 'fixed', left: 12, top: 12 }}
+                      >
+                        <div className="card-body p-2 rlm-usage-filter-panel">
+                          <div className="rlm-usage-filter-row">
+                            <div className="rlm-usage-filter-item">
+                              <div className="input-group input-group-sm">
+                                <span className="input-group-text rlm-usage-filter-prefix">
+                                  <span className="form-label mb-0 smaller text-muted text-truncate" title="用户名/邮箱">
+                                    用户
+                                  </span>
+                                </span>
+                                <input
+                                  id="adminUsageFilterUserValue"
+                                  type="text"
+                                  className="form-control"
+                                  placeholder="输入用户名或邮箱"
+                                  value={filterUser}
+                                  onChange={(e) => {
+                                    setFilterUser(e.target.value || '');
+                                    setBeforeID(undefined);
+                                    setAfterID(undefined);
+                                  }}
+                                  disabled={loading}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="rlm-usage-filter-item">
+                              <div className="input-group input-group-sm">
+                                <span className="input-group-text rlm-usage-filter-prefix">
+                                  <span className="form-label mb-0 smaller text-muted text-truncate" title="Key 名称">
+                                    Key
+                                  </span>
+                                </span>
+                                <input
+                                  id="adminUsageFilterKeyValue"
+                                  type="text"
+                                  className="form-control"
+                                  placeholder="输入 Key 名称"
+                                  value={filterKey}
+                                  onChange={(e) => {
+                                    setFilterKey(e.target.value || '');
+                                    setBeforeID(undefined);
+                                    setAfterID(undefined);
+                                  }}
+                                  disabled={loading}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="rlm-usage-filter-item">
+                              <div className="input-group input-group-sm">
+                                <span className="input-group-text rlm-usage-filter-prefix">
+                                  <span className="form-label mb-0 smaller text-muted text-truncate" title="渠道(ID/名称)">
+                                    渠道
+                                  </span>
+                                </span>
+                                <input
+                                  id="adminUsageFilterChannelValue"
+                                  type="text"
+                                  className="form-control"
+                                  placeholder="输入渠道 ID 或名称"
+                                  value={filterChannel}
+                                  onChange={(e) => {
+                                    setFilterChannel(e.target.value || '');
+                                    setBeforeID(undefined);
+                                    setAfterID(undefined);
+                                  }}
+                                  disabled={loading}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="rlm-usage-filter-item">
+                              <div className="input-group input-group-sm">
+                                <span className="input-group-text rlm-usage-filter-prefix">
+                                  <span className="form-label mb-0 smaller text-muted text-truncate" title="模型">
+                                    模型
+                                  </span>
+                                </span>
+                                <input
+                                  id="adminUsageFilterModelValue"
+                                  type="text"
+                                  className="form-control"
+                                  placeholder="输入模型名"
+                                  value={filterModel}
+                                  onChange={(e) => {
+                                    setFilterModel(e.target.value || '');
+                                    setBeforeID(undefined);
+                                    setAfterID(undefined);
+                                  }}
+                                  disabled={loading}
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="d-flex justify-content-between align-items-center mt-2">
+                            <div className="text-muted smaller">多个条件同时启用时，按交集过滤（AND）。</div>
+                            <button type="button" className="btn btn-link btn-sm p-0" onClick={() => setAdvOpen(false)}>
+                              收起
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="ms-auto d-flex gap-2">
+                  <button
+                    className="btn btn-primary btn-sm"
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      setBeforeID(undefined);
+                      setAfterID(undefined);
+                      void refresh();
+                    }}
+                  >
+                    <span className="material-symbols-rounded me-1">refresh</span>
+                    更新
+                  </button>
+                  <button
+                    className="btn btn-light border btn-sm"
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      setStart('');
+                      setEnd('');
+                      setAllTime(false);
+                      setAdvOpen(false);
+                      setFilterUser('');
+                      setFilterKey('');
+                      setFilterChannel('');
+                      setFilterModel('');
+                      setBeforeID(undefined);
+                      setAfterID(undefined);
+                      void refresh();
+                    }}
+                  >
+                    重置
+                  </button>
+                </div>
+              </div>
             </div>
 
-            <div className="vr my-2" style={{ height: '16px', opacity: 0.1 }}></div>
-
-            <div className="d-flex align-items-center px-2">
-              <span className="small text-muted me-2" style={{ whiteSpace: 'nowrap', fontSize: '12px' }}>显示条数</span>
-              <SelectPicker
-                value={limit}
-                options={[
-                  { label: '20', value: 20 },
-                  { label: '50', value: 50 },
-                  { label: '100', value: 100 },
-                  { label: '200', value: 200 },
-                ]}
-                label="条"
-                onChange={(val) => setLimit(val)}
-              />
-            </div>
-
-            <div className="ms-auto d-flex gap-2 pe-1">
-              <button
-                className="btn btn-sm"
-                style={{ 
-                  backgroundColor: '#326c52', 
-                  color: '#ffffff', 
-                  fontWeight: 500,
-                  height: '28px',
-                  fontSize: '12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  borderRadius: '4px',
-                  padding: '0 12px',
-                  transition: 'all 0.2s',
-                  border: 'none'
-                }}
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  setBeforeID(undefined);
-                  setAfterID(undefined);
-                  void refresh();
-                }}
-              >
-                <span className="material-symbols-rounded me-1" style={{ fontSize: '16px' }}>
-                  refresh
-                </span>
-                更新
-              </button>
-              <button
-                className="btn btn-sm"
-                style={{ 
-                  height: '28px',
-                  fontSize: '12px',
-                  border: '1px solid #e9ecef',
-                  borderRadius: '4px',
-                  backgroundColor: '#ffffff',
-                  color: '#6c757d',
-                  padding: '0 12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  transition: 'all 0.2s',
-                }}
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  setAllTime(false);
-                  setStart('');
-                  setEnd('');
-                  setBeforeID(undefined);
-                  setAfterID(undefined);
-                  void refresh();
-                }}
-              >
-                重置
-              </button>
-            </div>
           </div>
+
         </div>
 
       {loading ? (

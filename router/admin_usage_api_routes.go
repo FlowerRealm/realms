@@ -292,7 +292,46 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
-		events, err := opts.Store.ListUsageEventsWithUserRange(c.Request.Context(), since, until, limit, beforeID, afterID)
+		indexRaw := strings.TrimSpace(strings.ToLower(q.Get("index")))
+		query := strings.TrimSpace(q.Get("q"))
+		qUser := strings.TrimSpace(q.Get("q_user"))
+		qKey := strings.TrimSpace(q.Get("q_key"))
+		qChannel := strings.TrimSpace(q.Get("q_channel"))
+		qModel := strings.TrimSpace(q.Get("q_model"))
+		var idx store.UsageEventsIndexFlags
+		for _, part := range strings.Split(indexRaw, ",") {
+			p := strings.TrimSpace(part)
+			switch p {
+			case string(store.UsageEventsIndexUser):
+				idx.User = true
+			case string(store.UsageEventsIndexKey):
+				idx.Key = true
+			case string(store.UsageEventsIndexChannel):
+				idx.Channel = true
+			case string(store.UsageEventsIndexModel):
+				idx.Model = true
+			}
+		}
+		filters := store.UsageEventsFilters{
+			User:    qUser,
+			Key:     qKey,
+			Channel: qChannel,
+			Model:   qModel,
+		}
+		if idx.User && strings.TrimSpace(filters.User) == "" {
+			filters.User = query
+		}
+		if idx.Key && strings.TrimSpace(filters.Key) == "" {
+			filters.Key = query
+		}
+		if idx.Channel && strings.TrimSpace(filters.Channel) == "" {
+			filters.Channel = query
+		}
+		if idx.Model && strings.TrimSpace(filters.Model) == "" {
+			filters.Model = query
+		}
+
+		events, err := opts.Store.ListUsageEventsWithUserRangeFiltered(c.Request.Context(), since, until, limit, beforeID, afterID, idx, filters)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询请求明细失败"})
 			return
