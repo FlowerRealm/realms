@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
 
+import { api } from '../../api/client'
+import type { APIResponse } from '../../api/types'
 import { useAuth } from '../../auth/AuthContext'
 import { ProjectFooter } from '../ProjectFooter'
 
@@ -15,6 +17,9 @@ function userEmail(userEmailValue: string | null | undefined, username: string |
 export function AdminLayout() {
   const { user, loading, refresh } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [configChanged, setConfigChanged] = useState(false)
+  const [configError, setConfigError] = useState('')
+  const lastConfigSHA = useRef<string>('')
 
   useEffect(() => {
     document.documentElement.classList.remove('app-html')
@@ -40,6 +45,49 @@ export function AdminLayout() {
     localStorage.removeItem('user')
     void refresh()
   }
+
+  useEffect(() => {
+    if (import.meta.env.MODE !== 'personal') return
+    let mounted = true
+    const poll = async () => {
+      try {
+        const res = await api.get<
+          APIResponse<{
+            mode?: 'business' | 'personal'
+            personal_config_enabled?: boolean
+            personal_config_sha256?: string
+            personal_config_last_error?: string
+          }>
+        >('/api/meta')
+        if (!mounted) return
+        const data = res.data?.data
+        if (!res.data?.success || data?.mode !== 'personal' || !data?.personal_config_enabled) {
+          setConfigError('')
+          return
+        }
+        const sha = (data.personal_config_sha256 || '').trim()
+        const err = (data.personal_config_last_error || '').trim()
+        setConfigError(err)
+        if (!sha) return
+        if (!lastConfigSHA.current) {
+          lastConfigSHA.current = sha
+          return
+        }
+        if (lastConfigSHA.current !== sha) {
+          lastConfigSHA.current = sha
+          setConfigChanged(true)
+        }
+      } catch {
+        // ignore
+      }
+    }
+    void poll()
+    const t = window.setInterval(poll, 5000)
+    return () => {
+      mounted = false
+      window.clearInterval(t)
+    }
+  }, [])
 
   return (
     <div className="app-shell d-flex flex-grow-1">
@@ -113,6 +161,21 @@ export function AdminLayout() {
 
         <main className="content-scrollable">
           <div className="container-fluid" style={{ maxWidth: 1600 }}>
+            {configError ? (
+              <div className="alert alert-warning d-flex align-items-center" role="alert">
+                <span className="me-2 material-symbols-rounded">warning</span>
+                <div className="flex-grow-1">配置文件同步异常：{configError}</div>
+              </div>
+            ) : null}
+            {configChanged ? (
+              <div className="alert alert-info d-flex align-items-center" role="alert">
+                <span className="me-2 material-symbols-rounded">info</span>
+                <div className="flex-grow-1">检测到配置文件被外部修改。为避免界面显示过期数据，建议刷新页面。</div>
+                <button type="button" className="btn btn-sm btn-outline-primary ms-3" onClick={() => window.location.reload()}>
+                  刷新
+                </button>
+              </div>
+            ) : null}
             <Outlet />
             <ProjectFooter variant="admin" />
           </div>

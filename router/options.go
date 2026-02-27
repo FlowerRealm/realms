@@ -7,6 +7,7 @@ import (
 
 	openaiapi "realms/internal/api/openai"
 	"realms/internal/config"
+	"realms/internal/personalconfig"
 	"realms/internal/scheduler"
 	"realms/internal/store"
 	"realms/internal/tickets"
@@ -16,6 +17,7 @@ type Options struct {
 	Store    *store.Store
 	Sched    *scheduler.Scheduler
 	PersonalMode bool
+	PersonalConfig *personalconfig.Syncer
 
 	AllowOpenRegistration           bool
 	EmailVerificationEnabledDefault bool
