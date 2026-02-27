@@ -186,7 +186,7 @@ func (h *Handler) finalizeIfCanceled(r *http.Request, usageID int64, sel *schedu
 	if r == nil {
 		return false
 	}
-	if !errors.Is(r.Context().Err(), context.Canceled) {
+	if r.Context().Err() == nil {
 		return false
 	}
 	h.finalizeClientDisconnect(r, usageID, sel, reqStart, stream, reqBytes)
