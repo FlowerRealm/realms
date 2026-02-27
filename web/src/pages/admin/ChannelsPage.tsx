@@ -201,6 +201,9 @@ export function ChannelsPage() {
 
   const [usageStart, setUsageStart] = useState('');
   const [usageEnd, setUsageEnd] = useState('');
+  const [usageAllTime, setUsageAllTime] = useState(false);
+  const [usageResolvedStart, setUsageResolvedStart] = useState('');
+  const [usageResolvedEnd, setUsageResolvedEnd] = useState('');
   const [usageRangeDirty, setUsageRangeDirty] = useState(false);
   const detailTimeLineRef = useRef<HTMLCanvasElement | null>(null);
   const detailTimeLineChartRef = useRef<ChartInstance | null>(null);
@@ -476,12 +479,17 @@ export function ChannelsPage() {
     });
   }
 
-  const refresh = useCallback(async (params?: { start?: string; end?: string }) => {
+  const refresh = useCallback(async (params?: { start?: string; end?: string; all_time?: boolean }) => {
     setErr('');
     setNotice('');
     setLoading(true);
     try {
-      const [pageRes, modelsRes] = await Promise.all([getChannelsPage(params), listManagedModelsAdmin(1, 1000)]);
+      const startValue = (params?.start ?? '').trim();
+      const endValue = (params?.end ?? '').trim();
+      const allTimeActive = !!params?.all_time;
+      const pageParams = allTimeActive ? { all_time: true } : { start: startValue || undefined, end: endValue || undefined };
+
+      const [pageRes, modelsRes] = await Promise.all([getChannelsPage(pageParams), listManagedModelsAdmin(1, 1000)]);
       if (!modelsRes.success) throw new Error(modelsRes.message || '加载模型失败');
       setManagedModelIDs(
         (modelsRes.data?.items || [])
@@ -494,8 +502,12 @@ export function ChannelsPage() {
       const pageChannels = pageRes.data?.channels || [];
       const normalizedChannels = normalizeChannelSections(pageChannels).filter((ch) => (allowCodexOAuth ? true : ch.type !== 'codex_oauth'));
       channelsRef.current = normalizedChannels;
-      setUsageStart(pageRes.data?.start || '');
-      setUsageEnd(pageRes.data?.end || '');
+      setUsageResolvedStart(pageRes.data?.start || '');
+      setUsageResolvedEnd(pageRes.data?.end || '');
+      if (!allTimeActive) {
+        setUsageStart(pageRes.data?.start || '');
+        setUsageEnd(pageRes.data?.end || '');
+      }
       setChannels(normalizedChannels);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败');
@@ -503,6 +515,13 @@ export function ChannelsPage() {
       setLoading(false);
     }
   }, [allowCodexOAuth]);
+
+  const refreshWithCurrentRange = useCallback(async () => {
+    const startValue = usageStart.trim();
+    const endValue = usageEnd.trim();
+    const allTimeValue = usageAllTime;
+    await refresh({ start: startValue, end: endValue, all_time: allTimeValue });
+  }, [refresh, usageAllTime, usageEnd, usageStart]);
 
   useEffect(() => {
     void refresh();
@@ -512,10 +531,10 @@ export function ChannelsPage() {
     if (!usageRangeDirty) return;
     const t = window.setTimeout(() => {
       setUsageRangeDirty(false);
-      void refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+      void refreshWithCurrentRange();
     }, 400);
     return () => window.clearTimeout(t);
-  }, [usageRangeDirty, usageStart, usageEnd, refresh]);
+  }, [usageRangeDirty, refreshWithCurrentRange]);
 
   useEffect(() => {
     if (!expandedChannelID) {
@@ -529,9 +548,11 @@ export function ChannelsPage() {
       setDetailSeriesErr('');
       setDetailSeriesLoading(true);
       try {
+        const allTimeActive = usageAllTime && !usageStart.trim() && !usageEnd.trim();
         const res = await getChannelTimeSeries(expandedChannelID, {
-          start: usageStart.trim() || undefined,
-          end: usageEnd.trim() || undefined,
+          start: allTimeActive ? undefined : usageStart.trim() || undefined,
+          end: allTimeActive ? undefined : usageEnd.trim() || undefined,
+          all_time: allTimeActive ? true : undefined,
           granularity: detailGranularity,
         });
         if (!res.success) throw new Error(res.message || '加载时间序列失败');
@@ -548,7 +569,7 @@ export function ChannelsPage() {
     return () => {
       active = false;
     };
-  }, [expandedChannelID, usageStart, usageEnd, detailGranularity]);
+  }, [expandedChannelID, usageAllTime, usageStart, usageEnd, detailGranularity]);
 
   useEffect(() => {
     void (async () => {
@@ -691,7 +712,7 @@ export function ChannelsPage() {
       const res = await reorderChannels(nextEnabledIDs);
       if (!res.success) throw new Error(res.message || '保存排序失败');
       setNotice('已保存排序');
-      await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+      await refreshWithCurrentRange();
     } catch (e2) {
       channelsRef.current = startList;
       setChannels(startList);
@@ -969,7 +990,7 @@ export function ChannelsPage() {
 
       setNotice('已保存模型配置');
       await reloadBindings(settingsChannelID);
-      await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+      await refreshWithCurrentRange();
     } catch (e) {
       setErr(e instanceof Error ? e.message : '保存失败');
     } finally {
@@ -1115,6 +1136,9 @@ export function ChannelsPage() {
               start={usageStart}
               end={usageEnd}
               onChange={(r) => {
+                const isAll = !r.start.trim() && !r.end.trim();
+                setUsageAllTime(isAll);
+                if (isAll) setDetailGranularity('day');
                 setUsageStart(r.start);
                 setUsageEnd(r.end);
                 setUsageRangeDirty(true);
@@ -1142,7 +1166,7 @@ export function ChannelsPage() {
               type="button"
               disabled={loading}
               onClick={() => {
-                void refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                void refreshWithCurrentRange();
               }}
             >
               <span className="material-symbols-rounded me-1" style={{ fontSize: '16px' }}>
@@ -1167,6 +1191,7 @@ export function ChannelsPage() {
               type="button"
               disabled={loading}
               onClick={() => {
+                setUsageAllTime(false);
                 setUsageStart('');
                 setUsageEnd('');
                 setUsageRangeDirty(true);
@@ -1416,7 +1441,7 @@ export function ChannelsPage() {
                                     });
                                     if (!res.success) throw new Error(res.message || '测试失败');
                                     setNotice(res.message || '测试成功');
-                                    await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                                    await refreshWithCurrentRange();
                                   } catch (e) {
                                     const msg = e instanceof Error ? e.message : '测试失败';
                                     setErr(msg.toString().trim());
@@ -1474,7 +1499,7 @@ export function ChannelsPage() {
                                       setEditStatus(targetStatus);
                                     }
                                     setNotice(targetStatus === 1 ? '渠道已启用' : '渠道已禁用');
-                                    await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                                    await refreshWithCurrentRange();
                                   } catch (e) {
                                     setErr(e instanceof Error ? e.message : '更新状态失败');
                                   }
@@ -1525,7 +1550,7 @@ export function ChannelsPage() {
                                     const res = await deleteChannel(ch.id);
                                     if (!res.success) throw new Error(res.message || '删除失败');
                                     setNotice('已删除');
-                                    await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                                    await refreshWithCurrentRange();
                                   } catch (e) {
                                     setErr(e instanceof Error ? e.message : '删除失败');
                                   }
@@ -1689,7 +1714,7 @@ export function ChannelsPage() {
                                         setNotice('');
                                         try {
                                           await loadCodexAccountsForChannel(ch.id, true);
-                                          await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                                          await refreshWithCurrentRange();
                                           setNotice('账号统计已刷新');
                                         } catch (e) {
                                           setErr(e instanceof Error ? e.message : '刷新失败');
@@ -1799,7 +1824,7 @@ export function ChannelsPage() {
                                                           const res = await refreshChannelCodexAccount(ch.id, acc.id);
                                                           if (!res.success) throw new Error(res.message || '刷新失败');
                                                           await loadCodexAccountsForChannel(ch.id, true);
-                                                          await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                                                          await refreshWithCurrentRange();
                                                           setNotice(res.message || '已刷新');
                                                         } catch (e) {
                                                           setErr(e instanceof Error ? e.message : '刷新失败');
@@ -1819,7 +1844,7 @@ export function ChannelsPage() {
                                                           const res = await deleteChannelCodexAccount(ch.id, acc.id);
                                                           if (!res.success) throw new Error(res.message || '删除失败');
                                                           await loadCodexAccountsForChannel(ch.id, true);
-                                                          await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                                                          await refreshWithCurrentRange();
                                                           setNotice(res.message || '已删除账号');
                                                         } catch (e) {
                                                           setErr(e instanceof Error ? e.message : '删除失败');
@@ -1893,7 +1918,9 @@ export function ChannelsPage() {
                                         </div>
                                       </div>
                                     </div>
-                                    <div className="small text-muted mb-2">时间区间：{usageStart || '-'} ~ {usageEnd || '-'}</div>
+                                    <div className="small text-muted mb-2">
+                                      时间区间：{(usageAllTime ? usageResolvedStart : usageStart) || '-'} ~ {(usageAllTime ? usageResolvedEnd : usageEnd) || '-'}
+                                    </div>
                                     {detailSeriesErr ? <div className="alert alert-danger py-2 mb-2">{detailSeriesErr}</div> : null}
                                     {detailSeriesLoading ? (
                                       <div className="text-muted small py-4">时间序列加载中…</div>
@@ -2027,7 +2054,7 @@ export function ChannelsPage() {
               if (!res.success) throw new Error(res.message || '创建失败');
               setNotice('已创建');
               closeModalById('createChannelModal');
-              await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+              await refreshWithCurrentRange();
             } catch (e) {
               setErr(e instanceof Error ? e.message : '创建失败');
             }
@@ -2257,7 +2284,7 @@ export function ChannelsPage() {
                           if (!res.success) throw new Error(res.message || '保存失败');
                           setNotice('已保存');
                           setSettingsChannelName(editName.trim());
-                          await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                          await refreshWithCurrentRange();
                         } catch (e) {
                           setErr(e instanceof Error ? e.message : '保存失败');
                         }
@@ -2360,7 +2387,7 @@ export function ChannelsPage() {
                           });
                           if (!res.success) throw new Error(res.message || '保存失败');
                           setNotice('已保存');
-                          await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                          await refreshWithCurrentRange();
                         } catch (e) {
                           setErr(e instanceof Error ? e.message : '保存失败');
                         }
@@ -2432,7 +2459,7 @@ export function ChannelsPage() {
                                       if (!res.success) throw new Error(res.message || '完成授权失败');
                                       setCodexCallbackURL('');
                                       await reloadCodexAccounts(settingsChannelID);
-                                      await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                                      await refreshWithCurrentRange();
                                       setNotice(res.message || '已完成授权');
                                     } catch (e) {
                                       setErr(e instanceof Error ? e.message : '完成授权失败');
@@ -2511,7 +2538,7 @@ export function ChannelsPage() {
                                       setCodexManualIDToken('');
                                       setCodexManualExpiresAt('');
                                       await reloadCodexAccounts(settingsChannelID);
-                                      await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                                      await refreshWithCurrentRange();
                                       setNotice(res.message || '已保存');
                                     } catch (e) {
                                       setErr(e instanceof Error ? e.message : '保存失败');
@@ -2615,7 +2642,7 @@ export function ChannelsPage() {
                                             if (!res.success) throw new Error(res.message || '删除失败');
                                             setNotice(res.message || '已删除');
                                             await reloadCredentials(settingsChannelID);
-                                            await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                                            await refreshWithCurrentRange();
                                           } catch (e) {
                                             setErr(e instanceof Error ? e.message : '删除失败');
                                           }
@@ -2647,7 +2674,7 @@ export function ChannelsPage() {
                               setNewCredentialKey('');
                               setNewCredentialName('');
                               await reloadCredentials(settingsChannelID);
-                              await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                              await refreshWithCurrentRange();
                             } catch (e) {
                               setErr(e instanceof Error ? e.message : '添加失败');
                             }
@@ -2910,7 +2937,7 @@ export function ChannelsPage() {
                           });
                           if (!res.success) throw new Error(res.message || '保存失败');
                           setNotice(res.message || '已保存');
-                          await refresh({ start: usageStart.trim(), end: usageEnd.trim() });
+                          await refreshWithCurrentRange();
                         } catch (e) {
                           setErr(e instanceof Error ? e.message : '保存失败');
                         }

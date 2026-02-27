@@ -246,6 +246,17 @@ func channelsPageHandler(opts Options) gin.HandlerFunc {
 		q := c.Request.URL.Query()
 		startStr := strings.TrimSpace(q.Get("start"))
 		endStr := strings.TrimSpace(q.Get("end"))
+		allTime := queryBool(q.Get("all_time"))
+		if allTime {
+			s, e, has, ok := resolveAllTimeGlobalStartEnd(c, opts, loc, todayStr)
+			if !ok {
+				return
+			}
+			if has {
+				startStr = s
+				endStr = e
+			}
+		}
 		if startStr == "" {
 			startStr = todayStr
 		}
@@ -426,6 +437,7 @@ func channelTimeSeriesHandler(opts Options) gin.HandlerFunc {
 		q := c.Request.URL.Query()
 		startStr := strings.TrimSpace(q.Get("start"))
 		endStr := strings.TrimSpace(q.Get("end"))
+		allTime := queryBool(q.Get("all_time"))
 		granularity := strings.TrimSpace(strings.ToLower(q.Get("granularity")))
 		if granularity == "" {
 			granularity = "hour"
@@ -433,6 +445,16 @@ func channelTimeSeriesHandler(opts Options) gin.HandlerFunc {
 		if granularity != "hour" && granularity != "day" {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "granularity 仅支持 hour/day"})
 			return
+		}
+		if allTime {
+			s, e, has, ok := resolveAllTimeChannelStartEnd(c, opts, loc, todayStr, channelID)
+			if !ok {
+				return
+			}
+			if has {
+				startStr = s
+				endStr = e
+			}
 		}
 		if startStr == "" {
 			startStr = todayStr

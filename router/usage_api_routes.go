@@ -142,9 +142,12 @@ func usageWindowsHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 		now := time.Now().UTC()
-		since, until, sinceLocal, untilLocal, ok := parseDateRangeInLocation(now, strings.TrimSpace(c.Query("start")), strings.TrimSpace(c.Query("end")), loc)
+		startStr := strings.TrimSpace(c.Query("start"))
+		endStr := strings.TrimSpace(c.Query("end"))
+		allTime := queryBool(c.Query("all_time"))
+
+		rng, ok := resolveUsageDateRange(c, opts, loc, now, startStr, endStr, userID, tokenID, allTime)
 		if !ok {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "start/end 不合法（格式：YYYY-MM-DD）"})
 			return
 		}
 
@@ -171,15 +174,15 @@ func usageWindowsHandler(opts Options) gin.HandlerFunc {
 		if tokenID > 0 {
 			committed, reserved, err = opts.Store.SumCommittedAndReservedUSDRangeByToken(c.Request.Context(), store.UsageSumWithReservedRangeByTokenInput{
 				TokenID: tokenID,
-				Since:   since,
-				Until:   until,
+				Since:   rng.since,
+				Until:   rng.until,
 				Now:     now,
 			})
 		} else {
 			committed, reserved, err = opts.Store.SumCommittedAndReservedUSDRange(c.Request.Context(), store.UsageSumWithReservedRangeInput{
 				UserID: userID,
-				Since:  since,
-				Until:  until,
+				Since:  rng.since,
+				Until:  rng.until,
 				Now:    now,
 			})
 		}
@@ -190,9 +193,9 @@ func usageWindowsHandler(opts Options) gin.HandlerFunc {
 
 		var tokenStats store.UsageTokenStats
 		if tokenID > 0 {
-			tokenStats, err = opts.Store.GetUsageTokenStatsByTokenRange(c.Request.Context(), tokenID, since, until)
+			tokenStats, err = opts.Store.GetUsageTokenStatsByTokenRange(c.Request.Context(), tokenID, rng.since, rng.until)
 		} else {
-			tokenStats, err = opts.Store.GetUsageTokenStatsByUserRange(c.Request.Context(), userID, since, until)
+			tokenStats, err = opts.Store.GetUsageTokenStatsByUserRange(c.Request.Context(), userID, rng.since, rng.until)
 		}
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "Token 统计失败"})
@@ -212,8 +215,8 @@ func usageWindowsHandler(opts Options) gin.HandlerFunc {
 
 		resp.Windows = append(resp.Windows, usageWindowAPI{
 			Window:             "range",
-			Since:              sinceLocal,
-			Until:              untilLocal,
+			Since:              rng.sinceLocal,
+			Until:              rng.untilLocal,
 			Requests:           tokenStats.Requests,
 			Tokens:             tokenStats.Tokens,
 			RPM:                recentStats.Requests,
@@ -487,13 +490,14 @@ func usageTimeSeriesHandler(opts Options) gin.HandlerFunc {
 		now := time.Now().UTC()
 		startStr := strings.TrimSpace(c.Query("start"))
 		endStr := strings.TrimSpace(c.Query("end"))
-		since, until, sinceLocal, untilLocal, ok := parseDateRangeInLocation(now, startStr, endStr, loc)
+		allTime := queryBool(c.Query("all_time"))
+
+		rng, ok := resolveUsageDateRange(c, opts, loc, now, startStr, endStr, userID, tokenID, allTime)
 		if !ok {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "start/end 不合法（格式：YYYY-MM-DD）"})
 			return
 		}
-		startResp := sinceLocal.Format("2006-01-02")
-		endResp := untilLocal.Add(-time.Second).Format("2006-01-02")
+		startResp := rng.sinceLocal.Format("2006-01-02")
+		endResp := rng.untilLocal.Add(-time.Second).Format("2006-01-02")
 
 		granularity := strings.TrimSpace(strings.ToLower(c.Query("granularity")))
 		if granularity == "" {
@@ -507,9 +511,9 @@ func usageTimeSeriesHandler(opts Options) gin.HandlerFunc {
 		var rows []store.ChannelTimeSeriesUsageStats
 		var err error
 		if tokenID > 0 {
-			rows, err = opts.Store.GetTokenUsageTimeSeriesRange(c.Request.Context(), tokenID, since, until, granularity)
+			rows, err = opts.Store.GetTokenUsageTimeSeriesRange(c.Request.Context(), tokenID, rng.since, rng.until, granularity)
 		} else {
-			rows, err = opts.Store.GetUserUsageTimeSeriesRange(c.Request.Context(), userID, since, until, granularity)
+			rows, err = opts.Store.GetUserUsageTimeSeriesRange(c.Request.Context(), userID, rng.since, rng.until, granularity)
 		}
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询时间序列失败"})

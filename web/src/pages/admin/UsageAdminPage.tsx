@@ -65,6 +65,7 @@ export function UsageAdminPage() {
 
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
+  const [allTime, setAllTime] = useState(false);
   const [limit, setLimit] = useState(50);
   const [beforeID, setBeforeID] = useState<number | undefined>(undefined);
   const [afterID, setAfterID] = useState<number | undefined>(undefined);
@@ -101,11 +102,15 @@ export function UsageAdminPage() {
     setErr('');
     setLoading(true);
     try {
-      const params: { start?: string; end?: string; limit?: number; before_id?: number; after_id?: number } = {
-        start: start.trim() || undefined,
-        end: end.trim() || undefined,
-        limit,
-      };
+      const startValue = start.trim();
+      const endValue = end.trim();
+      const allTimeActive = allTime && !startValue && !endValue;
+      const params: { start?: string; end?: string; all_time?: boolean; limit?: number; before_id?: number; after_id?: number } = { limit };
+      if (allTimeActive) params.all_time = true;
+      else {
+        params.start = startValue || undefined;
+        params.end = endValue || undefined;
+      }
       if (opts?.keepCursor) {
         if (beforeID) params.before_id = beforeID;
         if (afterID) params.after_id = afterID;
@@ -114,9 +119,9 @@ export function UsageAdminPage() {
       if (!res.success) throw new Error(res.message || '加载失败');
       const d = res.data || null;
       setData(d);
-      if (d) {
-        if (!start.trim()) setStart(d.start || '');
-        if (!end.trim()) setEnd(d.end || '');
+      if (d && !allTimeActive) {
+        if (!startValue) setStart(d.start || '');
+        if (!endValue) setEnd(d.end || '');
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败');
@@ -332,6 +337,9 @@ export function UsageAdminPage() {
                 start={start}
                 end={end}
                 onChange={(r) => {
+                  const isAll = !r.start.trim() && !r.end.trim();
+                  setAllTime(isAll);
+                  if (isAll) setDetailGranularity('day');
                   setStart(r.start);
                   setEnd(r.end);
                   setBeforeID(undefined);
@@ -404,6 +412,7 @@ export function UsageAdminPage() {
                 type="button"
                 disabled={loading}
                 onClick={() => {
+                  setAllTime(false);
                   setStart('');
                   setEnd('');
                   setBeforeID(undefined);
