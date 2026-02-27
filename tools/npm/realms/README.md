@@ -16,7 +16,15 @@ npm install -g @flowerrealm/realms
 realms
 ```
 
-默认行为与 `realms-app` 一致（personal 模式、SQLite、本地启动后打开浏览器到 `/login`）。
+默认行为与 `realms-app` 一致（personal 模式、SQLite、本地启动后在日志中提示访问 `/login` 的地址；不自动打开浏览器）。
+
+## 重设管理 Key
+
+重设 personal 模式“管理 Key”（用于解锁 `/login` / 管理面）：
+
+```bash
+realms --set --key "NEW_KEY"
+```
 
 ## 环境变量
 

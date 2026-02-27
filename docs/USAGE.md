@@ -15,7 +15,7 @@ Realms 的前端工程位于 `web/`，后端提供 `/api/*` 与 `/v1/*`；但对
 
 ## App（personal 模式，浏览器 + 端口）
 
-App 用于把 Realms 以“personal 模式”封装成可执行程序（启动本地后端并打开浏览器页面）。
+App 用于把 Realms 以“personal 模式”封装成可执行程序（启动本地后端并在日志中提示访问地址；不自动打开浏览器）。
 
 关键约束：
 - 默认监听：`:8080`（便于多人访问；如需仅本机可访问，可设置 `REALMS_ADDR=127.0.0.1:8080`）
@@ -42,6 +42,22 @@ realms
 ```bash
 make app-dev
 ```
+
+### 重设管理 Key（开发/运维）
+
+如果你需要在 personal 模式下重设“管理 Key”（用于解锁 `/login` / 管理面），可以直接在本机/服务器控制台执行：
+
+```bash
+make app-set-key KEY="NEW_KEY"
+```
+
+或直接运行二进制：
+
+```bash
+./realms-app --set --key "NEW_KEY"
+```
+
+> 如果你是 npm 安装用户：`realms --set --key "NEW_KEY"`（参数会透传给 `realms-app`）。
 
 ### 打包二进制（当前平台）
 

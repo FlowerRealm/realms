@@ -11,6 +11,7 @@ ifeq ($(OS),Windows_NT)
 endif
 
 .PHONY: help tools dev test ci ci-real fmt tidy app-dev app-dist
+.PHONY: app-set-key
 
 help:
 	@echo "Targets:"
@@ -44,6 +45,10 @@ app-dist:
 	@npm --prefix "web" run build:personal
 	@mkdir -p "dist"
 	@go build -tags embed_web_personal -ldflags "-X realms/internal/version.Version=$(VERSION) -X realms/internal/version.Date=$(DATE)" -o "dist/realms-app$(EXE)" ./cmd/realms-app
+
+app-set-key:
+	@if [[ -z "$${KEY:-}" ]]; then echo "KEY is required (example: make app-set-key KEY='sk_...')"; exit 2; fi
+	@go run ./cmd/realms-app --set --key "$${KEY}"
 
 test:
 	go test ./...
