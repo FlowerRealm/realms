@@ -1026,6 +1026,18 @@ type UsageEventsFilters struct {
 	Model   string
 }
 
+func buildLikePattern(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	// If user supplies wildcards, respect them. Otherwise default to prefix-match for index-friendliness.
+	if strings.ContainsAny(s, "%_") {
+		return s
+	}
+	return s + "%"
+}
+
 func (s *Store) ListUsageEventsWithUserRange(ctx context.Context, since, until time.Time, limit int, beforeID, afterID *int64) ([]UsageEventWithUser, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
@@ -1107,7 +1119,7 @@ func (s *Store) ListUsageEventsWithUserRangeFiltered(ctx context.Context, since,
 	if idx.Key && f.Key != "" {
 		joins += "LEFT JOIN user_tokens ut ON ut.id=ue.token_id\n"
 		extraWhere.WriteString(" AND ut.name LIKE ?\n")
-		args = append(args, "%"+f.Key+"%")
+		args = append(args, buildLikePattern(f.Key))
 	}
 	if idx.Channel && f.Channel != "" {
 		if n, err := strconv.ParseInt(f.Channel, 10, 64); err == nil && n > 0 {
@@ -1116,16 +1128,17 @@ func (s *Store) ListUsageEventsWithUserRangeFiltered(ctx context.Context, since,
 		} else {
 			joins += "LEFT JOIN upstream_channels uc ON uc.id=ue.upstream_channel_id\n"
 			extraWhere.WriteString(" AND uc.name LIKE ?\n")
-			args = append(args, "%"+f.Channel+"%")
+			args = append(args, buildLikePattern(f.Channel))
 		}
 	}
 	if idx.Model && f.Model != "" {
 		extraWhere.WriteString(" AND ue.model LIKE ?\n")
-		args = append(args, "%"+f.Model+"%")
+		args = append(args, buildLikePattern(f.Model))
 	}
 	if idx.User && f.User != "" {
 		extraWhere.WriteString(" AND (u.email LIKE ? OR u.username LIKE ?)\n")
-		args = append(args, "%"+f.User+"%", "%"+f.User+"%")
+		p := buildLikePattern(f.User)
+		args = append(args, p, p)
 	}
 
 	q := `
@@ -1207,11 +1220,11 @@ func (s *Store) listUsageEventsByUserFiltered(ctx context.Context, userID int64,
 	if idx.Key && f.Key != "" {
 		joins += "LEFT JOIN user_tokens ut ON ut.id=ue.token_id\n"
 		extraWhere.WriteString(" AND ut.name LIKE ?\n")
-		filterArgs = append(filterArgs, "%"+f.Key+"%")
+		filterArgs = append(filterArgs, buildLikePattern(f.Key))
 	}
 	if idx.Model && f.Model != "" {
 		extraWhere.WriteString(" AND ue.model LIKE ?\n")
-		filterArgs = append(filterArgs, "%"+f.Model+"%")
+		filterArgs = append(filterArgs, buildLikePattern(f.Model))
 	}
 
 	args := []any{userID}

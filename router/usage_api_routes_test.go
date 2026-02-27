@@ -305,10 +305,10 @@ func TestUsageEvents_User_IndexKeyFiltersByTokenName(t *testing.T) {
 		return len(got.Data.Events)
 	}
 
-	if n := list("http://example.com/api/usage/events?index=key&q=abc"); n != 1 {
+	if n := list("http://example.com/api/usage/events?index=key&q=%25abc%25"); n != 1 {
 		t.Fatalf("expected 1 event for q=abc, got %d", n)
 	}
-	if n := list("http://example.com/api/usage/events?index=key&q=does-not-exist"); n != 0 {
+	if n := list("http://example.com/api/usage/events?index=key&q=%25does-not-exist%25"); n != 0 {
 		t.Fatalf("expected 0 event for missing key, got %d", n)
 	}
 }
