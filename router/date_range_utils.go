@@ -50,6 +50,15 @@ type usageResolvedRange struct {
 	untilLocal time.Time
 }
 
+func parseUsageResolvedRange(c *gin.Context, nowUTC time.Time, startStr string, endStr string, loc *time.Location) (usageResolvedRange, bool) {
+	since, until, sinceLocal, untilLocal, ok := parseDateRangeInLocation(nowUTC, startStr, endStr, loc)
+	if !ok {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "start/end 不合法（格式：YYYY-MM-DD）"})
+		return usageResolvedRange{}, false
+	}
+	return usageResolvedRange{since: since, until: until, sinceLocal: sinceLocal, untilLocal: untilLocal}, true
+}
+
 func resolveUsageDateRange(
 	c *gin.Context,
 	opts Options,
@@ -62,12 +71,7 @@ func resolveUsageDateRange(
 	allTime bool,
 ) (usageResolvedRange, bool) {
 	if !allTime {
-		since, until, sinceLocal, untilLocal, ok := parseDateRangeInLocation(nowUTC, startStr, endStr, loc)
-		if !ok {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "start/end 不合法（格式：YYYY-MM-DD）"})
-			return usageResolvedRange{}, false
-		}
-		return usageResolvedRange{since: since, until: until, sinceLocal: sinceLocal, untilLocal: untilLocal}, true
+		return parseUsageResolvedRange(c, nowUTC, startStr, endStr, loc)
 	}
 
 	var first time.Time
@@ -84,12 +88,7 @@ func resolveUsageDateRange(
 	}
 	if !has {
 		// No data: keep old semantics (empty range means today).
-		since, until, sinceLocal, untilLocal, ok := parseDateRangeInLocation(nowUTC, startStr, endStr, loc)
-		if !ok {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "start/end 不合法（格式：YYYY-MM-DD）"})
-			return usageResolvedRange{}, false
-		}
-		return usageResolvedRange{since: since, until: until, sinceLocal: sinceLocal, untilLocal: untilLocal}, true
+		return parseUsageResolvedRange(c, nowUTC, startStr, endStr, loc)
 	}
 
 	firstLocal := first.In(loc)
