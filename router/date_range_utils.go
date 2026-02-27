@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -17,8 +18,10 @@ func allTimeStartEndByFirst(first time.Time, loc *time.Location, todayStr string
 	return start, end
 }
 
-func resolveAllTimeGlobalStartEnd(c *gin.Context, opts Options, loc *time.Location, todayStr string) (start string, end string, has bool, ok bool) {
-	first, has, err := opts.Store.GetFirstUsageEventTimeGlobal(c.Request.Context())
+type firstUsageEventTimeGetter func(ctx context.Context) (first time.Time, has bool, err error)
+
+func resolveAllTimeStartEnd(c *gin.Context, getFirst firstUsageEventTimeGetter, loc *time.Location, todayStr string) (start string, end string, has bool, ok bool) {
+	first, has, err := getFirst(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
 		return "", "", false, false
@@ -30,17 +33,16 @@ func resolveAllTimeGlobalStartEnd(c *gin.Context, opts Options, loc *time.Locati
 	return start, end, true, true
 }
 
+func resolveAllTimeGlobalStartEnd(c *gin.Context, opts Options, loc *time.Location, todayStr string) (start string, end string, has bool, ok bool) {
+	return resolveAllTimeStartEnd(c, func(ctx context.Context) (time.Time, bool, error) {
+		return opts.Store.GetFirstUsageEventTimeGlobal(ctx)
+	}, loc, todayStr)
+}
+
 func resolveAllTimeChannelStartEnd(c *gin.Context, opts Options, loc *time.Location, todayStr string, channelID int64) (start string, end string, has bool, ok bool) {
-	first, has, err := opts.Store.GetFirstUsageEventTimeByChannel(c.Request.Context(), channelID)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
-		return "", "", false, false
-	}
-	if !has {
-		return "", "", false, true
-	}
-	start, end = allTimeStartEndByFirst(first, loc, todayStr)
-	return start, end, true, true
+	return resolveAllTimeStartEnd(c, func(ctx context.Context) (time.Time, bool, error) {
+		return opts.Store.GetFirstUsageEventTimeByChannel(ctx, channelID)
+	}, loc, todayStr)
 }
 
 type usageResolvedRange struct {
