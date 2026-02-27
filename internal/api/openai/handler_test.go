@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -217,6 +218,10 @@ type fakeStore struct {
 
 	groupByName   map[string]store.ChannelGroup
 	groupNameByID map[int64]string
+
+	blockGetChannelGroupByName bool
+	groupLookupStarted         chan struct{}
+	groupLookupStartedOnce     sync.Once
 }
 
 func (f *fakeStore) ListUpstreamChannels(_ context.Context) ([]store.UpstreamChannel, error) {
@@ -356,7 +361,14 @@ func (f *fakeStore) ensureGroups() {
 	}
 }
 
-func (f *fakeStore) GetChannelGroupByName(_ context.Context, name string) (store.ChannelGroup, error) {
+func (f *fakeStore) GetChannelGroupByName(ctx context.Context, name string) (store.ChannelGroup, error) {
+	if f.blockGetChannelGroupByName {
+		if f.groupLookupStarted != nil {
+			f.groupLookupStartedOnce.Do(func() { close(f.groupLookupStarted) })
+		}
+		<-ctx.Done()
+		return store.ChannelGroup{}, ctx.Err()
+	}
 	f.ensureGroups()
 	name = strings.TrimSpace(name)
 	g, ok := f.groupByName[name]
@@ -2741,5 +2753,153 @@ func TestDeriveRouteKeyFromConversationPayload_FallbackHash(t *testing.T) {
 	again := normalizeRouteKey(deriveRouteKeyFromConversationPayload(payload))
 	if got != again {
 		t.Fatalf("expected stable fallback hash, first=%q second=%q", got, again)
+	}
+}
+
+func TestResponses_ContextCanceledDuringExec_FinalizesAsClientDisconnect(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	sched := scheduler.New(fs)
+	q := &fakeQuota{}
+	u := &recordingUsage{}
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	ctx, cancel := context.WithCancel(req.Context())
+	req = req.WithContext(ctx)
+
+	doer := DoerFunc(func(ctx context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		cancel()
+		return nil, ctx.Err()
+	})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, q, fakeAudit{}, u, nil, upstream.SSEPumpOptions{})
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Body.Len() != 0 {
+		t.Fatalf("expected empty body, got=%q", rr.Body.String())
+	}
+	if len(q.voidCalls) != 1 || q.voidCalls[0] != 1 {
+		t.Fatalf("expected quota void(1), got=%v", q.voidCalls)
+	}
+	if len(u.calls) != 1 {
+		t.Fatalf("expected 1 finalize call, got=%d", len(u.calls))
+	}
+	if u.calls[0].ErrorClass == nil || *u.calls[0].ErrorClass != "client_disconnect" {
+		t.Fatalf("expected error_class=client_disconnect, got=%+v", u.calls[0].ErrorClass)
+	}
+	if u.calls[0].ErrorMessage != nil {
+		t.Fatalf("expected empty error_message, got=%+v", u.calls[0].ErrorMessage)
+	}
+	if u.calls[0].StatusCode != 0 {
+		t.Fatalf("expected status_code=0, got=%d", u.calls[0].StatusCode)
+	}
+}
+
+func TestResponses_ContextCanceledDuringRouterNext_FinalizesAsClientDisconnect(t *testing.T) {
+	started := make(chan struct{})
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+		blockGetChannelGroupByName: true,
+		groupLookupStarted:         started,
+	}
+
+	sched := scheduler.New(fs)
+	q := &fakeQuota{}
+	u := &recordingUsage{}
+	h := NewHandler(fs, fs, sched, &okDoer{}, nil, nil, false, q, fakeAudit{}, u, nil, upstream.SSEPumpOptions{})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+	ctx, cancel := context.WithCancel(req.Context())
+	req = req.WithContext(ctx)
+
+	rr := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+		close(done)
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(1 * time.Second):
+		t.Fatalf("timed out waiting for group lookup to start")
+	}
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatalf("timed out waiting for request to finish after cancel")
+	}
+
+	if rr.Body.Len() != 0 {
+		t.Fatalf("expected empty body, got=%q", rr.Body.String())
+	}
+	if len(q.voidCalls) != 1 || q.voidCalls[0] != 1 {
+		t.Fatalf("expected quota void(1), got=%v", q.voidCalls)
+	}
+	if len(u.calls) != 1 {
+		t.Fatalf("expected 1 finalize call, got=%d", len(u.calls))
+	}
+	if u.calls[0].ErrorClass == nil || *u.calls[0].ErrorClass != "client_disconnect" {
+		t.Fatalf("expected error_class=client_disconnect, got=%+v", u.calls[0].ErrorClass)
+	}
+	if u.calls[0].ErrorMessage != nil {
+		t.Fatalf("expected empty error_message, got=%+v", u.calls[0].ErrorMessage)
+	}
+	if u.calls[0].StatusCode != 0 {
+		t.Fatalf("expected status_code=0, got=%d", u.calls[0].StatusCode)
 	}
 }
