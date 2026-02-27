@@ -718,6 +718,33 @@ h6,
   white-space: normal !important;
 }
 
+.rlm-usage-col-status {
+  width: clamp(56px, 4.5vw, 72px);
+}
+.rlm-usage-col-latency {
+  width: clamp(88px, 7vw, 112px);
+}
+.rlm-usage-col-tokens {
+  width: clamp(104px, 9vw, 136px);
+}
+.rlm-usage-col-tps {
+  width: clamp(80px, 6vw, 96px);
+}
+.rlm-usage-col-cost {
+  width: clamp(80px, 6vw, 104px);
+}
+.rlm-usage-col-key {
+  width: clamp(88px, 7vw, 120px);
+}
+.rlm-usage-col-request {
+  width: clamp(120px, 10vw, 160px);
+}
+
+.rlm-usage-cell-compact {
+  padding-left: 0.5rem !important;
+  padding-right: 0.5rem !important;
+}
+
 .table {
   margin-bottom: 0;
   color: var(--bs-body-color);

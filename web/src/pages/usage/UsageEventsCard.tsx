@@ -64,18 +64,31 @@ export function UsageEventsCard({
       <div className="card-body p-0 border-top">
         <div className="table-responsive rlm-table-responsive-no-x">
           <table className="table table-hover align-middle mb-0 border-0 rlm-table-fit">
+            <colgroup>
+              <col />
+              <col />
+              <col />
+              <col className="rlm-usage-col-status" />
+              <col className="rlm-usage-col-latency" />
+              <col className="rlm-usage-col-tokens" />
+              <col className="rlm-usage-col-tps" />
+              <col className="rlm-usage-col-cost" />
+              <col />
+              <col className="rlm-usage-col-key" />
+              <col className="rlm-usage-col-request" />
+            </colgroup>
             <thead className="table-light text-muted smaller uppercase">
               <tr>
                 <th className="ps-4 border-0">时间</th>
                 <th className="border-0">用户</th>
                 <th className="border-0">接口 / 模型</th>
-                <th className="text-center border-0">状态码</th>
-                <th className="text-end border-0">耗时/首字</th>
-                <th className="text-end border-0">Tokens</th>
-                <th className="text-end border-0">Tokens/s</th>
-                <th className="text-end border-0">费用</th>
+                <th className="text-center border-0 rlm-usage-cell-compact">状态码</th>
+                <th className="text-end border-0 rlm-usage-cell-compact">耗时/首字</th>
+                <th className="text-end border-0 rlm-usage-cell-compact">Tokens</th>
+                <th className="text-end border-0 rlm-usage-cell-compact">Tokens/s</th>
+                <th className="text-end border-0 rlm-usage-cell-compact">费用</th>
                 <th className="text-center border-0">状态</th>
-                <th className="text-center border-0">Key</th>
+                <th className="text-center border-0 rlm-usage-cell-compact">Key</th>
                 <th className="pe-4 border-0">Request ID</th>
               </tr>
             </thead>
@@ -121,15 +134,15 @@ export function UsageEventsCard({
                         <div className="badge bg-light text-dark border fw-normal">{model}</div>
                         <div className="text-muted smaller mt-1 font-monospace">{endpoint}</div>
                       </td>
-                      <td className="text-center">
+                      <td className="text-center rlm-usage-cell-compact">
                         {code === '200' ? (
                           <span className="badge bg-success-subtle text-success border border-success-subtle rounded-pill">200</span>
                         ) : (
                           <span className="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill">{code}</span>
                         )}
                       </td>
-                      <td className="text-end font-monospace text-muted">{formatLatencyPairSeconds(e.latency_ms, undefined)}</td>
-                      <td className="text-end font-monospace">
+                      <td className="text-end font-monospace text-muted rlm-usage-cell-compact">{formatLatencyPairSeconds(e.latency_ms, undefined)}</td>
+                      <td className="text-end font-monospace rlm-usage-cell-compact">
                         <div>
                           <span className="text-muted">In:</span> {formatIntComma(e.input_tokens)}
                         </div>
@@ -142,8 +155,8 @@ export function UsageEventsCard({
                           </div>
                         ) : null}
                       </td>
-                      <td className="text-end font-monospace text-muted">{formatIntComma(tps)}</td>
-                      <td className="text-end font-monospace fw-bold text-dark">{cost}</td>
+                      <td className="text-end font-monospace text-muted rlm-usage-cell-compact">{formatIntComma(tps)}</td>
+                      <td className="text-end font-monospace fw-bold text-dark rlm-usage-cell-compact">{cost}</td>
                       <td className="text-center text-nowrap">
                         <span className={badgeForState(state.badgeClass)}>{state.label}</span>
                         {e.is_stream ? (
@@ -155,7 +168,7 @@ export function UsageEventsCard({
                           </div>
                         ) : null}
                       </td>
-                      <td className="text-center text-nowrap">
+                      <td className="text-center text-nowrap rlm-usage-cell-compact">
                         {keyName && keyName !== '-' ? <span className="badge bg-light text-dark border fw-normal">{keyName}</span> : <span className="text-muted">-</span>}
                       </td>
                       <td
