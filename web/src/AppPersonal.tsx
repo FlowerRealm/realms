@@ -9,15 +9,15 @@ import { LoginPage } from './pages/personal/LoginPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 
 function HomeRedirectPersonal() {
-  const { user, loading } = useAuth()
-  if (loading) return null
+  const { user, booting } = useAuth()
+  if (booting) return null
   if (user) return <Navigate to="/admin/channels" replace />
   return <Navigate to="/login" replace state={{ from: '/admin/channels' }} />
 }
 
 export function AppPersonal() {
-  const { loading } = useAuth()
-  if (loading) return null
+  const { booting } = useAuth()
+  if (booting) return null
 
   return (
     <Routes>

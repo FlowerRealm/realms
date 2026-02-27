@@ -132,6 +132,45 @@ async function main() {
       await page.goto(`${baseURL}/login`, { waitUntil: 'domcontentloaded', timeout: 20_000 });
       await page.getByRole('heading', { name: '登录 Realms' }).waitFor({ timeout: 20_000 });
 
+      await page.locator('input[name="login"]').fill('nobody@example.com');
+      await page.locator('input[name="password"]').fill('wrong-password');
+      await page.waitForFunction(() => {
+        const btn = document.querySelector('button[type="submit"]');
+        return !!btn && !(btn instanceof HTMLButtonElement ? btn.disabled : true);
+      });
+      await page.locator('button[type="submit"]').click();
+
+      const errAlert = page.locator('.alert.alert-danger');
+      await errAlert.waitFor({ timeout: 20_000 });
+      const errText = ((await errAlert.textContent()) || '').trim();
+      if (!errText) {
+        throw new Error('login error alert is empty');
+      }
+      if (!errText.includes('登录失败')) {
+        throw new Error(`unexpected login error alert: ${errText}`);
+      }
+
+      // Register page should also render errors (if registration is enabled).
+      await page.goto(`${baseURL}/register`, { waitUntil: 'domcontentloaded', timeout: 20_000 });
+      await page.getByRole('heading', { name: '注册账号' }).waitFor({ timeout: 20_000 });
+      const regBlocked = (await page.locator('.alert.alert-warning', { hasText: '未开放注册' }).count()) > 0;
+      if (!regBlocked) {
+        await page.locator('input[name="email"]').fill('nobody@example.com');
+        await page.locator('input[name="username"]').fill('bad!user');
+        await page.locator('input[name="password"]').fill('12345678');
+        await page.locator('button[type="submit"]').click();
+
+        const regErrAlert = page.locator('.alert.alert-danger');
+        await regErrAlert.waitFor({ timeout: 20_000 });
+        const regErrText = ((await regErrAlert.textContent()) || '').trim();
+        if (!regErrText) {
+          throw new Error('register error alert is empty');
+        }
+        if (!regErrText.includes('注册失败')) {
+          throw new Error(`unexpected register error alert: ${regErrText}`);
+        }
+      }
+
       const hasExternalStyles = (await page.locator('link[rel="stylesheet"][href^="http"]').count()) > 0;
       const hasExternalScripts = (await page.locator('script[src^="http"]').count()) > 0;
 
