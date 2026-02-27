@@ -467,6 +467,15 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("X-Realms-Route-Key-Source", routeKeySource)
 	routeKeyHash := h.sched.RouteKeyHash(routeKey)
+	// Codex CLI（wire_api=responses）通常使用 input 数组并依赖 prompt_cache_key/session_id 做远程压缩（compaction）。
+	// 这类“有状态输入”要求粘性路由：同一会话应尽量落到同一上游 channel/credential，否则 encrypted_content 可能无法复用。
+	//
+	// 为了避免影响普通 OpenAI SDK（input 为 string / 非 codex 形态）请求的负载均衡策略，这里仅对 codex-like payload
+	// 启用 routeKeyHash 参与调度。
+	stickyRouteKeyHash := ""
+	if isCodexResponsesPayload(payload) {
+		stickyRouteKeyHash = routeKeyHash
+	}
 	usageID := int64(0)
 	if h.quota != nil && r != nil && r.URL != nil && r.URL.Path == "/v1/responses" {
 		res, err := h.quota.Reserve(r.Context(), quota.ReserveInput{
@@ -506,7 +515,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	router := scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, routeKeyHash, cons)
+	router := scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
 	var lastSel *scheduler.Selection
 	bestFailure := proxyFailureInfo{}
 	const absoluteMaxAttempts = 1000

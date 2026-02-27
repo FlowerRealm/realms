@@ -112,6 +112,72 @@ func TestSelect_AffinityBeatsPriority(t *testing.T) {
 	}
 }
 
+func TestSelect_RouteKeyHashEnablesStickyChannelAndCredential(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+			2: {
+				{ID: 21, ChannelID: 2, BaseURL: "https://b.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+				{ID: 112, EndpointID: 11, Status: 1},
+			},
+			21: {
+				{ID: 211, EndpointID: 21, Status: 1},
+				{ID: 212, EndpointID: 21, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+	routeKeyHash := s.RouteKeyHash("session_abc")
+
+	expectedChannel := int64(1)
+	if rendezvousScore64(routeKeyHash, "channel", 2) > rendezvousScore64(routeKeyHash, "channel", 1) {
+		expectedChannel = 2
+	}
+
+	expectedCred := int64(0)
+	if expectedChannel == 1 {
+		expectedCred = 111
+		if rendezvousScore64(routeKeyHash, string(CredentialTypeOpenAI), 112) > rendezvousScore64(routeKeyHash, string(CredentialTypeOpenAI), 111) {
+			expectedCred = 112
+		}
+	} else {
+		expectedCred = 211
+		if rendezvousScore64(routeKeyHash, string(CredentialTypeOpenAI), 212) > rendezvousScore64(routeKeyHash, string(CredentialTypeOpenAI), 211) {
+			expectedCred = 212
+		}
+	}
+
+	first, err := s.SelectWithConstraints(context.Background(), 10, routeKeyHash, Constraints{})
+	if err != nil {
+		t.Fatalf("Select err: %v", err)
+	}
+	if first.ChannelID != expectedChannel {
+		t.Fatalf("expected channel=%d, got=%d", expectedChannel, first.ChannelID)
+	}
+	if first.CredentialID != expectedCred {
+		t.Fatalf("expected credential=%d, got=%d", expectedCred, first.CredentialID)
+	}
+
+	second, err := s.SelectWithConstraints(context.Background(), 10, routeKeyHash, Constraints{})
+	if err != nil {
+		t.Fatalf("Select err: %v", err)
+	}
+	if second.ChannelID != first.ChannelID || second.CredentialID != first.CredentialID {
+		t.Fatalf("expected sticky selection, first=%d/%d second=%d/%d", first.ChannelID, first.CredentialID, second.ChannelID, second.CredentialID)
+	}
+}
+
 func TestState_IsChannelBanned_ExpiredMarksProbeDue(t *testing.T) {
 	st := NewState()
 	now := time.Now()

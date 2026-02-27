@@ -135,6 +135,18 @@ Linux/macOS：`~/.codex/config.toml`；Windows：`%USERPROFILE%\\.codex\\config.
 	requires_openai_auth = true
 	```
 
+### 3.3 Codex 远程压缩（compaction）常见坑
+
+Codex CLI（`wire_api = "responses"`）可能会启用“远程压缩/上下文压缩”（`compaction`）。这类请求是**有状态的**：同一会话中返回的 `compaction.encrypted_content` 必须在后续请求里原样回传，并且最好落到同一上游账号/渠道，否则可能出现类似：
+
+`invalid compaction encrypted_content: illegal base64 data at input byte ...`
+
+建议：
+
+- 调大 Codex 自动会话的 TTL（避免长对话中 route key 频繁变化）：
+  - `REALMS_CODEX_SESSION_TTL_SECONDS=604800`（7 天）
+- 若你有多个 OpenAI-compatible key/账号，建议开启渠道设置 `pass_through_body_enabled`（减少中转层重写请求体带来的风险）。
+
 ---
 
 ## 4) 本地开发（贡献者）
