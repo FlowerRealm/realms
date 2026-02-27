@@ -328,6 +328,9 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 	for i := 0; i < absoluteMaxAttempts; i++ {
 		sel, err := router.Next(r.Context())
 		if err != nil {
+			if h.finalizeIfCanceled(r, usageID, nil, reqStart, stream, reqBytes) {
+				return
+			}
 			break
 		}
 		rewritten, err := rewriteBody(sel)

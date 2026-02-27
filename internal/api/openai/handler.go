@@ -170,6 +170,29 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(out)
 }
 
+func (h *Handler) finalizeClientDisconnect(r *http.Request, usageID int64, sel *scheduler.Selection, reqStart time.Time, stream bool, reqBytes int64) {
+	if r == nil {
+		return
+	}
+	if usageID != 0 && h.quota != nil {
+		bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = h.quota.Void(bookCtx, usageID)
+	}
+	h.finalizeUsageEvent(r, usageID, sel, 0, "client_disconnect", "", time.Since(reqStart), 0, stream, reqBytes, 0)
+}
+
+func (h *Handler) finalizeIfCanceled(r *http.Request, usageID int64, sel *scheduler.Selection, reqStart time.Time, stream bool, reqBytes int64) bool {
+	if r == nil {
+		return false
+	}
+	if r.Context().Err() == nil {
+		return false
+	}
+	h.finalizeClientDisconnect(r, usageID, sel, reqStart, stream, reqBytes)
+	return true
+}
+
 func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	reqStart := time.Now()
 	p, ok := auth.PrincipalFromContext(r.Context())
@@ -490,6 +513,9 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	for i := 0; i < absoluteMaxAttempts; i++ {
 		sel, err := router.Next(r.Context())
 		if err != nil {
+			if h.finalizeIfCanceled(r, usageID, nil, reqStart, stream, reqBytes) {
+				return
+			}
 			break
 		}
 		selCopy := sel
@@ -617,6 +643,9 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 
 	resp, err := h.exec.Do(r.Context(), sel, r, body)
 	if err != nil {
+		if h.finalizeIfCanceled(r, usageID, &sel, reqStart, wantStream, reqBytes) {
+			return proxyAttemptDone, proxyFailureInfo{}
+		}
 		h.sched.Report(sel, scheduler.Result{Success: false, Retriable: true, ErrorClass: "network"})
 		h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, 0, "network", time.Since(attemptStart))
 		return proxyAttemptRetrySameSelection, proxyFailureInfo{
