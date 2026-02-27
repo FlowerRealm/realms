@@ -4,9 +4,7 @@ import (
 	"strings"
 )
 
-const lobeHubStaticSVGVersion = "1.77.0"
-
-// ModelIconURL 返回模型的品牌/供应商图标 URL（来自 @lobehub/icons-static-svg）。
+// ModelIconURL 返回模型的品牌/供应商图标 URL（本地静态资源）。
 //
 // 设计目标：
 // - SSR 模板直接可用（返回空字符串表示“无匹配图标”）
@@ -16,7 +14,7 @@ func ModelIconURL(modelID, ownedBy string) string {
 	if key == "" {
 		return ""
 	}
-	return "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@" + lobeHubStaticSVGVersion + "/icons/" + key + ".svg"
+	return "/assets/model-icons/" + key + ".svg"
 }
 
 func modelIconKey(modelID, ownedBy string) string {
