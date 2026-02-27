@@ -535,28 +535,17 @@ func applyMCPConfigs(ctx context.Context, opts Options, storeV2 mcp.StoreV2, tar
 
 func mergeRemoveIDs(a []string, b []string) []string {
 	seen := make(map[string]struct{}, len(a)+len(b))
-	out := make([]string, 0, len(a)+len(b))
-	for _, x := range a {
-		x = strings.TrimSpace(x)
-		if x == "" {
-			continue
+	all := make([]string, 0, len(a)+len(b))
+	all = append(all, a...)
+	all = append(all, b...)
+	for _, s := range all {
+		if t := strings.TrimSpace(s); t != "" {
+			seen[t] = struct{}{}
 		}
-		if _, ok := seen[x]; ok {
-			continue
-		}
-		seen[x] = struct{}{}
-		out = append(out, x)
 	}
-	for _, x := range b {
-		x = strings.TrimSpace(x)
-		if x == "" {
-			continue
-		}
-		if _, ok := seen[x]; ok {
-			continue
-		}
-		seen[x] = struct{}{}
-		out = append(out, x)
+	out := make([]string, 0, len(seen))
+	for k := range seen {
+		out = append(out, k)
 	}
 	sort.Strings(out)
 	return out
