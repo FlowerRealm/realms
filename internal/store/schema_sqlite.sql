@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS `user_tokens` (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS `uk_user_tokens_hash` ON `user_tokens` (`token_hash`);
 CREATE INDEX IF NOT EXISTS `idx_user_tokens_user_id` ON `user_tokens` (`user_id`);
+CREATE INDEX IF NOT EXISTS `idx_user_tokens_user_id_name` ON `user_tokens` (`user_id`, `name`);
 
 -- personal_api_keys: personal 模式可创建多个“数据面 API Key”（用于 /v1/*）。
 -- 说明：
@@ -310,6 +311,9 @@ CREATE INDEX IF NOT EXISTS `idx_usage_events_user_subscription_state_time` ON `u
 CREATE INDEX IF NOT EXISTS `idx_usage_events_state_time_upstream_channel` ON `usage_events` (`state`, `time`, `upstream_channel_id`);
 CREATE INDEX IF NOT EXISTS `idx_usage_events_user_id_id` ON `usage_events` (`user_id`, `id`);
 CREATE INDEX IF NOT EXISTS `idx_usage_events_time_id` ON `usage_events` (`time`, `id`);
+CREATE INDEX IF NOT EXISTS `idx_usage_events_token_time_id` ON `usage_events` (`token_id`, `time`, `id`);
+CREATE INDEX IF NOT EXISTS `idx_usage_events_upstream_channel_time_id` ON `usage_events` (`upstream_channel_id`, `time`, `id`);
+CREATE INDEX IF NOT EXISTS `idx_usage_events_model` ON `usage_events` (`model`);
 
 CREATE TABLE IF NOT EXISTS `subscription_plans` (
   `id` INTEGER PRIMARY KEY AUTOINCREMENT,

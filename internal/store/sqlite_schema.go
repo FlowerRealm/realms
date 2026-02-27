@@ -77,6 +77,9 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 		if err := ensureSQLitePersonalModeKeyHashMigrated(db); err != nil {
 			return err
 		}
+		if err := ensureSQLiteUsageSearchIndexes(db); err != nil {
+			return err
+		}
 		return ensureSQLiteChannelGroupMembers(db)
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -140,6 +143,9 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 		return err
 	}
 	if err := ensureSQLitePersonalModeKeyHashMigrated(db); err != nil {
+		return err
+	}
+	if err := ensureSQLiteUsageSearchIndexes(db); err != nil {
 		return err
 	}
 	return ensureSQLiteChannelGroupMembers(db)

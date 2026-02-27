@@ -137,6 +137,12 @@ export async function getAdminUsagePage(params: {
   limit?: number;
   before_id?: number;
   after_id?: number;
+  index?: string;
+  q?: string;
+  q_user?: string;
+  q_key?: string;
+  q_channel?: string;
+  q_model?: string;
 }) {
   const res = await api.get<APIResponse<AdminUsagePage>>('/api/admin/usage', { params });
   return res.data;

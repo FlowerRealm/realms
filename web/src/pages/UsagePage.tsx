@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { listUserTokens, type UserToken } from '../api/tokens';
 import {
   getUsageEventDetail,
-  getUsageEvents,
+  getUsageEventsV2,
   getUsageTimeSeries,
   getUsageWindows,
   type UsageEvent,
@@ -14,6 +14,7 @@ import {
 import { useAuth } from '../auth/AuthContext';
 import { DateRangePicker, SelectPicker } from '../components/DateRangePicker';
 import { SegmentedFrame } from '../components/SegmentedFrame';
+import { UsageAdvancedFiltersDropdown, type UsageAdvancedFiltersDropdownHandle } from '../components/UsageAdvancedFiltersDropdown';
 import { formatSecondsFromMilliseconds } from '../format/duration';
 import { formatUSDPlain } from '../format/money';
 import { UsageEventsCard } from './usage/UsageEventsCard';
@@ -39,6 +40,9 @@ export function UsagePage() {
   const [end, setEnd] = useState('');
   const [allTime, setAllTime] = useState(false);
   const [limit, setLimit] = useState(50);
+  const [filterKey, setFilterKey] = useState('');
+  const [filterModel, setFilterModel] = useState('');
+  const advRef = useRef<UsageAdvancedFiltersDropdownHandle | null>(null);
 
   const [seriesStart, setSeriesStart] = useState('');
   const [seriesEnd, setSeriesEnd] = useState('');
@@ -71,16 +75,34 @@ export function UsagePage() {
   const canPrev = beforeStack.length > 0;
   const canNext = useMemo(() => !!nextBeforeID && events.length === limit, [events.length, limit, nextBeforeID]);
 
-  async function refresh(currentBeforeID?: number, override?: { start?: string; end?: string }) {
+  async function refresh(
+    currentBeforeID?: number,
+    override?: { start?: string; end?: string; allTime?: boolean; filterKey?: string; filterModel?: string },
+  ) {
     setErr('');
     setLoading(true);
     try {
       const startValue = (override?.start ?? start).trim();
       const endValue = (override?.end ?? end).trim();
-      const allTimeActive = allTime && !startValue && !endValue;
+      const allTimeValue = !!(override?.allTime ?? allTime);
+      const allTimeActive = allTimeValue && !startValue && !endValue;
+      const indexParts: string[] = [];
+      const q_key = (override?.filterKey ?? filterKey).trim();
+      const q_model = (override?.filterModel ?? filterModel).trim();
+      if (q_key) indexParts.push('key');
+      if (q_model) indexParts.push('model');
+      const index = indexParts.length ? indexParts.join(',') : undefined;
       const [w, e] = await Promise.all([
         getUsageWindows(startValue || undefined, endValue || undefined, undefined, allTimeActive),
-        getUsageEvents(limit, currentBeforeID, allTimeActive ? undefined : startValue || undefined, allTimeActive ? undefined : endValue || undefined),
+        getUsageEventsV2({
+          limit,
+          before_id: currentBeforeID,
+          start: allTimeActive ? undefined : startValue || undefined,
+          end: allTimeActive ? undefined : endValue || undefined,
+          index,
+          q_key: q_key || undefined,
+          q_model: q_model || undefined,
+        }),
       ]);
       if (!w.success) throw new Error(w.message || '加载失败');
       if (!e.success) throw new Error(e.message || '加载失败');
@@ -269,108 +291,113 @@ export function UsagePage() {
             </div>
           ) : null}
 
-          <div
-            className="d-flex flex-wrap align-items-center gap-2 mb-0 bg-white p-2 rounded-3 border-light shadow-sm"
-            style={{ border: '1px solid #f1f3f5' }}
-          >
-            <div className="d-flex align-items-center px-2">
-              <span className="small text-muted me-2" style={{ whiteSpace: 'nowrap', fontSize: '12px' }}>
-                时间区间
-              </span>
-              <DateRangePicker
-                start={start}
-                end={end}
-                onChange={(r) => {
-                  const isAll = !r.start.trim() && !r.end.trim();
-                  setAllTime(isAll);
-                  if (isAll) setDetailGranularity('day');
-                  setStart(r.start);
-                  setEnd(r.end);
-                  setBeforeStack([]);
-                  setExpandedID(null);
-                }}
-                loading={loading}
-              />
-            </div>
+          <div className="card border-0 shadow-sm mb-0">
+            <div className="card-body py-3 px-4">
+              <div className="d-flex flex-wrap align-items-end gap-3">
+                <div className="d-flex flex-wrap align-items-center gap-2">
+                  <div className="text-muted smaller fw-medium text-nowrap">时间区间</div>
+                  <DateRangePicker
+                    start={start}
+                    end={end}
+                    onChange={(r) => {
+                      const isAll = !r.start.trim() && !r.end.trim();
+                      setAllTime(isAll);
+                      if (isAll) setDetailGranularity('day');
+                      setStart(r.start);
+                      setEnd(r.end);
+                      setBeforeStack([]);
+                      setExpandedID(null);
+                    }}
+                    loading={loading}
+                  />
+                </div>
 
-            <div className="vr my-2" style={{ height: '16px', opacity: 0.1 }}></div>
+                <div className="d-flex flex-wrap align-items-center gap-2">
+                  <div className="text-muted smaller fw-medium text-nowrap">显示条数</div>
+                  <SelectPicker
+                    value={limit}
+                    options={[
+                      { label: '20', value: 20 },
+                      { label: '50', value: 50 },
+                      { label: '100', value: 100 },
+                    ]}
+                    label="条"
+                    onChange={(val) => {
+                      setLimit(val);
+                      setBeforeStack([]);
+                      setExpandedID(null);
+                    }}
+                  />
+                </div>
 
-            <div className="d-flex align-items-center px-2">
-              <span className="small text-muted me-2" style={{ whiteSpace: 'nowrap', fontSize: '12px' }}>
-                显示条数
-              </span>
-              <SelectPicker
-                value={limit}
-                options={[
-                  { label: '20', value: 20 },
-                  { label: '50', value: 50 },
-                  { label: '100', value: 100 },
-                ]}
-                label="条"
-                onChange={(val) => {
-                  setLimit(val);
-                  setBeforeStack([]);
-                  setExpandedID(null);
-                }}
-              />
-            </div>
+                <div className="d-flex align-items-center gap-2">
+                  <UsageAdvancedFiltersDropdown
+                    ref={advRef}
+                    disabled={loading}
+                    toggleTestId="usage-adv-toggle"
+                    fields={[
+                      {
+                        inputId: 'usageFilterKeyValue',
+                        label: 'Key',
+                        title: 'Key 名称',
+                        placeholder: '输入 Key 名称',
+                        value: filterKey,
+                        onChange: (v) => {
+                          setFilterKey(v);
+                          setBeforeStack([]);
+                          setExpandedID(null);
+                        },
+                      },
+                      {
+                        inputId: 'usageFilterModelValue',
+                        label: '模型',
+                        title: '模型',
+                        placeholder: '输入模型名',
+                        value: filterModel,
+                        onChange: (v) => {
+                          setFilterModel(v);
+                          setBeforeStack([]);
+                          setExpandedID(null);
+                        },
+                      },
+                    ]}
+                  />
+                </div>
 
-            <div className="ms-auto d-flex gap-2 pe-1">
-              <button
-                className="btn btn-sm"
-                style={{
-                  backgroundColor: '#326c52',
-                  color: '#ffffff',
-                  fontWeight: 500,
-                  height: '28px',
-                  fontSize: '12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  borderRadius: '4px',
-                  padding: '0 12px',
-                  transition: 'all 0.2s',
-                  border: 'none',
-                }}
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  setBeforeStack([]);
-                  setExpandedID(null);
-                  void refresh(undefined);
-                }}
-              >
-                <span className="material-symbols-rounded me-1" style={{ fontSize: '16px' }}>
-                  refresh
-                </span>
-                更新
-              </button>
-              <button
-                className="btn btn-sm"
-                style={{
-                  height: '28px',
-                  fontSize: '12px',
-                  border: '1px solid #e9ecef',
-                  borderRadius: '4px',
-                  backgroundColor: '#ffffff',
-                  color: '#6c757d',
-                  padding: '0 12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  transition: 'all 0.2s',
-                }}
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  setAllTime(false);
-                  setStart('');
-                  setEnd('');
-                  setBeforeStack([]);
-                  setExpandedID(null);
-                  void refresh(undefined, { start: '', end: '' });
-                }}
-              >
-                重置
-              </button>
+                <div className="ms-auto d-flex gap-2">
+                  <button
+                    className="btn btn-primary btn-sm"
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      setBeforeStack([]);
+                      setExpandedID(null);
+                      void refresh(undefined);
+                    }}
+                  >
+                    <span className="material-symbols-rounded me-1">refresh</span>
+                    更新
+                  </button>
+                  <button
+                    className="btn btn-light border btn-sm"
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      setAllTime(false);
+                      setStart('');
+                      setEnd('');
+                      advRef.current?.close();
+                      setFilterKey('');
+                      setFilterModel('');
+                      setBeforeStack([]);
+                      setExpandedID(null);
+                      void refresh(undefined, { start: '', end: '', allTime: false, filterKey: '', filterModel: '' });
+                    }}
+                  >
+                    重置
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

@@ -113,6 +113,26 @@ export async function getUsageEvents(limit = 100, beforeID?: number, start?: str
   return res.data;
 }
 
+export async function getUsageEventsV2(params: {
+  limit?: number;
+  before_id?: number;
+  start?: string;
+  end?: string;
+  token_id?: number;
+  index?: string;
+  q?: string;
+  q_key?: string;
+  q_model?: string;
+}) {
+  const res = await api.get<APIResponse<UsageEventsResponse>>('/api/usage/events', {
+    params: {
+      ...params,
+      tz: browserTimeZone(),
+    },
+  });
+  return res.data;
+}
+
 export async function getUsageTimeSeries(start?: string, end?: string, granularity?: 'hour' | 'day', tokenID?: number, allTime?: boolean) {
   const res = await api.get<APIResponse<UsageTimeSeriesResponse>>('/api/usage/timeseries', {
     params: {
