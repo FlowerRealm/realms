@@ -34,7 +34,7 @@ export function AdminHomePage() {
     { value: 'tokens', label: 'Token' },
     { value: 'committed_usd', label: '消耗 (USD)' },
     { value: 'cache_ratio', label: '缓存率 (%)' },
-    { value: 'avg_first_token_latency', label: '首字延迟 (ms)' },
+    { value: 'avg_first_token_latency', label: '首字延迟 (s)' },
     { value: 'tokens_per_second', label: 'Tokens/s' },
   ];
   const granularityOptions: Array<{ value: 'hour' | 'day'; label: string }> = [
@@ -136,9 +136,9 @@ export function AdminHomePage() {
         read: (point) => point.cache_ratio,
       },
       avg_first_token_latency: {
-        label: '首字延迟 (ms)',
+        label: '首字延迟 (s)',
         color: color(palette.danger, 0.95),
-        read: (point) => point.avg_first_token_latency,
+        read: (point) => point.avg_first_token_latency / 1000,
       },
       tokens_per_second: {
         label: 'Tokens/s',

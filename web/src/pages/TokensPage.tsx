@@ -846,7 +846,7 @@ export function TokensPage() {
                       <td className="text-end">{usageWindow.tokens}</td>
                     </tr>
                     <tr>
-                      <td className="text-muted">Tokens (In/Out/Cache)</td>
+                      <td className="text-muted">Tokens</td>
                       <td className="text-end">
                         {usageWindow.input_tokens}/{usageWindow.output_tokens}/{usageWindow.cached_input_tokens + usageWindow.cached_output_tokens}
                       </td>

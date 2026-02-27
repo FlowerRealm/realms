@@ -11,6 +11,7 @@ import {
 } from '../../api/admin/usage';
 import { DateRangePicker, SelectPicker } from '../../components/DateRangePicker';
 import { SegmentedFrame } from '../../components/SegmentedFrame';
+import { formatLatencyPairSeconds, formatSecondsFromMilliseconds } from '../../format/duration';
 import { formatIntComma } from '../../format/int';
 
 type ChartInstance = {
@@ -90,7 +91,7 @@ export function UsageAdminPage() {
     { value: 'requests', label: '请求数' },
     { value: 'tokens', label: 'Token' },
     { value: 'cache_ratio', label: '缓存率 (%)' },
-    { value: 'avg_first_token_latency', label: '首字延迟 (ms)' },
+    { value: 'avg_first_token_latency', label: '首字延迟 (s)' },
     { value: 'tokens_per_second', label: 'Tokens/s' },
   ];
   const granularityOptions: Array<{ value: 'hour' | 'day'; label: string }> = [
@@ -250,9 +251,9 @@ export function UsageAdminPage() {
         read: (point) => point.cache_ratio,
       },
       avg_first_token_latency: {
-        label: '首字延迟 (ms)',
+        label: '首字延迟 (s)',
         color: color(palette.danger, 0.95),
-        read: (point) => point.avg_first_token_latency,
+        read: (point) => point.avg_first_token_latency / 1000,
       },
       tokens_per_second: {
         label: 'Tokens/s',
@@ -497,7 +498,7 @@ export function UsageAdminPage() {
                       <div className="col-sm-6 col-md-3">
                         <div className="metric-card p-3 rounded-3 border">
                           <div className="text-muted smaller mb-1">平均首字延迟</div>
-                          <div className="h4 fw-bold mb-1">{windowStats.avg_first_token_latency || '-'}</div>
+                          <div className="h4 fw-bold mb-1">{formatSecondsFromMilliseconds(windowStats.avg_first_token_latency)}</div>
                           <div className="text-muted smaller fw-medium">基于有效首字样本</div>
                         </div>
                       </div>
@@ -692,9 +693,8 @@ export function UsageAdminPage() {
 	                        {isPersonalMode ? null : <th className="border-0">用户</th>}
                         <th className="border-0">接口 / 模型</th>
                         <th className="text-center border-0">状态码</th>
-                        <th className="text-end border-0">耗时</th>
-                        <th className="text-end border-0">首字延迟</th>
-                        <th className="text-end border-0">Tokens (In/Out/Cache)</th>
+                        <th className="text-end border-0">耗时/首字</th>
+                        <th className="text-end border-0">Tokens</th>
                         <th className="text-end border-0">Tokens/s</th>
                         <th className="text-end border-0">费用</th>
                         <th className="text-center border-0">状态</th>
@@ -736,10 +736,7 @@ export function UsageAdminPage() {
                                 <span className="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill">{e.status_code}</span>
                               )}
 	                            </td>
-	                            <td className="text-end font-monospace text-muted">{formatIntComma(e.latency_ms)} ms</td>
-	                            <td className="text-end font-monospace text-muted">
-	                              {e.first_token_latency_ms === '-' ? '-' : `${formatIntComma(e.first_token_latency_ms)} ms`}
-	                            </td>
+	                            <td className="text-end font-monospace text-muted">{formatLatencyPairSeconds(e.latency_ms, e.first_token_latency_ms)}</td>
 	                            <td className="text-end font-monospace">
 	                              <div>
 	                                <span className="text-muted">In:</span> {formatIntComma(e.input_tokens)}
@@ -779,7 +776,7 @@ export function UsageAdminPage() {
                           </tr>
                           {expandedID === e.id ? (
                             <tr key={`${e.id}-detail`} className="rlm-usage-detail-row">
-                              <td colSpan={isPersonalMode ? 11 : 12} className="p-0 border-0">
+                              <td colSpan={isPersonalMode ? 10 : 11} className="p-0 border-0">
                                 <div className="bg-light px-4 py-3 mt-1">
                                   {detailLoadingID === e.id ? <div className="text-muted small">加载详情中…</div> : null}
                                   {detailByEventID[e.id] ? (
@@ -826,7 +823,7 @@ export function UsageAdminPage() {
                       ))}
                       {events.length === 0 ? (
                         <tr>
-                          <td colSpan={isPersonalMode ? 11 : 12} className="text-center py-5 text-muted small">
+                          <td colSpan={isPersonalMode ? 10 : 11} className="text-center py-5 text-muted small">
                             暂无请求记录
                           </td>
                         </tr>

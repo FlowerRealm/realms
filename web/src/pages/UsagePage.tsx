@@ -14,6 +14,7 @@ import {
 import { useAuth } from '../auth/AuthContext';
 import { DateRangePicker, SelectPicker } from '../components/DateRangePicker';
 import { SegmentedFrame } from '../components/SegmentedFrame';
+import { formatSecondsFromMilliseconds } from '../format/duration';
 import { formatUSDPlain } from '../format/money';
 import { UsageEventsCard } from './usage/UsageEventsCard';
 import { UsageSummaryCard } from './usage/UsageSummaryCard';
@@ -59,7 +60,7 @@ export function UsagePage() {
     { value: 'requests', label: '请求数' },
     { value: 'tokens', label: 'Token' },
     { value: 'cache_ratio', label: '缓存率 (%)' },
-    { value: 'avg_first_token_latency', label: '首字延迟 (ms)' },
+    { value: 'avg_first_token_latency', label: '首字延迟 (s)' },
     { value: 'tokens_per_second', label: 'Tokens/s' },
   ];
   const granularityOptions: Array<{ value: DetailGranularity; label: string }> = [
@@ -207,7 +208,7 @@ export function UsagePage() {
     if (values.length === 0) return '-';
     const avg = values.reduce((acc, v) => acc + v, 0) / values.length;
     if (!Number.isFinite(avg) || avg <= 0) return '-';
-    return `${avg.toFixed(1)} ms`;
+    return formatSecondsFromMilliseconds(avg);
   }, [detailSeries]);
   const avgTokensPerSecondText = useMemo(() => {
     const values = (detailSeries || []).map((p) => p.tokens_per_second).filter((v) => Number.isFinite(v) && v > 0);

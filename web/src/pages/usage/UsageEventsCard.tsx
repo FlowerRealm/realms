@@ -1,5 +1,6 @@
 import type { UserToken } from '../../api/tokens';
 import type { UsageEvent, UsageEventDetail } from '../../api/usage';
+import { formatLatencyPairSeconds } from '../../format/duration';
 import { formatIntComma } from '../../format/int';
 import {
   badgeForState,
@@ -69,9 +70,8 @@ export function UsageEventsCard({
                 <th className="border-0">用户</th>
                 <th className="border-0">接口 / 模型</th>
                 <th className="text-center border-0">状态码</th>
-                <th className="text-end border-0">耗时</th>
-                <th className="text-end border-0">首字延迟</th>
-                <th className="text-end border-0">Tokens (In/Out/Cache)</th>
+                <th className="text-end border-0">耗时/首字</th>
+                <th className="text-end border-0">Tokens</th>
                 <th className="text-end border-0">Tokens/s</th>
                 <th className="text-end border-0">费用</th>
                 <th className="text-center border-0">状态</th>
@@ -85,8 +85,6 @@ export function UsageEventsCard({
                 const model = (e.model || '').trim() || '-';
                 const keyName = tokenNameFromMap(tokenByID, e.token_id);
                 const code = e.status_code ? String(e.status_code) : '-';
-                const latencyMS = e.latency_ms > 0 ? String(e.latency_ms) : '-';
-                const firstTokenLatencyMS = '-';
                 const cached = (() => {
                   let v = 0;
                   if (typeof e.cached_input_tokens === 'number' && e.cached_input_tokens > 0) v += e.cached_input_tokens;
@@ -130,10 +128,7 @@ export function UsageEventsCard({
                           <span className="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill">{code}</span>
                         )}
                       </td>
-                      <td className="text-end font-monospace text-muted">{formatIntComma(latencyMS)} ms</td>
-                      <td className="text-end font-monospace text-muted">
-                        {firstTokenLatencyMS === '-' ? '-' : `${formatIntComma(firstTokenLatencyMS)} ms`}
-                      </td>
+                      <td className="text-end font-monospace text-muted">{formatLatencyPairSeconds(e.latency_ms, undefined)}</td>
                       <td className="text-end font-monospace">
                         <div>
                           <span className="text-muted">In:</span> {formatIntComma(e.input_tokens)}
@@ -173,7 +168,7 @@ export function UsageEventsCard({
                     </tr>
                     {expandedID === e.id ? (
                       <tr key={`${e.id}-detail`} className="rlm-usage-detail-row">
-                        <td colSpan={12} className="p-0 border-0">
+                        <td colSpan={11} className="p-0 border-0">
                           <div className="bg-light px-4 py-3 mt-1">
                             {detailLoadingID === e.id ? <div className="text-muted small">加载详情中…</div> : null}
                             {detailByEventID[e.id] ? (
@@ -220,7 +215,7 @@ export function UsageEventsCard({
               })}
               {events.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="text-center py-5 text-muted small">
+                  <td colSpan={11} className="text-center py-5 text-muted small">
                     暂无请求记录
                   </td>
                 </tr>
