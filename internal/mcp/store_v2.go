@@ -20,6 +20,15 @@ type ServerV2 struct {
 	Stdio     *StdioV2    `json:"stdio,omitempty"`
 	HTTP      *HTTPV2     `json:"http,omitempty"`
 	Timeouts  *TimeoutsV2 `json:"timeouts,omitempty"`
+	// Targets controls per-target enablement for this server.
+	// Semantics: nil (or missing key) means enabled=true. Only explicit false disables.
+	Targets *ServerTargetsV2 `json:"targets,omitempty"`
+}
+
+type ServerTargetsV2 struct {
+	Codex  *bool `json:"codex,omitempty"`
+	Claude *bool `json:"claude,omitempty"`
+	Gemini *bool `json:"gemini,omitempty"`
 }
 
 type StdioV2 struct {
@@ -64,12 +73,56 @@ func (s StoreV2) Normalize() StoreV2 {
 			sv.HTTP.URL = strings.TrimSpace(sv.HTTP.URL)
 			sv.HTTP.BearerTokenEnvVar = strings.TrimSpace(sv.HTTP.BearerTokenEnvVar)
 		}
+
+		// targets: default is enabled=true, so explicit true is redundant.
+		if sv.Targets != nil {
+			if sv.Targets.Codex != nil && *sv.Targets.Codex {
+				sv.Targets.Codex = nil
+			}
+			if sv.Targets.Claude != nil && *sv.Targets.Claude {
+				sv.Targets.Claude = nil
+			}
+			if sv.Targets.Gemini != nil && *sv.Targets.Gemini {
+				sv.Targets.Gemini = nil
+			}
+			if sv.Targets.Codex == nil && sv.Targets.Claude == nil && sv.Targets.Gemini == nil {
+				sv.Targets = nil
+			}
+		}
+
 		out.Servers[id2] = sv
 		if id2 != id {
 			delete(out.Servers, id)
 		}
 	}
 	return out
+}
+
+func (sv ServerV2) EnabledFor(t Target) bool {
+	// Default: enabled everywhere.
+	if sv.Targets == nil {
+		return true
+	}
+	switch t {
+	case TargetCodex:
+		if sv.Targets.Codex == nil {
+			return true
+		}
+		return *sv.Targets.Codex
+	case TargetClaude:
+		if sv.Targets.Claude == nil {
+			return true
+		}
+		return *sv.Targets.Claude
+	case TargetGemini:
+		if sv.Targets.Gemini == nil {
+			return true
+		}
+		return *sv.Targets.Gemini
+	default:
+		// Unknown target: be conservative and treat as enabled.
+		return true
+	}
 }
 
 func (s StoreV2) Validate() error {
@@ -327,6 +380,42 @@ func toStringMapString(v any) map[string]string {
 	if len(out) == 0 {
 		return nil
 	}
+	return out
+}
+
+// StoreV2ToRegistryForTarget is like StoreV2ToRegistry, but only includes servers enabled for the given target.
+func StoreV2ToRegistryForTarget(s StoreV2, t Target) Registry {
+	s = s.Normalize()
+	out := make(Registry, 0)
+	for id, sv := range s.Servers {
+		if !sv.EnabledFor(t) {
+			continue
+		}
+		// Reuse existing conversion logic by converting one-by-one.
+		one := StoreV2{Version: 2, Servers: map[string]ServerV2{id: sv}}
+		reg := StoreV2ToRegistry(one)
+		if spec, ok := reg[id]; ok {
+			out[id] = spec
+		}
+	}
+	return out
+}
+
+// DisabledServerIDsForTarget returns server IDs explicitly disabled for the given target.
+func DisabledServerIDsForTarget(s StoreV2, t Target) []string {
+	s = s.Normalize()
+	out := make([]string, 0)
+	for id, sv := range s.Servers {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if sv.EnabledFor(t) {
+			continue
+		}
+		out = append(out, id)
+	}
+	sort.Strings(out)
 	return out
 }
 

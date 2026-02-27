@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -240,7 +241,7 @@ func adminMCPImportHandler(opts Options) gin.HandlerFunc {
 
 		applyResults := []mcp.ApplyResult{}
 		if req.ApplyAfter {
-			applyResults = applyMCPConfigs(ctx, opts, mcp.StoreV2ToRegistry(next), nil, nil, force)
+			applyResults = applyMCPConfigs(ctx, opts, next, nil, nil, force)
 		}
 
 		if mut != nil {
@@ -401,7 +402,7 @@ func adminMCPPutHandler(opts Options) gin.HandlerFunc {
 
 		applyResults := []mcp.ApplyResult{}
 		if applyOnSave {
-			applyResults = applyMCPConfigs(ctx, opts, mcp.StoreV2ToRegistry(storeV2), nil, nil, force)
+			applyResults = applyMCPConfigs(ctx, opts, storeV2, nil, nil, force)
 		}
 
 		if mut != nil {
@@ -447,7 +448,7 @@ func adminMCPApplyHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "读取配置失败"})
 			return
 		}
-		results := applyMCPConfigs(c.Request.Context(), opts, mcp.StoreV2ToRegistry(sv2), req.Targets, req.RemoveIDs, force)
+		results := applyMCPConfigs(c.Request.Context(), opts, sv2, req.Targets, req.RemoveIDs, force)
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "",
@@ -458,7 +459,7 @@ func adminMCPApplyHandler(opts Options) gin.HandlerFunc {
 	}
 }
 
-func applyMCPConfigs(ctx context.Context, opts Options, reg mcp.Registry, targets []string, removeIDs []string, force bool) []mcp.ApplyResult {
+func applyMCPConfigs(ctx context.Context, opts Options, storeV2 mcp.StoreV2, targets []string, removeIDs []string, force bool) []mcp.ApplyResult {
 	want := map[mcp.Target]bool{
 		mcp.TargetCodex:  true,
 		mcp.TargetClaude: true,
@@ -502,6 +503,10 @@ func applyMCPConfigs(ctx context.Context, opts Options, reg mcp.Registry, target
 		if !want[t] {
 			continue
 		}
+		regT := mcp.StoreV2ToRegistryForTarget(storeV2, t)
+		disabledIDs := mcp.DisabledServerIDsForTarget(storeV2, t)
+		mergedRemoveIDs := mergeRemoveIDs(removeIDs, disabledIDs)
+
 		path, err := mcp.ResolveTargetPath(t)
 		res := mcp.ApplyResult{Target: t, Path: path, Enabled: enabled[t]}
 		if strings.TrimSpace(path) != "" {
@@ -518,13 +523,31 @@ func applyMCPConfigs(ctx context.Context, opts Options, reg mcp.Registry, target
 			out = append(out, res)
 			continue
 		}
-		changed, err := mcp.ApplyTargetWithRemovals(t, path, reg, removeIDs, force)
+		changed, err := mcp.ApplyTargetWithRemovals(t, path, regT, mergedRemoveIDs, force)
 		res.Changed = changed
 		if err != nil {
 			res.Error = err.Error()
 		}
 		out = append(out, res)
 	}
+	return out
+}
+
+func mergeRemoveIDs(a []string, b []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(a)+len(b))
+	for _, x := range append(append([]string{}, a...), b...) {
+		x = strings.TrimSpace(x)
+		if x == "" {
+			continue
+		}
+		if seen[x] {
+			continue
+		}
+		seen[x] = true
+		out = append(out, x)
+	}
+	sort.Strings(out)
 	return out
 }
 
@@ -574,7 +597,7 @@ func adminMCPDeleteHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
-		applyResults := applyMCPConfigs(ctx, opts, mcp.StoreV2ToRegistry(sv2), req.Targets, []string{id}, force)
+		applyResults := applyMCPConfigs(ctx, opts, sv2, req.Targets, []string{id}, force)
 		if mut != nil {
 			if err := mut.Commit(ctx, true); err != nil {
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "personal config 同步失败"})
@@ -670,7 +693,7 @@ func adminMCPExportClaudeHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "读取配置失败"})
 			return
 		}
-		reg := mcp.StoreV2ToRegistry(sv2)
+		reg := mcp.StoreV2ToRegistryForTarget(sv2, mcp.TargetClaude)
 		platform := strings.TrimSpace(c.Query("platform"))
 		cfg, err := mcp.ExportClaudeConfig(reg, platform)
 		if err != nil {
@@ -699,7 +722,7 @@ func adminMCPExportGeminiHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "读取配置失败"})
 			return
 		}
-		reg := mcp.StoreV2ToRegistry(sv2)
+		reg := mcp.StoreV2ToRegistryForTarget(sv2, mcp.TargetGemini)
 		cfg, err := mcp.ExportGeminiConfig(reg)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "导出失败"})
@@ -727,7 +750,7 @@ func adminMCPExportCodexHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "读取配置失败"})
 			return
 		}
-		reg := mcp.StoreV2ToRegistry(sv2)
+		reg := mcp.StoreV2ToRegistryForTarget(sv2, mcp.TargetCodex)
 		platform := strings.TrimSpace(c.Query("platform"))
 		out, err := mcp.ExportCodexConfigTOML(reg, platform)
 		if err != nil {

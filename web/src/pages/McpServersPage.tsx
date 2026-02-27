@@ -5,7 +5,6 @@ import { deleteAdminMcp, getAdminMcp, updateAdminMcp, scanAdminMcp, parseAdminMc
 import { useAuth } from '../auth/AuthContext';
 import { BootstrapModal } from '../components/BootstrapModal';
 import { closeModalById } from '../components/modal';
-import { SegmentedFrame } from '../components/SegmentedFrame';
 
 type TargetKey = 'codex' | 'claude' | 'gemini';
 type McpType = 'stdio' | 'http' | 'sse';
@@ -26,7 +25,7 @@ type UnionRow = {
   actualByTarget: PerTarget;
   hasActual: boolean;
   actualConflict: boolean;
-  status: 'synced' | 'new' | 'missing' | 'conflict';
+  status: 'synced' | 'new' | 'missing' | 'conflict' | 'disabled';
 };
 
 function typeBadge(t: string) {
@@ -68,6 +67,24 @@ function equalSpec(a: unknown, b: unknown): boolean {
   return stableStringify(a) === stableStringify(b);
 }
 
+function targetEnabledForServer(s: McpServerV2 | undefined, k: TargetKey): boolean {
+  if (!s?.targets) return true;
+  const v = s.targets[k];
+  if (typeof v !== 'boolean') return true;
+  return v;
+}
+
+function withoutTargets(s: McpServerV2 | undefined): unknown {
+  if (!s) return s;
+  // Only strip the top-level `targets`; the rest is the actual spec.
+  const { targets: _t, ...rest } = s as McpServerV2 & { targets?: unknown };
+  return rest;
+}
+
+function equalServerCore(a: McpServerV2 | undefined, b: McpServerV2 | undefined): boolean {
+  return equalSpec(withoutTargets(a), withoutTargets(b));
+}
+
 function stableHash(v: unknown): string {
   // Simple stable hash for "did something materially change" checks.
   // Not cryptographic; just avoids repeated auto-fix loops.
@@ -86,6 +103,15 @@ function chooseActualServer(actualByTarget: PerTarget): McpServerV2 | undefined 
     if (s) return s;
   }
   return undefined;
+}
+
+function chooseActualServerForTargets(actualByTarget: PerTarget, enabled: Record<TargetKey, boolean>): McpServerV2 | undefined {
+  for (const k of ['codex', 'claude', 'gemini'] as const) {
+    if (!enabled[k]) continue;
+    const s = actualByTarget[k];
+    if (s) return s;
+  }
+  return chooseActualServer(actualByTarget);
 }
 
 type KVRow = { k: string; v: string };
@@ -205,12 +231,10 @@ export function McpServersPage() {
   const lastAutoFixSig = useRef<string>('');
   const conflictModalOpen = useRef(false);
   const desiredServersRef = useRef<Record<string, McpServerV2>>({});
-  const targetEnabledRef = useRef<Record<TargetKey, boolean>>({ codex: true, claude: true, gemini: true });
 
   const [err, setErr] = useState('');
   const [notice, setNotice] = useState('');
 
-  const [targetEnabled, setTargetEnabled] = useState<Record<TargetKey, boolean>>({ codex: true, claude: true, gemini: true });
   const [targetInfo, setTargetInfo] = useState<Record<TargetKey, { path: string; exists: boolean; parse_error?: string; server_count?: number }>>({
     codex: { path: '', exists: false },
     claude: { path: '', exists: false },
@@ -241,10 +265,6 @@ export function McpServersPage() {
     desiredServersRef.current = desiredServers || {};
   }, [desiredServers]);
 
-  useEffect(() => {
-    targetEnabledRef.current = targetEnabled;
-  }, [targetEnabled]);
-
   const unionRows = useMemo(() => {
     const ids = new Set<string>();
     for (const id of Object.keys(desiredServers || {})) ids.add(id);
@@ -262,25 +282,64 @@ export function McpServersPage() {
         const sv = servers[id];
         if (sv && typeof sv === 'object') actualByTarget[t] = sv;
       }
-      const chosen = chooseActualServer(actualByTarget);
-      const hasActual = !!chosen;
-      const actualSpecs = Object.values(actualByTarget);
+      const hasActual = Object.keys(actualByTarget).length > 0;
+
+      const desiredEnabled: Record<TargetKey, boolean> = {
+        codex: desired ? targetEnabledForServer(desired, 'codex') : true,
+        claude: desired ? targetEnabledForServer(desired, 'claude') : true,
+        gemini: desired ? targetEnabledForServer(desired, 'gemini') : true,
+      };
+      const enabledTargets: Record<TargetKey, boolean> = desired
+        ? desiredEnabled
+        : {
+            codex: !!actualByTarget.codex,
+            claude: !!actualByTarget.claude,
+            gemini: !!actualByTarget.gemini,
+          };
+
+      const chosen = chooseActualServerForTargets(actualByTarget, enabledTargets);
+
+      const enabledActualSpecs: McpServerV2[] = [];
+      for (const t of ['codex', 'claude', 'gemini'] as const) {
+        if (!enabledTargets[t]) continue;
+        const sv = actualByTarget[t];
+        if (sv) enabledActualSpecs.push(sv);
+      }
       const actualConflict = (() => {
-        if (actualSpecs.length <= 1) return false;
-        const first = actualSpecs[0];
-        for (const s of actualSpecs.slice(1)) {
-          if (!equalSpec(first, s)) return true;
+        if (enabledActualSpecs.length <= 1) return false;
+        const first = enabledActualSpecs[0];
+        for (const s of enabledActualSpecs.slice(1)) {
+          if (!equalServerCore(first, s)) return true;
         }
         return false;
       })();
 
       let status: UnionRow['status'] = 'synced';
-      if (!hasActual && desired) status = 'missing';
-      else if (hasActual && !desired) status = 'new';
-      else if (!hasActual && !desired) continue;
-      else if (actualConflict) status = 'conflict';
-      else if (desired && chosen && !equalSpec(desired, chosen)) status = 'conflict';
-      else status = 'synced';
+      if (!desired && hasActual) {
+        status = 'new';
+      } else if (!desired && !hasActual) {
+        continue;
+      } else if (desired && !enabledTargets.codex && !enabledTargets.claude && !enabledTargets.gemini) {
+        status = 'disabled';
+      } else if (desired) {
+        let missing = false;
+        for (const t of ['codex', 'claude', 'gemini'] as const) {
+          if (!enabledTargets[t]) continue;
+          if (!actualByTarget[t]) {
+            missing = true;
+            break;
+          }
+        }
+        if (missing) {
+          status = 'missing';
+        } else if (actualConflict) {
+          status = 'conflict';
+        } else if (chosen && !equalServerCore(desired, chosen)) {
+          status = 'conflict';
+        } else {
+          status = 'synced';
+        }
+      }
 
       out.push({
         id,
@@ -349,28 +408,53 @@ export function McpServersPage() {
     for (const [id, per] of Object.entries(actualByID)) {
       if (Object.prototype.hasOwnProperty.call(nextDesired, id)) continue;
       const chosen = chooseActualServer(per);
-      if (chosen) nextDesired[id] = chosen;
+      if (!chosen) continue;
+      const present: Record<TargetKey, boolean> = {
+        codex: !!per.codex,
+        claude: !!per.claude,
+        gemini: !!per.gemini,
+      };
+      const disable: Partial<Record<TargetKey, boolean>> = {};
+      for (const t of ['codex', 'claude', 'gemini'] as const) {
+        if (!present[t]) disable[t] = false;
+      }
+      nextDesired[id] = Object.keys(disable).length ? { ...chosen, targets: disable } : chosen;
     }
 
     // Conflicts: (1) actual differs across targets; (2) actual differs from desired.
     for (const [id, per] of Object.entries(actualByID)) {
-      const actualSpecs = Object.values(per);
       const desiredSpec = nextDesired[id];
+      const enabled: Record<TargetKey, boolean> = {
+        codex: desiredSpec ? targetEnabledForServer(desiredSpec, 'codex') : true,
+        claude: desiredSpec ? targetEnabledForServer(desiredSpec, 'claude') : true,
+        gemini: desiredSpec ? targetEnabledForServer(desiredSpec, 'gemini') : true,
+      };
+      if (!enabled.codex && !enabled.claude && !enabled.gemini) continue;
+
+      const actualSpecs: McpServerV2[] = [];
+      for (const t of ['codex', 'claude', 'gemini'] as const) {
+        if (!enabled[t]) continue;
+        const sv = per[t];
+        if (sv) actualSpecs.push(sv);
+      }
       let conflict = false;
       if (actualSpecs.length > 1) {
         const first = actualSpecs[0];
         for (const s of actualSpecs.slice(1)) {
-          if (!equalSpec(first, s)) {
+          if (!equalServerCore(first, s)) {
             conflict = true;
             break;
           }
         }
       }
-      const chosen = chooseActualServer(per);
-      if (!conflict && chosen && desiredSpec && !equalSpec(desiredSpec, chosen)) conflict = true;
+      const chosen = chooseActualServerForTargets(per, enabled);
+      if (!conflict && chosen && desiredSpec && !equalServerCore(desiredSpec, chosen)) conflict = true;
       if (!conflict) continue;
       conflictIDs.push(id);
-      if (per.codex) defaultChoice[id] = 'codex';
+      if (enabled.codex && per.codex) defaultChoice[id] = 'codex';
+      else if (enabled.claude && per.claude) defaultChoice[id] = 'claude';
+      else if (enabled.gemini && per.gemini) defaultChoice[id] = 'gemini';
+      else if (per.codex) defaultChoice[id] = 'codex';
       else if (per.claude) defaultChoice[id] = 'claude';
       else if (per.gemini) defaultChoice[id] = 'gemini';
       else defaultChoice[id] = 'desired';
@@ -379,10 +463,22 @@ export function McpServersPage() {
     // Missing-only differences: desired has IDs not in parse-ok actual; these can be fixed by applying desired to enabled targets.
     // We don't need to modify desired, but we still need an apply. We mark hasAnyFix so caller can decide.
     let hasMissing = false;
-    for (const id of Object.keys(desired || {})) {
-      if (Object.prototype.hasOwnProperty.call(actualByID, id)) continue;
-      hasMissing = true;
-      break;
+    for (const [id, ds] of Object.entries(desired || {})) {
+      const enabled: Record<TargetKey, boolean> = {
+        codex: targetEnabledForServer(ds, 'codex'),
+        claude: targetEnabledForServer(ds, 'claude'),
+        gemini: targetEnabledForServer(ds, 'gemini'),
+      };
+      if (!enabled.codex && !enabled.claude && !enabled.gemini) continue;
+      const per = actualByID[id] || {};
+      for (const t of ['codex', 'claude', 'gemini'] as const) {
+        if (!enabled[t]) continue;
+        if (!per[t]) {
+          hasMissing = true;
+          break;
+        }
+      }
+      if (hasMissing) break;
     }
 
     const hasNew = stableHash(nextDesired) !== stableHash(desired || {});
@@ -401,11 +497,6 @@ export function McpServersPage() {
       setApplyResults(d?.apply_results || []);
 
       const targets = d?.targets || {};
-      setTargetEnabled({
-        codex: typeof targets.codex?.enabled === 'boolean' ? targets.codex.enabled : true,
-        claude: typeof targets.claude?.enabled === 'boolean' ? targets.claude.enabled : true,
-        gemini: typeof targets.gemini?.enabled === 'boolean' ? targets.gemini.enabled : true,
-      });
       setTargetInfo({
         codex: { path: targets.codex?.path || '', exists: !!targets.codex?.exists },
         claude: { path: targets.claude?.path || '', exists: !!targets.claude?.exists },
@@ -463,7 +554,7 @@ export function McpServersPage() {
           if (sig && sig !== lastAutoFixSig.current) {
             lastAutoFixSig.current = sig;
             // Silent apply: keep UI quiet unless there's an error.
-            void saveDesired(nextDesired, undefined, true);
+            void saveDesired(nextDesired, true);
           }
         }
       }
@@ -476,7 +567,7 @@ export function McpServersPage() {
     }
   }
 
-  async function saveDesired(next: Record<string, McpServerV2>, nextTargetEnabled?: Record<TargetKey, boolean>, silent?: boolean) {
+  async function saveDesired(next: Record<string, McpServerV2>, silent?: boolean) {
     if (!silent) {
       setErr('');
       setNotice('');
@@ -485,7 +576,6 @@ export function McpServersPage() {
     try {
       const res = await updateAdminMcp({
         store: { version: 2, servers: next || {} } satisfies McpStoreV2,
-        target_enabled: nextTargetEnabled,
         apply_on_save: true,
       });
       if (!res.success) throw new Error(res.message || '保存失败');
@@ -535,11 +625,7 @@ export function McpServersPage() {
       setNotice('');
       setSaving(true);
       try {
-        const targets: string[] = [];
-        if (targetEnabled.codex) targets.push('codex');
-        if (targetEnabled.claude) targets.push('claude');
-        if (targetEnabled.gemini) targets.push('gemini');
-        const res = await deleteAdminMcp({ id, targets });
+        const res = await deleteAdminMcp({ id });
         if (!res.success) throw new Error(res.message || '删除失败');
         setApplyResults(res.data?.apply_results || []);
         setDesiredServers((prev) => {
@@ -565,25 +651,85 @@ export function McpServersPage() {
       if (!r.hasActual) continue;
       if (!r.chosen) continue;
       if (!r.desired) {
-        next[r.id] = r.chosen;
+        const present: Record<TargetKey, boolean> = {
+          codex: !!r.actualByTarget.codex,
+          claude: !!r.actualByTarget.claude,
+          gemini: !!r.actualByTarget.gemini,
+        };
+        const disable: Partial<Record<TargetKey, boolean>> = {};
+        for (const t of ['codex', 'claude', 'gemini'] as const) {
+          if (!present[t]) disable[t] = false;
+        }
+        next[r.id] = Object.keys(disable).length ? { ...r.chosen, targets: disable } : r.chosen;
         continue;
       }
-      if (!(r.actualConflict || !equalSpec(r.desired, r.chosen))) continue;
+      if (!(r.actualConflict || !equalServerCore(r.desired, r.chosen))) continue;
 
       const pick = conflictChoice[r.id] || 'desired';
       if (pick === 'desired') continue;
       const actual = r.actualByTarget[pick];
-      if (actual) next[r.id] = actual;
+      if (actual) {
+        const targets = r.desired.targets;
+        next[r.id] = targets ? { ...actual, targets } : actual;
+      }
     }
 
     await saveDesired(next);
     closeModalById('mcpConflictModal');
   }
 
-  async function toggleTarget(k: TargetKey, v: boolean) {
-    const next = { ...targetEnabled, [k]: v };
-    setTargetEnabled(next);
-    await saveDesired(desiredServersRef.current || {}, next);
+  function setServerTargetEnabled(s: McpServerV2, k: TargetKey, enabled: boolean): McpServerV2 {
+    const targets = { ...(s.targets || {}) } as Partial<Record<TargetKey, boolean>>;
+    if (enabled) delete targets[k];
+    else targets[k] = false;
+    const out: McpServerV2 = { ...s };
+    if (Object.keys(targets).length === 0) {
+      delete (out as any).targets;
+      return out;
+    }
+    out.targets = targets;
+    return out;
+  }
+
+  function setServerTarget(id: string, k: TargetKey, enabled: boolean) {
+    void (async () => {
+      setErr('');
+      setNotice('');
+
+      const curDesired = desiredServersRef.current?.[id];
+      const r = unionRows.find((x) => x.id === id);
+      const actualByTarget = r?.actualByTarget || {};
+
+      if (!curDesired) {
+        const base = actualByTarget[k] || chooseActualServer(actualByTarget);
+        if (!base) {
+          setErr('无法找到可用的实际配置');
+          return;
+        }
+
+        const present: Record<TargetKey, boolean> = {
+          codex: !!actualByTarget.codex,
+          claude: !!actualByTarget.claude,
+          gemini: !!actualByTarget.gemini,
+        };
+        const disable: Partial<Record<TargetKey, boolean>> = {};
+        for (const t of ['codex', 'claude', 'gemini'] as const) {
+          const wantEnabled = t === k ? enabled : present[t];
+          if (!wantEnabled) disable[t] = false;
+        }
+
+        const nextServer = Object.keys(disable).length ? { ...base, targets: disable } : base;
+        const next = { ...(desiredServersRef.current || {}) };
+        next[id] = nextServer;
+        await saveDesired(next);
+        return;
+      }
+
+      const nextServer = setServerTargetEnabled(curDesired, k, enabled);
+      const next = { ...(desiredServersRef.current || {}) };
+      next[id] = nextServer;
+      await saveDesired(next);
+    })();
   }
 
   function saveFormToDesired() {
@@ -620,7 +766,7 @@ export function McpServersPage() {
     for (const [id, sv] of Object.entries(imported || {})) {
       const cur = desired?.[id];
       if (!cur) continue;
-      if (!equalSpec(cur, sv)) out.push(id);
+      if (!equalServerCore(cur, sv)) out.push(id);
     }
     return out.sort((a, b) => a.localeCompare(b));
   }
@@ -631,14 +777,19 @@ export function McpServersPage() {
 
     const out: Record<string, McpServerV2> = { ...(p.desired || {}) };
     for (const [id, sv] of Object.entries(p.imported || {})) {
-      if (!conflictSet.has(id)) out[id] = sv;
+      if (conflictSet.has(id)) continue;
+      const keepTargets = p.desired?.[id]?.targets;
+      out[id] = keepTargets ? { ...sv, targets: keepTargets } : sv;
     }
     for (const id of conflictIDs) {
       const pick = choices[id];
       if (pick === 'keep') {
         if (p.desired[id]) out[id] = p.desired[id];
       } else if (pick === 'imported') {
-        if (p.imported[id]) out[id] = p.imported[id];
+        if (p.imported[id]) {
+          const keepTargets = p.desired?.[id]?.targets;
+          out[id] = keepTargets ? { ...p.imported[id], targets: keepTargets } : p.imported[id];
+        }
       }
     }
     return out;
@@ -677,7 +828,11 @@ export function McpServersPage() {
         return;
       }
 
-      const next = { ...(desired || {}), ...(imported || {}) };
+      const next: Record<string, McpServerV2> = { ...(desired || {}) };
+      for (const [id, sv] of Object.entries(imported || {})) {
+        const keepTargets = desired?.[id]?.targets;
+        next[id] = keepTargets ? { ...sv, targets: keepTargets } : sv;
+      }
       closeModalById('mcpEditModal');
       await saveDesired(next);
     } catch (e) {
@@ -731,49 +886,7 @@ export function McpServersPage() {
         </div>
       ) : null}
 
-      <SegmentedFrame>
-        <div className="row g-3">
-          {(['codex', 'claude', 'gemini'] as const).map((k) => {
-            const info = targetInfo[k];
-            const enabled = !!targetEnabled[k];
-            const parseError = (info.parse_error || '').trim();
-            const count = typeof info.server_count === 'number' ? info.server_count : null;
-            const statusLabel = parseError ? '读取失败' : '正常';
-            const statusBadge = parseError ? 'bg-light text-danger border' : 'bg-light text-success border';
-            return (
-              <div key={k} className="col-12 col-lg-4">
-                <div className="card h-100">
-                  <div className="card-body">
-                    <div className="d-flex justify-content-between align-items-start">
-                      <div>
-                        <div className="fw-semibold text-capitalize">{k}</div>
-                        <div className="text-muted small">当前生效的 MCP</div>
-                      </div>
-                      <div className="form-check form-switch">
-                        <input
-                          className="form-check-input"
-                          type="checkbox"
-                          role="switch"
-                          checked={enabled}
-                          disabled={loading || saving}
-                          onChange={(e) => void toggleTarget(k, e.target.checked)}
-                        />
-                      </div>
-                    </div>
-                    <div className="border-top mt-3 pt-3">
-                      <div className="d-flex gap-2">
-                        <span className={`badge ${statusBadge}`}>{statusLabel}</span>
-                        {count !== null ? <span className="badge bg-light text-primary border">{count} servers</span> : null}
-                      </div>
-                      {parseError ? <div className="text-danger small mt-2 text-truncate">{parseError}</div> : null}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </SegmentedFrame>
+      {/* per-server per-target toggles live in the table below */}
 
       {diffSummary.nConflict > 0 ? (
         <div className="alert alert-warning d-flex align-items-center mt-3" role="alert">
@@ -828,18 +941,25 @@ export function McpServersPage() {
                         ? 'bg-light text-success border'
                         : st === 'new'
                           ? 'bg-light text-primary border'
-                          : st === 'missing'
+                          : st === 'missing' || st === 'disabled'
                             ? 'bg-light text-secondary border'
                             : 'bg-light text-danger border';
 
                     const cell = (k: TargetKey) => {
-                      const sv = r.actualByTarget[k];
-                      if (!sv) return <span className="text-muted">—</span>;
-                      if (!chosen) return <span className="badge bg-light text-primary border">√</span>;
-                      return equalSpec(sv, chosen) ? (
-                        <span className="badge bg-light text-success border">√</span>
-                      ) : (
-                        <span className="badge bg-light text-danger border">!</span>
+                      const desired = r.desired;
+                      const enabled = desired ? targetEnabledForServer(desired, k) : !!r.actualByTarget[k];
+                      return (
+                        <div className="form-check form-switch d-flex justify-content-center m-0">
+                          <input
+                            className="form-check-input"
+                            type="checkbox"
+                            role="switch"
+                            checked={enabled}
+                            disabled={loading || saving}
+                            aria-label={`${r.id}:${k}`}
+                            onChange={(e) => setServerTarget(r.id, k, e.target.checked)}
+                          />
+                        </div>
                       );
                     };
 

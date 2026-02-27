@@ -8,6 +8,8 @@ export type McpStoreV2 = {
 
 export type McpServerV2 = {
   transport: 'stdio' | 'http' | 'sse';
+  // Per-target enablement overrides. Missing means enabled=true.
+  targets?: Partial<Record<'codex' | 'claude' | 'gemini', boolean>>;
   stdio?: {
     command: string;
     args?: string[];
