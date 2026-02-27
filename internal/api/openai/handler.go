@@ -567,8 +567,8 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			if usageID != 0 && h.quota != nil {
 				bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
 				_ = h.quota.Void(bookCtx, usageID)
-				cancel()
 			}
 			cw := &countingResponseWriter{ResponseWriter: w}
 			http.Error(cw, "请求体处理失败", http.StatusInternalServerError)
@@ -582,8 +582,8 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 				if !resetRes.hasUserText {
 					if usageID != 0 && h.quota != nil {
 						bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+						defer cancel()
 						_ = h.quota.Void(bookCtx, usageID)
-						cancel()
 					}
 					h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, optionalString(publicModel), http.StatusConflict, "session_reset_required", 0)
 					cw := &countingResponseWriter{ResponseWriter: w}
@@ -605,8 +605,8 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 
 	if usageID != 0 && h.quota != nil {
 		bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		_ = h.quota.Void(bookCtx, usageID)
-		cancel()
 	}
 	h.auditUpstreamError(r.Context(), r.URL.Path, p, lastSel, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", 0)
 	cw := &countingResponseWriter{ResponseWriter: w}
