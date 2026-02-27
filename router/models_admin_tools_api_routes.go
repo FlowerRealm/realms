@@ -87,6 +87,16 @@ func adminImportModelPricingHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
+		mut, ok := beginPersonalConfigMutation(c, opts)
+		if !ok {
+			return
+		}
+		finalized := false
+		defer func() {
+			if mut != nil && !finalized {
+				abortPersonalConfigMutation(c, mut)
+			}
+		}()
 
 		var req importModelPricingRequest
 		if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
@@ -116,6 +126,14 @@ func adminImportModelPricingHandler(opts Options) gin.HandlerFunc {
 		if len(parsed.failed) > 0 {
 			msg += " 失败示例：" + summarizeFailedItems(parsed.failed, 3)
 		}
+		if mut != nil {
+			if err := mut.Commit(c.Request.Context(), true); err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
+				finalized = true
+				return
+			}
+		}
+		finalized = true
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": msg,

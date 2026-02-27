@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"realms/internal/assets"
 	"realms/internal/codexoauth"
 	"realms/internal/config"
+	"realms/internal/personalconfig"
 	"realms/internal/proxylog"
 	"realms/internal/quota"
 	"realms/internal/scheduler"
@@ -46,6 +48,7 @@ type App struct {
 	cfg           config.Config
 	db            *sql.DB
 	store         *store.Store
+	personalCfg   *personalconfig.Syncer
 	codexOAuth    *codexoauth.Flow
 	exec          *upstream.Executor
 	openai        *openaiapi.Handler
@@ -135,9 +138,17 @@ func NewApp(opts AppOptions) (*App, error) {
 	}
 	frontendFS, frontendIndexPage := loadEmbeddedFrontend(personalMode)
 
+	// personal-config: optional authoritative local config file for personal mode.
+	pcfg, err := setupPersonalConfig(opts.Config, opts.DB, st, personalMode)
+	if err != nil {
+		return nil, err
+	}
+	app.personalCfg = pcfg
+
 	router.SetRouter(engine, router.Options{
 		Store:                           st,
 		PersonalMode:                    personalMode,
+		PersonalConfig:                  pcfg,
 		AllowOpenRegistration:           opts.Config.Security.AllowOpenRegistration,
 		EmailVerificationEnabledDefault: opts.Config.EmailVerif.Enable,
 		PublicBaseURLDefault:            publicBaseURL,
@@ -202,6 +213,54 @@ func NewApp(opts AppOptions) (*App, error) {
 	})
 	app.engine = engine
 	return app, nil
+}
+
+func setupPersonalConfig(cfg config.Config, db *sql.DB, st *store.Store, personalMode bool) (*personalconfig.Syncer, error) {
+	if !personalMode {
+		return nil, nil
+	}
+
+	rawEnable := strings.TrimSpace(os.Getenv("REALMS_PERSONAL_CONFIG_ENABLE"))
+	enabled := false
+	if rawEnable != "" {
+		if b, err := strconv.ParseBool(rawEnable); err == nil {
+			enabled = b
+		}
+	} else {
+		// Default: enabled for realms-app (Env=app), opt-in for server-style personal mode.
+		enabled = strings.EqualFold(strings.TrimSpace(cfg.Env), "app")
+	}
+	if !enabled {
+		return nil, nil
+	}
+
+	path := strings.TrimSpace(os.Getenv("REALMS_PERSONAL_CONFIG_PATH"))
+	if path == "" {
+		cfgDir, err := os.UserConfigDir()
+		if err != nil {
+			return nil, fmt.Errorf("personal config: get user config dir: %w", err)
+		}
+		path = filepath.Join(cfgDir, "Realms", "personal-config.json")
+	}
+
+	s, err := personalconfig.New(personalconfig.Options{
+		Enabled: enabled,
+		Path:    path,
+		DB:      db,
+		Dialect: store.Dialect(cfg.DB.Driver),
+		Store:   st,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := s.Init(ctx); err != nil {
+		return nil, err
+	}
+	_ = s.StartWatcher()
+	return s, nil
 }
 
 func randomSecret(n int) string {
