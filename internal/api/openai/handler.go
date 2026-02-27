@@ -470,10 +470,10 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	// Codex CLI（wire_api=responses）通常使用 input 数组并依赖 prompt_cache_key/session_id 做远程压缩（compaction）。
 	// 这类“有状态输入”要求粘性路由：同一会话应尽量落到同一上游 channel/credential，否则 encrypted_content 可能无法复用。
 	//
-	// 为了避免影响普通 OpenAI SDK（input 为 string / 非 codex 形态）请求的负载均衡策略，这里仅对 codex-like payload
-	// 启用 routeKeyHash 参与调度。
+	// 为了避免影响普通 OpenAI SDK（input 为 string / 非 codex 形态）请求的负载均衡策略，这里仅对“显式会话键”的请求
+	// 启用 routeKeyHash 参与调度（例如 Codex 自带 session_id/prompt_cache_key）。
 	stickyRouteKeyHash := ""
-	if isCodexResponsesPayload(payload) {
+	if shouldEnableStickyRouting(payload, r, routeKeySource) {
 		stickyRouteKeyHash = routeKeyHash
 	}
 	usageID := int64(0)
@@ -1602,6 +1602,31 @@ func normalizeRouteKey(v any) string {
 		return ""
 	}
 	return s
+}
+
+func shouldEnableStickyRouting(payload map[string]any, r *http.Request, routeKeySource string) bool {
+	if payload == nil || r == nil {
+		return false
+	}
+	// derived/missing 路由键不够稳定：避免把“内容哈希”或空值当会话键导致意外粘性。
+	if routeKeySource == "derived" || routeKeySource == "missing" {
+		return false
+	}
+	// sticky routing 仅用于 Codex-like responses payload（input 数组）；
+	// 普通 Responses/ChatCompletions 仍保持原有负载均衡策略。
+	if _, ok := payload["input"].([]any); !ok {
+		return false
+	}
+
+	// 只在客户端显式提供会话键时启用粘性（或 Codex UA 兜底），避免无意间改变路由行为。
+	if strings.TrimSpace(extractSessionIDFromHeaders(r.Header)) != "" {
+		return true
+	}
+	if strings.TrimSpace(stringFromAny(payload["prompt_cache_key"])) != "" {
+		return true
+	}
+	ua := strings.ToLower(strings.TrimSpace(r.Header.Get("User-Agent")))
+	return strings.Contains(ua, "codex")
 }
 
 func (h *Handler) auditFailover(ctx context.Context, path string, p auth.Principal, sel *scheduler.Selection, model *string, status int, class string, latency time.Duration) {
