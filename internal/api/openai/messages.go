@@ -35,7 +35,7 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	rawBody := body
 
-	payload, err := sanitizeMessagesPayload(body, 0)
+	payload, err := sanitizeMessagesPayload(body, 0, h.selfMode)
 	if err != nil {
 		if errors.Is(err, errInvalidJSON) {
 			writeAnthropicError(w, http.StatusBadRequest, "请求体不是有效 JSON")

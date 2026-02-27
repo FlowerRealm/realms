@@ -25,7 +25,6 @@ import { TopupPage } from './pages/TopupPage';
 import { UsagePage } from './pages/UsagePage';
 import { OAuthAuthorizePage } from './pages/OAuthAuthorizePage';
 import { UserGuidePage } from './pages/UserGuidePage';
-import { McpServersPage } from './pages/McpServersPage';
 
 function HomeRedirect() {
   const { user, loading } = useAuth();
@@ -70,7 +69,6 @@ export function App() {
         <Route path="/tokens/created" element={<TokenCreatedPage />} />
         <Route path="/models" element={<ModelsPage />} />
         <Route path="/usage" element={<UsagePage />} />
-        <Route path="/mcp" element={<McpServersPage />} />
         <Route path="/account" element={<AccountPage />} />
         <Route path="/subscription" element={<SubscriptionPage />} />
         <Route path="/topup" element={<TopupPage />} />

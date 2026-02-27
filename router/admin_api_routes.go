@@ -24,7 +24,6 @@ func setAdminAPIRoutes(r gin.IRoutes, opts Options) {
 	setAdminUsageAPIRoutes(admin, opts)
 	setAdminTicketAPIRoutes(admin, opts)
 	setAdminOAuthAppAPIRoutes(admin, opts)
-	setAdminMCPAPIRoutes(admin, opts)
 	setAdminSettingsAPIRoutes(admin, opts)
 	setAdminPaymentChannelAPIRoutes(admin, opts)
 }
