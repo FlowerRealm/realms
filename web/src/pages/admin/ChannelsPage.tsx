@@ -21,6 +21,7 @@ import { BootstrapModal } from '../../components/BootstrapModal';
 import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { closeModalById } from '../../components/modal';
 import { PortalDragOverlay } from '../../components/PortalDragOverlay';
+import { formatSecondsFromMilliseconds } from '../../format/duration';
 import { formatIntComma } from '../../format/int';
 import {
   createChannel,
@@ -217,7 +218,7 @@ export function ChannelsPage() {
     { value: 'committed_usd', label: '消耗 (USD)' },
     { value: 'tokens', label: 'Token' },
     { value: 'cache_ratio', label: '缓存率 (%)' },
-    { value: 'avg_first_token_latency', label: '首字延迟 (ms)' },
+    { value: 'avg_first_token_latency', label: '首字延迟 (s)' },
     { value: 'tokens_per_second', label: 'Tokens/s' },
   ];
   const granularityOptions: Array<{ value: 'hour' | 'day'; label: string }> = [
@@ -1053,9 +1054,9 @@ export function ChannelsPage() {
         read: (p) => p.cache_ratio,
       },
       avg_first_token_latency: {
-        label: '首字延迟 (ms)',
+        label: '首字延迟 (s)',
         color: color(palette.danger, 0.95),
-        read: (p) => p.avg_first_token_latency,
+        read: (p) => p.avg_first_token_latency / 1000,
       },
       tokens_per_second: {
         label: 'Tokens/s',
@@ -1880,7 +1881,7 @@ export function ChannelsPage() {
                                     </div>
                                     <div className="d-flex align-items-center">
                                       <span className="me-1">首字:</span>
-                                      <span className="fw-medium text-dark">{usage?.avg_first_token_latency ?? '-'}</span>
+                                      <span className="fw-medium text-dark">{formatSecondsFromMilliseconds(usage?.avg_first_token_latency)}</span>
                                     </div>
                                     <div className="d-flex align-items-center">
                                       <span className="me-1">Tokens/s:</span>
