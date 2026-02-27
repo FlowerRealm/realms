@@ -16,6 +16,7 @@ import { DateRangePicker, SelectPicker } from '../components/DateRangePicker';
 import { SegmentedFrame } from '../components/SegmentedFrame';
 import { formatSecondsFromMilliseconds } from '../format/duration';
 import { formatUSDPlain } from '../format/money';
+import { useAnchoredPopover } from '../hooks/useAnchoredPopover';
 import { UsageEventsCard } from './usage/UsageEventsCard';
 import { UsageSummaryCard } from './usage/UsageSummaryCard';
 import { UsageTimeSeriesCard } from './usage/UsageTimeSeriesCard';
@@ -44,7 +45,12 @@ export function UsagePage() {
   const [filterModel, setFilterModel] = useState('');
   const advBtnRef = useRef<HTMLButtonElement | null>(null);
   const advPanelRef = useRef<HTMLDivElement | null>(null);
-  const [advPos, setAdvPos] = useState<{ left: number; top: number } | null>(null);
+  const advPanelStyle = useAnchoredPopover({
+    open: advOpen,
+    onClose: () => setAdvOpen(false),
+    triggerRef: advBtnRef,
+    panelRef: advPanelRef,
+  });
 
   const [seriesStart, setSeriesStart] = useState('');
   const [seriesEnd, setSeriesEnd] = useState('');
@@ -159,61 +165,6 @@ export function UsagePage() {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    if (!advOpen) return;
-    const reposition = () => {
-      const btn = advBtnRef.current;
-      const panel = advPanelRef.current;
-      if (!btn || !panel) return;
-      const btnRect = btn.getBoundingClientRect();
-      const panelRect = panel.getBoundingClientRect();
-      const vw = window.innerWidth || document.documentElement.clientWidth || 0;
-      const vh = window.innerHeight || document.documentElement.clientHeight || 0;
-      const margin = 12;
-
-      const panelW = Math.max(0, panelRect.width);
-      const panelH = Math.max(0, panelRect.height);
-
-      const maxLeft = Math.max(margin, vw - panelW - margin);
-      const left = Math.min(Math.max(margin, btnRect.left), maxLeft);
-
-      const maxTop = Math.max(margin, vh - panelH - margin);
-      const top = Math.min(Math.max(margin, btnRect.bottom + 8), maxTop);
-
-      setAdvPos({ left, top });
-    };
-
-    // Reposition after render/layout.
-    const raf1 = requestAnimationFrame(() => {
-      reposition();
-      requestAnimationFrame(() => reposition());
-    });
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setAdvOpen(false);
-    };
-    const onPointerDown = (e: MouseEvent | PointerEvent) => {
-      const target = e.target as Node | null;
-      if (!target) return;
-      if (advPanelRef.current && advPanelRef.current.contains(target)) return;
-      if (advBtnRef.current && advBtnRef.current.contains(target)) return;
-      setAdvOpen(false);
-    };
-    const onResize = () => reposition();
-    const onScroll = () => reposition();
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('pointerdown', onPointerDown);
-    window.addEventListener('resize', onResize);
-    window.addEventListener('scroll', onScroll, true);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('pointerdown', onPointerDown);
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('scroll', onScroll, true);
-      cancelAnimationFrame(raf1);
-    };
-  }, [advOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -401,7 +352,7 @@ export function UsagePage() {
                       <div
                         ref={advPanelRef}
                         className="rlm-usage-filter-dropdown card shadow-sm"
-                        style={advPos ? { position: 'fixed', left: advPos.left, top: advPos.top } : { position: 'fixed', left: 12, top: 12 }}
+                        style={advPanelStyle}
                       >
                         <div className="card-body p-2 rlm-usage-filter-panel">
                           <div className="rlm-usage-filter-row">

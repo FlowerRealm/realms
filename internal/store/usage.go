@@ -601,84 +601,10 @@ WHERE user_id=? AND state<>?
 
 	var out []UsageEvent
 	for rows.Next() {
-		var e UsageEvent
-		var model sql.NullString
-		var endpoint sql.NullString
-		var method sql.NullString
-		var subscriptionID sql.NullInt64
-		var inputTokens sql.NullInt64
-		var cachedInputTokens sql.NullInt64
-		var outputTokens sql.NullInt64
-		var cachedOutputTokens sql.NullInt64
-		var upstreamChannelID sql.NullInt64
-		var upstreamEndpointID sql.NullInt64
-		var upstreamCredID sql.NullInt64
-		var errClass sql.NullString
-		var errMsg sql.NullString
-		var multGroupName sql.NullString
-		var isStream int
-		if err := rows.Scan(&e.ID, &e.Time, &e.RequestID, &endpoint, &method,
-			&e.UserID, &subscriptionID, &e.TokenID,
-			&upstreamChannelID, &upstreamEndpointID, &upstreamCredID,
-			&e.State, &model,
-			&inputTokens, &cachedInputTokens, &outputTokens, &cachedOutputTokens,
-			&e.ReservedUSD, &e.CommittedUSD, &e.PriceMultiplier, &e.PriceMultiplierGroup, &e.PriceMultiplierPayment, &multGroupName, &e.ReserveExpiresAt,
-			&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &errClass, &errMsg,
-			&isStream, &e.RequestBytes, &e.ResponseBytes,
-			&e.CreatedAt, &e.UpdatedAt); err != nil {
+		e, err := scanUsageEventRowWithMultipliers(rows)
+		if err != nil {
 			return nil, fmt.Errorf("扫描 usage_events 失败: %w", err)
 		}
-		e.ReservedUSD = e.ReservedUSD.Truncate(USDScale)
-		e.CommittedUSD = e.CommittedUSD.Truncate(USDScale)
-		e.PriceMultiplier = e.PriceMultiplier.Truncate(PriceMultiplierScale)
-		e.PriceMultiplierGroup = e.PriceMultiplierGroup.Truncate(PriceMultiplierScale)
-		e.PriceMultiplierPayment = e.PriceMultiplierPayment.Truncate(PriceMultiplierScale)
-		if multGroupName.Valid {
-			v := strings.TrimSpace(multGroupName.String)
-			if v != "" {
-				e.PriceMultiplierGroupName = &v
-			}
-		}
-		if endpoint.Valid {
-			e.Endpoint = &endpoint.String
-		}
-		if method.Valid {
-			e.Method = &method.String
-		}
-		if model.Valid {
-			e.Model = &model.String
-		}
-		if subscriptionID.Valid {
-			e.SubscriptionID = &subscriptionID.Int64
-		}
-		if inputTokens.Valid {
-			e.InputTokens = &inputTokens.Int64
-		}
-		if cachedInputTokens.Valid {
-			e.CachedInputTokens = &cachedInputTokens.Int64
-		}
-		if outputTokens.Valid {
-			e.OutputTokens = &outputTokens.Int64
-		}
-		if cachedOutputTokens.Valid {
-			e.CachedOutputTokens = &cachedOutputTokens.Int64
-		}
-		if upstreamChannelID.Valid {
-			e.UpstreamChannelID = &upstreamChannelID.Int64
-		}
-		if upstreamEndpointID.Valid {
-			e.UpstreamEndpointID = &upstreamEndpointID.Int64
-		}
-		if upstreamCredID.Valid {
-			e.UpstreamCredID = &upstreamCredID.Int64
-		}
-		if errClass.Valid {
-			e.ErrorClass = &errClass.String
-		}
-		if errMsg.Valid {
-			e.ErrorMessage = &errMsg.String
-		}
-		e.IsStream = isStream != 0
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
@@ -1544,6 +1470,88 @@ FROM usage_events ue
 	return out, nil
 }
 
+func scanUsageEventRowWithMultipliers(rows *sql.Rows) (UsageEvent, error) {
+	var e UsageEvent
+	var model sql.NullString
+	var endpoint sql.NullString
+	var method sql.NullString
+	var subscriptionID sql.NullInt64
+	var inputTokens sql.NullInt64
+	var cachedInputTokens sql.NullInt64
+	var outputTokens sql.NullInt64
+	var cachedOutputTokens sql.NullInt64
+	var upstreamChannelID sql.NullInt64
+	var upstreamEndpointID sql.NullInt64
+	var upstreamCredID sql.NullInt64
+	var errClass sql.NullString
+	var errMsg sql.NullString
+	var multGroupName sql.NullString
+	var isStream int
+	if err := rows.Scan(&e.ID, &e.Time, &e.RequestID, &endpoint, &method,
+		&e.UserID, &subscriptionID, &e.TokenID,
+		&upstreamChannelID, &upstreamEndpointID, &upstreamCredID,
+		&e.State, &model,
+		&inputTokens, &cachedInputTokens, &outputTokens, &cachedOutputTokens,
+		&e.ReservedUSD, &e.CommittedUSD, &e.PriceMultiplier, &e.PriceMultiplierGroup, &e.PriceMultiplierPayment, &multGroupName, &e.ReserveExpiresAt,
+		&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &errClass, &errMsg,
+		&isStream, &e.RequestBytes, &e.ResponseBytes,
+		&e.CreatedAt, &e.UpdatedAt); err != nil {
+		return UsageEvent{}, err
+	}
+	e.ReservedUSD = e.ReservedUSD.Truncate(USDScale)
+	e.CommittedUSD = e.CommittedUSD.Truncate(USDScale)
+	e.PriceMultiplier = e.PriceMultiplier.Truncate(PriceMultiplierScale)
+	e.PriceMultiplierGroup = e.PriceMultiplierGroup.Truncate(PriceMultiplierScale)
+	e.PriceMultiplierPayment = e.PriceMultiplierPayment.Truncate(PriceMultiplierScale)
+	if multGroupName.Valid {
+		v := strings.TrimSpace(multGroupName.String)
+		if v != "" {
+			e.PriceMultiplierGroupName = &v
+		}
+	}
+	if endpoint.Valid {
+		e.Endpoint = &endpoint.String
+	}
+	if method.Valid {
+		e.Method = &method.String
+	}
+	if model.Valid {
+		e.Model = &model.String
+	}
+	if subscriptionID.Valid {
+		e.SubscriptionID = &subscriptionID.Int64
+	}
+	if inputTokens.Valid {
+		e.InputTokens = &inputTokens.Int64
+	}
+	if cachedInputTokens.Valid {
+		e.CachedInputTokens = &cachedInputTokens.Int64
+	}
+	if outputTokens.Valid {
+		e.OutputTokens = &outputTokens.Int64
+	}
+	if cachedOutputTokens.Valid {
+		e.CachedOutputTokens = &cachedOutputTokens.Int64
+	}
+	if upstreamChannelID.Valid {
+		e.UpstreamChannelID = &upstreamChannelID.Int64
+	}
+	if upstreamEndpointID.Valid {
+		e.UpstreamEndpointID = &upstreamEndpointID.Int64
+	}
+	if upstreamCredID.Valid {
+		e.UpstreamCredID = &upstreamCredID.Int64
+	}
+	if errClass.Valid {
+		e.ErrorClass = &errClass.String
+	}
+	if errMsg.Valid {
+		e.ErrorMessage = &errMsg.String
+	}
+	e.IsStream = isStream != 0
+	return e, nil
+}
+
 func (s *Store) ListUsageEventsByUserRangeFiltered(ctx context.Context, userID int64, since, until time.Time, limit int, beforeID, afterID *int64, idx UsageEventsIndexFlags, f UsageEventsFilters) ([]UsageEvent, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
@@ -1605,84 +1613,10 @@ FROM usage_events ue
 
 	var out []UsageEvent
 	for rows.Next() {
-		var e UsageEvent
-		var model sql.NullString
-		var endpoint sql.NullString
-		var method sql.NullString
-		var subscriptionID sql.NullInt64
-		var inputTokens sql.NullInt64
-		var cachedInputTokens sql.NullInt64
-		var outputTokens sql.NullInt64
-		var cachedOutputTokens sql.NullInt64
-		var upstreamChannelID sql.NullInt64
-		var upstreamEndpointID sql.NullInt64
-		var upstreamCredID sql.NullInt64
-		var errClass sql.NullString
-		var errMsg sql.NullString
-		var multGroupName sql.NullString
-		var isStream int
-		if err := rows.Scan(&e.ID, &e.Time, &e.RequestID, &endpoint, &method,
-			&e.UserID, &subscriptionID, &e.TokenID,
-			&upstreamChannelID, &upstreamEndpointID, &upstreamCredID,
-			&e.State, &model,
-			&inputTokens, &cachedInputTokens, &outputTokens, &cachedOutputTokens,
-			&e.ReservedUSD, &e.CommittedUSD, &e.PriceMultiplier, &e.PriceMultiplierGroup, &e.PriceMultiplierPayment, &multGroupName, &e.ReserveExpiresAt,
-			&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &errClass, &errMsg,
-			&isStream, &e.RequestBytes, &e.ResponseBytes,
-			&e.CreatedAt, &e.UpdatedAt); err != nil {
+		e, err := scanUsageEventRowWithMultipliers(rows)
+		if err != nil {
 			return nil, fmt.Errorf("扫描 usage_events 失败: %w", err)
 		}
-		e.ReservedUSD = e.ReservedUSD.Truncate(USDScale)
-		e.CommittedUSD = e.CommittedUSD.Truncate(USDScale)
-		e.PriceMultiplier = e.PriceMultiplier.Truncate(PriceMultiplierScale)
-		e.PriceMultiplierGroup = e.PriceMultiplierGroup.Truncate(PriceMultiplierScale)
-		e.PriceMultiplierPayment = e.PriceMultiplierPayment.Truncate(PriceMultiplierScale)
-		if multGroupName.Valid {
-			v := strings.TrimSpace(multGroupName.String)
-			if v != "" {
-				e.PriceMultiplierGroupName = &v
-			}
-		}
-		if endpoint.Valid {
-			e.Endpoint = &endpoint.String
-		}
-		if method.Valid {
-			e.Method = &method.String
-		}
-		if model.Valid {
-			e.Model = &model.String
-		}
-		if subscriptionID.Valid {
-			e.SubscriptionID = &subscriptionID.Int64
-		}
-		if inputTokens.Valid {
-			e.InputTokens = &inputTokens.Int64
-		}
-		if cachedInputTokens.Valid {
-			e.CachedInputTokens = &cachedInputTokens.Int64
-		}
-		if outputTokens.Valid {
-			e.OutputTokens = &outputTokens.Int64
-		}
-		if cachedOutputTokens.Valid {
-			e.CachedOutputTokens = &cachedOutputTokens.Int64
-		}
-		if upstreamChannelID.Valid {
-			e.UpstreamChannelID = &upstreamChannelID.Int64
-		}
-		if upstreamEndpointID.Valid {
-			e.UpstreamEndpointID = &upstreamEndpointID.Int64
-		}
-		if upstreamCredID.Valid {
-			e.UpstreamCredID = &upstreamCredID.Int64
-		}
-		if errClass.Valid {
-			e.ErrorClass = &errClass.String
-		}
-		if errMsg.Valid {
-			e.ErrorMessage = &errMsg.String
-		}
-		e.IsStream = isStream != 0
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {

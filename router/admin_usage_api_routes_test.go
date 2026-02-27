@@ -20,8 +20,8 @@ import (
 	"realms/internal/store"
 )
 
-func TestAdminUsagePage_EventIncludesFirstTokenLatencyAndTokensPerSecond(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+func newTestSQLiteStore(t *testing.T) (*store.Store, func()) {
+	t.Helper()
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
@@ -29,13 +29,70 @@ func TestAdminUsagePage_EventIncludesFirstTokenLatencyAndTokensPerSecond(t *test
 	if err != nil {
 		t.Fatalf("OpenSQLite: %v", err)
 	}
-	defer db.Close()
 	if err := store.EnsureSQLiteSchema(db); err != nil {
+		_ = db.Close()
 		t.Fatalf("EnsureSQLiteSchema: %v", err)
 	}
 
 	st := store.New(db)
 	st.SetDialect(store.DialectSQLite)
+
+	return st, func() { _ = db.Close() }
+}
+
+func newTestEngine(t *testing.T, st *store.Store) (*gin.Engine, string) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+	cookieName := "realms_session"
+	sessionStore := cookie.NewStore([]byte("test-secret"))
+	sessionStore.Options(sessions.Options{
+		Path:     "/",
+		MaxAge:   2592000,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	engine.Use(sessions.Sessions(cookieName, sessionStore))
+
+	SetRouter(engine, Options{
+		Store:             st,
+		PersonalMode:      false,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
+
+	return engine, cookieName
+}
+
+func loginCookie(t *testing.T, engine *gin.Engine, cookieName, login, password string) string {
+	t.Helper()
+
+	loginBody, _ := json.Marshal(map[string]any{
+		"login":    login,
+		"password": password,
+	})
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/user/login", bytes.NewReader(loginBody))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == cookieName {
+			return c.String()
+		}
+	}
+	t.Fatalf("expected session cookie %q", cookieName)
+	return ""
+}
+
+func TestAdminUsagePage_EventIncludesFirstTokenLatencyAndTokensPerSecond(t *testing.T) {
+	st, closeDB := newTestSQLiteStore(t)
+	defer closeDB()
 
 	ctx := context.Background()
 	pwHash, err := auth.HashPassword("password123")
@@ -93,51 +150,13 @@ func TestAdminUsagePage_EventIncludesFirstTokenLatencyAndTokensPerSecond(t *test
 		t.Fatalf("FinalizeUsageEvent: %v", err)
 	}
 
-	engine := gin.New()
-	engine.Use(gin.Recovery())
-	cookieName := "realms_session"
-	sessionStore := cookie.NewStore([]byte("test-secret"))
-	sessionStore.Options(sessions.Options{
-		Path:     "/",
-		MaxAge:   2592000,
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-	})
-	engine.Use(sessions.Sessions(cookieName, sessionStore))
+	engine, cookieName := newTestEngine(t, st)
+	sessionCookie := loginCookie(t, engine, cookieName, "root@example.com", "password123")
 
-	SetRouter(engine, Options{
-		Store:             st,
-		PersonalMode:      false,
-		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
-	})
-
-	loginBody, _ := json.Marshal(map[string]any{
-		"login":    "root@example.com",
-		"password": "password123",
-	})
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/user/login", bytes.NewReader(loginBody))
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	rr := httptest.NewRecorder()
-	engine.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("login status=%d body=%s", rr.Code, rr.Body.String())
-	}
-
-	sessionCookie := ""
-	for _, c := range rr.Result().Cookies() {
-		if c.Name == cookieName {
-			sessionCookie = c.String()
-			break
-		}
-	}
-	if sessionCookie == "" {
-		t.Fatalf("expected session cookie %q", cookieName)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage", nil)
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage", nil)
 	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
 	req.Header.Set("Cookie", sessionCookie)
-	rr = httptest.NewRecorder()
+	rr := httptest.NewRecorder()
 	engine.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("admin usage status=%d body=%s", rr.Code, rr.Body.String())
@@ -243,21 +262,8 @@ func TestAdminUsagePage_EventIncludesFirstTokenLatencyAndTokensPerSecond(t *test
 }
 
 func TestAdminUsagePage_IndexFilters_UserKeyAndChannel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
-	db, err := store.OpenSQLite(path)
-	if err != nil {
-		t.Fatalf("OpenSQLite: %v", err)
-	}
-	defer db.Close()
-	if err := store.EnsureSQLiteSchema(db); err != nil {
-		t.Fatalf("EnsureSQLiteSchema: %v", err)
-	}
-
-	st := store.New(db)
-	st.SetDialect(store.DialectSQLite)
+	st, closeDB := newTestSQLiteStore(t)
+	defer closeDB()
 
 	ctx := context.Background()
 	pwHash, err := auth.HashPassword("password123")
@@ -328,53 +334,14 @@ func TestAdminUsagePage_IndexFilters_UserKeyAndChannel(t *testing.T) {
 	createEvent(aliceID, aliceTokenID, "req_filter_alice_gpt", ch2, "gpt-5.2")
 	createEvent(aliceID, aliceTokenID, "req_filter_alice_claude", ch2, "claude-3")
 
-	engine := gin.New()
-	engine.Use(gin.Recovery())
-	cookieName := "realms_session"
-	sessionStore := cookie.NewStore([]byte("test-secret"))
-	sessionStore.Options(sessions.Options{
-		Path:     "/",
-		MaxAge:   2592000,
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-	})
-	engine.Use(sessions.Sessions(cookieName, sessionStore))
-
-	SetRouter(engine, Options{
-		Store:             st,
-		PersonalMode:      false,
-		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
-	})
-
-	// login as root
-	loginBody, _ := json.Marshal(map[string]any{
-		"login":    "root@example.com",
-		"password": "password123",
-	})
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/user/login", bytes.NewReader(loginBody))
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	rr := httptest.NewRecorder()
-	engine.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("login status=%d body=%s", rr.Code, rr.Body.String())
-	}
-
-	sessionCookie := ""
-	for _, c := range rr.Result().Cookies() {
-		if c.Name == cookieName {
-			sessionCookie = c.String()
-			break
-		}
-	}
-	if sessionCookie == "" {
-		t.Fatalf("expected session cookie %q", cookieName)
-	}
+	engine, cookieName := newTestEngine(t, st)
+	sessionCookie := loginCookie(t, engine, cookieName, "root@example.com", "password123")
 
 	list := func(url string) []map[string]any {
-		req = httptest.NewRequest(http.MethodGet, url, nil)
+		req := httptest.NewRequest(http.MethodGet, url, nil)
 		req.Header.Set("Realms-User", strconv.FormatInt(rootID, 10))
 		req.Header.Set("Cookie", sessionCookie)
-		rr = httptest.NewRecorder()
+		rr := httptest.NewRecorder()
 		engine.ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("admin usage status=%d body=%s", rr.Code, rr.Body.String())
@@ -418,21 +385,8 @@ func TestAdminUsagePage_IndexFilters_UserKeyAndChannel(t *testing.T) {
 }
 
 func TestAdminUsagePage_UpstreamUnavailable_ShowsDetailedErrorMessage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
-	db, err := store.OpenSQLite(path)
-	if err != nil {
-		t.Fatalf("OpenSQLite: %v", err)
-	}
-	defer db.Close()
-	if err := store.EnsureSQLiteSchema(db); err != nil {
-		t.Fatalf("EnsureSQLiteSchema: %v", err)
-	}
-
-	st := store.New(db)
-	st.SetDialect(store.DialectSQLite)
+	st, closeDB := newTestSQLiteStore(t)
+	defer closeDB()
 
 	ctx := context.Background()
 	pwHash, err := auth.HashPassword("password123")
@@ -487,51 +441,13 @@ func TestAdminUsagePage_UpstreamUnavailable_ShowsDetailedErrorMessage(t *testing
 		t.Fatalf("FinalizeUsageEvent: %v", err)
 	}
 
-	engine := gin.New()
-	engine.Use(gin.Recovery())
-	cookieName := "realms_session"
-	sessionStore := cookie.NewStore([]byte("test-secret"))
-	sessionStore.Options(sessions.Options{
-		Path:     "/",
-		MaxAge:   2592000,
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-	})
-	engine.Use(sessions.Sessions(cookieName, sessionStore))
+	engine, cookieName := newTestEngine(t, st)
+	sessionCookie := loginCookie(t, engine, cookieName, "root2@example.com", "password123")
 
-	SetRouter(engine, Options{
-		Store:             st,
-		PersonalMode:      false,
-		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
-	})
-
-	loginBody, _ := json.Marshal(map[string]any{
-		"login":    "root2@example.com",
-		"password": "password123",
-	})
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/user/login", bytes.NewReader(loginBody))
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	rr := httptest.NewRecorder()
-	engine.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("login status=%d body=%s", rr.Code, rr.Body.String())
-	}
-
-	sessionCookie := ""
-	for _, c := range rr.Result().Cookies() {
-		if c.Name == cookieName {
-			sessionCookie = c.String()
-			break
-		}
-	}
-	if sessionCookie == "" {
-		t.Fatalf("expected session cookie %q", cookieName)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage", nil)
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage", nil)
 	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
 	req.Header.Set("Cookie", sessionCookie)
-	rr = httptest.NewRecorder()
+	rr := httptest.NewRecorder()
 	engine.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("admin usage status=%d body=%s", rr.Code, rr.Body.String())
@@ -566,21 +482,8 @@ func TestAdminUsagePage_UpstreamUnavailable_ShowsDetailedErrorMessage(t *testing
 }
 
 func TestAdminUsagePage_CodexOAuthKeepsModelAndSetsAccount(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
-	db, err := store.OpenSQLite(path)
-	if err != nil {
-		t.Fatalf("OpenSQLite: %v", err)
-	}
-	defer db.Close()
-	if err := store.EnsureSQLiteSchema(db); err != nil {
-		t.Fatalf("EnsureSQLiteSchema: %v", err)
-	}
-
-	st := store.New(db)
-	st.SetDialect(store.DialectSQLite)
+	st, closeDB := newTestSQLiteStore(t)
+	defer closeDB()
 
 	ctx := context.Background()
 	pwHash, err := auth.HashPassword("password123")
@@ -676,51 +579,13 @@ func TestAdminUsagePage_CodexOAuthKeepsModelAndSetsAccount(t *testing.T) {
 		t.Fatalf("FinalizeUsageEvent(openai): %v", err)
 	}
 
-	engine := gin.New()
-	engine.Use(gin.Recovery())
-	cookieName := "realms_session"
-	sessionStore := cookie.NewStore([]byte("test-secret"))
-	sessionStore.Options(sessions.Options{
-		Path:     "/",
-		MaxAge:   2592000,
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-	})
-	engine.Use(sessions.Sessions(cookieName, sessionStore))
+	engine, cookieName := newTestEngine(t, st)
+	sessionCookie := loginCookie(t, engine, cookieName, "root@example.com", "password123")
 
-	SetRouter(engine, Options{
-		Store:             st,
-		PersonalMode:      false,
-		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
-	})
-
-	loginBody, _ := json.Marshal(map[string]any{
-		"login":    "root@example.com",
-		"password": "password123",
-	})
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/user/login", bytes.NewReader(loginBody))
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	rr := httptest.NewRecorder()
-	engine.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("login status=%d body=%s", rr.Code, rr.Body.String())
-	}
-
-	sessionCookie := ""
-	for _, c := range rr.Result().Cookies() {
-		if c.Name == cookieName {
-			sessionCookie = c.String()
-			break
-		}
-	}
-	if sessionCookie == "" {
-		t.Fatalf("expected session cookie %q", cookieName)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage?limit=100", nil)
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage?limit=100", nil)
 	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
 	req.Header.Set("Cookie", sessionCookie)
-	rr = httptest.NewRecorder()
+	rr := httptest.NewRecorder()
 	engine.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("admin usage status=%d body=%s", rr.Code, rr.Body.String())
