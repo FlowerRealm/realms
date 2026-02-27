@@ -780,27 +780,27 @@ export function UsageAdminPage() {
                     下一页
                   </button>
                 </div>
-	              </div>
-	              <div className="card-body p-0 border-top">
-	                <div className="table-responsive rlm-table-responsive-no-x">
-		                  <table className="table table-hover align-middle mb-0 border-0 rlm-table-fit">
-                        <colgroup>
-                          <col />
-                          {isPersonalMode ? null : <col />}
-                          <col />
-                          <col className="rlm-usage-col-status" />
-                          <col className="rlm-usage-col-latency" />
-                          <col className="rlm-usage-col-tokens" />
-                          <col className="rlm-usage-col-tps" />
-                          <col className="rlm-usage-col-cost" />
-                          <col />
-                          <col className="rlm-usage-col-channel" />
-                          <col className="rlm-usage-col-request" />
-                        </colgroup>
-		                    <thead className="table-light text-muted smaller uppercase">
-		                      <tr>
-		                        <th className="ps-4 border-0">时间</th>
-		                        {isPersonalMode ? null : <th className="border-0">用户</th>}
+              </div>
+              <div className="card-body p-0 border-top">
+                <div className="table-responsive rlm-table-responsive-no-x">
+                  <table className="table table-hover align-middle mb-0 border-0 rlm-table-fit">
+                    <colgroup>
+                      <col />
+                      {isPersonalMode ? null : <col />}
+                      <col />
+                      <col className="rlm-usage-col-status" />
+                      <col className="rlm-usage-col-latency" />
+                      <col className="rlm-usage-col-tokens" />
+                      <col className="rlm-usage-col-tps" />
+                      <col className="rlm-usage-col-cost" />
+                      <col />
+                      <col className="rlm-usage-col-channel" />
+                      <col className="rlm-usage-col-request" />
+                    </colgroup>
+                    <thead className="table-light text-muted smaller uppercase">
+                      <tr>
+                        <th className="ps-4 border-0">时间</th>
+                        {isPersonalMode ? null : <th className="border-0">用户</th>}
                         <th className="border-0">接口 / 模型</th>
                         <th className="text-center border-0 rlm-usage-cell-compact">状态码</th>
                         <th className="text-end border-0 rlm-usage-cell-compact">耗时/首字</th>
@@ -810,8 +810,8 @@ export function UsageAdminPage() {
                         <th className="text-center border-0">状态</th>
                         <th className="text-center border-0 rlm-usage-cell-compact">渠道</th>
                         <th className="pe-4 border-0">Request ID</th>
-	                      </tr>
-	                    </thead>
+                      </tr>
+                    </thead>
                     <tbody className="small">
                       {events.map((e) => (
                         <>
@@ -834,48 +834,50 @@ export function UsageAdminPage() {
                                 <div className="text-muted smaller">ID: {e.user_id}</div>
                               </td>
                             )}
-	                            <td className="text-nowrap">
-	                              <div className="badge bg-light text-dark border fw-normal">{e.model}</div>
-	                              <div className="text-muted smaller mt-1 font-monospace">{e.endpoint}</div>
-	                              {e.account && e.account !== '-' ? <div className="text-muted smaller font-monospace">acct: {e.account}</div> : null}
-	                            </td>
-	                            <td className="text-center rlm-usage-cell-compact">
-	                              {e.status_code === '200' ? (
-	                                <span className="badge bg-success-subtle text-success border border-success-subtle rounded-pill">200</span>
-	                              ) : (
-	                                <span className="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill">{e.status_code}</span>
-	                              )}
-		                            </td>
-		                            <td className="text-end font-monospace text-muted rlm-usage-cell-compact">{formatLatencyPairSeconds(e.latency_ms, e.first_token_latency_ms)}</td>
-		                            <td className="text-end font-monospace rlm-usage-cell-compact">
-		                              <div>
-		                                <span className="text-muted">In:</span> {formatIntComma(e.input_tokens)}
-		                              </div>
-		                              <div>
-		                                <span className="text-muted">Out:</span> {formatIntComma(e.output_tokens)}
-	                              </div>
-	                              {e.cached_tokens !== '-' ? (
-	                                <div className="text-muted smaller">
-	                                  <span className="material-symbols-rounded">bolt</span> {formatIntComma(e.cached_tokens)}
-	                                </div>
-		                              ) : null}
-		                            </td>
-		                            <td className="text-end font-monospace text-muted rlm-usage-cell-compact">{formatIntComma(e.tokens_per_second)}</td>
-		                            <td className="text-end font-monospace fw-bold text-dark rlm-usage-cell-compact">{e.cost_usd}</td>
-	                            <td className="text-center text-nowrap">
-	                              <span className={badgeForState(e.state_badge_class)}>{e.state_label}</span>
-	                              {e.is_stream ? <div className="badge bg-info-subtle text-info border border-info-subtle rounded-pill px-2 scale-90 mt-1">STREAM</div> : null}
-	                              {e.error ? (
+                            <td className="text-nowrap">
+                              <div className="badge bg-light text-dark border fw-normal">{e.model}</div>
+                              <div className="text-muted smaller mt-1 font-monospace">{e.endpoint}</div>
+                              {e.account && e.account !== '-' ? <div className="text-muted smaller font-monospace">acct: {e.account}</div> : null}
+                            </td>
+                            <td className="text-center rlm-usage-cell-compact">
+                              {e.status_code === '200' ? (
+                                <span className="badge bg-success-subtle text-success border border-success-subtle rounded-pill">200</span>
+                              ) : (
+                                <span className="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill">{e.status_code}</span>
+                              )}
+                            </td>
+                            <td className="text-end font-monospace text-muted rlm-usage-cell-compact">
+                              {formatLatencyPairSeconds(e.latency_ms, e.first_token_latency_ms)}
+                            </td>
+                            <td className="text-end font-monospace rlm-usage-cell-compact">
+                              <div>
+                                <span className="text-muted">In:</span> {formatIntComma(e.input_tokens)}
+                              </div>
+                              <div>
+                                <span className="text-muted">Out:</span> {formatIntComma(e.output_tokens)}
+                              </div>
+                              {e.cached_tokens !== '-' ? (
+                                <div className="text-muted smaller">
+                                  <span className="material-symbols-rounded">bolt</span> {formatIntComma(e.cached_tokens)}
+                                </div>
+                              ) : null}
+                            </td>
+                            <td className="text-end font-monospace text-muted rlm-usage-cell-compact">{formatIntComma(e.tokens_per_second)}</td>
+                            <td className="text-end font-monospace fw-bold text-dark rlm-usage-cell-compact">{e.cost_usd}</td>
+                            <td className="text-center text-nowrap">
+                              <span className={badgeForState(e.state_badge_class)}>{e.state_label}</span>
+                              {e.is_stream ? <div className="badge bg-info-subtle text-info border border-info-subtle rounded-pill px-2 scale-90 mt-1">STREAM</div> : null}
+                              {e.error ? (
                                 <div className="text-danger smaller mt-1" title={e.error}>
                                   <span className="material-symbols-rounded">error</span> 错误
                                 </div>
                               ) : null}
                             </td>
-	                            <td className="text-center text-nowrap rlm-usage-cell-compact">
-	                              {e.upstream_channel_name ? (
-	                                <span className="badge bg-light text-dark border fw-normal">{e.upstream_channel_name}</span>
-	                              ) : e.upstream_channel_id && e.upstream_channel_id !== '-' ? (
-	                                <span className="badge bg-light text-dark border fw-normal">#{e.upstream_channel_id}</span>
+                            <td className="text-center text-nowrap rlm-usage-cell-compact">
+                              {e.upstream_channel_name ? (
+                                <span className="badge bg-light text-dark border fw-normal">{e.upstream_channel_name}</span>
+                              ) : e.upstream_channel_id && e.upstream_channel_id !== '-' ? (
+                                <span className="badge bg-light text-dark border fw-normal">#{e.upstream_channel_id}</span>
                               ) : (
                                 <span className="text-muted">-</span>
                               )}

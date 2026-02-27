@@ -733,19 +733,12 @@ h6,
 .rlm-usage-col-cost {
   width: clamp(80px, 6vw, 104px);
 }
-.rlm-usage-col-key {
-  width: clamp(88px, 7vw, 120px);
-}
+.rlm-usage-col-key,
 .rlm-usage-col-channel {
   width: clamp(88px, 7vw, 120px);
 }
 .rlm-usage-col-request {
   width: clamp(120px, 10vw, 160px);
-}
-
-.rlm-usage-cell-compact {
-  padding-left: 0.5rem !important;
-  padding-right: 0.5rem !important;
 }
 
 .table {
@@ -769,6 +762,11 @@ h6,
   padding: 0.75rem 1rem;
   vertical-align: middle;
   border-bottom: 1px solid var(--rlm-border-soft);
+}
+.table th.rlm-usage-cell-compact,
+.table td.rlm-usage-cell-compact {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
 }
 .table tr:last-child td {
   border-bottom: none;
