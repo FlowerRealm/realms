@@ -335,7 +335,7 @@ func adminMCPPutHandler(opts Options) gin.HandlerFunc {
 		}()
 
 		var req adminMCPPutReq
-		if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
+		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
 			return
 		}
@@ -534,17 +534,28 @@ func applyMCPConfigs(ctx context.Context, opts Options, storeV2 mcp.StoreV2, tar
 }
 
 func mergeRemoveIDs(a []string, b []string) []string {
-	seen := map[string]bool{}
+	seen := make(map[string]struct{}, len(a)+len(b))
 	out := make([]string, 0, len(a)+len(b))
-	for _, x := range append(append([]string{}, a...), b...) {
+	for _, x := range a {
 		x = strings.TrimSpace(x)
 		if x == "" {
 			continue
 		}
-		if seen[x] {
+		if _, ok := seen[x]; ok {
 			continue
 		}
-		seen[x] = true
+		seen[x] = struct{}{}
+		out = append(out, x)
+	}
+	for _, x := range b {
+		x = strings.TrimSpace(x)
+		if x == "" {
+			continue
+		}
+		if _, ok := seen[x]; ok {
+			continue
+		}
+		seen[x] = struct{}{}
 		out = append(out, x)
 	}
 	sort.Strings(out)

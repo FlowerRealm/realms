@@ -233,6 +233,62 @@ func StoreV2FromRegistry(reg Registry) StoreV2 {
 	return out.Normalize()
 }
 
+func serverV2ToLegacySpec(sv ServerV2) map[string]any {
+	spec := map[string]any{}
+	switch sv.Transport {
+	case "stdio":
+		spec["type"] = "stdio"
+		if sv.Stdio != nil {
+			spec["command"] = sv.Stdio.Command
+			if len(sv.Stdio.Args) > 0 {
+				args := make([]any, 0, len(sv.Stdio.Args))
+				for _, a := range sv.Stdio.Args {
+					args = append(args, a)
+				}
+				spec["args"] = args
+			}
+			if strings.TrimSpace(sv.Stdio.Cwd) != "" {
+				spec["cwd"] = sv.Stdio.Cwd
+			}
+			if len(sv.Stdio.Env) > 0 {
+				env := map[string]any{}
+				for k, v := range sv.Stdio.Env {
+					env[k] = v
+				}
+				spec["env"] = env
+			}
+		}
+	case "http", "sse":
+		spec["type"] = sv.Transport
+		if sv.HTTP != nil {
+			spec["url"] = sv.HTTP.URL
+			if strings.TrimSpace(sv.HTTP.BearerTokenEnvVar) != "" {
+				spec["bearer_token_env_var"] = sv.HTTP.BearerTokenEnvVar
+			}
+			if len(sv.HTTP.Headers) > 0 {
+				h := map[string]any{}
+				for k, v := range sv.HTTP.Headers {
+					h[k] = v
+				}
+				spec["http_headers"] = h
+			}
+		}
+	default:
+		return nil
+	}
+
+	// Only export timeouts when explicitly set in canonical.
+	if sv.Timeouts != nil {
+		if sv.Timeouts.StartupMS > 0 {
+			spec["startup_timeout_ms"] = sv.Timeouts.StartupMS
+		}
+		if sv.Timeouts.ToolMS > 0 {
+			spec["tool_timeout_ms"] = sv.Timeouts.ToolMS
+		}
+	}
+	return spec
+}
+
 // StoreV2ToRegistry converts canonical store v2 to legacy registry view for applying/exporting.
 func StoreV2ToRegistry(s StoreV2) Registry {
 	s = s.Normalize()
@@ -242,59 +298,10 @@ func StoreV2ToRegistry(s StoreV2) Registry {
 		if id == "" {
 			continue
 		}
-		spec := map[string]any{}
-		switch sv.Transport {
-		case "stdio":
-			spec["type"] = "stdio"
-			if sv.Stdio != nil {
-				spec["command"] = sv.Stdio.Command
-				if len(sv.Stdio.Args) > 0 {
-					args := make([]any, 0, len(sv.Stdio.Args))
-					for _, a := range sv.Stdio.Args {
-						args = append(args, a)
-					}
-					spec["args"] = args
-				}
-				if strings.TrimSpace(sv.Stdio.Cwd) != "" {
-					spec["cwd"] = sv.Stdio.Cwd
-				}
-				if len(sv.Stdio.Env) > 0 {
-					env := map[string]any{}
-					for k, v := range sv.Stdio.Env {
-						env[k] = v
-					}
-					spec["env"] = env
-				}
-			}
-		case "http", "sse":
-			spec["type"] = sv.Transport
-			if sv.HTTP != nil {
-				spec["url"] = sv.HTTP.URL
-				if strings.TrimSpace(sv.HTTP.BearerTokenEnvVar) != "" {
-					spec["bearer_token_env_var"] = sv.HTTP.BearerTokenEnvVar
-				}
-				if len(sv.HTTP.Headers) > 0 {
-					h := map[string]any{}
-					for k, v := range sv.HTTP.Headers {
-						h[k] = v
-					}
-					spec["http_headers"] = h
-				}
-			}
-		default:
+		spec := serverV2ToLegacySpec(sv)
+		if spec == nil {
 			continue
 		}
-
-		// Only export timeouts when explicitly set in canonical.
-		if sv.Timeouts != nil {
-			if sv.Timeouts.StartupMS > 0 {
-				spec["startup_timeout_ms"] = sv.Timeouts.StartupMS
-			}
-			if sv.Timeouts.ToolMS > 0 {
-				spec["tool_timeout_ms"] = sv.Timeouts.ToolMS
-			}
-		}
-
 		out[id] = spec
 	}
 	return out
@@ -386,15 +393,16 @@ func toStringMapString(v any) map[string]string {
 // StoreV2ToRegistryForTarget is like StoreV2ToRegistry, but only includes servers enabled for the given target.
 func StoreV2ToRegistryForTarget(s StoreV2, t Target) Registry {
 	s = s.Normalize()
-	out := make(Registry, 0)
+	out := make(Registry, len(s.Servers))
 	for id, sv := range s.Servers {
 		if !sv.EnabledFor(t) {
 			continue
 		}
-		// Reuse existing conversion logic by converting one-by-one.
-		one := StoreV2{Version: 2, Servers: map[string]ServerV2{id: sv}}
-		reg := StoreV2ToRegistry(one)
-		if spec, ok := reg[id]; ok {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if spec := serverV2ToLegacySpec(sv); spec != nil {
 			out[id] = spec
 		}
 	}
