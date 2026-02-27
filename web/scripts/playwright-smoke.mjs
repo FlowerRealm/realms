@@ -134,10 +134,7 @@ async function main() {
 
       await page.locator('input[name="login"]').fill('nobody@example.com');
       await page.locator('input[name="password"]').fill('wrong-password');
-      await page.waitForFunction(() => {
-        const btn = document.querySelector('button[type="submit"]');
-        return !!btn && !(btn instanceof HTMLButtonElement ? btn.disabled : true);
-      });
+      await page.locator('button[type="submit"]:not([disabled])').waitFor({ timeout: 20_000 });
       await page.locator('button[type="submit"]').click();
 
       const errAlert = page.locator('.alert.alert-danger');
