@@ -11,15 +11,15 @@ function truncateText(s: string, maxLen: number): string {
 
 function toErrorMessage(err: unknown): string {
   if (typeof err === 'string') return err;
-  if (err instanceof Error) return err.message || '';
   if (err && typeof err === 'object') {
     const anyErr = err as { message?: unknown; response?: { data?: unknown } };
-    const msg = typeof anyErr.message === 'string' ? anyErr.message : '';
-    if (msg.trim()) return msg.trim();
     const resp = anyErr.response?.data as { message?: unknown } | undefined;
     const respMsg = typeof resp?.message === 'string' ? resp.message : '';
     if (respMsg.trim()) return respMsg.trim();
+    const msg = typeof anyErr.message === 'string' ? anyErr.message : '';
+    if (msg.trim()) return msg.trim();
   }
+  if (err instanceof Error) return err.message || '';
   return '';
 }
 
@@ -50,4 +50,3 @@ export function formatAuthError(action: '登录' | '注册', err: unknown): Page
   const detail = summary !== raw ? truncateText(raw, 400) : undefined;
   return { summary, detail };
 }
-
