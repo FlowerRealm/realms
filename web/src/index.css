@@ -736,6 +736,9 @@ h6,
 .rlm-usage-col-key {
   width: clamp(88px, 7vw, 120px);
 }
+.rlm-usage-col-channel {
+  width: clamp(88px, 7vw, 120px);
+}
 .rlm-usage-col-request {
   width: clamp(120px, 10vw, 160px);
 }

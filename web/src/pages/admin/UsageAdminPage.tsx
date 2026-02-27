@@ -784,34 +784,19 @@ export function UsageAdminPage() {
 	              <div className="card-body p-0 border-top">
 	                <div className="table-responsive rlm-table-responsive-no-x">
 		                  <table className="table table-hover align-middle mb-0 border-0 rlm-table-fit">
-                        {isPersonalMode ? (
-                          <colgroup>
-                            <col />
-                            <col />
-                            <col className="rlm-usage-col-status" />
-                            <col className="rlm-usage-col-latency" />
-                            <col className="rlm-usage-col-tokens" />
-                            <col className="rlm-usage-col-tps" />
-                            <col className="rlm-usage-col-cost" />
-                            <col />
-                            <col className="rlm-usage-col-key" />
-                            <col className="rlm-usage-col-request" />
-                          </colgroup>
-                        ) : (
-                          <colgroup>
-                            <col />
-                            <col />
-                            <col />
-                            <col className="rlm-usage-col-status" />
-                            <col className="rlm-usage-col-latency" />
-                            <col className="rlm-usage-col-tokens" />
-                            <col className="rlm-usage-col-tps" />
-                            <col className="rlm-usage-col-cost" />
-                            <col />
-                            <col className="rlm-usage-col-key" />
-                            <col className="rlm-usage-col-request" />
-                          </colgroup>
-                        )}
+                        <colgroup>
+                          <col />
+                          {isPersonalMode ? null : <col />}
+                          <col />
+                          <col className="rlm-usage-col-status" />
+                          <col className="rlm-usage-col-latency" />
+                          <col className="rlm-usage-col-tokens" />
+                          <col className="rlm-usage-col-tps" />
+                          <col className="rlm-usage-col-cost" />
+                          <col />
+                          <col className="rlm-usage-col-channel" />
+                          <col className="rlm-usage-col-request" />
+                        </colgroup>
 		                    <thead className="table-light text-muted smaller uppercase">
 		                      <tr>
 		                        <th className="ps-4 border-0">时间</th>
