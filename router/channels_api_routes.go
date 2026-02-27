@@ -595,7 +595,7 @@ func createChannelHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 		var req createChannelRequest
@@ -708,7 +708,7 @@ func reorderChannelsHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 		var ids []int64
@@ -758,7 +758,7 @@ func updateChannelHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 		var req updateChannelRequest
@@ -1416,7 +1416,7 @@ func createChannelCredentialHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
@@ -1506,7 +1506,7 @@ func deleteChannelCredentialHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
@@ -1605,7 +1605,7 @@ func updateChannelMetaHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
@@ -1692,7 +1692,7 @@ func updateChannelSettingHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
@@ -1778,7 +1778,7 @@ func updateChannelParamOverrideHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
@@ -1836,7 +1836,7 @@ func updateChannelHeaderOverrideHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
@@ -1894,7 +1894,7 @@ func updateChannelModelSuffixPreserveHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
@@ -1952,7 +1952,7 @@ func updateChannelRequestBodyWhitelistHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
@@ -2010,7 +2010,7 @@ func updateChannelRequestBodyBlacklistHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
@@ -2068,7 +2068,7 @@ func updateChannelStatusCodeMappingHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
@@ -2123,7 +2123,7 @@ func deleteChannelHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)

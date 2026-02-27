@@ -1,6 +1,7 @@
 package router
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -20,3 +21,11 @@ func beginPersonalConfigMutation(c *gin.Context, opts Options) (*personalconfig.
 	return m, true
 }
 
+func abortPersonalConfigMutation(c *gin.Context, mut *personalconfig.Mutation) {
+	if mut == nil {
+		return
+	}
+	if err := mut.Abort(c.Request.Context()); err != nil {
+		_ = c.Error(fmt.Errorf("failed to abort personal config mutation: %w", err))
+	}
+}

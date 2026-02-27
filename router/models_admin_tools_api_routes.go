@@ -94,7 +94,7 @@ func adminImportModelPricingHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 

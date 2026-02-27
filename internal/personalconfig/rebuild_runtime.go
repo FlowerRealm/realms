@@ -339,7 +339,7 @@ VALUES(?, NULL, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 
 	// Insert credentials (secrets).
 	if b.Secrets != nil {
-		if err := insertSecrets(ctx, tx, channelIDByKey, endpointIDByChannelID, b.secretsOrEmpty(), dialect); err != nil {
+		if err := insertSecrets(ctx, tx, channelIDByKey, endpointIDByChannelID, b.secretsOrEmpty()); err != nil {
 			return err
 		}
 	}
@@ -350,13 +350,15 @@ VALUES(?, NULL, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	return nil
 }
 
-func insertSecrets(ctx context.Context, tx *sql.Tx, channelIDByKey map[string]int64, endpointIDByChannelID map[int64]int64, sec Secrets, dialect store.Dialect) error {
-	_ = dialect
+func insertSecrets(ctx context.Context, tx *sql.Tx, channelIDByKey map[string]int64, endpointIDByChannelID map[int64]int64, sec Secrets) error {
 	insert := func(table string, endpointID int64, name *string, apiKey string) error {
 		apiKey = strings.TrimSpace(apiKey)
 		if apiKey == "" {
 			return nil
 		}
+		// NOTE: Despite the `_enc` suffix, this project currently stores API keys as plaintext bytes in
+		// `api_key_enc` (app-level encryption was removed; legacy encrypted blobs are rejected elsewhere).
+		// Keep rebuild behavior consistent with the rest of the store.
 		hint := tokenHint(apiKey)
 		n := nullableTrimmedString(name)
 		_, err := tx.ExecContext(ctx, `

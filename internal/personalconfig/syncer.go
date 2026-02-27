@@ -109,7 +109,6 @@ func (s *Syncer) BeginMutation(ctx context.Context) (*Mutation, error) {
 		s.mu.Unlock()
 		return nil, err
 	}
-	_ = preSHA
 	return &Mutation{
 		syncer:   s,
 		pre:      pre,

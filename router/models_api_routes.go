@@ -381,7 +381,7 @@ func adminCreateManagedModelHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 		var req reqBody
@@ -449,7 +449,7 @@ func adminUpdateManagedModelHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 
@@ -536,7 +536,7 @@ func adminDeleteManagedModelHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 		id, err := strconv.ParseInt(strings.TrimSpace(c.Param("model_id")), 10, 64)
@@ -617,7 +617,7 @@ func adminCreateChannelModelHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
@@ -684,7 +684,7 @@ func adminUpdateChannelModelHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
@@ -745,7 +745,7 @@ func adminDeleteChannelModelHandler(opts Options) gin.HandlerFunc {
 		finalized := false
 		defer func() {
 			if mut != nil && !finalized {
-				_ = mut.Abort(c.Request.Context())
+				abortPersonalConfigMutation(c, mut)
 			}
 		}()
 		_, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
