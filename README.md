@@ -22,9 +22,9 @@ Realms 是一个 Go 单体服务（Gin），对外提供 **OpenAI 兼容** 的 `
 ## 0) 先选一种“运行形态”
 
 - **Server（business 模式，推荐）**：部署/多人使用，默认开启账号/Token/模型目录等完整功能域。
-- **App（personal 模式）**：单二进制可执行程序，双击启动后用浏览器访问（默认监听 `:8080`，启动后自动打开页面）。
+- **App（personal 模式）**：单二进制可执行程序，双击启动后用浏览器访问（默认监听 `:8080`，启动后打印访问地址，不自动打开页面）。
 
-> 说明：personal 模式也可以以 Server 形态运行（`REALMS_MODE=personal`）。App 是一个 Go 启动器形态（`cmd/realms-app`）：启动本地后端并打开浏览器页面。
+> 说明：personal 模式也可以以 Server 形态运行（`REALMS_MODE=personal`）。App 是一个 Go 启动器形态（`cmd/realms-app`）：启动本地后端并在日志中提示访问地址（不自动打开浏览器）。
 
 > 迁移/历史说明：`docs/MIGRATION.md`。
 
@@ -51,7 +51,7 @@ cp ".env.example" ".env"
 
 ## 2) 最小开始：App（personal 模式，浏览器 + 端口）
 
-App 用于把 Realms 以“personal 模式”封装成可执行程序（启动本地后端并打开浏览器页面）。
+App 用于把 Realms 以“personal 模式”封装成可执行程序（启动本地后端并在日志中提示访问地址；不自动打开浏览器）。
 
 关键约束（App 默认值）：
 - 默认监听：`:8080`（便于多人访问；如需仅本机可访问，可设置 `REALMS_ADDR=127.0.0.1:8080`）

@@ -2,21 +2,19 @@
 // - 默认启用 personal 模式（REALMS_MODE=personal）
 // - 默认监听 :8080（多人访问）
 // - 默认启用 CORS（REALMS_CORS_ALLOW_ORIGINS=*）
-// - 启动后等待 /healthz 就绪并打开默认浏览器到 /login
+// - 启动后打印 /login 访问地址（不自动打开浏览器）
 package main
 
 import (
 	"context"
-	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -34,9 +32,27 @@ import (
 func main() {
 	_ = godotenv.Load()
 
+	var (
+		doSet bool
+		key   string
+		quiet bool
+	)
+	flag.BoolVar(&doSet, "set", false, "set/overwrite personal-mode management key and exit")
+	flag.StringVar(&key, "key", "", "new management key (will not be printed)")
+	flag.BoolVar(&quiet, "quiet", false, "suppress success output")
+	flag.Parse()
+
 	if err := applyAppDefaults(); err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
+	}
+
+	if doSet {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			fmt.Fprintln(os.Stderr, "--key 不能为空")
+			os.Exit(2)
+		}
 	}
 
 	cfg, err := config.LoadFromEnv()
@@ -74,6 +90,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	if doSet {
+		st := store.New(db)
+		st.SetDialect(dialect)
+		if err := st.SetPersonalModeKey(context.Background(), key); err != nil {
+			slog.Error("重设管理 Key 失败", "err", err)
+			os.Exit(1)
+		}
+		if !quiet {
+			slog.Info("管理 Key 已更新（旧 Key 已失效）")
+		}
+		return
+	}
+
 	app, err := server.NewApp(server.AppOptions{
 		Config:  cfg,
 		DB:      db,
@@ -104,17 +133,7 @@ func main() {
 	}()
 
 	localBaseURL := localURLFromListener(ln)
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-		if err := waitForHealthz(ctx, localBaseURL+"/healthz"); err != nil {
-			slog.Warn("等待后端就绪超时", "err", err)
-			return
-		}
-		if err := openBrowser(localBaseURL + "/login"); err != nil {
-			slog.Warn("打开浏览器失败", "err", err)
-		}
-	}()
+	slog.Info("访问控制台", "url", localBaseURL+"/login")
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
@@ -175,50 +194,4 @@ func localURLFromListener(ln net.Listener) string {
 		return "http://127.0.0.1"
 	}
 	return "http://127.0.0.1:" + port
-}
-
-func waitForHealthz(ctx context.Context, url string) error {
-	client := &http.Client{Timeout: 2 * time.Second}
-	ticker := time.NewTicker(250 * time.Millisecond)
-	defer ticker.Stop()
-
-	var lastErr error
-	for {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		resp, err := client.Do(req)
-		if err == nil && resp != nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-				return nil
-			}
-			err = fmt.Errorf("healthz not ok: %d", resp.StatusCode)
-		}
-		lastErr = err
-
-		select {
-		case <-ctx.Done():
-			if lastErr == nil {
-				lastErr = ctx.Err()
-			}
-			return lastErr
-		case <-ticker.C:
-		}
-	}
-}
-
-func openBrowser(url string) error {
-	if strings.TrimSpace(url) == "" {
-		return errors.New("url 为空")
-	}
-
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", "", url)
-	default:
-		cmd = exec.Command("xdg-open", url)
-	}
-	return cmd.Start()
 }

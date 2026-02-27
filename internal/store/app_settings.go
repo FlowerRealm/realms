@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/shopspring/decimal"
+
+	rlmcrypto "realms/internal/crypto"
 )
 
 const SettingEmailVerificationEnable = "email_verification_enable"
@@ -83,6 +85,19 @@ func (s *Store) GetPersonalModeKeyHash(ctx context.Context) ([]byte, bool, error
 		return nil, false, fmt.Errorf("解析 app_settings[%s] 失败: hash 长度不合法", SettingPersonalModeKeyHash)
 	}
 	return b, true, nil
+}
+
+func (s *Store) SetPersonalModeKey(ctx context.Context, rawKey string) error {
+	key := strings.TrimSpace(rawKey)
+	if key == "" {
+		return errors.New("key 不能为空")
+	}
+	hashHex := hex.EncodeToString(rlmcrypto.TokenHash(key))
+	if err := s.UpsertAppSetting(ctx, SettingPersonalModeKeyHash, hashHex); err != nil {
+		return err
+	}
+	// 清理历史字段，避免 SQLite 启动迁移回填旧值。
+	return s.DeleteAppSetting(ctx, "self_mode_key_hash")
 }
 
 // InsertAppSettingIfAbsent 仅当 key 不存在时写入（不会覆盖已有值）。
