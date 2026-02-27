@@ -22,6 +22,20 @@ const SettingEmailVerificationEnable = "email_verification_enable"
 // 注意：仅存 hash，不存明文 Key。
 const SettingPersonalModeKeyHash = "personal_mode_key_hash"
 
+// SettingMCPServersRegistry stores the canonical MCP servers registry JSON (object).
+// It is used by admin UI to manage MCP servers and by personal-config bundle export/import.
+const SettingMCPServersRegistry = "mcp_servers_registry"
+
+// SettingMCPServersStoreV2 stores MCP servers in Realms canonical format (v2).
+// It is the preferred internal source of truth; target config files are adapters/views.
+const SettingMCPServersStoreV2 = "mcp_servers_store_v2"
+
+const (
+	SettingMCPApplyCodexEnabled  = "mcp_apply_codex_enabled"
+	SettingMCPApplyClaudeEnabled = "mcp_apply_claude_enabled"
+	SettingMCPApplyGeminiEnabled = "mcp_apply_gemini_enabled"
+)
+
 const (
 	SettingFeatureDisableWebAnnouncements = "feature_disable_web_announcements"
 	SettingFeatureDisableWebTokens        = "feature_disable_web_tokens"

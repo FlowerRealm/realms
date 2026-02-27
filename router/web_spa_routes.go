@@ -34,6 +34,10 @@ func setWebSPARoutes(r *gin.Engine, opts Options) {
 
 	r.NoRoute(func(c *gin.Context) {
 		p := strings.TrimSpace(c.Request.URL.Path)
+		if p == "/admin/mcp" || strings.HasPrefix(p, "/admin/mcp/") {
+			c.Data(http.StatusNotFound, "text/plain; charset=utf-8", []byte("Not Found"))
+			return
+		}
 		if opts.PersonalMode && strings.HasPrefix(p, "/oauth") {
 			c.Data(http.StatusNotFound, "text/plain; charset=utf-8", []byte("Not Found"))
 			return
@@ -57,6 +61,8 @@ func isPersonalModeAllowedWebPath(p string) bool {
 	case p == "/":
 		return true
 	case p == "/login":
+		return true
+	case p == "/mcp" || strings.HasPrefix(p, "/mcp/"):
 		return true
 	case strings.HasPrefix(p, "/admin"):
 		return true

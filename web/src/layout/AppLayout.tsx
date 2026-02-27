@@ -108,6 +108,13 @@ export function AppLayout() {
               <span className="material-symbols-rounded">manage_accounts</span> 账号设置
             </NavLink>
           </li>
+          {isRoot ? (
+            <li>
+              <NavLink to="/mcp" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`} onClick={closeSidebar}>
+                <span className="material-symbols-rounded">extension</span> MCP 集成
+              </NavLink>
+            </li>
+          ) : null}
 
           {isRoot ? (
             <>

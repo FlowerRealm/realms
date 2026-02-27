@@ -108,6 +108,11 @@ export function AdminLayout() {
               </NavLink>
             </li>
           ) : null}
+          <li>
+            <NavLink to="/mcp" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`} onClick={closeSidebar}>
+              <i className="ri-plug-line"></i> MCP 管理
+            </NavLink>
+          </li>
           {showUsage ? (
             <li>
               <NavLink to="/admin/usage" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`} onClick={closeSidebar}>

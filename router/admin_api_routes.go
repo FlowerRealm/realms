@@ -9,6 +9,7 @@ func setAdminAPIRoutes(r gin.IRoutes, opts Options) {
 	// personal 模式收敛：保留最小管理面 API（渠道管理走 /api/channel*；设置与用量统计走 /api/admin/*）。
 	if opts.PersonalMode {
 		setAdminUsageAPIRoutes(admin, opts)
+		setAdminMCPAPIRoutes(admin, opts)
 		setAdminSettingsAPIRoutes(admin, opts)
 		setAdminPersonalConfigAPIRoutes(admin, opts)
 		return
@@ -23,6 +24,7 @@ func setAdminAPIRoutes(r gin.IRoutes, opts Options) {
 	setAdminUsageAPIRoutes(admin, opts)
 	setAdminTicketAPIRoutes(admin, opts)
 	setAdminOAuthAppAPIRoutes(admin, opts)
+	setAdminMCPAPIRoutes(admin, opts)
 	setAdminSettingsAPIRoutes(admin, opts)
 	setAdminPaymentChannelAPIRoutes(admin, opts)
 }

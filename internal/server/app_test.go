@@ -368,6 +368,20 @@ func TestRoutes_SPAFallback(t *testing.T) {
 			t.Fatalf("expected status %d, got %d", http.StatusNotFound, rr.Code)
 		}
 	})
+
+	t.Run("GET /admin/mcp returns 404", func(t *testing.T) {
+		for _, p := range []string{
+			"/admin/mcp",
+			"/admin/mcp/x",
+		} {
+			req := httptest.NewRequest(http.MethodGet, "http://example.com"+p, nil)
+			rr := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, req)
+			if rr.Code != http.StatusNotFound {
+				t.Fatalf("GET %s expected status %d, got %d", p, http.StatusNotFound, rr.Code)
+			}
+		}
+	})
 }
 
 func TestRoutes_PersonalMode_SPAAllowedPaths(t *testing.T) {
@@ -380,6 +394,7 @@ func TestRoutes_PersonalMode_SPAAllowedPaths(t *testing.T) {
 		paths := []string{
 			"/",
 			"/login",
+			"/mcp",
 			"/admin",
 			"/admin?tab=channels",
 			"/admin?tab=usage",
@@ -407,11 +422,17 @@ func TestRoutes_PersonalMode_SPAAllowedPaths(t *testing.T) {
 	})
 
 	t.Run("disallowed paths return 404", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "http://example.com/usage", nil)
-		rr := httptest.NewRecorder()
-		app.Handler().ServeHTTP(rr, req)
-		if rr.Code != http.StatusNotFound {
-			t.Fatalf("expected status %d, got %d", http.StatusNotFound, rr.Code)
+		for _, p := range []string{
+			"/usage",
+			"/admin/mcp",
+			"/admin/mcp/x",
+		} {
+			req := httptest.NewRequest(http.MethodGet, "http://example.com"+p, nil)
+			rr := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, req)
+			if rr.Code != http.StatusNotFound {
+				t.Fatalf("GET %s expected status %d, got %d", p, http.StatusNotFound, rr.Code)
+			}
 		}
 	})
 }
