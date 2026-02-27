@@ -30,3 +30,23 @@ func TestMigration0038_PolicyToFeatureBans(t *testing.T) {
 		t.Fatalf("unexpected stmt count: %d", len(stmts))
 	}
 }
+
+func TestMigration0064_UsageSearchIndexes(t *testing.T) {
+	b, err := migrationsFS.ReadFile("migrations/0064_usage_search_indexes.sql")
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+
+	text := string(b)
+	if strings.Contains(text, "(`model`(191))") || strings.Contains(text, "(191)") {
+		t.Fatalf("migration must not use prefix index for model")
+	}
+	if !strings.Contains(text, "CREATE INDEX `idx_usage_events_model` ON `usage_events` (`model`)") {
+		t.Fatalf("migration missing idx_usage_events_model full-column index")
+	}
+
+	stmts := splitSQLStatements(text)
+	if len(stmts) != 20 {
+		t.Fatalf("unexpected stmt count: %d", len(stmts))
+	}
+}
