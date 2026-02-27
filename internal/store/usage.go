@@ -1273,171 +1273,113 @@ FROM usage_events ue
 	return out, nil
 }
 
-func scanUsageEventRowWithMultipliers(rows *sql.Rows) (UsageEvent, error) {
-	var e UsageEvent
-	var model sql.NullString
-	var endpoint sql.NullString
-	var method sql.NullString
-	var subscriptionID sql.NullInt64
-	var inputTokens sql.NullInt64
-	var cachedInputTokens sql.NullInt64
-	var outputTokens sql.NullInt64
-	var cachedOutputTokens sql.NullInt64
-	var upstreamChannelID sql.NullInt64
-	var upstreamEndpointID sql.NullInt64
-	var upstreamCredID sql.NullInt64
-	var errClass sql.NullString
-	var errMsg sql.NullString
-	var multGroupName sql.NullString
-	var isStream int
-	if err := rows.Scan(&e.ID, &e.Time, &e.RequestID, &endpoint, &method,
-		&e.UserID, &subscriptionID, &e.TokenID,
-		&upstreamChannelID, &upstreamEndpointID, &upstreamCredID,
-		&e.State, &model,
-		&inputTokens, &cachedInputTokens, &outputTokens, &cachedOutputTokens,
-		&e.ReservedUSD, &e.CommittedUSD, &e.PriceMultiplier, &e.PriceMultiplierGroup, &e.PriceMultiplierPayment, &multGroupName, &e.ReserveExpiresAt,
-		&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &errClass, &errMsg,
-		&isStream, &e.RequestBytes, &e.ResponseBytes,
-		&e.CreatedAt, &e.UpdatedAt); err != nil {
-		return UsageEvent{}, err
-	}
+type scannedUsageEventNulls struct {
+	Model              sql.NullString
+	Endpoint           sql.NullString
+	Method             sql.NullString
+	SubscriptionID     sql.NullInt64
+	InputTokens        sql.NullInt64
+	CachedInputTokens  sql.NullInt64
+	OutputTokens       sql.NullInt64
+	CachedOutputTokens sql.NullInt64
+	UpstreamChannelID  sql.NullInt64
+	UpstreamEndpointID sql.NullInt64
+	UpstreamCredID     sql.NullInt64
+	ErrClass           sql.NullString
+	ErrMsg             sql.NullString
+	MultGroupName      sql.NullString
+	IsStream           int
+}
+
+func normalizeScannedUsageEvent(e *UsageEvent, n scannedUsageEventNulls) {
 	e.ReservedUSD = e.ReservedUSD.Truncate(USDScale)
 	e.CommittedUSD = e.CommittedUSD.Truncate(USDScale)
 	e.PriceMultiplier = e.PriceMultiplier.Truncate(PriceMultiplierScale)
 	e.PriceMultiplierGroup = e.PriceMultiplierGroup.Truncate(PriceMultiplierScale)
 	e.PriceMultiplierPayment = e.PriceMultiplierPayment.Truncate(PriceMultiplierScale)
-	if multGroupName.Valid {
-		v := strings.TrimSpace(multGroupName.String)
+	if n.MultGroupName.Valid {
+		v := strings.TrimSpace(n.MultGroupName.String)
 		if v != "" {
 			e.PriceMultiplierGroupName = &v
 		}
 	}
-	if endpoint.Valid {
-		e.Endpoint = &endpoint.String
+	if n.Endpoint.Valid {
+		e.Endpoint = &n.Endpoint.String
 	}
-	if method.Valid {
-		e.Method = &method.String
+	if n.Method.Valid {
+		e.Method = &n.Method.String
 	}
-	if model.Valid {
-		e.Model = &model.String
+	if n.Model.Valid {
+		e.Model = &n.Model.String
 	}
-	if subscriptionID.Valid {
-		e.SubscriptionID = &subscriptionID.Int64
+	if n.SubscriptionID.Valid {
+		e.SubscriptionID = &n.SubscriptionID.Int64
 	}
-	if inputTokens.Valid {
-		e.InputTokens = &inputTokens.Int64
+	if n.InputTokens.Valid {
+		e.InputTokens = &n.InputTokens.Int64
 	}
-	if cachedInputTokens.Valid {
-		e.CachedInputTokens = &cachedInputTokens.Int64
+	if n.CachedInputTokens.Valid {
+		e.CachedInputTokens = &n.CachedInputTokens.Int64
 	}
-	if outputTokens.Valid {
-		e.OutputTokens = &outputTokens.Int64
+	if n.OutputTokens.Valid {
+		e.OutputTokens = &n.OutputTokens.Int64
 	}
-	if cachedOutputTokens.Valid {
-		e.CachedOutputTokens = &cachedOutputTokens.Int64
+	if n.CachedOutputTokens.Valid {
+		e.CachedOutputTokens = &n.CachedOutputTokens.Int64
 	}
-	if upstreamChannelID.Valid {
-		e.UpstreamChannelID = &upstreamChannelID.Int64
+	if n.UpstreamChannelID.Valid {
+		e.UpstreamChannelID = &n.UpstreamChannelID.Int64
 	}
-	if upstreamEndpointID.Valid {
-		e.UpstreamEndpointID = &upstreamEndpointID.Int64
+	if n.UpstreamEndpointID.Valid {
+		e.UpstreamEndpointID = &n.UpstreamEndpointID.Int64
 	}
-	if upstreamCredID.Valid {
-		e.UpstreamCredID = &upstreamCredID.Int64
+	if n.UpstreamCredID.Valid {
+		e.UpstreamCredID = &n.UpstreamCredID.Int64
 	}
-	if errClass.Valid {
-		e.ErrorClass = &errClass.String
+	if n.ErrClass.Valid {
+		e.ErrorClass = &n.ErrClass.String
 	}
-	if errMsg.Valid {
-		e.ErrorMessage = &errMsg.String
+	if n.ErrMsg.Valid {
+		e.ErrorMessage = &n.ErrMsg.String
 	}
-	e.IsStream = isStream != 0
+	e.IsStream = n.IsStream != 0
+}
+
+func scanUsageEventRowWithMultipliers(rows *sql.Rows) (UsageEvent, error) {
+	var e UsageEvent
+	var n scannedUsageEventNulls
+	if err := rows.Scan(&e.ID, &e.Time, &e.RequestID, &n.Endpoint, &n.Method,
+		&e.UserID, &n.SubscriptionID, &e.TokenID,
+		&n.UpstreamChannelID, &n.UpstreamEndpointID, &n.UpstreamCredID,
+		&e.State, &n.Model,
+		&n.InputTokens, &n.CachedInputTokens, &n.OutputTokens, &n.CachedOutputTokens,
+		&e.ReservedUSD, &e.CommittedUSD, &e.PriceMultiplier, &e.PriceMultiplierGroup, &e.PriceMultiplierPayment, &n.MultGroupName, &e.ReserveExpiresAt,
+		&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &n.ErrClass, &n.ErrMsg,
+		&n.IsStream, &e.RequestBytes, &e.ResponseBytes,
+		&e.CreatedAt, &e.UpdatedAt); err != nil {
+		return UsageEvent{}, err
+	}
+	normalizeScannedUsageEvent(&e, n)
 	return e, nil
 }
 
 func scanUsageEventWithUserRowWithMultipliers(rows *sql.Rows) (UsageEventWithUser, error) {
 	var e UsageEvent
-	var model sql.NullString
-	var endpoint sql.NullString
-	var method sql.NullString
-	var subscriptionID sql.NullInt64
-	var inputTokens sql.NullInt64
-	var cachedInputTokens sql.NullInt64
-	var outputTokens sql.NullInt64
-	var cachedOutputTokens sql.NullInt64
-	var upstreamChannelID sql.NullInt64
-	var upstreamEndpointID sql.NullInt64
-	var upstreamCredID sql.NullInt64
-	var errClass sql.NullString
-	var errMsg sql.NullString
-	var multGroupName sql.NullString
-	var isStream int
+	var n scannedUsageEventNulls
 	var email string
-
-	if err := rows.Scan(&e.ID, &e.Time, &e.RequestID, &endpoint, &method,
-		&e.UserID, &subscriptionID, &e.TokenID,
-		&upstreamChannelID, &upstreamEndpointID, &upstreamCredID,
-		&e.State, &model,
-		&inputTokens, &cachedInputTokens, &outputTokens, &cachedOutputTokens,
-		&e.ReservedUSD, &e.CommittedUSD, &e.PriceMultiplier, &e.PriceMultiplierGroup, &e.PriceMultiplierPayment, &multGroupName, &e.ReserveExpiresAt,
-		&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &errClass, &errMsg,
-		&isStream, &e.RequestBytes, &e.ResponseBytes,
+	if err := rows.Scan(&e.ID, &e.Time, &e.RequestID, &n.Endpoint, &n.Method,
+		&e.UserID, &n.SubscriptionID, &e.TokenID,
+		&n.UpstreamChannelID, &n.UpstreamEndpointID, &n.UpstreamCredID,
+		&e.State, &n.Model,
+		&n.InputTokens, &n.CachedInputTokens, &n.OutputTokens, &n.CachedOutputTokens,
+		&e.ReservedUSD, &e.CommittedUSD, &e.PriceMultiplier, &e.PriceMultiplierGroup, &e.PriceMultiplierPayment, &n.MultGroupName, &e.ReserveExpiresAt,
+		&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &n.ErrClass, &n.ErrMsg,
+		&n.IsStream, &e.RequestBytes, &e.ResponseBytes,
 		&e.CreatedAt, &e.UpdatedAt,
 		&email); err != nil {
 		return UsageEventWithUser{}, err
 	}
-
-	e.ReservedUSD = e.ReservedUSD.Truncate(USDScale)
-	e.CommittedUSD = e.CommittedUSD.Truncate(USDScale)
-	e.PriceMultiplier = e.PriceMultiplier.Truncate(PriceMultiplierScale)
-	e.PriceMultiplierGroup = e.PriceMultiplierGroup.Truncate(PriceMultiplierScale)
-	e.PriceMultiplierPayment = e.PriceMultiplierPayment.Truncate(PriceMultiplierScale)
-	if multGroupName.Valid {
-		v := strings.TrimSpace(multGroupName.String)
-		if v != "" {
-			e.PriceMultiplierGroupName = &v
-		}
-	}
-	if endpoint.Valid {
-		e.Endpoint = &endpoint.String
-	}
-	if method.Valid {
-		e.Method = &method.String
-	}
-	if model.Valid {
-		e.Model = &model.String
-	}
-	if subscriptionID.Valid {
-		e.SubscriptionID = &subscriptionID.Int64
-	}
-	if inputTokens.Valid {
-		e.InputTokens = &inputTokens.Int64
-	}
-	if cachedInputTokens.Valid {
-		e.CachedInputTokens = &cachedInputTokens.Int64
-	}
-	if outputTokens.Valid {
-		e.OutputTokens = &outputTokens.Int64
-	}
-	if cachedOutputTokens.Valid {
-		e.CachedOutputTokens = &cachedOutputTokens.Int64
-	}
-	if upstreamChannelID.Valid {
-		e.UpstreamChannelID = &upstreamChannelID.Int64
-	}
-	if upstreamEndpointID.Valid {
-		e.UpstreamEndpointID = &upstreamEndpointID.Int64
-	}
-	if upstreamCredID.Valid {
-		e.UpstreamCredID = &upstreamCredID.Int64
-	}
-	if errClass.Valid {
-		e.ErrorClass = &errClass.String
-	}
-	if errMsg.Valid {
-		e.ErrorMessage = &errMsg.String
-	}
-	e.IsStream = isStream != 0
+	normalizeScannedUsageEvent(&e, n)
 
 	email = strings.TrimSpace(email)
 	if email == "" {
