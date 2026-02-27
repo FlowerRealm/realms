@@ -77,7 +77,17 @@ func dashboardHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
-		todayStart, now := dashboardUTCDayRange(time.Now())
+		loc, _, ok := usageRequestLocation(c)
+		if !ok {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "tz 不合法（需为 IANA 时区名，如 Asia/Shanghai）"})
+			return
+		}
+		nowUTC := time.Now().UTC()
+		todayStart, now, _, _, ok := parseDateRangeInLocation(nowUTC, "", "", loc)
+		if !ok {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "日期范围不合法"})
+			return
+		}
 
 		todayCommitted, todayReserved, err := opts.Store.SumCommittedAndReservedUSD(c.Request.Context(), store.UsageSumWithReservedInput{
 			UserID: userID,
@@ -155,7 +165,7 @@ func dashboardHandler(opts Options) gin.HandlerFunc {
 
 		timeMap := make(map[string]store.TimeSeriesUsageStats, len(timeStats))
 		for _, ts := range timeStats {
-			timeMap[ts.Time.UTC().Format("15:00")] = ts
+			timeMap[ts.Time.In(loc).Format("15:00")] = ts
 		}
 
 		palette := []string{"#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16", "#14b8a6", "#64748b"}
@@ -175,8 +185,8 @@ func dashboardHandler(opts Options) gin.HandlerFunc {
 			})
 		}
 		for i := 0; i < 24; i++ {
-			hr := time.Date(todayStart.Year(), todayStart.Month(), todayStart.Day(), i, 0, 0, 0, time.UTC)
-			label := hr.Format("15:00")
+			bucketUTC := todayStart.Add(time.Duration(i) * time.Hour)
+			label := bucketUTC.In(loc).Format("15:00")
 			if ts, ok := timeMap[label]; ok {
 				f, _ := ts.CommittedUSD.Float64()
 				chartView.TimeSeriesStats = append(chartView.TimeSeriesStats, dashboardTimeSeriesUsage{

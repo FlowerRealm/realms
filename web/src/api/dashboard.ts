@@ -1,5 +1,6 @@
 import { api } from './client';
 import type { APIResponse } from './types';
+import { browserTimeZone } from './timezone';
 
 type DashboardSubscriptionWindow = {
   window: string;
@@ -48,6 +49,10 @@ export type DashboardData = {
 };
 
 export async function getDashboard() {
-  const res = await api.get<APIResponse<DashboardData>>('/api/dashboard');
+  const res = await api.get<APIResponse<DashboardData>>('/api/dashboard', {
+    params: {
+      tz: browserTimeZone(),
+    },
+  });
   return res.data;
 }
