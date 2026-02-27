@@ -403,10 +403,34 @@ WHERE token_id=? AND time >= ? AND time < ? AND (state=? OR state=?)
 	return committedUSD, reservedUSD, nil
 }
 
-func (s *Store) firstUsageEventTime(ctx context.Context, where string, args ...any) (time.Time, bool, error) {
+type firstUsageEventWhere int
+
+const (
+	firstUsageEventWhereNone firstUsageEventWhere = iota
+	firstUsageEventWhereUserID
+	firstUsageEventWhereTokenID
+	firstUsageEventWhereUpstreamChannelID
+)
+
+func (w firstUsageEventWhere) clause() string {
+	switch w {
+	case firstUsageEventWhereNone:
+		return ""
+	case firstUsageEventWhereUserID:
+		return "user_id=?"
+	case firstUsageEventWhereTokenID:
+		return "token_id=?"
+	case firstUsageEventWhereUpstreamChannelID:
+		return "upstream_channel_id=?"
+	default:
+		return ""
+	}
+}
+
+func (s *Store) firstUsageEventTime(ctx context.Context, w firstUsageEventWhere, args ...any) (time.Time, bool, error) {
 	q := "SELECT time FROM usage_events"
-	if strings.TrimSpace(where) != "" {
-		q += " WHERE " + where
+	if clause := w.clause(); clause != "" {
+		q += " WHERE " + clause
 	}
 	q += " ORDER BY time ASC LIMIT 1"
 
@@ -424,25 +448,25 @@ func (s *Store) GetFirstUsageEventTimeByUser(ctx context.Context, userID int64) 
 	if userID <= 0 {
 		return time.Time{}, false, fmt.Errorf("userID 不合法")
 	}
-	return s.firstUsageEventTime(ctx, "user_id=?", userID)
+	return s.firstUsageEventTime(ctx, firstUsageEventWhereUserID, userID)
 }
 
 func (s *Store) GetFirstUsageEventTimeByToken(ctx context.Context, tokenID int64) (time.Time, bool, error) {
 	if tokenID <= 0 {
 		return time.Time{}, false, fmt.Errorf("tokenID 不合法")
 	}
-	return s.firstUsageEventTime(ctx, "token_id=?", tokenID)
+	return s.firstUsageEventTime(ctx, firstUsageEventWhereTokenID, tokenID)
 }
 
 func (s *Store) GetFirstUsageEventTimeGlobal(ctx context.Context) (time.Time, bool, error) {
-	return s.firstUsageEventTime(ctx, "")
+	return s.firstUsageEventTime(ctx, firstUsageEventWhereNone)
 }
 
 func (s *Store) GetFirstUsageEventTimeByChannel(ctx context.Context, channelID int64) (time.Time, bool, error) {
 	if channelID <= 0 {
 		return time.Time{}, false, fmt.Errorf("channelID 不合法")
 	}
-	return s.firstUsageEventTime(ctx, "upstream_channel_id=?", channelID)
+	return s.firstUsageEventTime(ctx, firstUsageEventWhereUpstreamChannelID, channelID)
 }
 
 func (s *Store) GetUsageEvent(ctx context.Context, id int64) (UsageEvent, error) {
