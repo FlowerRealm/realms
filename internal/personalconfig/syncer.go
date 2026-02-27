@@ -3,6 +3,7 @@ package personalconfig
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -74,6 +75,15 @@ func (s *Syncer) CurrentSHA256() string {
 	return s.currentSHA256
 }
 
+func (s *Syncer) LastWrittenSHA256() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastWrittenSHA
+}
+
 func (s *Syncer) LastError() string {
 	if s == nil {
 		return ""
@@ -110,9 +120,9 @@ func (s *Syncer) BeginMutation(ctx context.Context) (*Mutation, error) {
 		return nil, err
 	}
 	return &Mutation{
-		syncer:   s,
-		pre:      pre,
-		preSHA:   preSHA,
+		syncer:    s,
+		pre:       pre,
+		preSHA:    preSHA,
 		finalized: false,
 	}, nil
 }
@@ -413,6 +423,19 @@ func (s *Syncer) exportBundleLocked(ctx context.Context, includeSecrets bool) (B
 		ExportedAt: time.Now(),
 		Admin:      admin,
 	}
+
+	// Optional MCP store snapshot (preferred) + legacy view for backward compatibility.
+	if raw, ok, err := s.st.GetStringAppSetting(ctx, store.SettingMCPServersStoreV2); err != nil {
+		return Bundle{}, "", err
+	} else if ok && strings.TrimSpace(raw) != "" {
+		b.MCPStoreV2 = json.RawMessage(strings.TrimSpace(raw))
+	}
+	if raw, ok, err := s.st.GetStringAppSetting(ctx, store.SettingMCPServersRegistry); err != nil {
+		return Bundle{}, "", err
+	} else if ok && strings.TrimSpace(raw) != "" {
+		b.MCPServers = json.RawMessage(strings.TrimSpace(raw))
+	}
+
 	if includeSecrets {
 		sec, err := exportSecrets(ctx, s.st)
 		if err != nil {

@@ -540,20 +540,22 @@ tr:hover .rlm-model-icon {
   border-radius: 999px;
 }
 
-/* Row Stack Divider: 在同一 segment 内，为“纵向堆叠的 col-12 区块”自动补充分隔线与留白 */
-.rlm-segment .row > [class~='col-12']:not(:first-child) {
-  position: relative;
-  margin-top: calc(var(--bs-gutter-y, 0px) + var(--rlm-segment-gap)) !important;
-}
-.rlm-segment .row > [class~='col-12']:not(:first-child)::before {
-  content: '';
-  position: absolute;
-  top: calc(-1 * (var(--bs-gutter-y, 0px) + var(--rlm-segment-gap)) / 2);
-  left: var(--rlm-segment-sep-inset);
-  right: var(--rlm-segment-sep-inset);
-  height: var(--rlm-frame-w);
-  background: var(--rlm-frame-color-soft);
-  border-radius: 999px;
+/* Row Stack Divider: 仅在窄屏（col-12 实际是整行堆叠）时启用，避免在多列网格上“误画横线”。 */
+@media (max-width: 575.98px) {
+  .rlm-segment .row > [class~='col-12']:not(:first-child) {
+    position: relative;
+    margin-top: calc(var(--bs-gutter-y, 0px) + var(--rlm-segment-gap)) !important;
+  }
+  .rlm-segment .row > [class~='col-12']:not(:first-child)::before {
+    content: '';
+    position: absolute;
+    top: calc(-1 * (var(--bs-gutter-y, 0px) + var(--rlm-segment-gap)) / 2);
+    left: var(--rlm-segment-sep-inset);
+    right: var(--rlm-segment-sep-inset);
+    height: var(--rlm-frame-w);
+    background: var(--rlm-frame-color-soft);
+    border-radius: 999px;
+  }
 }
 
 /* Usage detail: 详情区是“网格字段”，不应触发 Row Stack Divider（否则会在 Error Class 等字段上出现多条横线）。 */

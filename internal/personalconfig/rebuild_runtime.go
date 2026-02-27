@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"realms/internal/mcp"
 	"realms/internal/store"
 )
 
@@ -344,8 +345,85 @@ VALUES(?, NULL, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		}
 	}
 
+	// Optional MCP registry snapshot (app_settings).
+	// Backward-compat: missing/null field means "leave unchanged".
+	if b.MCPStoreV2 != nil {
+		sv2, err := mcp.ParseStoreV2JSON(string(b.MCPStoreV2))
+		if err != nil {
+			return err
+		}
+		if err := applyMCPStoreV2(ctx, tx, dialect, sv2); err != nil {
+			return err
+		}
+	} else if b.MCPServers != nil {
+		// Legacy bundles: migrate to v2 and dual-write.
+		reg, err := mcp.ParseRegistryJSON(string(b.MCPServers))
+		if err != nil {
+			return err
+		}
+		if err := applyMCPStoreV2(ctx, tx, dialect, mcp.StoreV2FromRegistry(reg)); err != nil {
+			return err
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}
+
+func applyMCPStoreV2(ctx context.Context, tx *sql.Tx, dialect store.Dialect, sv2 mcp.StoreV2) error {
+	if tx == nil {
+		return errors.New("tx is nil")
+	}
+	sv2 = sv2.Normalize()
+	if err := sv2.Validate(); err != nil {
+		return err
+	}
+	rawV2, err := mcp.PrettyStoreV2JSON(sv2)
+	if err != nil {
+		return err
+	}
+	rawLegacy := ""
+	reg := mcp.StoreV2ToRegistry(sv2)
+	if len(reg) > 0 {
+		s, err := mcp.PrettyJSON(reg)
+		if err != nil {
+			return err
+		}
+		rawLegacy = s
+	}
+
+	stmt := "INSERT INTO app_settings(`key`, value, created_at, updated_at)\n" +
+		"VALUES(?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)\n" +
+		"ON DUPLICATE KEY UPDATE value=VALUES(value), updated_at=CURRENT_TIMESTAMP"
+	if dialect == store.DialectSQLite {
+		stmt = "INSERT INTO app_settings(`key`, value, created_at, updated_at)\n" +
+			"VALUES(?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)\n" +
+			"ON CONFLICT(`key`) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP"
+	}
+
+	if len(sv2.Servers) == 0 {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM app_settings WHERE `key`=?", store.SettingMCPServersStoreV2); err != nil {
+			return fmt.Errorf("clear mcp store_v2 app_setting: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM app_settings WHERE `key`=?", store.SettingMCPServersRegistry); err != nil {
+			return fmt.Errorf("clear mcp registry app_setting: %w", err)
+		}
+		return nil
+	}
+
+	if _, err := tx.ExecContext(ctx, stmt, store.SettingMCPServersStoreV2, rawV2); err != nil {
+		return fmt.Errorf("upsert mcp store_v2 app_setting: %w", err)
+	}
+	if rawLegacy == "" {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM app_settings WHERE `key`=?", store.SettingMCPServersRegistry); err != nil {
+			return fmt.Errorf("clear mcp registry app_setting: %w", err)
+		}
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, stmt, store.SettingMCPServersRegistry, rawLegacy); err != nil {
+		return fmt.Errorf("upsert mcp registry app_setting: %w", err)
 	}
 	return nil
 }

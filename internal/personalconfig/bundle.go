@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"realms/internal/mcp"
 	"realms/internal/store"
 )
 
@@ -24,6 +25,15 @@ type Bundle struct {
 	ExportedAt time.Time `json:"exported_at"`
 
 	Admin store.AdminConfigExport `json:"admin"`
+
+	// MCPServers is an optional canonical MCP servers registry snapshot.
+	// When absent (null/missing), it is treated as "unchanged" during personal-config apply
+	// for backward compatibility with older bundles.
+	MCPServers json.RawMessage `json:"mcp_servers,omitempty"`
+
+	// MCPStoreV2 is Realms canonical MCP store snapshot (v2).
+	// When present, it takes precedence over MCPServers.
+	MCPStoreV2 json.RawMessage `json:"mcp_store_v2,omitempty"`
 
 	Secrets *Secrets `json:"secrets,omitempty"`
 }
@@ -52,6 +62,16 @@ func (b Bundle) Validate() error {
 	}
 	if b.Admin.Version < 1 {
 		return errors.New("admin export missing version")
+	}
+	if len(b.MCPStoreV2) > 0 {
+		if _, err := mcp.ParseStoreV2JSON(string(b.MCPStoreV2)); err != nil {
+			return fmt.Errorf("invalid mcp_store_v2: %w", err)
+		}
+	}
+	if len(b.MCPServers) > 0 {
+		if _, err := mcp.ParseRegistryJSON(string(b.MCPServers)); err != nil {
+			return fmt.Errorf("invalid mcp_servers: %w", err)
+		}
 	}
 	// Basic sanity checks; deeper validation happens during rebuild.
 	for _, ep := range append(append([]EndpointSecrets{}, b.secretsOrEmpty().OpenAICompatible...), b.secretsOrEmpty().Anthropic...) {

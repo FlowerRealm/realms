@@ -56,6 +56,7 @@ export function AdminLayout() {
             mode?: 'business' | 'personal'
             personal_config_enabled?: boolean
             personal_config_sha256?: string
+            personal_config_last_written_sha256?: string
             personal_config_last_error?: string
           }>
         >('/api/meta')
@@ -66,6 +67,7 @@ export function AdminLayout() {
           return
         }
         const sha = (data.personal_config_sha256 || '').trim()
+        const lastWritten = (data.personal_config_last_written_sha256 || '').trim()
         const err = (data.personal_config_last_error || '').trim()
         setConfigError(err)
         if (!sha) return
@@ -75,7 +77,9 @@ export function AdminLayout() {
         }
         if (lastConfigSHA.current !== sha) {
           lastConfigSHA.current = sha
-          setConfigChanged(true)
+          if (lastWritten && sha !== lastWritten) {
+            setConfigChanged(true)
+          }
         }
       } catch {
         // ignore
@@ -108,6 +112,11 @@ export function AdminLayout() {
               </NavLink>
             </li>
           ) : null}
+          <li>
+            <NavLink to="/mcp" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`} onClick={closeSidebar}>
+              <i className="ri-plug-line"></i> MCP 管理
+            </NavLink>
+          </li>
           {showUsage ? (
             <li>
               <NavLink to="/admin/usage" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`} onClick={closeSidebar}>

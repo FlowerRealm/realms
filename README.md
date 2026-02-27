@@ -188,7 +188,7 @@ go test ./...
   面向完整功能（订阅/余额/支付/工单等），需要账号系统与更多配置项。
 
 - personal 模式：`REALMS_MODE=personal`  
-  适合个人/小团队自用：不提供账号/Token/系统设置/OAuth 等功能域；管理后台通过 `/login` 的管理 Key 解锁；数据面与管理面 API 均要求携带该 Key。
+  适合个人/小团队自用：不提供账号/Token/系统设置/OAuth 等功能域；管理后台通过 `/login` 的管理 Key 解锁；数据面与管理面 API 均要求携带该 Key；MCP 管理仅 personal 模式提供。
 
 </details>
 

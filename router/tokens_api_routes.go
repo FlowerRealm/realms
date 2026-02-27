@@ -3,6 +3,7 @@ package router
 import (
 	"database/sql"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -81,7 +82,10 @@ func createUserTokenHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 		var req reqBody
-		_ = c.ShouldBindJSON(&req)
+		if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
+			return
+		}
 		if req.Name != nil {
 			name := strings.TrimSpace(*req.Name)
 			if name == "" {
@@ -251,9 +255,9 @@ type tokenChannelGroupBindingView struct {
 }
 
 type tokenChannelGroupsView struct {
-	TokenID              int64                        `json:"token_id"`
-	UserGroup            string                       `json:"user_group"`
-	AllowedChannelGroups []tokenChannelGroupOptionView `json:"allowed_channel_groups"`
+	TokenID              int64                          `json:"token_id"`
+	UserGroup            string                         `json:"user_group"`
+	AllowedChannelGroups []tokenChannelGroupOptionView  `json:"allowed_channel_groups"`
 	Bindings             []tokenChannelGroupBindingView `json:"bindings"`
 	EffectiveBindings    []tokenChannelGroupBindingView `json:"effective_bindings"`
 }
@@ -419,7 +423,14 @@ func replaceUserTokenChannelGroupsHandler(opts Options) gin.HandlerFunc {
 		}
 
 		var req reqBody
-		_ = c.ShouldBindJSON(&req)
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
+			return
+		}
+		if req.ChannelGroups == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
+			return
+		}
 		if err := opts.Store.ReplaceTokenChannelGroups(c.Request.Context(), tokenID, req.ChannelGroups); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "not found"})

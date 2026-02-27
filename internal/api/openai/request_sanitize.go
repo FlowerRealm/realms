@@ -28,7 +28,7 @@ func sanitizeResponsesPayload(body []byte) (map[string]any, error) {
 }
 
 // sanitizeMessagesPayload 参考 new-api 的 ClaudeRequest：仅保留已写定字段（未知字段静默丢弃），并做 tokens 别名/补齐。
-func sanitizeMessagesPayload(body []byte, defaultMaxTokens int) (map[string]any, error) {
+func sanitizeMessagesPayload(body []byte, defaultMaxTokens int, allowMCPServers bool) (map[string]any, error) {
 	type thinking struct {
 		Type         string `json:"type,omitempty"`
 		BudgetTokens *int64 `json:"budget_tokens,omitempty"`
@@ -97,6 +97,10 @@ func sanitizeMessagesPayload(body []byte, defaultMaxTokens int) (map[string]any,
 	}
 	if r.MaxTokens == nil || *r.MaxTokens <= 0 {
 		return nil, errors.New("max_tokens 不能为空")
+	}
+
+	if !allowMCPServers {
+		r.McpServers = nil
 	}
 
 	raw, err := json.Marshal(r)

@@ -4,6 +4,7 @@ import { RequireAuth } from './auth/RequireAuth'
 import { useAuth } from './auth/AuthContext'
 import { AdminLayout } from './layout/personal/AdminLayout'
 import { PublicLayout } from './layout/personal/PublicLayout'
+import { McpServersPage } from './pages/McpServersPage'
 import { AdminPage } from './pages/personal/AdminPage'
 import { LoginPage } from './pages/personal/LoginPage'
 import { NotFoundPage } from './pages/NotFoundPage'
@@ -34,6 +35,7 @@ export function AppPersonal() {
           </RequireAuth>
         }
       >
+        <Route path="/mcp" element={<McpServersPage />} />
         <Route path="/admin/*" element={<AdminPage />} />
       </Route>
 
