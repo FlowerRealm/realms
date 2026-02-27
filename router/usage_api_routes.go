@@ -315,11 +315,13 @@ func usageEventsHandler(opts Options) gin.HandlerFunc {
 			Key:   qKey,
 			Model: qModel,
 		}
-		if idx.Key && strings.TrimSpace(filters.Key) == "" {
-			filters.Key = q
-		}
-		if idx.Model && strings.TrimSpace(filters.Model) == "" {
-			filters.Model = q
+		if q != "" {
+			if idx.Key && filters.Key == "" {
+				filters.Key = q
+			}
+			if idx.Model && filters.Model == "" {
+				filters.Model = q
+			}
 		}
 
 		var events []store.UsageEvent

@@ -318,17 +318,19 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 			Channel: qChannel,
 			Model:   qModel,
 		}
-		if idx.User && strings.TrimSpace(filters.User) == "" {
-			filters.User = query
-		}
-		if idx.Key && strings.TrimSpace(filters.Key) == "" {
-			filters.Key = query
-		}
-		if idx.Channel && strings.TrimSpace(filters.Channel) == "" {
-			filters.Channel = query
-		}
-		if idx.Model && strings.TrimSpace(filters.Model) == "" {
-			filters.Model = query
+		if query != "" {
+			if idx.User && filters.User == "" {
+				filters.User = query
+			}
+			if idx.Key && filters.Key == "" {
+				filters.Key = query
+			}
+			if idx.Channel && filters.Channel == "" {
+				filters.Channel = query
+			}
+			if idx.Model && filters.Model == "" {
+				filters.Model = query
+			}
 		}
 
 		events, err := opts.Store.ListUsageEventsWithUserRangeFiltered(c.Request.Context(), since, until, limit, beforeID, afterID, idx, filters)
