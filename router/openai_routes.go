@@ -42,7 +42,7 @@ func setOpenAIRoutes(r *gin.Engine, opts Options) {
 		r.DELETE("/v1/responses/:response_id", apiChain(http.HandlerFunc(opts.OpenAI.ResponseDelete)))
 		r.POST("/v1/responses/:response_id/cancel", apiChain(http.HandlerFunc(opts.OpenAI.ResponseCancel)))
 		r.GET("/v1/responses/:response_id/input_items", apiChain(http.HandlerFunc(opts.OpenAI.ResponseInputItems)))
-		r.POST("/v1/responses/compact", apiChain(http.HandlerFunc(opts.OpenAI.Responses)))
+		r.POST("/v1/responses/compact", apiChain(http.HandlerFunc(opts.OpenAI.ResponsesCompact)))
 		r.POST("/v1/responses/input_tokens", apiChain(http.HandlerFunc(opts.OpenAI.Responses)))
 
 		r.POST("/v1/chat/completions", apiChain(http.HandlerFunc(opts.OpenAI.ChatCompletions)))

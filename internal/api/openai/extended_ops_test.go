@@ -266,7 +266,7 @@ func TestChatCompletions_StoreTrue_InsertsOwnerMetadataAndStoresObjectRef(t *tes
 	}
 }
 
-func TestResponsesCompact_RequiresOpenAICompatibleAndSkipsQuota(t *testing.T) {
+func TestResponsesCompact_RemoteRequiresSessionIDAndDoesNotTouchScheduler(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
 			{ID: 1, Type: store.UpstreamTypeCodexOAuth, Status: 1},
@@ -301,36 +301,27 @@ func TestResponsesCompact_RequiresOpenAICompatibleAndSkipsQuota(t *testing.T) {
 		},
 	}
 
-	var gotSel scheduler.Selection
-	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
-		gotSel = sel
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(bytes.NewReader([]byte(`{"ok":true}`))),
-		}, nil
-	})
-
 	q := &fakeQuota{}
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, doer, nil, nil, false, q, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		t.Fatalf("unexpected scheduler-based upstream call")
+		return nil, nil
+	}), nil, nil, false, q, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
 
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses/compact", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi"}`)))
-	req.Header.Set("Content-Type", "application/json")
 	tokenID := int64(123)
 	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{testGroupName}}
-	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
 
-	rr := httptest.NewRecorder()
-	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
-	}
-	if gotSel.ChannelType != store.UpstreamTypeOpenAICompatible {
-		t.Fatalf("expected openai_compatible selection, got=%s", gotSel.ChannelType)
+	reqMissing := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses/compact", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi"}`)))
+	reqMissing.Header.Set("Content-Type", "application/json")
+	reqMissing = reqMissing.WithContext(auth.WithPrincipal(reqMissing.Context(), p))
+
+	rrMissing := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.ResponsesCompact), middleware.BodyCache(1<<20)).ServeHTTP(rrMissing, reqMissing)
+	if rrMissing.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing session_id, got=%d body=%s", rrMissing.Code, rrMissing.Body.String())
 	}
 	if len(q.reserveCalls) != 0 {
-		t.Fatalf("expected quota reserve to be skipped, got=%d", len(q.reserveCalls))
+		t.Fatalf("expected quota reserve not called on missing session_id, got=%d", len(q.reserveCalls))
 	}
 }
 

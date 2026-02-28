@@ -55,6 +55,8 @@ type Handler struct {
 
 	codexRouteCache *codexSessionRouteCache
 	sessionBindings SessionBindingStore
+
+	sub2api *upstream.Sub2APIClient
 }
 
 type Doer interface {
@@ -110,18 +112,18 @@ func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *
 		}
 	}
 	return &Handler{
-		models:   models,
-		groups:   groups,
-		sched:    sched,
-		exec:     exec,
-		proxyLog: proxyLog,
-		features: features,
-		selfMode: selfMode,
-		quota:    qp,
-		audit:    audit,
-		usage:    usage,
-		refs:     refs,
-		sseOpts:  sseOpts,
+		models:          models,
+		groups:          groups,
+		sched:           sched,
+		exec:            exec,
+		proxyLog:        proxyLog,
+		features:        features,
+		selfMode:        selfMode,
+		quota:           qp,
+		audit:           audit,
+		usage:           usage,
+		refs:            refs,
+		sseOpts:         sseOpts,
 		codexRouteCache: newCodexSessionRouteCache(),
 		sessionBindings: sessionBindings,
 	}
@@ -129,6 +131,13 @@ func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *
 
 func (h *Handler) Responses(w http.ResponseWriter, r *http.Request) {
 	h.proxyJSON(w, r)
+}
+
+func (h *Handler) SetSub2APIClient(client *upstream.Sub2APIClient) {
+	if h == nil {
+		return
+	}
+	h.sub2api = client
 }
 
 func (h *Handler) patchCodexQuotaBestEffort(sel scheduler.Selection, headers http.Header) {

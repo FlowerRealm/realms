@@ -102,6 +102,11 @@ List input items（仅对已登记对象生效）。
 
 Compact（用于压缩输入上下文，行为由上游决定）。
 
+注意：
+
+- 该端点对齐远程 Sub2API 的 compact 网关：请求必须携带 `session_id`（header 或 body），否则返回 400。
+- 需要配置 `REALMS_SUB2API_BASE_URL` 与 `REALMS_SUB2API_GATEWAY_KEY`；未配置时返回 500。
+
 #### [POST] /v1/responses/input_tokens
 
 Input tokens（仅计算输入 tokens 的工具端点，行为由上游决定）。

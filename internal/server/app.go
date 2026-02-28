@@ -95,6 +95,11 @@ func NewApp(opts AppOptions) (*App, error) {
 	openaiHandler := openaiapi.NewHandler(st, st, sched, exec, proxyLog, st, personalMode, qp, st, st, st, upstream.SSEPumpOptions{
 		InitialLineBytes: 64 << 10,
 	})
+	openaiHandler.SetSub2APIClient(upstream.NewSub2APIClient(
+		opts.Config.Sub2API.BaseURL,
+		opts.Config.Sub2API.GatewayKey,
+		time.Duration(opts.Config.Sub2API.TimeoutMS)*time.Millisecond,
+	))
 
 	app := &App{
 		cfg:           opts.Config,
