@@ -700,8 +700,10 @@ func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p aut
 func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel scheduler.Selection, body []byte, wantStream bool, model *string, p auth.Principal, usageID int64, reqStart time.Time, reqBytes int64) (proxyAttemptDecision, proxyFailureInfo) {
 	attemptStart := time.Now()
 	resetTried := false
+	var resp *http.Response
 	for attempt := 0; attempt < 2; attempt++ {
-		resp, err := h.exec.Do(r.Context(), sel, r, body)
+		var err error
+		resp, err = h.exec.Do(r.Context(), sel, r, body)
 		if err != nil {
 			if h.finalizeIfCanceled(r, usageID, &sel, reqStart, wantStream, reqBytes) {
 				return proxyAttemptDone, proxyFailureInfo{}
@@ -715,26 +717,10 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			}
 		}
 
-		contentType := resp.Header.Get("Content-Type")
-		isSSE := strings.Contains(strings.ToLower(contentType), "text/event-stream")
-
-		recordCreatedObjectType := ""
-		recordCreatedObject := false
-		if r != nil && r.Method == http.MethodPost {
-			switch r.URL.Path {
-			case "/v1/responses":
-				recordCreatedObjectType = openAIObjectTypeResponse
-				recordCreatedObject = true
-			case "/v1/chat/completions":
-				if chatCompletionRequestStoresObject(body) {
-					recordCreatedObjectType = openAIObjectTypeChatCompletion
-					recordCreatedObject = true
-				}
-			}
-		}
-
-		// 失败分支：根据状态码决定是否 failover。
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			contentType := resp.Header.Get("Content-Type")
+			isSSE := strings.Contains(strings.ToLower(contentType), "text/event-stream")
+
 			bodyBytes := readPrefixBestEffort(resp.Body, upstreamErrorBodyMaxBytes)
 			if attempt == 0 && !resetTried && isInvalidEncryptedContentUpstreamError(bodyBytes) {
 				resetRes, rErr := resetCodexStatefulContinuation(body)
@@ -748,6 +734,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 				}
 			}
 			_ = resp.Body.Close()
+
 			codexErr := classifyCodexOAuthUpstreamError(sel, resp.StatusCode, bodyBytes)
 			retriable := isRetriableStatus(resp.StatusCode) || codexErr.retriable()
 			errorClass := "upstream_status"
@@ -787,6 +774,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 					Message:    failMsg,
 				}
 			}
+
 			if h.sched != nil {
 				h.sched.Report(sel, scheduler.Result{Success: false, Retriable: false, StatusCode: resp.StatusCode, ErrorClass: "upstream_status"})
 			}
@@ -812,11 +800,34 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "upstream_status", failMsg, time.Since(reqStart), 0, wantStream || isSSE, reqBytes, respBytes)
 			return proxyAttemptDone, proxyFailureInfo{}
 		}
+		break
+	}
 
-		defer resp.Body.Close()
+	if resp == nil {
+		return proxyAttemptDone, proxyFailureInfo{}
+	}
+	defer resp.Body.Close()
 
-		// SSE 分支：开始写回后禁止 failover。
-		if wantStream || isSSE {
+	contentType := resp.Header.Get("Content-Type")
+	isSSE := strings.Contains(strings.ToLower(contentType), "text/event-stream")
+
+	recordCreatedObjectType := ""
+	recordCreatedObject := false
+	if r != nil && r.Method == http.MethodPost {
+		switch r.URL.Path {
+		case "/v1/responses":
+			recordCreatedObjectType = openAIObjectTypeResponse
+			recordCreatedObject = true
+		case "/v1/chat/completions":
+			if chatCompletionRequestStoresObject(body) {
+				recordCreatedObjectType = openAIObjectTypeChatCompletion
+				recordCreatedObject = true
+			}
+		}
+	}
+
+	// SSE 分支：开始写回后禁止 failover。
+	if wantStream || isSSE {
 		type usageAcc struct {
 			in        *int64
 			out       *int64
@@ -960,92 +971,90 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		}
 		h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, pumpRes.ErrorClass, "", time.Since(reqStart), firstTokenLatencyMS, true, reqBytes, cw.bytes)
 		return proxyAttemptDone, proxyFailureInfo{}
+	}
+
+	// 非流式：流式转发以避免超大响应导致 OOM，同时仅缓冲有限前缀用于提取 usage。
+	var capBuf limitedPrefixBuffer
+	capBuf.maxBytes = upstreamNonStreamExtractMaxBytes
+
+	cw := &countingResponseWriter{ResponseWriter: w}
+	h.patchCodexQuotaBestEffort(sel, resp.Header)
+	copyResponseHeaders(cw.Header(), resp.Header)
+	cw.WriteHeader(resp.StatusCode)
+
+	_, copyErr := io.Copy(cw, io.TeeReader(resp.Body, &capBuf))
+	respBytes := cw.bytes
+	if copyErr != nil {
+		if h.sched != nil {
+			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: false, StatusCode: resp.StatusCode, ErrorClass: "proxy_copy"})
 		}
-
-		// 非流式：流式转发以避免超大响应导致 OOM，同时仅缓冲有限前缀用于提取 usage。
-		var capBuf limitedPrefixBuffer
-		capBuf.maxBytes = upstreamNonStreamExtractMaxBytes
-
-		cw := &countingResponseWriter{ResponseWriter: w}
-		h.patchCodexQuotaBestEffort(sel, resp.Header)
-		copyResponseHeaders(cw.Header(), resp.Header)
-		cw.WriteHeader(resp.StatusCode)
-
-		_, copyErr := io.Copy(cw, io.TeeReader(resp.Body, &capBuf))
-		respBytes := cw.bytes
-		if copyErr != nil {
-			if h.sched != nil {
-				h.sched.Report(sel, scheduler.Result{Success: false, Retriable: false, StatusCode: resp.StatusCode, ErrorClass: "proxy_copy"})
-			}
-			if usageID != 0 && h.quota != nil {
-				bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				_ = h.quota.Void(bookCtx, usageID)
-			}
-			h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, "proxy_copy", time.Since(attemptStart))
-			h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, resp.StatusCode, "proxy_copy", copyErr.Error(), time.Since(attemptStart), false)
-			h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "proxy_copy", "", time.Since(reqStart), 0, false, reqBytes, respBytes)
-			return proxyAttemptDone, proxyFailureInfo{}
-		}
-
-		var (
-			inTok, outTok, cachedInTok, cachedOutTok *int64
-		)
-		if !capBuf.exceeded {
-			bodyBytes := capBuf.buf.Bytes()
-			if recordCreatedObject {
-				switch recordCreatedObjectType {
-				case openAIObjectTypeResponse:
-					if id := extractResponseIDFromJSONBytes(bodyBytes); id != "" {
-						h.recordOpenAIObjectRef(r.Context(), recordCreatedObjectType, id, p, sel)
-					}
-				case openAIObjectTypeChatCompletion:
-					if id := extractChatCompletionIDFromJSONBytes(bodyBytes); id != "" {
-						h.recordOpenAIObjectRef(r.Context(), recordCreatedObjectType, id, p, sel)
-					}
-				default:
-				}
-			}
-			inTok, outTok, cachedInTok, cachedOutTok = extractUsageTokens(bodyBytes)
-		}
-
 		if usageID != 0 && h.quota != nil {
 			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			_ = h.quota.Commit(bookCtx, quota.CommitInput{
-				UsageEventID:       usageID,
-				Model:              model,
-				UpstreamChannelID:  &sel.ChannelID,
-				RouteGroup:         optionalString(sel.RouteGroup),
-				InputTokens:        inTok,
-				CachedInputTokens:  cachedInTok,
-				OutputTokens:       outTok,
-				CachedOutputTokens: cachedOutTok,
-			})
+			_ = h.quota.Void(bookCtx, usageID)
 		}
-		if h.sched != nil {
-			total := int64(0)
-			if inTok != nil {
-				total += *inTok
-			}
-			if outTok != nil {
-				total += *outTok
-			}
-			if cachedInTok != nil {
-				total += *cachedInTok
-			}
-			if cachedOutTok != nil {
-				total += *cachedOutTok
-			}
-			if total > 0 {
-				h.sched.RecordTokens(sel.CredentialKey(), int(total))
-			}
-			h.sched.Report(sel, scheduler.Result{Success: true})
-		}
-		h.rememberCodexLastSuccessRoute(r, sel)
-		h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "", "", time.Since(reqStart), 0, false, reqBytes, respBytes)
+		h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, "proxy_copy", time.Since(attemptStart))
+		h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, resp.StatusCode, "proxy_copy", copyErr.Error(), time.Since(attemptStart), false)
+		h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "proxy_copy", "", time.Since(reqStart), 0, false, reqBytes, respBytes)
 		return proxyAttemptDone, proxyFailureInfo{}
 	}
+
+	var (
+		inTok, outTok, cachedInTok, cachedOutTok *int64
+	)
+	if !capBuf.exceeded {
+		bodyBytes := capBuf.buf.Bytes()
+		if recordCreatedObject {
+			switch recordCreatedObjectType {
+			case openAIObjectTypeResponse:
+				if id := extractResponseIDFromJSONBytes(bodyBytes); id != "" {
+					h.recordOpenAIObjectRef(r.Context(), recordCreatedObjectType, id, p, sel)
+				}
+			case openAIObjectTypeChatCompletion:
+				if id := extractChatCompletionIDFromJSONBytes(bodyBytes); id != "" {
+					h.recordOpenAIObjectRef(r.Context(), recordCreatedObjectType, id, p, sel)
+				}
+			default:
+			}
+		}
+		inTok, outTok, cachedInTok, cachedOutTok = extractUsageTokens(bodyBytes)
+	}
+
+	if usageID != 0 && h.quota != nil {
+		bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = h.quota.Commit(bookCtx, quota.CommitInput{
+			UsageEventID:       usageID,
+			Model:              model,
+			UpstreamChannelID:  &sel.ChannelID,
+			RouteGroup:         optionalString(sel.RouteGroup),
+			InputTokens:        inTok,
+			CachedInputTokens:  cachedInTok,
+			OutputTokens:       outTok,
+			CachedOutputTokens: cachedOutTok,
+		})
+	}
+	if h.sched != nil {
+		total := int64(0)
+		if inTok != nil {
+			total += *inTok
+		}
+		if outTok != nil {
+			total += *outTok
+		}
+		if cachedInTok != nil {
+			total += *cachedInTok
+		}
+		if cachedOutTok != nil {
+			total += *cachedOutTok
+		}
+		if total > 0 {
+			h.sched.RecordTokens(sel.CredentialKey(), int(total))
+		}
+		h.sched.Report(sel, scheduler.Result{Success: true})
+	}
+	h.rememberCodexLastSuccessRoute(r, sel)
+	h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "", "", time.Since(reqStart), 0, false, reqBytes, respBytes)
 	return proxyAttemptDone, proxyFailureInfo{}
 }
 
