@@ -100,7 +100,7 @@ type OpenAIObjectRefStore interface {
 	DeleteOpenAIObjectRef(ctx context.Context, objectType string, objectID string) error
 }
 
-func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *scheduler.Scheduler, exec Doer, proxyLog *proxylog.Writer, features FeatureResolver, selfMode bool, qp quota.Provider, audit AuditSink, usage UsageEventSink, refs OpenAIObjectRefStore, sseOpts upstream.SSEPumpOptions) *Handler {
+func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *scheduler.Scheduler, exec Doer, proxyLog *proxylog.Writer, features FeatureResolver, selfMode bool, qp quota.Provider, audit AuditSink, usage UsageEventSink, refs OpenAIObjectRefStore, sseOpts upstream.SSEPumpOptions, sub2api *upstream.Sub2APIClient) *Handler {
 	var sessionBindings SessionBindingStore
 	for _, candidate := range []any{models, groups, features, audit, usage, refs} {
 		if candidate == nil {
@@ -126,18 +126,12 @@ func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *
 		sseOpts:         sseOpts,
 		codexRouteCache: newCodexSessionRouteCache(),
 		sessionBindings: sessionBindings,
+		sub2api:         sub2api,
 	}
 }
 
 func (h *Handler) Responses(w http.ResponseWriter, r *http.Request) {
 	h.proxyJSON(w, r)
-}
-
-func (h *Handler) SetSub2APIClient(client *upstream.Sub2APIClient) {
-	if h == nil {
-		return
-	}
-	h.sub2api = client
 }
 
 func (h *Handler) patchCodexQuotaBestEffort(sel scheduler.Selection, headers http.Header) {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -116,20 +117,25 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 		usageID = res.UsageEventID
 	}
 
+	voidUsage := func() {
+		if usageID == 0 || h.quota == nil {
+			return
+		}
+		bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = h.quota.Void(bookCtx, usageID)
+	}
+
 	resp, err := h.sub2api.ForwardResponsesCompact(r.Context(), r, body, middleware.GetRequestID(r.Context()))
 	if err != nil {
-		if usageID != 0 && h.quota != nil {
-			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = h.quota.Void(bookCtx, usageID)
-			cancel()
-		}
+		voidUsage()
 
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(r.Context().Err(), context.DeadlineExceeded) {
 			timeoutMs := int64(h.sub2api.Timeout() / time.Millisecond)
 			if timeoutMs < 0 {
 				timeoutMs = 0
 			}
-			writeOpenAIError(w, http.StatusGatewayTimeout, "upstream_error", "Upstream timeout after "+strconvI64(timeoutMs)+"ms")
+			writeOpenAIError(w, http.StatusGatewayTimeout, "upstream_error", "Upstream timeout after "+strconv.FormatInt(timeoutMs, 10)+"ms")
 			h.finalizeUsageEvent(r, usageID, nil, http.StatusGatewayTimeout, "upstream_timeout", "upstream_timeout", time.Since(reqStart), 0, false, reqBytes, 0)
 			return
 		}
@@ -144,11 +150,7 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if resp == nil {
-		if usageID != 0 && h.quota != nil {
-			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = h.quota.Void(bookCtx, usageID)
-			cancel()
-		}
+		voidUsage()
 		writeOpenAIError(w, http.StatusBadGateway, "upstream_error", "Failed to reach upstream service")
 		h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_network_error", "upstream_network_error", time.Since(reqStart), 0, false, reqBytes, 0)
 		return
@@ -164,11 +166,7 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 		capBuf.maxBytes = upstreamErrorBodyMaxBytes
 		_, _ = io.Copy(cw, io.TeeReader(resp.Body, &capBuf))
 		respBytes := cw.bytes
-		if usageID != 0 && h.quota != nil {
-			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = h.quota.Void(bookCtx, usageID)
-			cancel()
-		}
+		voidUsage()
 		msg := ""
 		if !capBuf.exceeded {
 			msg = summarizeUpstreamErrorBody(capBuf.buf.Bytes())
@@ -183,11 +181,7 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 	_, copyErr := io.Copy(cw, io.TeeReader(resp.Body, &capBuf))
 	respBytes := cw.bytes
 	if copyErr != nil {
-		if usageID != 0 && h.quota != nil {
-			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = h.quota.Void(bookCtx, usageID)
-			cancel()
-		}
+		voidUsage()
 		h.maybeLogProxyFailure(r.Context(), r, p, nil, modelPtr, resp.StatusCode, "proxy_copy", copyErr.Error(), time.Since(reqStart), false)
 		h.finalizeUsageEvent(r, usageID, nil, resp.StatusCode, "proxy_copy", "", time.Since(reqStart), 0, false, reqBytes, respBytes)
 		return
@@ -199,6 +193,7 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 	}
 	if usageID != 0 && h.quota != nil {
 		bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		_ = h.quota.Commit(bookCtx, quota.CommitInput{
 			UsageEventID:       usageID,
 			Model:              modelPtr,
@@ -207,30 +202,7 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 			OutputTokens:       outTok,
 			CachedOutputTokens: cachedOutTok,
 		})
-		cancel()
 	}
 
 	h.finalizeUsageEvent(r, usageID, nil, resp.StatusCode, "", "", time.Since(reqStart), 0, false, reqBytes, respBytes)
-}
-
-func strconvI64(v int64) string {
-	if v == 0 {
-		return "0"
-	}
-	neg := v < 0
-	if neg {
-		v = -v
-	}
-	var buf [32]byte
-	i := len(buf)
-	for v > 0 {
-		i--
-		buf[i] = byte('0' + v%10)
-		v /= 10
-	}
-	if neg {
-		i--
-		buf[i] = '-'
-	}
-	return string(buf[i:])
 }

@@ -57,7 +57,7 @@ func TestChatCompletions_DropsUnknownAndAppliesOModelRules(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
 
 	reqBody := `{"model":"m1","messages":[{"role":"system","content":"hi"}],"max_tokens":10,"temperature":0.7,"unknown":123}`
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/chat/completions", bytes.NewReader([]byte(reqBody)))
@@ -150,7 +150,7 @@ func TestChatCompletions_AliasesMaxOutputTokens(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
 
 	reqBody := `{"model":"m1","messages":[{"role":"system","content":"hi"}],"max_output_tokens":10,"temperature":0.7,"unknown":123}`
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/chat/completions", bytes.NewReader([]byte(reqBody)))
@@ -222,7 +222,7 @@ func TestChatCompletions_Stream_ForcesStreamOptionsIncludeUsage(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10}, nil)
 
 	reqBody := `{"model":"m1","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":false}}`
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/chat/completions", bytes.NewReader([]byte(reqBody)))

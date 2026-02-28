@@ -43,7 +43,7 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 	st.SetDialect(store.DialectSQLite)
 	st.SetAppSettingsDefaults(cfg.AppSettingsDefaults)
 
-	openaiHandler := openaiapi.NewHandler(nil, nil, nil, nil, nil, nil, personalMode, nil, nil, nil, nil, upstream.SSEPumpOptions{})
+	openaiHandler := openaiapi.NewHandler(nil, nil, nil, nil, nil, nil, personalMode, nil, nil, nil, nil, upstream.SSEPumpOptions{}, nil)
 
 	app := &App{
 		cfg:    cfg,

@@ -64,7 +64,7 @@ func TestResponses_ExtendedOps_OwnershipMismatch_Returns404WithoutUpstream(t *te
 			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
 		}, nil
 	})
-	h := NewHandler(nil, nil, scheduler.New(&fakeStore{}), doer, nil, nil, false, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{})
+	h := NewHandler(nil, nil, scheduler.New(&fakeStore{}), doer, nil, nil, false, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
 
 	for name, tc := range map[string]struct {
 		fn     http.HandlerFunc
@@ -119,7 +119,7 @@ func TestResponseRetrieve_CodexSelection_Returns501(t *testing.T) {
 			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
 		}, nil
 	})
-	h := NewHandler(nil, nil, scheduler.New(&fakeStore{}), doer, nil, nil, false, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{})
+	h := NewHandler(nil, nil, scheduler.New(&fakeStore{}), doer, nil, nil, false, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
 
 	rr := runHandler(h.ResponseRetrieve, makeTokenRequest(http.MethodGet, "/v1/responses/resp_123", "", 10))
 	if rr.Code != http.StatusNotImplemented {
@@ -178,7 +178,7 @@ func TestResponsesInputTokens_RequiresOpenAICompatibleAndSkipsQuota(t *testing.T
 
 	q := &fakeQuota{}
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, doer, nil, nil, false, q, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{})
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, q, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
 
 	req := makeTokenRequest(http.MethodPost, "/v1/responses/input_tokens", `{"model":"gpt-5.2","input":"hi"}`, 10)
 	rr := runHandler(h.Responses, req)
@@ -220,7 +220,7 @@ func TestChatCompletionUpdate_MismatchOwner_Returns404(t *testing.T) {
 			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
 		}, nil
 	})
-	h := NewHandler(nil, nil, scheduler.New(&fakeStore{}), doer, nil, nil, false, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{})
+	h := NewHandler(nil, nil, scheduler.New(&fakeStore{}), doer, nil, nil, false, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
 
 	req := makeTokenRequest(http.MethodPost, "/v1/chat/completions/chatcmpl-777", `{"metadata":{"x":"y"}}`, 11)
 	rr := runHandler(h.ChatCompletionUpdate, req)
@@ -259,7 +259,7 @@ func TestChatCompletionDelete_OwnershipAndCleanup(t *testing.T) {
 			Body:       io.NopCloser(strings.NewReader(`{"deleted":true}`)),
 		}, nil
 	})
-	h := NewHandler(nil, nil, scheduler.New(&fakeStore{}), doer, nil, nil, false, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{})
+	h := NewHandler(nil, nil, scheduler.New(&fakeStore{}), doer, nil, nil, false, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
 
 	rr := runHandler(h.ChatCompletionDelete, makeTokenRequest(http.MethodDelete, "/v1/chat/completions/chatcmpl-del", "", 11))
 	if rr.Code != http.StatusNotFound {
@@ -313,7 +313,7 @@ func TestChatCompletionMessages_OwnershipRequired(t *testing.T) {
 			Body:       io.NopCloser(strings.NewReader(`{"object":"list","data":[]}`)),
 		}, nil
 	})
-	h := NewHandler(nil, nil, scheduler.New(&fakeStore{}), doer, nil, nil, false, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{})
+	h := NewHandler(nil, nil, scheduler.New(&fakeStore{}), doer, nil, nil, false, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
 
 	rr := runHandler(h.ChatCompletionMessages, makeTokenRequest(http.MethodGet, "/v1/chat/completions/chatcmpl-msg/messages", "", 11))
 	if rr.Code != http.StatusNotFound {
@@ -346,7 +346,7 @@ func TestChatCompletionsList_EmptyRefs_ReturnsEmptyListWithoutUpstream(t *testin
 			Body:       io.NopCloser(bytes.NewReader([]byte(`{"object":"list","data":[{"id":"x"}]}`))),
 		}, nil
 	})
-	h := NewHandler(nil, nil, scheduler.New(&fakeStore{}), doer, nil, nil, false, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{})
+	h := NewHandler(nil, nil, scheduler.New(&fakeStore{}), doer, nil, nil, false, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
 
 	rr := runHandler(h.ChatCompletionsList, makeTokenRequest(http.MethodGet, "/v1/chat/completions", "", 10))
 	if rr.Code != http.StatusOK {

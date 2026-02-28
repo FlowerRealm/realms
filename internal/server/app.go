@@ -92,14 +92,14 @@ func NewApp(opts AppOptions) (*App, error) {
 		Dir:    opts.Config.Debug.ProxyLog.Dir,
 	})
 	qp := quotaProvider(st, opts.Config)
-	openaiHandler := openaiapi.NewHandler(st, st, sched, exec, proxyLog, st, personalMode, qp, st, st, st, upstream.SSEPumpOptions{
-		InitialLineBytes: 64 << 10,
-	})
-	openaiHandler.SetSub2APIClient(upstream.NewSub2APIClient(
+	sub2api := upstream.NewSub2APIClient(
 		opts.Config.Sub2API.BaseURL,
 		opts.Config.Sub2API.GatewayKey,
 		time.Duration(opts.Config.Sub2API.TimeoutMS)*time.Millisecond,
-	))
+	)
+	openaiHandler := openaiapi.NewHandler(st, st, sched, exec, proxyLog, st, personalMode, qp, st, st, st, upstream.SSEPumpOptions{
+		InitialLineBytes: 64 << 10,
+	}, sub2api)
 
 	app := &App{
 		cfg:           opts.Config,
