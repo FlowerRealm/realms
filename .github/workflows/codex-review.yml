@@ -33,11 +33,6 @@ jobs:
       - name: Install Codex CLI
         run: npm install -g @openai/codex
 
-      - name: Prepare CODEX_HOME
-        run: |
-          mkdir -p .github/codex/home
-          cp .github/codex/config.toml .github/codex/home/config.toml
-
       - name: Run Codex (CLI)
         env:
           CODEX_HOME: ${{ github.workspace }}/.github/codex/home
