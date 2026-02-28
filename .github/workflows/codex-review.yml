@@ -28,15 +28,13 @@ jobs:
       - name: Install Codex CLI
         run: npm install -g @openai/codex
 
-      - name: Run Codex (using custom provider)
-        env:
-          CODEX_HOME: ${{ github.workspace }}/.github/codex/home
-          CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
-        run: |
-          codex exec \
-            --prompt-file .github/codex/prompts/review.md \
-            --sandbox read-only \
-            --output-file codex-output.md
+      - name: Run Codex (CLI)
+       env:
+       CODEX_HOME: ${{ github.workspace }}/.github/codex/home
+       MYPROXY_API_KEY: ${{ secrets.MYPROXY_API_KEY }}
+       run: |
+        PROMPT="$(cat .github/codex/prompts/review.md)"
+        codex exec --profile pr_review "$PROMPT" > codex-output.md
 
       - name: Post review as PR comment
         uses: actions/github-script@v7
