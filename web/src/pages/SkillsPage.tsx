@@ -30,7 +30,7 @@ function initDraft(sk: SkillV1 | null): SkillEditDraft {
   };
 }
 
-function draftToSkill(d: SkillEditDraft): SkillV1 {
+function draftToSkill(d: SkillEditDraft, originalSkill: SkillV1 | null): SkillV1 {
   const id = (d.id || '').trim();
   const title = (d.title || id).trim();
   const prompt = (d.prompt || '').trim();
@@ -40,9 +40,18 @@ function draftToSkill(d: SkillEditDraft): SkillV1 {
   if (desc) out.description = desc;
 
   const per: NonNullable<SkillV1['per_target']> = {};
-  if (!d.enabledCodex) per.codex = { enabled: false };
-  if (!d.enabledClaude) per.claude = { enabled: false };
-  if (!d.enabledGemini) per.gemini = { enabled: false };
+  const originalPer = originalSkill?.per_target || {};
+  const enabledFlags: Record<SkillsTargetKey, boolean> = {
+    codex: d.enabledCodex,
+    claude: d.enabledClaude,
+    gemini: d.enabledGemini,
+  };
+  for (const target of ['codex', 'claude', 'gemini'] as const) {
+    const opts = { ...(originalPer[target] || {}) };
+    if (!enabledFlags[target]) opts.enabled = false;
+    else delete opts.enabled;
+    if (Object.keys(opts).length) per[target] = opts;
+  }
   if (Object.keys(per).length) out.per_target = per;
 
   return out;
@@ -51,7 +60,7 @@ function draftToSkill(d: SkillEditDraft): SkillV1 {
 function setSkillTargetEnabled(skill: SkillV1, target: SkillsTargetKey, enabled: boolean): SkillV1 {
   const out: SkillV1 = { ...skill };
   const per: NonNullable<SkillV1['per_target']> = { ...(out.per_target || {}) };
-  const cur: { enabled?: boolean } = { ...(per[target] || {}) };
+  const cur: NonNullable<SkillV1['per_target']>[SkillsTargetKey] = { ...(per[target] || {}) };
 
   if (enabled) {
     delete cur.enabled;
@@ -209,7 +218,7 @@ export function SkillsPage() {
   }
 
   async function saveDraftToStore() {
-    const sk = draftToSkill(draft);
+    const sk = draftToSkill(draft, editing);
     if (!sk.id.trim()) {
       setErr('ID 不能为空');
       return;

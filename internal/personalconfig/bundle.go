@@ -83,21 +83,17 @@ func (b Bundle) Validate() error {
 			return fmt.Errorf("invalid mcp_servers: %w", err)
 		}
 	}
-	if len(b.SkillsStoreV1) > 0 {
-		raw := strings.TrimSpace(string(b.SkillsStoreV1))
-		if raw != "" && raw != "null" {
-			if _, err := skills.ParseStoreV1JSON(raw); err != nil {
-				return fmt.Errorf("invalid skills_store_v1: %w", err)
-			}
-		}
+	if err := validateOptionalRawMessage(b.SkillsStoreV1, "skills_store_v1", func(raw string) error {
+		_, err := skills.ParseStoreV1JSON(raw)
+		return err
+	}); err != nil {
+		return err
 	}
-	if len(b.SkillsTargetEnabledV1) > 0 {
-		raw := strings.TrimSpace(string(b.SkillsTargetEnabledV1))
-		if raw != "" && raw != "null" {
-			if _, err := skills.ParseTargetEnabledV1JSON(raw); err != nil {
-				return fmt.Errorf("invalid skills_target_enabled_v1: %w", err)
-			}
-		}
+	if err := validateOptionalRawMessage(b.SkillsTargetEnabledV1, "skills_target_enabled_v1", func(raw string) error {
+		_, err := skills.ParseTargetEnabledV1JSON(raw)
+		return err
+	}); err != nil {
+		return err
 	}
 	// Basic sanity checks; deeper validation happens during rebuild.
 	for _, ep := range append(append([]EndpointSecrets{}, b.secretsOrEmpty().OpenAICompatible...), b.secretsOrEmpty().Anthropic...) {
@@ -109,6 +105,20 @@ func (b Bundle) Validate() error {
 				return errors.New("secrets credential api_key is empty")
 			}
 		}
+	}
+	return nil
+}
+
+func validateOptionalRawMessage(raw json.RawMessage, field string, parse func(string) error) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "null" {
+		return nil
+	}
+	if err := parse(s); err != nil {
+		return fmt.Errorf("invalid %s: %w", field, err)
 	}
 	return nil
 }

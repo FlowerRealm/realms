@@ -9,7 +9,7 @@ export type SkillV1 = {
   description?: string;
   prompt: string;
   install_as?: Partial<Record<SkillsTargetKey, string>>;
-  per_target?: Partial<Record<SkillsTargetKey, { enabled?: boolean }>>;
+  per_target?: Partial<Record<SkillsTargetKey, { enabled?: boolean; frontmatter?: Record<string, unknown> }>>;
 };
 
 export type SkillsStoreV1 = {
