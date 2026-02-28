@@ -1,3 +1,4 @@
+[profiles.pr_review]
 model_provider = "su8codes"
 model = "gpt-5.2"
 model_reasoning_effort = 'xhigh'
