@@ -436,6 +436,18 @@ func (s *Syncer) exportBundleLocked(ctx context.Context, includeSecrets bool) (B
 		b.MCPServers = json.RawMessage(strings.TrimSpace(raw))
 	}
 
+	// Optional Skills snapshot.
+	if raw, ok, err := s.st.GetStringAppSetting(ctx, store.SettingSkillsStoreV1); err != nil {
+		return Bundle{}, "", err
+	} else if ok && strings.TrimSpace(raw) != "" {
+		b.SkillsStoreV1 = json.RawMessage(strings.TrimSpace(raw))
+	}
+	if raw, ok, err := s.st.GetStringAppSetting(ctx, store.SettingSkillsTargetEnabledV1); err != nil {
+		return Bundle{}, "", err
+	} else if ok && strings.TrimSpace(raw) != "" {
+		b.SkillsTargetEnabledV1 = json.RawMessage(strings.TrimSpace(raw))
+	}
+
 	if includeSecrets {
 		sec, err := exportSecrets(ctx, s.st)
 		if err != nil {

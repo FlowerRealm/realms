@@ -7,6 +7,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	"realms/internal/skills"
 	"realms/internal/store"
 )
 
@@ -166,6 +167,61 @@ func TestRebuildRuntimeFromBundle_RoundTripWithSecretsAndDeletions(t *testing.T)
 		if sec2.APIKey != "sk-test-abcdef123456" {
 			t.Fatalf("api key mismatch: %q", sec2.APIKey)
 		}
+	}
+}
+
+func TestRebuildRuntimeFromBundle_AppliesSkillsStoreV1(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "dst.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	admin, err := st.ExportAdminConfig(ctx)
+	if err != nil {
+		t.Fatalf("ExportAdminConfig: %v", err)
+	}
+
+	sv1 := skills.StoreV1{
+		Version: 1,
+		Skills: map[string]skills.SkillV1{
+			"skill1": {ID: "skill1", Title: "t", Prompt: "p"},
+		},
+	}
+	sv1JSON, err := skills.PrettyStoreV1JSON(sv1)
+	if err != nil {
+		t.Fatalf("PrettyStoreV1JSON: %v", err)
+	}
+	teJSON, err := skills.PrettyTargetEnabledV1JSON(skills.TargetEnabledV1{})
+	if err != nil {
+		t.Fatalf("PrettyTargetEnabledV1JSON: %v", err)
+	}
+
+	bundle := Bundle{
+		Version:               BundleVersion,
+		Admin:                 admin,
+		SkillsStoreV1:         []byte(sv1JSON),
+		SkillsTargetEnabledV1: []byte(teJSON),
+	}
+
+	if err := RebuildRuntimeFromBundle(ctx, db, store.DialectSQLite, bundle); err != nil {
+		t.Fatalf("RebuildRuntimeFromBundle: %v", err)
+	}
+
+	raw, ok, err := st.GetStringAppSetting(ctx, store.SettingSkillsStoreV1)
+	if err != nil || !ok {
+		t.Fatalf("skills store not written: ok=%v err=%v", ok, err)
+	}
+	if _, err := skills.ParseStoreV1JSON(raw); err != nil {
+		t.Fatalf("stored skills json invalid: %v", err)
 	}
 }
 

@@ -39,6 +39,7 @@ export function AdminLayout() {
   const showChannels = !(features?.admin_channels_disabled ?? false)
   const showUsage = !(features?.admin_usage_disabled ?? false)
   const showAPIKeys = true
+  const showSkills = true
 
   const logout = () => {
     localStorage.removeItem('personal_mode_key')
@@ -117,6 +118,13 @@ export function AdminLayout() {
               <i className="ri-plug-line"></i> MCP 管理
             </NavLink>
           </li>
+          {showSkills ? (
+            <li>
+              <NavLink to="/skills" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`} onClick={closeSidebar}>
+                <i className="ri-magic-line"></i> Skills 管理
+              </NavLink>
+            </li>
+          ) : null}
           {showUsage ? (
             <li>
               <NavLink to="/admin/usage" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`} onClick={closeSidebar}>

@@ -82,9 +82,11 @@ func TestWebSPARoutes_SPAFallbackLoadsLatestDistIndex(t *testing.T) {
 
 	assertIndex("/login", "INDEX-A")
 	assertIndex("/admin/models", "INDEX-A")
+	assertIndex("/skills", "INDEX-A")
 
 	writeIndex("B")
 
 	assertIndex("/login", "INDEX-B")
 	assertIndex("/admin/models", "INDEX-B")
+	assertIndex("/skills", "INDEX-B")
 }

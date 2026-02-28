@@ -3,7 +3,7 @@ import { Navigate } from 'react-router-dom';
 
 import { parseAdminMcp, type McpServerV2 } from '../api/admin/mcp';
 import { useAuth } from '../auth/AuthContext';
-import { closeModalById } from '../components/modal';
+import { closeModalById, showModalById } from '../components/modal';
 
 import type { ImportPick, ImportSource, Row, TargetKey, UnionRow } from './mcp/mcpTypes';
 import { chooseActualServer, equalServerCore, mainSummary, serverType, targetEnabledForServer, typeBadge } from './mcp/mcpUtils';
@@ -12,13 +12,6 @@ import { useMcpManager } from './mcp/useMcpManager';
 import { McpConflictModal } from './mcp/modals/McpConflictModal';
 import { McpImportConflictModal } from './mcp/modals/McpImportConflictModal';
 import { McpServerEditModal } from './mcp/modals/McpServerEditModal';
-
-function showModal(id: string) {
-  const modalRoot = document.getElementById(id);
-  const modalCtor = (window as Window & { bootstrap?: { Modal?: { getOrCreateInstance: (el: Element) => { show: () => void } } } }).bootstrap?.Modal;
-  if (!modalRoot || !modalCtor?.getOrCreateInstance) return;
-  modalCtor.getOrCreateInstance(modalRoot).show();
-}
 
 export function McpServersPage() {
   const { user, loading: authLoading } = useAuth();
@@ -68,7 +61,7 @@ export function McpServersPage() {
   useEffect(() => {
     if (!conflictModalRequested) return;
     ackConflictModalRequested();
-    showModal('mcpConflictModal');
+    showModalById('mcpConflictModal');
   }, [conflictModalRequested, ackConflictModalRequested]);
 
   function openCreate() {
@@ -77,7 +70,7 @@ export function McpServersPage() {
     setCreateMode('import');
     setImportSource('claude');
     setImportContent('');
-    showModal('mcpEditModal');
+    showModalById('mcpEditModal');
   }
 
   function openEditFromUnion(r: UnionRow) {
@@ -85,7 +78,7 @@ export function McpServersPage() {
     if (!server) return;
     setEditing({ id: r.id, server });
     setForm(initForm({ id: r.id, server }));
-    showModal('mcpEditModal');
+    showModalById('mcpEditModal');
   }
 
   async function confirmConflictsAndClose() {
@@ -242,7 +235,7 @@ export function McpServersPage() {
         setImportConflicts(conflictIDs);
         setImportConflictChoice({});
         closeModalById('mcpEditModal');
-        showModal('mcpImportConflictModal');
+        showModalById('mcpImportConflictModal');
         return;
       }
 

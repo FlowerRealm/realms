@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"realms/internal/mcp"
+	"realms/internal/skills"
 	"realms/internal/store"
 )
 
@@ -34,6 +35,15 @@ type Bundle struct {
 	// MCPStoreV2 is Realms canonical MCP store snapshot (v2).
 	// When present, it takes precedence over MCPServers.
 	MCPStoreV2 json.RawMessage `json:"mcp_store_v2,omitempty"`
+
+	// SkillsStoreV1 is Realms canonical Skills store snapshot (v1).
+	// When absent (null/missing), it is treated as "unchanged" during personal-config apply
+	// for backward compatibility with older bundles.
+	SkillsStoreV1 json.RawMessage `json:"skills_store_v1,omitempty"`
+
+	// SkillsTargetEnabledV1 stores per-target enablement for skills apply (v1).
+	// When absent (null/missing), it is treated as "unchanged".
+	SkillsTargetEnabledV1 json.RawMessage `json:"skills_target_enabled_v1,omitempty"`
 
 	Secrets *Secrets `json:"secrets,omitempty"`
 }
@@ -73,6 +83,18 @@ func (b Bundle) Validate() error {
 			return fmt.Errorf("invalid mcp_servers: %w", err)
 		}
 	}
+	if err := validateOptionalRawMessage(b.SkillsStoreV1, "skills_store_v1", func(raw string) error {
+		_, err := skills.ParseStoreV1JSON(raw)
+		return err
+	}); err != nil {
+		return err
+	}
+	if err := validateOptionalRawMessage(b.SkillsTargetEnabledV1, "skills_target_enabled_v1", func(raw string) error {
+		_, err := skills.ParseTargetEnabledV1JSON(raw)
+		return err
+	}); err != nil {
+		return err
+	}
 	// Basic sanity checks; deeper validation happens during rebuild.
 	for _, ep := range append(append([]EndpointSecrets{}, b.secretsOrEmpty().OpenAICompatible...), b.secretsOrEmpty().Anthropic...) {
 		if strings.TrimSpace(ep.ChannelType) == "" || strings.TrimSpace(ep.ChannelName) == "" {
@@ -83,6 +105,20 @@ func (b Bundle) Validate() error {
 				return errors.New("secrets credential api_key is empty")
 			}
 		}
+	}
+	return nil
+}
+
+func validateOptionalRawMessage(raw json.RawMessage, field string, parse func(string) error) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "null" {
+		return nil
+	}
+	if err := parse(s); err != nil {
+		return fmt.Errorf("invalid %s: %w", field, err)
 	}
 	return nil
 }
