@@ -375,6 +375,10 @@ func readFileIfExists(path string) ([]byte, bool, error) {
 	return b, true, nil
 }
 
+func targetUsesSkillsDirLayout(t Target, root string) bool {
+	return t == TargetCodex || (t == TargetClaude && claudeUsesSkillsLayout(root))
+}
+
 func applyRemovals(t Target, root string, store StoreV1, removeSet map[string]bool) []ApplyResult {
 	out := []ApplyResult{}
 	ids := make([]string, 0, len(removeSet))
@@ -393,20 +397,7 @@ func applyRemovals(t Target, root string, store StoreV1, removeSet map[string]bo
 				out = append(out, ApplyResult{ID: id, Target: t, Name: name, Enabled: false, Error: "invalid name"})
 				continue
 			}
-			if t == TargetCodex {
-				dir := filepath.Join(root, name)
-				if !withinDir(root, dir) {
-					out = append(out, ApplyResult{ID: id, Target: t, Name: name, Enabled: false, Error: "path traversal detected"})
-					continue
-				}
-				if err := os.RemoveAll(dir); err != nil {
-					out = append(out, ApplyResult{ID: id, Target: t, Name: name, Path: dir, Enabled: false, Exists: true, Error: err.Error()})
-				} else {
-					out = append(out, ApplyResult{ID: id, Target: t, Name: name, Path: dir, Enabled: false, Changed: true})
-				}
-				continue
-			}
-			if t == TargetClaude && claudeUsesSkillsLayout(root) {
+			if targetUsesSkillsDirLayout(t, root) {
 				dir := filepath.Join(root, name)
 				if !withinDir(root, dir) {
 					out = append(out, ApplyResult{ID: id, Target: t, Name: name, Enabled: false, Error: "path traversal detected"})
@@ -440,13 +431,7 @@ func applyRemovals(t Target, root string, store StoreV1, removeSet map[string]bo
 				out = append(out, ApplyResult{ID: id, Target: t, Name: name, Enabled: false, Error: "invalid id"})
 				continue
 			}
-			if t == TargetCodex {
-				dir := filepath.Join(root, name)
-				_ = os.RemoveAll(dir)
-				out = append(out, ApplyResult{ID: id, Target: t, Name: name, Path: dir, Enabled: false, Changed: true})
-				continue
-			}
-			if t == TargetClaude && claudeUsesSkillsLayout(root) {
+			if targetUsesSkillsDirLayout(t, root) {
 				dir := filepath.Join(root, name)
 				_ = os.RemoveAll(dir)
 				out = append(out, ApplyResult{ID: id, Target: t, Name: name, Path: dir, Enabled: false, Changed: true})

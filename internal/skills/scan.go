@@ -171,6 +171,52 @@ func ScanAllTargets() (map[Target]ScanTargetResult, error) {
 	return out, nil
 }
 
+func importFromSkillsDirLayout(root string) (map[string]SkillV1, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]SkillV1{}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		id := strings.TrimSpace(e.Name())
+		if !IsSafeID(id) {
+			continue
+		}
+		p := filepath.Join(root, id, "SKILL.md")
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		content := strings.TrimSpace(string(raw))
+		if content == "" {
+			continue
+		}
+		meta, body, ok := parseFrontmatter(content)
+		title := id
+		desc := ""
+		prompt := content
+		if ok {
+			if nm := stringFromMeta(meta, "name"); nm != "" {
+				title = nm
+			}
+			desc = stringFromMeta(meta, "description")
+			if strings.TrimSpace(body) != "" {
+				prompt = body
+			}
+		}
+		var descPtr *string
+		if strings.TrimSpace(desc) != "" {
+			dd := strings.TrimSpace(desc)
+			descPtr = &dd
+		}
+		out[id] = SkillV1{ID: id, Title: title, Description: descPtr, Prompt: strings.TrimSpace(prompt)}
+	}
+	return out, nil
+}
+
 func ImportFromTarget(t Target, root string) (StoreV1, string, error) {
 	root = strings.TrimSpace(root)
 	if root == "" {
@@ -184,89 +230,21 @@ func ImportFromTarget(t Target, root string) (StoreV1, string, error) {
 
 	switch t {
 	case TargetCodex:
-		entries, err := os.ReadDir(root)
+		skills, err := importFromSkillsDirLayout(root)
 		if err != nil {
 			return StoreV1{}, "", err
 		}
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			id := strings.TrimSpace(e.Name())
-			if !IsSafeID(id) {
-				continue
-			}
-			p := filepath.Join(root, id, "SKILL.md")
-			raw, err := os.ReadFile(p)
-			if err != nil {
-				continue
-			}
-			content := strings.TrimSpace(string(raw))
-			if content == "" {
-				continue
-			}
-			meta, body, ok := parseFrontmatter(content)
-			title := id
-			desc := ""
-			prompt := content
-			if ok {
-				if nm := stringFromMeta(meta, "name"); nm != "" {
-					title = nm
-				}
-				desc = stringFromMeta(meta, "description")
-				if strings.TrimSpace(body) != "" {
-					prompt = body
-				}
-			}
-			var descPtr *string
-			if strings.TrimSpace(desc) != "" {
-				dd := strings.TrimSpace(desc)
-				descPtr = &dd
-			}
-			s.Skills[id] = SkillV1{ID: id, Title: title, Description: descPtr, Prompt: strings.TrimSpace(prompt)}
+		for id, sk := range skills {
+			s.Skills[id] = sk
 		}
 	case TargetClaude:
 		if claudeUsesSkillsLayout(root) {
-			entries, err := os.ReadDir(root)
+			skills, err := importFromSkillsDirLayout(root)
 			if err != nil {
 				return StoreV1{}, "", err
 			}
-			for _, e := range entries {
-				if !e.IsDir() {
-					continue
-				}
-				id := strings.TrimSpace(e.Name())
-				if !IsSafeID(id) {
-					continue
-				}
-				p := filepath.Join(root, id, "SKILL.md")
-				raw, err := os.ReadFile(p)
-				if err != nil {
-					continue
-				}
-				content := strings.TrimSpace(string(raw))
-				if content == "" {
-					continue
-				}
-				meta, body, ok := parseFrontmatter(content)
-				title := id
-				desc := ""
-				prompt := content
-				if ok {
-					if nm := stringFromMeta(meta, "name"); nm != "" {
-						title = nm
-					}
-					desc = stringFromMeta(meta, "description")
-					if strings.TrimSpace(body) != "" {
-						prompt = body
-					}
-				}
-				var descPtr *string
-				if strings.TrimSpace(desc) != "" {
-					dd := strings.TrimSpace(desc)
-					descPtr = &dd
-				}
-				s.Skills[id] = SkillV1{ID: id, Title: title, Description: descPtr, Prompt: strings.TrimSpace(prompt)}
+			for id, sk := range skills {
+				s.Skills[id] = sk
 			}
 		} else {
 			err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {

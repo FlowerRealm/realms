@@ -162,7 +162,10 @@ func adminSkillsAutoAdoptHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 		var req adminSkillsAutoAdoptReq
-		_ = c.ShouldBindJSON(&req)
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "无效的参数"})
+			return
+		}
 
 		want := map[skills.Target]bool{skills.TargetCodex: true, skills.TargetClaude: true, skills.TargetGemini: true}
 		if len(req.Targets) > 0 {
