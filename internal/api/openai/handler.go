@@ -724,13 +724,23 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			bodyBytes := readPrefixBestEffort(resp.Body, upstreamErrorBodyMaxBytes)
 			if attempt == 0 && !resetTried && isInvalidEncryptedContentUpstreamError(bodyBytes) {
 				resetRes, rErr := resetCodexStatefulContinuation(body)
-				if rErr == nil && resetRes.changed && resetRes.hasUserText {
-					w.Header().Set("X-Realms-Codex-Session-Reset", "1")
-					w.Header().Set("X-Realms-Codex-Session-Reset-Reason", "invalid_encrypted_content")
-					body = resetRes.body
-					resetTried = true
+				if rErr == nil && resetRes.changed {
+					if resetRes.hasUserText {
+						w.Header().Set("X-Realms-Codex-Session-Reset", "1")
+						w.Header().Set("X-Realms-Codex-Session-Reset-Reason", "invalid_encrypted_content")
+						body = resetRes.body
+						resetTried = true
+						_ = resp.Body.Close()
+						continue
+					}
 					_ = resp.Body.Close()
-					continue
+					h.voidQuotaBestEffort(usageID)
+					h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, model, http.StatusConflict, "session_reset_required", time.Since(attemptStart))
+					cw := &countingResponseWriter{ResponseWriter: w}
+					writeOpenAIError(cw, http.StatusConflict, "session_reset_required", "上游返回续链错误，且自动重置后无有效内容可发送。请在 Codex CLI 重启会话/新开对话后重试。")
+					h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, http.StatusConflict, "session_reset_required", "session_reset_required", time.Since(attemptStart), wantStream || isSSE)
+					h.finalizeUsageEvent(r, usageID, &sel, http.StatusConflict, "session_reset_required", "session_reset_required", time.Since(reqStart), 0, wantStream || isSSE, reqBytes, cw.bytes)
+					return proxyAttemptDone, proxyFailureInfo{}
 				}
 			}
 			_ = resp.Body.Close()
