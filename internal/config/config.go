@@ -18,6 +18,7 @@ type Config struct {
 	Mode       Mode             `yaml:"mode"`
 	Server     ServerConfig     `yaml:"server"`
 	DB         DBConfig         `yaml:"db"`
+	Sub2API    Sub2APIConfig    `yaml:"sub2api"`
 	Security   SecurityConfig   `yaml:"security"`
 	Debug      DebugConfig      `yaml:"debug"`
 	Billing    BillingConfig    `yaml:"billing"`
@@ -93,6 +94,12 @@ type DBConfig struct {
 	// MigrationLockTimeoutSeconds 是 MySQL 启启动迁移等待锁的超时（秒）。
 	// - 0 表示不等待（立即失败）
 	MigrationLockTimeoutSeconds int `yaml:"migration_lock_timeout_seconds"`
+}
+
+type Sub2APIConfig struct {
+	BaseURL    string `yaml:"base_url"`
+	GatewayKey string `yaml:"gateway_key"`
+	TimeoutMS  int    `yaml:"timeout_ms"`
 }
 
 type SecurityConfig struct {
@@ -195,6 +202,23 @@ func normalizeAndValidate(cfg Config) (Config, error) {
 	default:
 		return Config{}, fmt.Errorf("db.driver 不支持：%s（仅支持 mysql/sqlite）", cfg.DB.Driver)
 	}
+
+	cfg.Sub2API.BaseURL = strings.TrimSpace(cfg.Sub2API.BaseURL)
+	if cfg.Sub2API.BaseURL != "" {
+		sub2BaseURL, err := NormalizeHTTPBaseURL(cfg.Sub2API.BaseURL, "sub2api.base_url")
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.Sub2API.BaseURL = sub2BaseURL
+	}
+	cfg.Sub2API.GatewayKey = strings.TrimSpace(cfg.Sub2API.GatewayKey)
+	if cfg.Sub2API.TimeoutMS <= 0 {
+		cfg.Sub2API.TimeoutMS = 300000
+	}
+	if cfg.Sub2API.TimeoutMS < 1000 {
+		cfg.Sub2API.TimeoutMS = 1000
+	}
+
 	cfg.Tickets.AttachmentsDir = strings.TrimSpace(cfg.Tickets.AttachmentsDir)
 	if cfg.Tickets.AttachmentsDir == "" {
 		cfg.Tickets.AttachmentsDir = "./data/tickets"
@@ -298,6 +322,11 @@ func defaultConfig() Config {
 		Server: ServerConfig{
 			Addr: ":8080",
 		},
+		Sub2API: Sub2APIConfig{
+			BaseURL:    "",
+			GatewayKey: "",
+			TimeoutMS:  300000,
+		},
 		Debug: DebugConfig{
 			ProxyLog: ProxyLogConfig{
 				Enable: false,
@@ -365,6 +394,18 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("REALMS_DB_MIGRATION_LOCK_TIMEOUT_SECONDS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.DB.MigrationLockTimeoutSeconds = n
+		}
+	}
+
+	if v := os.Getenv("REALMS_SUB2API_BASE_URL"); v != "" {
+		cfg.Sub2API.BaseURL = v
+	}
+	if v := os.Getenv("REALMS_SUB2API_GATEWAY_KEY"); v != "" {
+		cfg.Sub2API.GatewayKey = v
+	}
+	if v := os.Getenv("REALMS_SUB2API_TIMEOUT_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Sub2API.TimeoutMS = n
 		}
 	}
 	if v := os.Getenv("REALMS_ALLOW_OPEN_REGISTRATION"); v != "" {

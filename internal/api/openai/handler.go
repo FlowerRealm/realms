@@ -55,6 +55,8 @@ type Handler struct {
 
 	codexRouteCache *codexSessionRouteCache
 	sessionBindings SessionBindingStore
+
+	sub2api *upstream.Sub2APIClient
 }
 
 type Doer interface {
@@ -98,7 +100,7 @@ type OpenAIObjectRefStore interface {
 	DeleteOpenAIObjectRef(ctx context.Context, objectType string, objectID string) error
 }
 
-func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *scheduler.Scheduler, exec Doer, proxyLog *proxylog.Writer, features FeatureResolver, selfMode bool, qp quota.Provider, audit AuditSink, usage UsageEventSink, refs OpenAIObjectRefStore, sseOpts upstream.SSEPumpOptions) *Handler {
+func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *scheduler.Scheduler, exec Doer, proxyLog *proxylog.Writer, features FeatureResolver, selfMode bool, qp quota.Provider, audit AuditSink, usage UsageEventSink, refs OpenAIObjectRefStore, sseOpts upstream.SSEPumpOptions, sub2api *upstream.Sub2APIClient) *Handler {
 	var sessionBindings SessionBindingStore
 	for _, candidate := range []any{models, groups, features, audit, usage, refs} {
 		if candidate == nil {
@@ -110,20 +112,21 @@ func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *
 		}
 	}
 	return &Handler{
-		models:   models,
-		groups:   groups,
-		sched:    sched,
-		exec:     exec,
-		proxyLog: proxyLog,
-		features: features,
-		selfMode: selfMode,
-		quota:    qp,
-		audit:    audit,
-		usage:    usage,
-		refs:     refs,
-		sseOpts:  sseOpts,
+		models:          models,
+		groups:          groups,
+		sched:           sched,
+		exec:            exec,
+		proxyLog:        proxyLog,
+		features:        features,
+		selfMode:        selfMode,
+		quota:           qp,
+		audit:           audit,
+		usage:           usage,
+		refs:            refs,
+		sseOpts:         sseOpts,
 		codexRouteCache: newCodexSessionRouteCache(),
 		sessionBindings: sessionBindings,
+		sub2api:         sub2api,
 	}
 }
 
