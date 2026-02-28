@@ -36,6 +36,13 @@ const (
 	SettingMCPApplyGeminiEnabled = "mcp_apply_gemini_enabled"
 )
 
+// SettingSkillsStoreV1 stores Skills in Realms canonical format (v1).
+// It is the authoritative source of truth for skills manager; target files are adapters/views.
+const SettingSkillsStoreV1 = "skills_store_v1"
+
+// SettingSkillsTargetEnabledV1 stores per-target enablement for skills apply (JSON object).
+const SettingSkillsTargetEnabledV1 = "skills_target_enabled_v1"
+
 const (
 	SettingFeatureDisableWebAnnouncements = "feature_disable_web_announcements"
 	SettingFeatureDisableWebTokens        = "feature_disable_web_tokens"

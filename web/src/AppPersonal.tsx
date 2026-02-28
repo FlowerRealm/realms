@@ -5,6 +5,7 @@ import { useAuth } from './auth/AuthContext'
 import { AdminLayout } from './layout/personal/AdminLayout'
 import { PublicLayout } from './layout/personal/PublicLayout'
 import { McpServersPage } from './pages/McpServersPage'
+import { SkillsPage } from './pages/SkillsPage'
 import { AdminPage } from './pages/personal/AdminPage'
 import { LoginPage } from './pages/personal/LoginPage'
 import { NotFoundPage } from './pages/NotFoundPage'
@@ -36,6 +37,7 @@ export function AppPersonal() {
         }
       >
         <Route path="/mcp" element={<McpServersPage />} />
+        <Route path="/skills" element={<SkillsPage />} />
         <Route path="/admin/*" element={<AdminPage />} />
       </Route>
 

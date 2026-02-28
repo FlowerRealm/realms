@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"realms/internal/mcp"
+	"realms/internal/skills"
 	"realms/internal/store"
 )
 
@@ -34,6 +35,15 @@ type Bundle struct {
 	// MCPStoreV2 is Realms canonical MCP store snapshot (v2).
 	// When present, it takes precedence over MCPServers.
 	MCPStoreV2 json.RawMessage `json:"mcp_store_v2,omitempty"`
+
+	// SkillsStoreV1 is Realms canonical Skills store snapshot (v1).
+	// When absent (null/missing), it is treated as "unchanged" during personal-config apply
+	// for backward compatibility with older bundles.
+	SkillsStoreV1 json.RawMessage `json:"skills_store_v1,omitempty"`
+
+	// SkillsTargetEnabledV1 stores per-target enablement for skills apply (v1).
+	// When absent (null/missing), it is treated as "unchanged".
+	SkillsTargetEnabledV1 json.RawMessage `json:"skills_target_enabled_v1,omitempty"`
 
 	Secrets *Secrets `json:"secrets,omitempty"`
 }
@@ -71,6 +81,22 @@ func (b Bundle) Validate() error {
 	if len(b.MCPServers) > 0 {
 		if _, err := mcp.ParseRegistryJSON(string(b.MCPServers)); err != nil {
 			return fmt.Errorf("invalid mcp_servers: %w", err)
+		}
+	}
+	if len(b.SkillsStoreV1) > 0 {
+		raw := strings.TrimSpace(string(b.SkillsStoreV1))
+		if raw != "" && raw != "null" {
+			if _, err := skills.ParseStoreV1JSON(raw); err != nil {
+				return fmt.Errorf("invalid skills_store_v1: %w", err)
+			}
+		}
+	}
+	if len(b.SkillsTargetEnabledV1) > 0 {
+		raw := strings.TrimSpace(string(b.SkillsTargetEnabledV1))
+		if raw != "" && raw != "null" {
+			if _, err := skills.ParseTargetEnabledV1JSON(raw); err != nil {
+				return fmt.Errorf("invalid skills_target_enabled_v1: %w", err)
+			}
 		}
 	}
 	// Basic sanity checks; deeper validation happens during rebuild.

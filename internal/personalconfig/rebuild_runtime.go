@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"realms/internal/mcp"
+	"realms/internal/skills"
 	"realms/internal/store"
 )
 
@@ -366,6 +367,33 @@ VALUES(?, NULL, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		}
 	}
 
+	// Optional Skills snapshot (app_settings).
+	// Backward-compat: missing/null field means "leave unchanged".
+	if b.SkillsStoreV1 != nil {
+		raw := strings.TrimSpace(string(b.SkillsStoreV1))
+		if raw != "" && raw != "null" {
+			sv1, err := skills.ParseStoreV1JSON(raw)
+			if err != nil {
+				return err
+			}
+			if err := applySkillsStoreV1(ctx, tx, dialect, sv1); err != nil {
+				return err
+			}
+		}
+	}
+	if b.SkillsTargetEnabledV1 != nil {
+		raw := strings.TrimSpace(string(b.SkillsTargetEnabledV1))
+		if raw != "" && raw != "null" {
+			te, err := skills.ParseTargetEnabledV1JSON(raw)
+			if err != nil {
+				return err
+			}
+			if err := applySkillsTargetEnabledV1(ctx, tx, dialect, te); err != nil {
+				return err
+			}
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
@@ -424,6 +452,73 @@ func applyMCPStoreV2(ctx context.Context, tx *sql.Tx, dialect store.Dialect, sv2
 	}
 	if _, err := tx.ExecContext(ctx, stmt, store.SettingMCPServersRegistry, rawLegacy); err != nil {
 		return fmt.Errorf("upsert mcp registry app_setting: %w", err)
+	}
+	return nil
+}
+
+func applySkillsStoreV1(ctx context.Context, tx *sql.Tx, dialect store.Dialect, sv1 skills.StoreV1) error {
+	if tx == nil {
+		return errors.New("tx is nil")
+	}
+	sv1 = sv1.Normalize()
+	if err := sv1.Validate(); err != nil {
+		return err
+	}
+	raw, err := skills.PrettyStoreV1JSON(sv1)
+	if err != nil {
+		return err
+	}
+
+	stmt := "INSERT INTO app_settings(`key`, value, created_at, updated_at)\n" +
+		"VALUES(?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)\n" +
+		"ON DUPLICATE KEY UPDATE value=VALUES(value), updated_at=CURRENT_TIMESTAMP"
+	if dialect == store.DialectSQLite {
+		stmt = "INSERT INTO app_settings(`key`, value, created_at, updated_at)\n" +
+			"VALUES(?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)\n" +
+			"ON CONFLICT(`key`) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP"
+	}
+
+	if len(sv1.Skills) == 0 {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM app_settings WHERE `key`=?", store.SettingSkillsStoreV1); err != nil {
+			return fmt.Errorf("clear skills store_v1 app_setting: %w", err)
+		}
+		return nil
+	}
+
+	if _, err := tx.ExecContext(ctx, stmt, store.SettingSkillsStoreV1, raw); err != nil {
+		return fmt.Errorf("upsert skills store_v1 app_setting: %w", err)
+	}
+	return nil
+}
+
+func applySkillsTargetEnabledV1(ctx context.Context, tx *sql.Tx, dialect store.Dialect, te skills.TargetEnabledV1) error {
+	if tx == nil {
+		return errors.New("tx is nil")
+	}
+	raw, err := skills.PrettyTargetEnabledV1JSON(te)
+	if err != nil {
+		return err
+	}
+
+	stmt := "INSERT INTO app_settings(`key`, value, created_at, updated_at)\n" +
+		"VALUES(?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)\n" +
+		"ON DUPLICATE KEY UPDATE value=VALUES(value), updated_at=CURRENT_TIMESTAMP"
+	if dialect == store.DialectSQLite {
+		stmt = "INSERT INTO app_settings(`key`, value, created_at, updated_at)\n" +
+			"VALUES(?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)\n" +
+			"ON CONFLICT(`key`) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP"
+	}
+
+	rawTrim := strings.TrimSpace(raw)
+	if rawTrim == "" || rawTrim == "{}" {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM app_settings WHERE `key`=?", store.SettingSkillsTargetEnabledV1); err != nil {
+			return fmt.Errorf("clear skills target_enabled app_setting: %w", err)
+		}
+		return nil
+	}
+
+	if _, err := tx.ExecContext(ctx, stmt, store.SettingSkillsTargetEnabledV1, rawTrim); err != nil {
+		return fmt.Errorf("upsert skills target_enabled app_setting: %w", err)
 	}
 	return nil
 }

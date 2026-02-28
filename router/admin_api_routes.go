@@ -10,6 +10,7 @@ func setAdminAPIRoutes(r gin.IRoutes, opts Options) {
 	if opts.PersonalMode {
 		setAdminUsageAPIRoutes(admin, opts)
 		setAdminMCPAPIRoutes(admin, opts)
+		setAdminSkillsAPIRoutes(admin, opts)
 		setAdminSettingsAPIRoutes(admin, opts)
 		setAdminPersonalConfigAPIRoutes(admin, opts)
 		return

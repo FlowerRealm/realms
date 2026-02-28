@@ -64,6 +64,8 @@ func isPersonalModeAllowedWebPath(p string) bool {
 		return true
 	case p == "/mcp" || strings.HasPrefix(p, "/mcp/"):
 		return true
+	case p == "/skills" || strings.HasPrefix(p, "/skills/"):
+		return true
 	case strings.HasPrefix(p, "/admin"):
 		return true
 	default:
