@@ -11,7 +11,6 @@
     "preview": "vite preview",
     "check:sri": "node scripts/sri.mjs",
     "fix:sri": "node scripts/sri.mjs --write",
-    "test:playwright": "node scripts/playwright-smoke.mjs",
     "check:theme": "node scripts/check-theme-colors.js"
   },
   "dependencies": {
@@ -33,7 +32,6 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
-    "playwright-core": "^1.58.2",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
     "vite": "^7.2.4"
