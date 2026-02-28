@@ -157,7 +157,7 @@ func ApplyStore(store StoreV1, opts ApplyOptions) (ApplyOutput, error) {
 				out.Results = append(out.Results, ApplyResult{ID: id, Target: t, Name: name, Enabled: true, Error: err.Error()})
 				continue
 			}
-			desired, err := RenderForTarget(sk, t)
+			desired, err := RenderForTargetInDir(sk, t, root)
 			if err != nil {
 				out.Results = append(out.Results, ApplyResult{ID: id, Target: t, Name: name, Path: dstPath, Enabled: true, Error: err.Error()})
 				continue
@@ -293,7 +293,11 @@ func targetPath(t Target, root string, name string) (string, error) {
 	case TargetCodex:
 		p = filepath.Join(root, name, "SKILL.md")
 	case TargetClaude:
-		p = filepath.Join(root, name+".md")
+		if claudeUsesSkillsLayout(root) {
+			p = filepath.Join(root, name, "SKILL.md")
+		} else {
+			p = filepath.Join(root, name+".md")
+		}
 	case TargetGemini:
 		p = filepath.Join(root, name+".toml")
 	default:
@@ -303,6 +307,22 @@ func targetPath(t Target, root string, name string) (string, error) {
 		return "", errors.New("path traversal detected")
 	}
 	return p, nil
+}
+
+func claudeUsesSkillsLayout(root string) bool {
+	root = filepath.Clean(strings.TrimSpace(root))
+	if root == "" {
+		return false
+	}
+	switch strings.ToLower(filepath.Base(root)) {
+	case "skills":
+		return true
+	case "commands":
+		return false
+	default:
+		// Keep backward-compatible default.
+		return false
+	}
 }
 
 func compareExisting(t Target, path string, desiredTrim string) (exists bool, same bool, existingSHA string, reason string, err error) {
@@ -386,6 +406,19 @@ func applyRemovals(t Target, root string, store StoreV1, removeSet map[string]bo
 				}
 				continue
 			}
+			if t == TargetClaude && claudeUsesSkillsLayout(root) {
+				dir := filepath.Join(root, name)
+				if !withinDir(root, dir) {
+					out = append(out, ApplyResult{ID: id, Target: t, Name: name, Enabled: false, Error: "path traversal detected"})
+					continue
+				}
+				if err := os.RemoveAll(dir); err != nil {
+					out = append(out, ApplyResult{ID: id, Target: t, Name: name, Path: dir, Enabled: false, Exists: true, Error: err.Error()})
+				} else {
+					out = append(out, ApplyResult{ID: id, Target: t, Name: name, Path: dir, Enabled: false, Changed: true})
+				}
+				continue
+			}
 			p, err := targetPath(t, root, name)
 			if err != nil {
 				out = append(out, ApplyResult{ID: id, Target: t, Name: name, Enabled: false, Error: err.Error()})
@@ -408,6 +441,12 @@ func applyRemovals(t Target, root string, store StoreV1, removeSet map[string]bo
 				continue
 			}
 			if t == TargetCodex {
+				dir := filepath.Join(root, name)
+				_ = os.RemoveAll(dir)
+				out = append(out, ApplyResult{ID: id, Target: t, Name: name, Path: dir, Enabled: false, Changed: true})
+				continue
+			}
+			if t == TargetClaude && claudeUsesSkillsLayout(root) {
 				dir := filepath.Join(root, name)
 				_ = os.RemoveAll(dir)
 				out = append(out, ApplyResult{ID: id, Target: t, Name: name, Path: dir, Enabled: false, Changed: true})

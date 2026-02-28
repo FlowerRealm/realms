@@ -12,6 +12,9 @@ const (
 	DefaultCodexSkillsRelDir = ".codex/skills"
 	DefaultClaudeCommandsRel = ".claude/commands"
 	DefaultGeminiCommandsRel = ".gemini/commands"
+
+	DefaultAgentsSkillsRelDir = ".agents/skills"
+	DefaultClaudeSkillsRel    = ".claude/skills"
 )
 
 const (
@@ -26,7 +29,7 @@ func ResolveTargetDir(t Target) (string, error) {
 	switch t {
 	case TargetCodex:
 		envKey = EnvCodexSkillsDir
-		rel = DefaultCodexSkillsRelDir
+		rel = DefaultAgentsSkillsRelDir
 	case TargetClaude:
 		envKey = EnvClaudeCommandsDir
 		rel = DefaultClaudeCommandsRel
@@ -43,7 +46,17 @@ func ResolveTargetDir(t Target) (string, error) {
 	if err != nil || strings.TrimSpace(home) == "" {
 		return "", errors.New("cannot resolve user home dir")
 	}
-	return filepath.Join(home, rel), nil
+	preferred := filepath.Join(home, rel)
+	switch t {
+	case TargetCodex:
+		fallback := filepath.Join(home, DefaultCodexSkillsRelDir)
+		return preferExistingDir(preferred, fallback), nil
+	case TargetClaude:
+		fallback := filepath.Join(home, DefaultClaudeSkillsRel)
+		return preferExistingDir(preferred, fallback), nil
+	default:
+		return preferred, nil
+	}
 }
 
 func withinDir(root string, p string) bool {
@@ -57,4 +70,20 @@ func withinDir(root string, p string) bool {
 		root += sep
 	}
 	return strings.HasPrefix(p, root)
+}
+
+func preferExistingDir(preferred string, fallback string) string {
+	preferred = strings.TrimSpace(preferred)
+	fallback = strings.TrimSpace(fallback)
+	if preferred == "" {
+		return fallback
+	}
+	// If preferred exists, use it. If not, but fallback exists, use fallback.
+	if st, err := os.Stat(preferred); err == nil && st != nil && st.IsDir() {
+		return preferred
+	}
+	if st, err := os.Stat(fallback); err == nil && st != nil && st.IsDir() {
+		return fallback
+	}
+	return preferred
 }

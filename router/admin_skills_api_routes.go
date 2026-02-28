@@ -80,12 +80,17 @@ func adminSkillsGetHandler(opts Options) gin.HandlerFunc {
 		}
 
 		desiredHashes := map[string]map[string]string{}
+		targetRoots := map[skills.Target]string{}
+		for _, t := range []skills.Target{skills.TargetCodex, skills.TargetClaude, skills.TargetGemini} {
+			dir, _ := skills.ResolveTargetDir(t)
+			targetRoots[t] = dir
+		}
 		for _, id := range storeV1.IDs() {
 			sk := storeV1.Skills[id]
 			sk.ID = id
 			per := map[string]string{}
 			for _, t := range []skills.Target{skills.TargetCodex, skills.TargetClaude, skills.TargetGemini} {
-				b, err := skills.RenderForTarget(sk, t)
+				b, err := skills.RenderForTargetInDir(sk, t, targetRoots[t])
 				if err != nil {
 					continue
 				}

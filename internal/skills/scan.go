@@ -69,29 +69,53 @@ func ScanTarget(t Target, root string) ScanTargetResult {
 			out.Skills[name] = ScannedSkill{Name: name, Path: p, SHA256: hex.EncodeToString(sum[:])}
 		}
 	case TargetClaude:
-		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if claudeUsesSkillsLayout(root) {
+			entries, err := os.ReadDir(root)
 			if err != nil {
-				return nil
+				out.ParseError = err.Error()
+				return out
 			}
-			if d.IsDir() {
-				return nil
+			for _, e := range entries {
+				if !e.IsDir() {
+					continue
+				}
+				name := strings.TrimSpace(e.Name())
+				if name == "" || !IsSafeID(name) {
+					continue
+				}
+				p := filepath.Join(root, name, "SKILL.md")
+				raw, err := os.ReadFile(p)
+				if err != nil {
+					continue
+				}
+				sum := sha256.Sum256([]byte(strings.TrimSpace(string(raw))))
+				out.Skills[name] = ScannedSkill{Name: name, Path: p, SHA256: hex.EncodeToString(sum[:])}
 			}
-			if !strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
+		} else {
+			_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+				if err != nil {
+					return nil
+				}
+				if d.IsDir() {
+					return nil
+				}
+				if !strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
+					return nil
+				}
+				name := strings.TrimSuffix(d.Name(), filepath.Ext(d.Name()))
+				name = strings.TrimSpace(name)
+				if name == "" || !IsSafeID(name) {
+					return nil
+				}
+				raw, err := os.ReadFile(p)
+				if err != nil {
+					return nil
+				}
+				sum := sha256.Sum256([]byte(strings.TrimSpace(string(raw))))
+				out.Skills[name] = ScannedSkill{Name: name, Path: p, SHA256: hex.EncodeToString(sum[:])}
 				return nil
-			}
-			name := strings.TrimSuffix(d.Name(), filepath.Ext(d.Name()))
-			name = strings.TrimSpace(name)
-			if name == "" || !IsSafeID(name) {
-				return nil
-			}
-			raw, err := os.ReadFile(p)
-			if err != nil {
-				return nil
-			}
-			sum := sha256.Sum256([]byte(strings.TrimSpace(string(raw))))
-			out.Skills[name] = ScannedSkill{Name: name, Path: p, SHA256: hex.EncodeToString(sum[:])}
-			return nil
-		})
+			})
+		}
 	case TargetGemini:
 		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
@@ -181,37 +205,118 @@ func ImportFromTarget(t Target, root string) (StoreV1, string, error) {
 			if content == "" {
 				continue
 			}
-			s.Skills[id] = SkillV1{ID: id, Title: id, Prompt: content}
+			meta, body, ok := parseFrontmatter(content)
+			title := id
+			desc := ""
+			prompt := content
+			if ok {
+				if nm := stringFromMeta(meta, "name"); nm != "" {
+					title = nm
+				}
+				desc = stringFromMeta(meta, "description")
+				if strings.TrimSpace(body) != "" {
+					prompt = body
+				}
+			}
+			var descPtr *string
+			if strings.TrimSpace(desc) != "" {
+				dd := strings.TrimSpace(desc)
+				descPtr = &dd
+			}
+			s.Skills[id] = SkillV1{ID: id, Title: title, Description: descPtr, Prompt: strings.TrimSpace(prompt)}
 		}
 	case TargetClaude:
-		err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if claudeUsesSkillsLayout(root) {
+			entries, err := os.ReadDir(root)
 			if err != nil {
-				return nil
+				return StoreV1{}, "", err
 			}
-			if d.IsDir() {
-				return nil
+			for _, e := range entries {
+				if !e.IsDir() {
+					continue
+				}
+				id := strings.TrimSpace(e.Name())
+				if !IsSafeID(id) {
+					continue
+				}
+				p := filepath.Join(root, id, "SKILL.md")
+				raw, err := os.ReadFile(p)
+				if err != nil {
+					continue
+				}
+				content := strings.TrimSpace(string(raw))
+				if content == "" {
+					continue
+				}
+				meta, body, ok := parseFrontmatter(content)
+				title := id
+				desc := ""
+				prompt := content
+				if ok {
+					if nm := stringFromMeta(meta, "name"); nm != "" {
+						title = nm
+					}
+					desc = stringFromMeta(meta, "description")
+					if strings.TrimSpace(body) != "" {
+						prompt = body
+					}
+				}
+				var descPtr *string
+				if strings.TrimSpace(desc) != "" {
+					dd := strings.TrimSpace(desc)
+					descPtr = &dd
+				}
+				s.Skills[id] = SkillV1{ID: id, Title: title, Description: descPtr, Prompt: strings.TrimSpace(prompt)}
 			}
-			if !strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
+		} else {
+			err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+				if err != nil {
+					return nil
+				}
+				if d.IsDir() {
+					return nil
+				}
+				if !strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
+					return nil
+				}
+				id := strings.TrimSuffix(d.Name(), filepath.Ext(d.Name()))
+				id = strings.TrimSpace(id)
+				if !IsSafeID(id) {
+					return nil
+				}
+				raw, err := os.ReadFile(p)
+				if err != nil {
+					return nil
+				}
+				content := strings.TrimSpace(string(raw))
+				if content == "" {
+					return nil
+				}
+				meta, body, ok := parseFrontmatter(content)
+				desc := ""
+				prompt := content
+				if ok {
+					desc = stringFromMeta(meta, "description")
+					if strings.TrimSpace(body) != "" {
+						prompt = body
+					}
+				}
+				var descPtr *string
+				if strings.TrimSpace(desc) != "" {
+					dd := strings.TrimSpace(desc)
+					descPtr = &dd
+				}
+				sk := SkillV1{ID: id, Title: id, Description: descPtr, Prompt: strings.TrimSpace(prompt)}
+				fm := claudeFrontmatterFromMeta(meta)
+				if len(fm) > 0 {
+					sk.PerTarget = &PerTargetV1{Claude: &TargetOptionsV1{Frontmatter: fm}}
+				}
+				s.Skills[id] = sk
 				return nil
-			}
-			id := strings.TrimSuffix(d.Name(), filepath.Ext(d.Name()))
-			id = strings.TrimSpace(id)
-			if !IsSafeID(id) {
-				return nil
-			}
-			raw, err := os.ReadFile(p)
+			})
 			if err != nil {
-				return nil
+				return StoreV1{}, "", err
 			}
-			content := strings.TrimSpace(string(raw))
-			if content == "" {
-				return nil
-			}
-			s.Skills[id] = SkillV1{ID: id, Title: id, Prompt: content}
-			return nil
-		})
-		if err != nil {
-			return StoreV1{}, "", err
 		}
 	case TargetGemini:
 		err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
@@ -243,10 +348,6 @@ func ImportFromTarget(t Target, root string) (StoreV1, string, error) {
 				s.Skills[id] = SkillV1{ID: id, Title: id, Prompt: content}
 				return nil
 			}
-			title := strings.TrimSpace(stringFromAny(m["title"]))
-			if title == "" {
-				title = id
-			}
 			desc := strings.TrimSpace(stringFromAny(m["description"]))
 			prompt := strings.TrimSpace(stringFromAny(m["prompt"]))
 			if prompt == "" {
@@ -256,7 +357,7 @@ func ImportFromTarget(t Target, root string) (StoreV1, string, error) {
 			if desc != "" {
 				descPtr = &desc
 			}
-			s.Skills[id] = SkillV1{ID: id, Title: title, Description: descPtr, Prompt: prompt}
+			s.Skills[id] = SkillV1{ID: id, Title: id, Description: descPtr, Prompt: prompt}
 			return nil
 		})
 		if err != nil {
@@ -286,4 +387,27 @@ func stringFromAny(v any) string {
 	default:
 		return ""
 	}
+}
+
+func claudeFrontmatterFromMeta(meta map[string]any) map[string]any {
+	if meta == nil || len(meta) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for k, v := range meta {
+		kk := strings.TrimSpace(k)
+		if kk == "" {
+			continue
+		}
+		switch strings.ToLower(kk) {
+		case "description", "name":
+			continue
+		default:
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

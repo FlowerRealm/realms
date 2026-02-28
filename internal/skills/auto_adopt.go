@@ -66,11 +66,12 @@ func AutoAdoptMissing(store StoreV1, scans map[Target]ScanTargetResult) (AutoAdo
 		type present struct {
 			ok       bool
 			path     string
-			raw      string
+			raw      string // full file content, trimmed
 			fileHash string
 			title    string
 			desc     *string
 			prompt   string
+			fm       map[string]any
 		}
 		p := map[Target]*present{
 			TargetCodex:  {ok: false},
@@ -97,10 +98,30 @@ func AutoAdoptMissing(store StoreV1, scans map[Target]ScanTargetResult) (AutoAdo
 			ps.path = sk.Path
 			ps.raw = raw
 			ps.fileHash = hex.EncodeToString(sum[:])
-			if t == TargetGemini {
+			switch t {
+			case TargetCodex, TargetClaude:
+				meta, body, ok := parseFrontmatter(raw)
+				if ok {
+					dd := strings.TrimSpace(stringFromMeta(meta, "description"))
+					if dd != "" {
+						ps.desc = &dd
+					}
+					ps.title = strings.TrimSpace(stringFromMeta(meta, "name"))
+					ps.prompt = strings.TrimSpace(body)
+					if t == TargetClaude {
+						ps.fm = claudeFrontmatterFromMeta(meta)
+					}
+				}
+				if ps.prompt == "" {
+					// If the file isn't in the expected format, keep the raw content as prompt.
+					ps.prompt = raw
+				}
+				if ps.title == "" {
+					ps.title = id
+				}
+			case TargetGemini:
 				var m map[string]any
 				if err := toml.Unmarshal([]byte(raw), &m); err == nil {
-					ps.title = strings.TrimSpace(stringFromAny(m["title"]))
 					dd := strings.TrimSpace(stringFromAny(m["description"]))
 					if dd != "" {
 						ps.desc = &dd
@@ -110,9 +131,7 @@ func AutoAdoptMissing(store StoreV1, scans map[Target]ScanTargetResult) (AutoAdo
 				if ps.prompt == "" {
 					ps.prompt = raw
 				}
-				if ps.title == "" {
-					ps.title = id
-				}
+				ps.title = id
 			}
 		}
 
@@ -121,14 +140,20 @@ func AutoAdoptMissing(store StoreV1, scans map[Target]ScanTargetResult) (AutoAdo
 		var desc *string
 		prompt := ""
 		if p[TargetCodex].ok {
-			prompt = p[TargetCodex].raw
-		} else if p[TargetClaude].ok {
-			prompt = p[TargetClaude].raw
-		} else if p[TargetGemini].ok {
-			title = strings.TrimSpace(p[TargetGemini].title)
+			title = strings.TrimSpace(p[TargetCodex].title)
 			if title == "" {
 				title = id
 			}
+			desc = p[TargetCodex].desc
+			prompt = p[TargetCodex].prompt
+		} else if p[TargetClaude].ok {
+			title = strings.TrimSpace(p[TargetClaude].title)
+			if title == "" {
+				title = id
+			}
+			desc = p[TargetClaude].desc
+			prompt = p[TargetClaude].prompt
+		} else if p[TargetGemini].ok {
 			desc = p[TargetGemini].desc
 			prompt = p[TargetGemini].prompt
 		}
@@ -139,6 +164,9 @@ func AutoAdoptMissing(store StoreV1, scans map[Target]ScanTargetResult) (AutoAdo
 		}
 
 		skill := SkillV1{ID: id, Title: title, Description: desc, Prompt: prompt}
+		if p[TargetClaude].ok && len(p[TargetClaude].fm) > 0 {
+			skill.PerTarget = &PerTargetV1{Claude: &TargetOptionsV1{Frontmatter: p[TargetClaude].fm}}
+		}
 
 		// Compute per-target enablement based on "would overwrite" + existence.
 		confT := []Target{}
@@ -161,7 +189,11 @@ func AutoAdoptMissing(store StoreV1, scans map[Target]ScanTargetResult) (AutoAdo
 				disable(t)
 				continue
 			}
-			desiredBytes, err := RenderForTarget(skill, t)
+			root := ""
+			if t == TargetClaude {
+				root = scans[t].Path
+			}
+			desiredBytes, err := RenderForTargetInDir(skill, t, root)
 			if err != nil {
 				disable(t)
 				continue

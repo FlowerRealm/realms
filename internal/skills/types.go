@@ -65,7 +65,8 @@ type PerTargetV1 struct {
 }
 
 type TargetOptionsV1 struct {
-	Enabled *bool `json:"enabled,omitempty"`
+	Enabled     *bool          `json:"enabled,omitempty"`
+	Frontmatter map[string]any `json:"frontmatter,omitempty"` // used for Claude command frontmatter (allowed-tools, argument-hint, model, etc.)
 }
 
 func (s StoreV1) Normalize() StoreV1 {
@@ -122,7 +123,7 @@ func normalizeTargetOptions(o *TargetOptionsV1) *TargetOptionsV1 {
 	if o == nil {
 		return nil
 	}
-	if o.Enabled == nil {
+	if o.Enabled == nil && len(o.Frontmatter) == 0 {
 		return nil
 	}
 	return o
