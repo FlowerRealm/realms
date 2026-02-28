@@ -2,11 +2,13 @@ package openai
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"realms/internal/auth"
 	"realms/internal/scheduler"
 )
 
@@ -123,20 +125,77 @@ func (c *codexSessionRouteCache) Set(key string, sel scheduler.Selection, expire
 	}
 }
 
-func (h *Handler) getCodexLastSuccessRoute(stickyRouteKeyHash string, now time.Time) (codexLastSuccessRoute, bool) {
+func (c *codexSessionRouteCache) SetRoute(key string, route codexLastSuccessRoute) {
+	if c == nil || strings.TrimSpace(key) == "" {
+		return
+	}
+	if route.channelID <= 0 || strings.TrimSpace(route.credentialKey) == "" || route.expiresAt.IsZero() {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.sweepLocked(time.Now())
+	c.data[key] = route
+}
+
+func (c *codexSessionRouteCache) Delete(key string) {
+	if c == nil || strings.TrimSpace(key) == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.data, key)
+}
+
+func codexStickyBindingKey(userID int64, stickyRouteKeyHash string) string {
+	if userID <= 0 {
+		return ""
+	}
+	stickyRouteKeyHash = strings.TrimSpace(stickyRouteKeyHash)
+	if stickyRouteKeyHash == "" {
+		return ""
+	}
+	return fmt.Sprintf("%d|%s", userID, stickyRouteKeyHash)
+}
+
+func (h *Handler) getCodexLastSuccessRoute(userID int64, stickyRouteKeyHash string, now time.Time) (codexLastSuccessRoute, bool) {
 	if h == nil || h.codexRouteCache == nil {
 		return codexLastSuccessRoute{}, false
 	}
-	return h.codexRouteCache.Get(stickyRouteKeyHash, now)
+	key := codexStickyBindingKey(userID, stickyRouteKeyHash)
+	if key == "" {
+		return codexLastSuccessRoute{}, false
+	}
+	return h.codexRouteCache.Get(key, now)
 }
 
 func (h *Handler) rememberCodexLastSuccessRoute(r *http.Request, sel scheduler.Selection) {
 	if h == nil || h.codexRouteCache == nil || r == nil {
 		return
 	}
-	key := strings.TrimSpace(getCodexStickyRouteKeyHash(r.Context()))
+	stickyHash := strings.TrimSpace(getCodexStickyRouteKeyHash(r.Context()))
+	if stickyHash == "" {
+		return
+	}
+	p, ok := auth.PrincipalFromContext(r.Context())
+	if !ok || p.UserID <= 0 {
+		return
+	}
+	key := codexStickyBindingKey(p.UserID, stickyHash)
 	if key == "" {
 		return
 	}
 	h.codexRouteCache.Set(key, sel, time.Now().Add(codexSessionTTL()))
+	h.upsertCodexStickyBindingBestEffort(r.Context(), p.UserID, stickyHash, sel)
+}
+
+func (h *Handler) clearCodexLastSuccessRoute(userID int64, stickyRouteKeyHash string) {
+	if h == nil || h.codexRouteCache == nil {
+		return
+	}
+	key := codexStickyBindingKey(userID, stickyRouteKeyHash)
+	if key == "" {
+		return
+	}
+	h.codexRouteCache.Delete(key)
 }

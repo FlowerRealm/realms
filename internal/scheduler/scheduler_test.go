@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -175,6 +176,68 @@ func TestSelect_RouteKeyHashEnablesStickyChannelAndCredential(t *testing.T) {
 	}
 	if second.ChannelID != first.ChannelID || second.CredentialID != first.CredentialID {
 		t.Fatalf("expected sticky selection, first=%d/%d second=%d/%d", first.ChannelID, first.CredentialID, second.ChannelID, second.CredentialID)
+	}
+}
+
+func TestSelectWithConstraints_RequireCredentialKey_PicksExactCredential(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+				{ID: 222, EndpointID: 11, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+	wantKey := fmt.Sprintf("%s:%d", CredentialTypeOpenAI, 222)
+	sel, err := s.SelectWithConstraints(context.Background(), 10, "", Constraints{
+		RequireChannelID:     1,
+		RequireCredentialKey: wantKey,
+	})
+	if err != nil {
+		t.Fatalf("Select err: %v", err)
+	}
+	if sel.ChannelID != 1 {
+		t.Fatalf("expected channel=1, got=%d", sel.ChannelID)
+	}
+	if sel.CredentialKey() != wantKey {
+		t.Fatalf("expected credential=%q, got=%q", wantKey, sel.CredentialKey())
+	}
+}
+
+func TestSelectWithConstraints_RequireCredentialKey_CoolingFailsSelection(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+				{ID: 222, EndpointID: 11, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+	key := fmt.Sprintf("%s:%d", CredentialTypeOpenAI, 222)
+	s.state.SetCredentialCooling(key, time.Now().Add(10*time.Minute))
+	if _, err := s.SelectWithConstraints(context.Background(), 10, "", Constraints{
+		RequireChannelID:     1,
+		RequireCredentialKey: key,
+	}); err == nil {
+		t.Fatalf("expected selection to fail when required credential is cooling")
 	}
 }
 

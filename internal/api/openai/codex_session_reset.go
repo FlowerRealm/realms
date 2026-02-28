@@ -42,6 +42,40 @@ func codexHasStatefulContinuationSignalsFromBody(body []byte) bool {
 	return false
 }
 
+func codexHasStatefulContinuationSignals(payload map[string]any) bool {
+	if payload == nil {
+		return false
+	}
+	if compactionAny, ok := payload["compaction"]; ok && compactionAny != nil {
+		if cm, ok := compactionAny.(map[string]any); ok {
+			if strings.TrimSpace(stringFromAny(cm["encrypted_content"])) != "" {
+				return true
+			}
+		}
+	}
+	if strings.TrimSpace(stringFromAny(payload["previous_response_id"])) != "" {
+		return true
+	}
+	if inputAny, ok := payload["input"]; ok && inputAny != nil {
+		if items, ok := inputAny.([]any); ok {
+			for _, item := range items {
+				m, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				typ := strings.TrimSpace(stringFromAny(m["type"]))
+				if typ == "item_reference" {
+					return true
+				}
+				if strings.HasSuffix(typ, "_call_output") {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func resetCodexStatefulContinuation(body []byte) (codexResetResult, error) {
 	if len(body) == 0 {
 		return codexResetResult{body: body}, nil
@@ -145,4 +179,3 @@ func codexPayloadHasUserText(payload map[string]any) bool {
 	}
 	return false
 }
-

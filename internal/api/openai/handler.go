@@ -54,6 +54,7 @@ type Handler struct {
 	sseOpts upstream.SSEPumpOptions
 
 	codexRouteCache *codexSessionRouteCache
+	sessionBindings SessionBindingStore
 }
 
 type Doer interface {
@@ -84,6 +85,12 @@ type UsageEventSink interface {
 	FinalizeUsageEvent(ctx context.Context, in store.FinalizeUsageEventInput) error
 }
 
+type SessionBindingStore interface {
+	GetSessionBindingPayload(ctx context.Context, userID int64, routeKeyHash string, now time.Time) (string, bool, error)
+	UpsertSessionBindingPayload(ctx context.Context, userID int64, routeKeyHash string, payload string, expiresAt time.Time) error
+	DeleteSessionBinding(ctx context.Context, userID int64, routeKeyHash string) error
+}
+
 type OpenAIObjectRefStore interface {
 	UpsertOpenAIObjectRef(ctx context.Context, ref store.OpenAIObjectRef) error
 	GetOpenAIObjectRefForUser(ctx context.Context, userID int64, objectType string, objectID string) (store.OpenAIObjectRef, bool, error)
@@ -92,6 +99,16 @@ type OpenAIObjectRefStore interface {
 }
 
 func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *scheduler.Scheduler, exec Doer, proxyLog *proxylog.Writer, features FeatureResolver, selfMode bool, qp quota.Provider, audit AuditSink, usage UsageEventSink, refs OpenAIObjectRefStore, sseOpts upstream.SSEPumpOptions) *Handler {
+	var sessionBindings SessionBindingStore
+	for _, candidate := range []any{models, groups, features, audit, usage, refs} {
+		if candidate == nil {
+			continue
+		}
+		if sb, ok := candidate.(SessionBindingStore); ok && sb != nil {
+			sessionBindings = sb
+			break
+		}
+	}
 	return &Handler{
 		models:   models,
 		groups:   groups,
@@ -106,6 +123,7 @@ func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *
 		refs:     refs,
 		sseOpts:  sseOpts,
 		codexRouteCache: newCodexSessionRouteCache(),
+		sessionBindings: sessionBindings,
 	}
 }
 
@@ -518,6 +536,16 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	if stickyRouteKeyHash != "" {
 		r = r.WithContext(withCodexStickyRouteKeyHash(r.Context(), stickyRouteKeyHash))
 	}
+
+	boundRoute, boundOK := h.loadCodexStickyBinding(r.Context(), p.UserID, stickyRouteKeyHash, time.Now())
+	bindingActive := false
+	bindingCleared := false
+	if stickyRouteKeyHash != "" && boundOK && boundRoute.channelID > 0 && strings.TrimSpace(boundRoute.credentialKey) != "" {
+		bindingActive = true
+		cons.RequireChannelID = boundRoute.channelID
+		cons.RequireCredentialKey = boundRoute.credentialKey
+	}
+
 	usageID := int64(0)
 	if h.quota != nil && r != nil && r.URL != nil && r.URL.Path == "/v1/responses" {
 		res, err := h.quota.Reserve(r.Context(), quota.ReserveInput{
@@ -556,13 +584,24 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	router := scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
 	var lastSel *scheduler.Selection
 	bestFailure := proxyFailureInfo{}
-	prevRoute, prevOK := h.getCodexLastSuccessRoute(stickyRouteKeyHash, time.Now())
 	const absoluteMaxAttempts = 1000
 	for i := 0; i < absoluteMaxAttempts; i++ {
 		sel, err := router.Next(r.Context())
 		if err != nil {
 			if h.finalizeIfCanceled(r, usageID, nil, reqStart, stream, reqBytes) {
 				return
+			}
+			if bindingActive && !bindingCleared {
+				h.clearCodexStickyBindingBestEffort(r.Context(), p.UserID, stickyRouteKeyHash)
+				bindingCleared = true
+				bindingActive = false
+				cons.RequireChannelID = 0
+				cons.RequireCredentialKey = ""
+				w.Header().Set("X-Realms-Codex-Sticky-Cleared", "1")
+				w.Header().Set("X-Realms-Codex-Prev-Channel", strconv.FormatInt(boundRoute.channelID, 10))
+				w.Header().Set("X-Realms-Codex-Prev-Credential", boundRoute.credentialKey)
+				router = scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
+				continue
 			}
 			break
 		}
@@ -577,26 +616,19 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if prevOK && stickyRouteKeyHash != "" && prevRoute.differs(sel) && codexHasStatefulContinuationSignalsFromBody(rewritten) {
-			resetRes, rErr := resetCodexStatefulContinuation(rewritten)
-			if rErr == nil && resetRes.changed {
-				if !resetRes.hasUserText {
-					h.voidQuotaBestEffort(usageID)
-					h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, optionalString(publicModel), http.StatusConflict, "session_reset_required", 0)
-					cw := &countingResponseWriter{ResponseWriter: w}
-					writeOpenAIError(cw, http.StatusConflict, "session_reset_required", "上游渠道已切换：该请求仅包含续链上下文（compaction/item_reference/previous_response_id），无法跨上游复用。请在 Codex CLI 重启会话/新开对话后重试。")
-					h.maybeLogProxyFailure(r.Context(), r, p, &sel, optionalString(publicModel), http.StatusConflict, "session_reset_required", "session_reset_required", time.Since(reqStart), stream)
-					h.finalizeUsageEvent(r, usageID, &sel, http.StatusConflict, "session_reset_required", "session_reset_required", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
-					return
-				}
-				w.Header().Set("X-Realms-Codex-Session-Reset", "1")
-				w.Header().Set("X-Realms-Codex-Session-Reset-Reason", "upstream_selection_changed")
-				rewritten = resetRes.body
-			}
-		}
-
 		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), usageID, reqStart, reqBytes, 2, &bestFailure) {
 			return
+		}
+		if bindingActive && !bindingCleared {
+			h.clearCodexStickyBindingBestEffort(r.Context(), p.UserID, stickyRouteKeyHash)
+			bindingCleared = true
+			bindingActive = false
+			cons.RequireChannelID = 0
+			cons.RequireCredentialKey = ""
+			w.Header().Set("X-Realms-Codex-Sticky-Cleared", "1")
+			w.Header().Set("X-Realms-Codex-Prev-Channel", strconv.FormatInt(boundRoute.channelID, 10))
+			w.Header().Set("X-Realms-Codex-Prev-Credential", boundRoute.credentialKey)
+			router = scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
 		}
 	}
 
@@ -699,7 +731,6 @@ func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p aut
 
 func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel scheduler.Selection, body []byte, wantStream bool, model *string, p auth.Principal, usageID int64, reqStart time.Time, reqBytes int64) (proxyAttemptDecision, proxyFailureInfo) {
 	attemptStart := time.Now()
-	resetTried := false
 	var resp *http.Response
 	for attempt := 0; attempt < 2; attempt++ {
 		var err error
@@ -722,22 +753,14 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			isSSE := strings.Contains(strings.ToLower(contentType), "text/event-stream")
 
 			bodyBytes := readPrefixBestEffort(resp.Body, upstreamErrorBodyMaxBytes)
-			if attempt == 0 && !resetTried && isInvalidEncryptedContentUpstreamError(bodyBytes) {
+			if attempt == 0 && isInvalidEncryptedContentUpstreamError(bodyBytes) {
 				resetRes, rErr := resetCodexStatefulContinuation(body)
 				if rErr == nil && resetRes.changed {
-					if resetRes.hasUserText {
-						w.Header().Set("X-Realms-Codex-Session-Reset", "1")
-						w.Header().Set("X-Realms-Codex-Session-Reset-Reason", "invalid_encrypted_content")
-						body = resetRes.body
-						resetTried = true
-						_ = resp.Body.Close()
-						continue
-					}
 					_ = resp.Body.Close()
 					h.voidQuotaBestEffort(usageID)
 					h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, model, http.StatusConflict, "session_reset_required", time.Since(attemptStart))
 					cw := &countingResponseWriter{ResponseWriter: w}
-					writeOpenAIError(cw, http.StatusConflict, "session_reset_required", "上游返回续链错误，且自动重置后无有效内容可发送。请在 Codex CLI 重启会话/新开对话后重试。")
+					writeOpenAIError(cw, http.StatusConflict, "session_reset_required", "上游返回续链错误（invalid encrypted_content）：该会话的 compaction 上下文无法复用。为避免静默丢上下文，服务端不会自动重置续链；请重启会话/新开对话后重试。")
 					h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, http.StatusConflict, "session_reset_required", "session_reset_required", time.Since(attemptStart), wantStream || isSSE)
 					h.finalizeUsageEvent(r, usageID, &sel, http.StatusConflict, "session_reset_required", "session_reset_required", time.Since(reqStart), 0, wantStream || isSSE, reqBytes, cw.bytes)
 					return proxyAttemptDone, proxyFailureInfo{}
@@ -1701,9 +1724,15 @@ func shouldEnableStickyRouting(payload map[string]any, r *http.Request, routeKey
 	if routeKeySource == "derived" || routeKeySource == "missing" {
 		return false
 	}
-	// sticky routing 仅用于 Codex-like responses payload（input 数组）；
-	// 普通 Responses/ChatCompletions 仍保持原有负载均衡策略。
-	if _, ok := payload["input"].([]any); !ok {
+	// sticky routing 仅用于“有状态会话”：
+	// - Codex-like responses payload（input 数组）
+	// - /v1/responses/compact（input 可能是 string，但 compact 结果会影响后续续链）
+	// - 已携带续链信号（compaction/item_reference/previous_response_id）
+	path := ""
+	if r.URL != nil {
+		path = strings.TrimSpace(r.URL.Path)
+	}
+	if _, ok := payload["input"].([]any); !ok && path != "/v1/responses/compact" && !codexHasStatefulContinuationSignals(payload) {
 		return false
 	}
 
@@ -1716,6 +1745,116 @@ func shouldEnableStickyRouting(payload map[string]any, r *http.Request, routeKey
 	}
 	ua := strings.ToLower(strings.TrimSpace(r.Header.Get("User-Agent")))
 	return strings.Contains(ua, "codex")
+}
+
+type codexStickyBindingPayloadV1 struct {
+	Kind            string `json:"kind,omitempty"`
+	ChannelID       int64  `json:"channel_id"`
+	CredentialKey   string `json:"credential_key"`
+	UpdatedAtUnixMS int64  `json:"updated_at_unix_ms,omitempty"`
+}
+
+func parseCodexStickyBindingPayload(payload string, now time.Time) (codexLastSuccessRoute, bool) {
+	payload = strings.TrimSpace(payload)
+	if payload == "" {
+		return codexLastSuccessRoute{}, false
+	}
+	var parsed codexStickyBindingPayloadV1
+	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
+		return codexLastSuccessRoute{}, false
+	}
+	if parsed.ChannelID <= 0 || strings.TrimSpace(parsed.CredentialKey) == "" {
+		return codexLastSuccessRoute{}, false
+	}
+	kind := strings.TrimSpace(parsed.Kind)
+	if kind != "" && kind != "codex_route_v1" {
+		return codexLastSuccessRoute{}, false
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	return codexLastSuccessRoute{
+		channelID:     parsed.ChannelID,
+		credentialKey: strings.TrimSpace(parsed.CredentialKey),
+		expiresAt:     now.Add(codexSessionTTL()),
+	}, true
+}
+
+func codexStickyBindingPayloadJSON(sel scheduler.Selection) (string, bool) {
+	if sel.ChannelID <= 0 {
+		return "", false
+	}
+	credKey := strings.TrimSpace(sel.CredentialKey())
+	if credKey == "" {
+		return "", false
+	}
+	b, err := json.Marshal(codexStickyBindingPayloadV1{
+		Kind:            "codex_route_v1",
+		ChannelID:       sel.ChannelID,
+		CredentialKey:   credKey,
+		UpdatedAtUnixMS: time.Now().UnixMilli(),
+	})
+	if err != nil || len(b) == 0 {
+		return "", false
+	}
+	return string(b), true
+}
+
+func (h *Handler) loadCodexStickyBinding(ctx context.Context, userID int64, stickyRouteKeyHash string, now time.Time) (codexLastSuccessRoute, bool) {
+	if h == nil || userID <= 0 || strings.TrimSpace(stickyRouteKeyHash) == "" {
+		return codexLastSuccessRoute{}, false
+	}
+	if v, ok := h.getCodexLastSuccessRoute(userID, stickyRouteKeyHash, now); ok {
+		return v, true
+	}
+	if h.sessionBindings == nil {
+		return codexLastSuccessRoute{}, false
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	payload, ok, err := h.sessionBindings.GetSessionBindingPayload(ctx, userID, stickyRouteKeyHash, now)
+	if err != nil || !ok {
+		return codexLastSuccessRoute{}, false
+	}
+	route, parsed := parseCodexStickyBindingPayload(payload, now)
+	if !parsed {
+		return codexLastSuccessRoute{}, false
+	}
+	if h.codexRouteCache != nil {
+		key := codexStickyBindingKey(userID, stickyRouteKeyHash)
+		if key != "" {
+			h.codexRouteCache.SetRoute(key, route)
+		}
+	}
+	return route, true
+}
+
+func (h *Handler) clearCodexStickyBindingBestEffort(ctx context.Context, userID int64, stickyRouteKeyHash string) {
+	if h == nil || userID <= 0 || strings.TrimSpace(stickyRouteKeyHash) == "" {
+		return
+	}
+	if h.sessionBindings != nil {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		_ = h.sessionBindings.DeleteSessionBinding(ctx, userID, stickyRouteKeyHash)
+	}
+	h.clearCodexLastSuccessRoute(userID, stickyRouteKeyHash)
+}
+
+func (h *Handler) upsertCodexStickyBindingBestEffort(ctx context.Context, userID int64, stickyRouteKeyHash string, sel scheduler.Selection) {
+	if h == nil || h.sessionBindings == nil || userID <= 0 || strings.TrimSpace(stickyRouteKeyHash) == "" {
+		return
+	}
+	payload, ok := codexStickyBindingPayloadJSON(sel)
+	if !ok {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	_ = h.sessionBindings.UpsertSessionBindingPayload(ctx, userID, stickyRouteKeyHash, payload, time.Now().Add(codexSessionTTL()))
 }
 
 func (h *Handler) auditFailover(ctx context.Context, path string, p auth.Principal, sel *scheduler.Selection, model *string, status int, class string, latency time.Duration) {
