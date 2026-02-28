@@ -35,7 +35,15 @@ var codexAutoSessionCache = struct {
 var metadataSessionIDRegex = regexp.MustCompile(`(?i)session_([a-f0-9-]{36})`)
 
 func completeCodexSessionIdentifiers(payload map[string]any, r *http.Request, p auth.Principal) (bool, string, bool) {
-	if payload == nil || r == nil || !isCodexResponsesPayload(payload) {
+	if payload == nil || r == nil {
+		return false, "", false
+	}
+	path := ""
+	if r.URL != nil {
+		path = strings.TrimSpace(r.URL.Path)
+	}
+	isCompact := path == "/v1/responses/compact"
+	if !isCompact && !isCodexResponsesPayload(payload) && !codexHasStatefulContinuationSignals(payload) {
 		return false, "", false
 	}
 

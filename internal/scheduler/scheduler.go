@@ -90,13 +90,14 @@ type Scheduler struct {
 	groupPointerSync        map[int64]groupPointerSyncState
 }
 
-type Constraints struct {
-	RequireChannelType string
-	RequireChannelID   int64
-	AllowGroups        map[string]struct{}
-	AllowGroupOrder    []string
-	AllowChannelIDs    map[int64]struct{}
-}
+	type Constraints struct {
+		RequireChannelType string
+		RequireChannelID   int64
+		RequireCredentialKey string
+		AllowGroups        map[string]struct{}
+		AllowGroupOrder    []string
+		AllowChannelIDs    map[int64]struct{}
+	}
 
 type Options struct {
 	DisableCodexOAuth bool
@@ -389,13 +390,13 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 			}
 			return eps[i].ID > eps[j].ID
 		})
-		for _, ep := range eps {
-			sel, ok, err := s.selectCredential(ctx, ch, ep, now, routeKeyHash)
-			if err != nil {
-				if claimedProbe {
-					s.state.ReleaseChannelProbeClaim(ch.ID)
-				}
-				return Selection{}, err
+			for _, ep := range eps {
+				sel, ok, err := s.selectCredential(ctx, ch, ep, now, routeKeyHash, cons)
+				if err != nil {
+					if claimedProbe {
+						s.state.ReleaseChannelProbeClaim(ch.ID)
+					}
+					return Selection{}, err
 			}
 			if ok {
 				s.state.RecordRPM(sel.CredentialKey(), now)
@@ -420,6 +421,9 @@ func selectionMatchesConstraints(sel Selection, c Constraints) bool {
 	if c.RequireChannelID != 0 && sel.ChannelID != c.RequireChannelID {
 		return false
 	}
+	if strings.TrimSpace(c.RequireCredentialKey) != "" && sel.CredentialKey() != strings.TrimSpace(c.RequireCredentialKey) {
+		return false
+	}
 	if c.AllowGroups != nil && !channelInAnyGroup(sel.ChannelGroups, c.AllowGroups) {
 		return false
 	}
@@ -431,9 +435,38 @@ func selectionMatchesConstraints(sel Selection, c Constraints) bool {
 	return true
 }
 
-func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChannel, ep store.UpstreamEndpoint, now time.Time, routeKeyHash string) (Selection, bool, error) {
+func parseCredentialKey(key string) (CredentialType, int64, bool) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", 0, false
+	}
+	parts := strings.Split(key, ":")
+	if len(parts) != 2 {
+		return "", 0, false
+	}
+	typ := CredentialType(strings.TrimSpace(parts[0]))
+	if typ == "" {
+		return "", 0, false
+	}
+	id, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
+	if err != nil || id <= 0 {
+		return "", 0, false
+	}
+	return typ, id, true
+}
+
+func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChannel, ep store.UpstreamEndpoint, now time.Time, routeKeyHash string, cons Constraints) (Selection, bool, error) {
+	requireCredKey := strings.TrimSpace(cons.RequireCredentialKey)
+	requireCredType, requireCredID, requireCredOK := parseCredentialKey(requireCredKey)
+	if requireCredKey != "" && !requireCredOK {
+		// Invalid/stale bindings should not hard-fail routing; treat as "no match".
+		return Selection{}, false, nil
+	}
 	switch ch.Type {
 	case store.UpstreamTypeOpenAICompatible:
+		if requireCredKey != "" && requireCredType != CredentialTypeOpenAI {
+			return Selection{}, false, nil
+		}
 		creds, err := s.st.ListOpenAICompatibleCredentialsByEndpoint(ctx, ep.ID)
 		if err != nil {
 			return Selection{}, false, err
@@ -441,6 +474,9 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 		var ids []int64
 		for _, c := range creds {
 			if c.Status != 1 {
+				continue
+			}
+			if requireCredKey != "" && c.ID != requireCredID {
 				continue
 			}
 			key := fmt.Sprintf("%s:%d", CredentialTypeOpenAI, c.ID)
@@ -501,6 +537,9 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			CredentialID:           ids[0],
 		}, true, nil
 	case store.UpstreamTypeAnthropic:
+		if requireCredKey != "" && requireCredType != CredentialTypeAnthropic {
+			return Selection{}, false, nil
+		}
 		creds, err := s.st.ListAnthropicCredentialsByEndpoint(ctx, ep.ID)
 		if err != nil {
 			return Selection{}, false, err
@@ -508,6 +547,9 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 		var ids []int64
 		for _, c := range creds {
 			if c.Status != 1 {
+				continue
+			}
+			if requireCredKey != "" && c.ID != requireCredID {
 				continue
 			}
 			key := fmt.Sprintf("%s:%d", CredentialTypeAnthropic, c.ID)
@@ -568,6 +610,9 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			CredentialID:           ids[0],
 		}, true, nil
 	case store.UpstreamTypeCodexOAuth:
+		if requireCredKey != "" && requireCredType != CredentialTypeCodex {
+			return Selection{}, false, nil
+		}
 		accs, err := s.st.ListCodexOAuthAccountsByEndpoint(ctx, ep.ID)
 		if err != nil {
 			return Selection{}, false, err
@@ -575,6 +620,9 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 		var eligible []store.CodexOAuthAccount
 		for _, a := range accs {
 			if a.Status != 1 {
+				continue
+			}
+			if requireCredKey != "" && a.ID != requireCredID {
 				continue
 			}
 			if a.CooldownUntil != nil && now.Before(*a.CooldownUntil) {
