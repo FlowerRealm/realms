@@ -52,6 +52,8 @@ type Handler struct {
 	refs OpenAIObjectRefStore
 
 	sseOpts upstream.SSEPumpOptions
+
+	codexRouteCache *codexSessionRouteCache
 }
 
 type Doer interface {
@@ -103,6 +105,7 @@ func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *
 		usage:    usage,
 		refs:     refs,
 		sseOpts:  sseOpts,
+		codexRouteCache: newCodexSessionRouteCache(),
 	}
 }
 
@@ -218,6 +221,15 @@ func (h *Handler) finalizeIfCanceled(r *http.Request, usageID int64, sel *schedu
 	}
 	h.finalizeClientDisconnect(r, usageID, sel, reqStart, stream, reqBytes)
 	return true
+}
+
+func (h *Handler) voidQuotaBestEffort(usageID int64) {
+	if h == nil || h.quota == nil || usageID == 0 {
+		return
+	}
+	bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = h.quota.Void(bookCtx, usageID)
 }
 
 func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
@@ -503,6 +515,9 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	if shouldEnableStickyRouting(payload, r, routeKeySource) {
 		stickyRouteKeyHash = routeKeyHash
 	}
+	if stickyRouteKeyHash != "" {
+		r = r.WithContext(withCodexStickyRouteKeyHash(r.Context(), stickyRouteKeyHash))
+	}
 	usageID := int64(0)
 	if h.quota != nil && r != nil && r.URL != nil && r.URL.Path == "/v1/responses" {
 		res, err := h.quota.Reserve(r.Context(), quota.ReserveInput{
@@ -529,11 +544,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	reqBytes := int64(len(body))
 
 	if h.groups == nil && !h.selfMode {
-		if usageID != 0 && h.quota != nil {
-			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = h.quota.Void(bookCtx, usageID)
-			cancel()
-		}
+		h.voidQuotaBestEffort(usageID)
 		h.auditUpstreamError(r.Context(), r.URL.Path, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", 0)
 		cw := &countingResponseWriter{ResponseWriter: w}
 		http.Error(cw, "上游不可用", http.StatusBadGateway)
@@ -545,6 +556,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	router := scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
 	var lastSel *scheduler.Selection
 	bestFailure := proxyFailureInfo{}
+	prevRoute, prevOK := h.getCodexLastSuccessRoute(stickyRouteKeyHash, time.Now())
 	const absoluteMaxAttempts = 1000
 	for i := 0; i < absoluteMaxAttempts; i++ {
 		sel, err := router.Next(r.Context())
@@ -558,26 +570,37 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		lastSel = &selCopy
 		rewritten, err := rewriteBody(sel)
 		if err != nil {
-			if usageID != 0 && h.quota != nil {
-				bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				_ = h.quota.Void(bookCtx, usageID)
-				cancel()
-			}
+			h.voidQuotaBestEffort(usageID)
 			cw := &countingResponseWriter{ResponseWriter: w}
 			http.Error(cw, "请求体处理失败", http.StatusInternalServerError)
 			h.finalizeUsageEvent(r, usageID, &sel, http.StatusInternalServerError, "rewrite_body", "请求体处理失败", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
 			return
 		}
+
+		if prevOK && stickyRouteKeyHash != "" && prevRoute.differs(sel) && codexHasStatefulContinuationSignalsFromBody(rewritten) {
+			resetRes, rErr := resetCodexStatefulContinuation(rewritten)
+			if rErr == nil && resetRes.changed {
+				if !resetRes.hasUserText {
+					h.voidQuotaBestEffort(usageID)
+					h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, optionalString(publicModel), http.StatusConflict, "session_reset_required", 0)
+					cw := &countingResponseWriter{ResponseWriter: w}
+					writeOpenAIError(cw, http.StatusConflict, "session_reset_required", "上游渠道已切换：该请求仅包含续链上下文（compaction/item_reference/previous_response_id），无法跨上游复用。请在 Codex CLI 重启会话/新开对话后重试。")
+					h.maybeLogProxyFailure(r.Context(), r, p, &sel, optionalString(publicModel), http.StatusConflict, "session_reset_required", "session_reset_required", time.Since(reqStart), stream)
+					h.finalizeUsageEvent(r, usageID, &sel, http.StatusConflict, "session_reset_required", "session_reset_required", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
+					return
+				}
+				w.Header().Set("X-Realms-Codex-Session-Reset", "1")
+				w.Header().Set("X-Realms-Codex-Session-Reset-Reason", "upstream_selection_changed")
+				rewritten = resetRes.body
+			}
+		}
+
 		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), usageID, reqStart, reqBytes, 2, &bestFailure) {
 			return
 		}
 	}
 
-	if usageID != 0 && h.quota != nil {
-		bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = h.quota.Void(bookCtx, usageID)
-		cancel()
-	}
+	h.voidQuotaBestEffort(usageID)
 	h.auditUpstreamError(r.Context(), r.URL.Path, p, lastSel, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", 0)
 	cw := &countingResponseWriter{ResponseWriter: w}
 	http.Error(cw, "上游不可用", http.StatusBadGateway)
@@ -676,19 +699,122 @@ func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p aut
 
 func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel scheduler.Selection, body []byte, wantStream bool, model *string, p auth.Principal, usageID int64, reqStart time.Time, reqBytes int64) (proxyAttemptDecision, proxyFailureInfo) {
 	attemptStart := time.Now()
+	resetTried := false
+	var resp *http.Response
+	for attempt := 0; attempt < 2; attempt++ {
+		var err error
+		resp, err = h.exec.Do(r.Context(), sel, r, body)
+		if err != nil {
+			if h.finalizeIfCanceled(r, usageID, &sel, reqStart, wantStream, reqBytes) {
+				return proxyAttemptDone, proxyFailureInfo{}
+			}
+			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: true, ErrorClass: "network"})
+			h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, 0, "network", time.Since(attemptStart))
+			return proxyAttemptRetrySameSelection, proxyFailureInfo{
+				Valid:   true,
+				Class:   "network",
+				Message: trimSummary(err.Error()),
+			}
+		}
 
-	resp, err := h.exec.Do(r.Context(), sel, r, body)
-	if err != nil {
-		if h.finalizeIfCanceled(r, usageID, &sel, reqStart, wantStream, reqBytes) {
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			contentType := resp.Header.Get("Content-Type")
+			isSSE := strings.Contains(strings.ToLower(contentType), "text/event-stream")
+
+			bodyBytes := readPrefixBestEffort(resp.Body, upstreamErrorBodyMaxBytes)
+			if attempt == 0 && !resetTried && isInvalidEncryptedContentUpstreamError(bodyBytes) {
+				resetRes, rErr := resetCodexStatefulContinuation(body)
+				if rErr == nil && resetRes.changed {
+					if resetRes.hasUserText {
+						w.Header().Set("X-Realms-Codex-Session-Reset", "1")
+						w.Header().Set("X-Realms-Codex-Session-Reset-Reason", "invalid_encrypted_content")
+						body = resetRes.body
+						resetTried = true
+						_ = resp.Body.Close()
+						continue
+					}
+					_ = resp.Body.Close()
+					h.voidQuotaBestEffort(usageID)
+					h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, model, http.StatusConflict, "session_reset_required", time.Since(attemptStart))
+					cw := &countingResponseWriter{ResponseWriter: w}
+					writeOpenAIError(cw, http.StatusConflict, "session_reset_required", "上游返回续链错误，且自动重置后无有效内容可发送。请在 Codex CLI 重启会话/新开对话后重试。")
+					h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, http.StatusConflict, "session_reset_required", "session_reset_required", time.Since(attemptStart), wantStream || isSSE)
+					h.finalizeUsageEvent(r, usageID, &sel, http.StatusConflict, "session_reset_required", "session_reset_required", time.Since(reqStart), 0, wantStream || isSSE, reqBytes, cw.bytes)
+					return proxyAttemptDone, proxyFailureInfo{}
+				}
+			}
+			_ = resp.Body.Close()
+
+			codexErr := classifyCodexOAuthUpstreamError(sel, resp.StatusCode, bodyBytes)
+			retriable := isRetriableStatus(resp.StatusCode) || codexErr.retriable()
+			errorClass := "upstream_status"
+			var cooldownUntil *time.Time
+			if codexErr.Kind != codexOAuthErrNone {
+				if cls := codexErr.errorClass(); cls != "" {
+					errorClass = cls
+				}
+				if codexErr.DisableAccount {
+					h.setCodexCredentialDisabled(r.Context(), sel)
+				}
+				if codexErr.MarkBalanceDepleted {
+					h.setCodexCredentialQuotaError(r.Context(), sel, "余额用尽")
+				}
+				if until := codexErr.cooldownUntil(time.Now(), bodyBytes); until != nil {
+					cooldownUntil = until
+					h.setCodexCredentialCooldown(r.Context(), sel, *until)
+				}
+			}
+			if retriable {
+				failMsg := summarizeUpstreamErrorBody(bodyBytes)
+				if strings.TrimSpace(failMsg) == "" {
+					failMsg = strings.TrimSpace(resp.Status)
+				}
+				h.sched.Report(sel, scheduler.Result{
+					Success:       false,
+					Retriable:     true,
+					StatusCode:    resp.StatusCode,
+					ErrorClass:    errorClass,
+					CooldownUntil: cooldownUntil,
+				})
+				h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, errorClass, time.Since(attemptStart))
+				return proxyAttemptFailover, proxyFailureInfo{
+					Valid:      true,
+					Class:      errorClass,
+					StatusCode: resp.StatusCode,
+					Message:    failMsg,
+				}
+			}
+
+			if h.sched != nil {
+				h.sched.Report(sel, scheduler.Result{Success: false, Retriable: false, StatusCode: resp.StatusCode, ErrorClass: "upstream_status"})
+			}
+			h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, "upstream_status", time.Since(attemptStart))
+			cw := &countingResponseWriter{ResponseWriter: w}
+			downstreamStatus := resetStatusCode(resp.StatusCode, sel.StatusCodeMapping)
+			copyResponseHeaders(cw.Header(), resp.Header)
+			cw.WriteHeader(downstreamStatus)
+			n, _ := cw.Write(bodyBytes)
+			respBytes := int64(n)
+
+			failMsg := summarizeUpstreamErrorBody(bodyBytes)
+			logMsg := resp.Status
+			if strings.TrimSpace(failMsg) != "" {
+				logMsg = failMsg
+			}
+			h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, resp.StatusCode, "upstream_status", logMsg, time.Since(attemptStart), wantStream || isSSE)
+			if usageID != 0 && h.quota != nil {
+				bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = h.quota.Void(bookCtx, usageID)
+			}
+			h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "upstream_status", failMsg, time.Since(reqStart), 0, wantStream || isSSE, reqBytes, respBytes)
 			return proxyAttemptDone, proxyFailureInfo{}
 		}
-		h.sched.Report(sel, scheduler.Result{Success: false, Retriable: true, ErrorClass: "network"})
-		h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, 0, "network", time.Since(attemptStart))
-		return proxyAttemptRetrySameSelection, proxyFailureInfo{
-			Valid:   true,
-			Class:   "network",
-			Message: trimSummary(err.Error()),
-		}
+		break
+	}
+
+	if resp == nil {
+		return proxyAttemptDone, proxyFailureInfo{}
 	}
 	defer resp.Body.Close()
 
@@ -708,74 +834,6 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 				recordCreatedObject = true
 			}
 		}
-	}
-
-	// 失败分支：根据状态码决定是否 failover。
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bodyBytes := readPrefixBestEffort(resp.Body, upstreamErrorBodyMaxBytes)
-		codexErr := classifyCodexOAuthUpstreamError(sel, resp.StatusCode, bodyBytes)
-		retriable := isRetriableStatus(resp.StatusCode) || codexErr.retriable()
-		errorClass := "upstream_status"
-		var cooldownUntil *time.Time
-		if codexErr.Kind != codexOAuthErrNone {
-			if cls := codexErr.errorClass(); cls != "" {
-				errorClass = cls
-			}
-			if codexErr.DisableAccount {
-				h.setCodexCredentialDisabled(r.Context(), sel)
-			}
-			if codexErr.MarkBalanceDepleted {
-				h.setCodexCredentialQuotaError(r.Context(), sel, "余额用尽")
-			}
-			if until := codexErr.cooldownUntil(time.Now(), bodyBytes); until != nil {
-				cooldownUntil = until
-				h.setCodexCredentialCooldown(r.Context(), sel, *until)
-			}
-		}
-		if retriable {
-			failMsg := summarizeUpstreamErrorBody(bodyBytes)
-			if strings.TrimSpace(failMsg) == "" {
-				failMsg = strings.TrimSpace(resp.Status)
-			}
-			h.sched.Report(sel, scheduler.Result{
-				Success:       false,
-				Retriable:     true,
-				StatusCode:    resp.StatusCode,
-				ErrorClass:    errorClass,
-				CooldownUntil: cooldownUntil,
-			})
-			h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, errorClass, time.Since(attemptStart))
-			return proxyAttemptFailover, proxyFailureInfo{
-				Valid:      true,
-				Class:      errorClass,
-				StatusCode: resp.StatusCode,
-				Message:    failMsg,
-			}
-		}
-		if h.sched != nil {
-			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: false, StatusCode: resp.StatusCode, ErrorClass: "upstream_status"})
-		}
-		h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, "upstream_status", time.Since(attemptStart))
-		cw := &countingResponseWriter{ResponseWriter: w}
-		downstreamStatus := resetStatusCode(resp.StatusCode, sel.StatusCodeMapping)
-		copyResponseHeaders(cw.Header(), resp.Header)
-		cw.WriteHeader(downstreamStatus)
-		n, _ := cw.Write(bodyBytes)
-		respBytes := int64(n)
-
-		failMsg := summarizeUpstreamErrorBody(bodyBytes)
-		logMsg := resp.Status
-		if strings.TrimSpace(failMsg) != "" {
-			logMsg = failMsg
-		}
-		h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, resp.StatusCode, "upstream_status", logMsg, time.Since(attemptStart), wantStream || isSSE)
-		if usageID != 0 && h.quota != nil {
-			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = h.quota.Void(bookCtx, usageID)
-			cancel()
-		}
-		h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "upstream_status", failMsg, time.Since(reqStart), 0, wantStream || isSSE, reqBytes, respBytes)
-		return proxyAttemptDone, proxyFailureInfo{}
 	}
 
 	// SSE 分支：开始写回后禁止 failover。
@@ -913,6 +971,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		// SSE 已写回后不再 failover，但仍记录结果以用于后续调度权重。
 		if pumpRes.ErrorClass == "" || pumpRes.ErrorClass == "client_disconnect" || pumpRes.ErrorClass == "stream_max_duration" {
 			h.sched.Report(sel, scheduler.Result{Success: true})
+			h.rememberCodexLastSuccessRoute(r, sel)
 		} else {
 			retriable := pumpRes.ErrorClass == "stream_idle_timeout" || pumpRes.ErrorClass == "stream_read_error"
 			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: retriable, StatusCode: resp.StatusCode, ErrorClass: pumpRes.ErrorClass})
@@ -941,8 +1000,8 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		}
 		if usageID != 0 && h.quota != nil {
 			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 			_ = h.quota.Void(bookCtx, usageID)
-			cancel()
 		}
 		h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, "proxy_copy", time.Since(attemptStart))
 		h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, resp.StatusCode, "proxy_copy", copyErr.Error(), time.Since(attemptStart), false)
@@ -973,6 +1032,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 
 	if usageID != 0 && h.quota != nil {
 		bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		_ = h.quota.Commit(bookCtx, quota.CommitInput{
 			UsageEventID:       usageID,
 			Model:              model,
@@ -983,7 +1043,6 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			OutputTokens:       outTok,
 			CachedOutputTokens: cachedOutTok,
 		})
-		cancel()
 	}
 	if h.sched != nil {
 		total := int64(0)
@@ -1004,6 +1063,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		}
 		h.sched.Report(sel, scheduler.Result{Success: true})
 	}
+	h.rememberCodexLastSuccessRoute(r, sel)
 	h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "", "", time.Since(reqStart), 0, false, reqBytes, respBytes)
 	return proxyAttemptDone, proxyFailureInfo{}
 }
