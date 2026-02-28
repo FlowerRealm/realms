@@ -36,7 +36,7 @@ jobs:
       - name: Run Codex (CLI)
         env:
           CODEX_HOME: ${{ github.workspace }}/.github/codex/home
-          MYPROXY_API_KEY: ${{ secrets.MYPROXY_API_KEY }}
+          CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
         run: |
           PROMPT="$(cat .github/codex/prompts/review.md)"
           codex exec --profile pr_review "$PROMPT" > codex-output.md
