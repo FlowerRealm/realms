@@ -369,35 +369,36 @@ VALUES(?, NULL, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 
 	// Optional Skills snapshot (app_settings).
 	// Backward-compat: missing/null field means "leave unchanged".
-	if b.SkillsStoreV1 != nil {
-		raw := strings.TrimSpace(string(b.SkillsStoreV1))
-		if raw != "" && raw != "null" {
-			sv1, err := skills.ParseStoreV1JSON(raw)
-			if err != nil {
-				return err
-			}
-			if err := applySkillsStoreV1(ctx, tx, dialect, sv1); err != nil {
-				return err
-			}
-		}
+	if err := applyOptionalRawMessage(b.SkillsStoreV1, skills.ParseStoreV1JSON, func(sv1 skills.StoreV1) error {
+		return applySkillsStoreV1(ctx, tx, dialect, sv1)
+	}); err != nil {
+		return err
 	}
-	if b.SkillsTargetEnabledV1 != nil {
-		raw := strings.TrimSpace(string(b.SkillsTargetEnabledV1))
-		if raw != "" && raw != "null" {
-			te, err := skills.ParseTargetEnabledV1JSON(raw)
-			if err != nil {
-				return err
-			}
-			if err := applySkillsTargetEnabledV1(ctx, tx, dialect, te); err != nil {
-				return err
-			}
-		}
+	if err := applyOptionalRawMessage(b.SkillsTargetEnabledV1, skills.ParseTargetEnabledV1JSON, func(te skills.TargetEnabledV1) error {
+		return applySkillsTargetEnabledV1(ctx, tx, dialect, te)
+	}); err != nil {
+		return err
 	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
 	return nil
+}
+
+func applyOptionalRawMessage[T any](raw json.RawMessage, parse func(string) (T, error), apply func(T) error) error {
+	if raw == nil {
+		return nil
+	}
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "null" {
+		return nil
+	}
+	v, err := parse(s)
+	if err != nil {
+		return err
+	}
+	return apply(v)
 }
 
 func applyMCPStoreV2(ctx context.Context, tx *sql.Tx, dialect store.Dialect, sv2 mcp.StoreV2) error {

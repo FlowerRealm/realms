@@ -26,7 +26,7 @@ export function skillPromptSummary(desired: SkillV1 | undefined): string {
 
 export function buildUnionRows(opts: {
   desiredSkills: Record<string, SkillV1>;
-  scanTargets?: Record<string, { skills?: Record<string, ScannedSkill> }>;
+  scanTargets?: Partial<Record<SkillsTargetKey, { skills?: Record<string, ScannedSkill> }>>;
   desiredHashes?: Record<string, Partial<Record<SkillsTargetKey, string>>>;
   includeUnmanaged?: boolean;
 }): { unionRows: SkillsUnionRow[]; diffSummary: { nConflict: number; nMissing: number; nNew: number; nUnmanaged: number } } {
@@ -58,7 +58,7 @@ export function buildUnionRows(opts: {
       codex: (scanTargets?.codex?.skills || {})[id],
       claude: (scanTargets?.claude?.skills || {})[id],
       gemini: (scanTargets?.gemini?.skills || {})[id],
-    } as any;
+    };
 
     const enabledByTarget: Record<SkillsTargetKey, boolean> = {
       codex: skillEnabled(desired, 'codex'),

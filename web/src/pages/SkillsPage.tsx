@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom';
 
 import type { SkillV1, SkillsStoreV1, SkillsTargetKey } from '../api/admin/skills';
 import { useAuth } from '../auth/AuthContext';
+import { BootstrapModal } from '../components/BootstrapModal';
 import { closeModalById, showModalById } from '../components/modal';
 
 import { useSkillsManager } from './skills/useSkillsManager';
@@ -38,7 +39,7 @@ function draftToSkill(d: SkillEditDraft): SkillV1 {
   const out: SkillV1 = { id, title, prompt };
   if (desc) out.description = desc;
 
-  const per: any = {};
+  const per: NonNullable<SkillV1['per_target']> = {};
   if (!d.enabledCodex) per.codex = { enabled: false };
   if (!d.enabledClaude) per.claude = { enabled: false };
   if (!d.enabledGemini) per.gemini = { enabled: false };
@@ -49,8 +50,8 @@ function draftToSkill(d: SkillEditDraft): SkillV1 {
 
 function setSkillTargetEnabled(skill: SkillV1, target: SkillsTargetKey, enabled: boolean): SkillV1 {
   const out: SkillV1 = { ...skill };
-  const per = { ...(out.per_target || {}) } as any;
-  const cur = { ...(per[target] || {}) } as any;
+  const per: NonNullable<SkillV1['per_target']> = { ...(out.per_target || {}) };
+  const cur: { enabled?: boolean } = { ...(per[target] || {}) };
 
   if (enabled) {
     delete cur.enabled;
@@ -62,9 +63,9 @@ function setSkillTargetEnabled(skill: SkillV1, target: SkillsTargetKey, enabled:
   else per[target] = cur;
 
   if (Object.keys(per).length === 0) {
-    const { per_target, ...rest } = out as any;
-    void per_target;
-    return rest as SkillV1;
+    const { per_target: _perTarget, ...rest } = out;
+    void _perTarget;
+    return rest;
   }
   out.per_target = per;
   return out;
@@ -105,18 +106,36 @@ export function SkillsPage() {
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
   const [importApplyAfter, setImportApplyAfter] = useState(true);
 
+  type ConfirmState = {
+    title: string;
+    message: string;
+    confirmText: string;
+    confirmBtnClass?: string;
+    reopenModalId?: string;
+    onConfirm: () => Promise<void>;
+  };
+  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+  const confirming = useRef(false);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const confirmAction = useRef<'none' | 'cancel' | 'ok'>('none');
+  const confirmStateRef = useRef<ConfirmState | null>(null);
+
+  useEffect(() => {
+    confirmStateRef.current = confirmState;
+  }, [confirmState]);
+
   const { unionRows, diffSummary } = useMemo(() => {
     return buildUnionRows({
       desiredSkills: (store?.skills || {}) as Record<string, SkillV1>,
-      scanTargets: (scanTargets || undefined) as any,
-      desiredHashes: (desiredHashes || undefined) as any,
+      scanTargets: scanTargets || undefined,
+      desiredHashes: desiredHashes || undefined,
       includeUnmanaged: false,
     });
   }, [store, scanTargets, desiredHashes]);
 
   const [conflictPicks, setConflictPicks] = useState<Record<string, ConflictPick>>({});
   const scanConflicts = useMemo(() => conflictsFromUnion(unionRows, desiredHashes), [unionRows, desiredHashes]);
-  const activeConflicts = (conflicts && conflicts.length ? conflicts : scanConflicts) || [];
+  const activeConflicts = useMemo(() => (conflicts && conflicts.length ? conflicts : scanConflicts) || [], [conflicts, scanConflicts]);
   const conflictModalOpen = useRef(false);
 
   useEffect(() => {
@@ -142,6 +161,33 @@ export function SkillsPage() {
     showModalById('skillsEditModal');
   }
 
+  function openConfirm(next: ConfirmState) {
+    confirming.current = false;
+    confirmAction.current = 'none';
+    setConfirmBusy(false);
+    setConfirmState(next);
+    showModalById('skillsConfirmModal');
+  }
+
+  async function confirmOK() {
+    if (!confirmState || confirming.current) return;
+    confirming.current = true;
+    setConfirmBusy(true);
+    confirmAction.current = 'ok';
+    closeModalById('skillsConfirmModal');
+    try {
+      await confirmState.onConfirm();
+    } finally {
+      confirming.current = false;
+      setConfirmBusy(false);
+    }
+  }
+
+  function confirmCancel() {
+    confirmAction.current = 'cancel';
+    closeModalById('skillsConfirmModal');
+  }
+
   function openEditFromRow(r: SkillsUnionRow) {
     if (!r.desired) return;
     setEditing(r.desired);
@@ -151,8 +197,15 @@ export function SkillsPage() {
   }
 
   async function confirmDelete(id: string) {
-    if (!window.confirm(`确认删除 skill：${id}？（会从 store 删除，并尝试删除目标文件）`)) return;
-    await removeSkill(id);
+    openConfirm({
+      title: '确认删除',
+      message: `确认删除 skill：${id}？（会从 store 删除，并尝试删除目标文件）`,
+      confirmText: '删除',
+      confirmBtnClass: 'btn-danger',
+      onConfirm: async () => {
+        await removeSkill(id);
+      },
+    });
   }
 
   async function saveDraftToStore() {
@@ -184,7 +237,18 @@ export function SkillsPage() {
 
   async function doImport() {
     if (importMode === 'replace') {
-      if (!window.confirm(`确认 replace 导入？这会用 ${importSource} 的实际内容覆盖 Realms 里的全部 skills。`)) return;
+      closeModalById('skillsEditModal');
+      openConfirm({
+        title: '确认 Replace 导入',
+        message: `确认 replace 导入？这会用 ${importSource} 的实际内容覆盖 Realms 里的全部 skills。`,
+        confirmText: '继续导入',
+        confirmBtnClass: 'btn-danger',
+        reopenModalId: 'skillsEditModal',
+        onConfirm: async () => {
+          await importFrom(importSource, importMode, importApplyAfter);
+        },
+      });
+      return;
     }
     closeModalById('skillsEditModal');
     await importFrom(importSource, importMode, importApplyAfter);
@@ -234,6 +298,41 @@ export function SkillsPage() {
 
   return (
     <div className="fade-in-up">
+      <BootstrapModal
+        id="skillsConfirmModal"
+        title={confirmState?.title || '确认操作'}
+        footer={
+          <div className="d-flex gap-2">
+            <button className="btn btn-light border" type="button" onClick={() => confirmCancel()}>
+              取消
+            </button>
+            <button
+              className={`btn ${confirmState?.confirmBtnClass || 'btn-primary'}`.trim()}
+              type="button"
+              disabled={saving || confirmBusy}
+              onClick={() => void confirmOK()}
+            >
+              {confirmState?.confirmText || '确认'}
+            </button>
+          </div>
+        }
+        onHidden={() => {
+          const st = confirmStateRef.current;
+          const act = confirmAction.current;
+          confirmAction.current = 'none';
+          setConfirmState(null);
+          if (!st) return;
+
+          // 用户点遮罩/右上角关闭：等同于取消。
+          const shouldReopen = act !== 'ok';
+          if (shouldReopen && st.reopenModalId) {
+            setTimeout(() => showModalById(st.reopenModalId as string), 200);
+          }
+        }}
+      >
+        <div>{confirmState?.message || ''}</div>
+      </BootstrapModal>
+
       <div className="d-flex justify-content-between align-items-center mb-4">
         <div>
           <h3 className="mb-1 fw-bold">Skills 管理</h3>

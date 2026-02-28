@@ -8,6 +8,7 @@ import {
   importAdminSkills,
   scanAdminSkills,
   updateAdminSkills,
+  type ApplyAdminSkillsRequest,
   type AdminSkillsState,
   type SkillApplyConflict,
   type SkillApplyResult,
@@ -17,7 +18,8 @@ import {
   type SkillsTargetKey,
 } from '../../api/admin/skills';
 
-type ScanTargets = NonNullable<Awaited<ReturnType<typeof scanAdminSkills>>['data']>['targets'];
+type ScanTarget = NonNullable<Awaited<ReturnType<typeof scanAdminSkills>>['data']>['targets'][string];
+type ScanTargets = Partial<Record<SkillsTargetKey, ScanTarget>>;
 
 function emptyStore(): SkillsStoreV1 {
   return { version: 1, skills: {} };
@@ -50,7 +52,7 @@ export type UseSkillsManagerResult = {
   refresh: () => Promise<void>;
   scanNow: (silent?: boolean) => Promise<void>;
   saveStore: (next: SkillsStoreV1, applyOnSave?: boolean) => Promise<void>;
-  applyNow: (opts?: { targets?: string[]; remove_ids?: string[]; force?: boolean; resolutions?: any[] }) => Promise<void>;
+  applyNow: (opts?: Pick<ApplyAdminSkillsRequest, 'targets' | 'remove_ids' | 'force' | 'resolutions'>) => Promise<void>;
   importFrom: (source: SkillsTargetKey, mode: 'merge' | 'replace', applyAfter: boolean) => Promise<void>;
   removeSkill: (id: string) => Promise<void>;
 };
@@ -132,7 +134,7 @@ export function useSkillsManager(): UseSkillsManagerResult {
     }
   }, [refresh]);
 
-  const applyNow = useCallback(async (opts?: { targets?: string[]; remove_ids?: string[]; force?: boolean; resolutions?: any[] }) => {
+  const applyNow = useCallback(async (opts?: Pick<ApplyAdminSkillsRequest, 'targets' | 'remove_ids' | 'force' | 'resolutions'>) => {
     setErr('');
     setNotice('');
     setSaving(true);
@@ -220,7 +222,7 @@ export function useSkillsManager(): UseSkillsManagerResult {
     const desired = new Set(Object.keys(store?.skills || {}));
     const scanned = new Set<string>();
     for (const t of ['codex', 'claude', 'gemini'] as const) {
-      const m = ((scanTargets as any)?.[t]?.skills || {}) as Record<string, { name: string }>;
+      const m = scanTargets?.[t]?.skills || {};
       for (const id of Object.keys(m)) scanned.add(id);
     }
     let unmanaged = 0;

@@ -105,14 +105,19 @@ export function SkillEditModal(props: {
               <option value="gemini">gemini</option>
             </select>
           </div>
-          <div className="col-12 col-lg-6">
-            <label className="form-label">模式</label>
-            <select className="form-select" value={importMode} onChange={(e) => setImportMode(e.target.value as any)} disabled={saving}>
-              <option value="merge">merge</option>
-              <option value="replace">replace</option>
-            </select>
-            <div className="form-text">replace 会覆盖 Realms 内的全部 skills。</div>
-          </div>
+	          <div className="col-12 col-lg-6">
+	            <label className="form-label">模式</label>
+	            <select
+	              className="form-select"
+	              value={importMode}
+	              onChange={(e) => setImportMode(e.target.value === 'replace' ? 'replace' : 'merge')}
+	              disabled={saving}
+	            >
+	              <option value="merge">merge</option>
+	              <option value="replace">replace</option>
+	            </select>
+	            <div className="form-text">replace 会覆盖 Realms 内的全部 skills。</div>
+	          </div>
           <div className="col-12">
             <div className="form-check">
               <input className="form-check-input" type="checkbox" checked={importApplyAfter} onChange={(e) => setImportApplyAfter(e.target.checked)} disabled={saving} />
@@ -167,4 +172,3 @@ export function SkillEditModal(props: {
     </BootstrapModal>
   );
 }
-

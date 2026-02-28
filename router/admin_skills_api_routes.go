@@ -270,7 +270,7 @@ func adminSkillsImportHandler(opts Options) gin.HandlerFunc {
 
 		var req adminSkillsImportReq
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "无效的参数"})
 			return
 		}
 		source := strings.TrimSpace(strings.ToLower(req.Source))
@@ -383,7 +383,7 @@ func adminSkillsPutHandler(opts Options) gin.HandlerFunc {
 
 		var req adminSkillsPutReq
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "无效的参数"})
 			return
 		}
 
@@ -471,7 +471,7 @@ func adminSkillsApplyHandler(opts Options) gin.HandlerFunc {
 		}
 		var req adminSkillsApplyReq
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "无效的参数"})
 			return
 		}
 		force := false
@@ -549,7 +549,7 @@ func adminSkillsDeleteHandler(opts Options) gin.HandlerFunc {
 		}
 		var req adminSkillsDeleteReq
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "无效的参数"})
 			return
 		}
 		id := strings.TrimSpace(req.ID)
