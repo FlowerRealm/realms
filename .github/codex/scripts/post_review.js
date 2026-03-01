@@ -1,5 +1,7 @@
 const fs = require('fs');
 
+const placeholderMarker = '<!-- CODEX_REVIEW_PLACEHOLDER -->';
+
 function readText(path) {
   return fs.readFileSync(path, 'utf8');
 }
@@ -70,18 +72,36 @@ function safeSuggestion(s) {
   return t;
 }
 
-async function postFallbackIssueComment({ github, context, body }) {
-  await github.rest.issues.createComment({
-    owner: context.repo.owner,
-    repo: context.repo.repo,
-    issue_number: Number(context.payload.pull_request?.number || context.payload.issue?.number),
-    body,
-  });
+function appendMarker(body) {
+  const t = String(body || '').trim();
+  if (!t) return placeholderMarker;
+  if (t.includes(placeholderMarker)) return t;
+  return `${t}\n\n${placeholderMarker}`;
+}
+
+async function postFallbackIssueComment({ github, context, body, placeholderCommentID }) {
+  const owner = context.repo.owner;
+  const repo = context.repo.repo;
+  const issueNumber = Number(context.payload.pull_request?.number || context.payload.issue?.number);
+  const finalBody = appendMarker(body);
+
+  if (placeholderCommentID && Number.isFinite(placeholderCommentID) && placeholderCommentID > 0) {
+    await github.rest.issues.updateComment({
+      owner,
+      repo,
+      comment_id: placeholderCommentID,
+      body: finalBody,
+    });
+    return;
+  }
+
+  await github.rest.issues.createComment({ owner, repo, issue_number: issueNumber, body: finalBody });
 }
 
 module.exports = async ({ github, context, core }) => {
   const prNumber = Number(process.env.PR_NUMBER || '');
   const headSha = (process.env.HEAD_SHA || '').trim();
+  const placeholderCommentID = Number(process.env.PLACEHOLDER_COMMENT_ID || '');
 
   if (!Number.isFinite(prNumber) || prNumber <= 0) {
     throw new Error(`invalid PR_NUMBER: ${process.env.PR_NUMBER || ''}`);
@@ -94,7 +114,7 @@ module.exports = async ({ github, context, core }) => {
   const { json, stripped } = extractJSONBlock(raw);
   if (!json) {
     core.warning('missing CODEX_REVIEW_JSON_V1 block; falling back to issue comment');
-    await postFallbackIssueComment({ github, context, body: raw });
+    await postFallbackIssueComment({ github, context, body: raw, placeholderCommentID });
     return;
   }
 
@@ -103,7 +123,7 @@ module.exports = async ({ github, context, core }) => {
     payload = JSON.parse(json);
   } catch (e) {
     core.warning(`invalid CODEX_REVIEW_JSON_V1 JSON; falling back to issue comment: ${e instanceof Error ? e.message : String(e)}`);
-    await postFallbackIssueComment({ github, context, body: raw });
+    await postFallbackIssueComment({ github, context, body: stripped.trim() || raw, placeholderCommentID });
     return;
   }
 
@@ -180,8 +200,17 @@ module.exports = async ({ github, context, core }) => {
       body: reviewBody,
       comments: inlineComments,
     });
+
+    if (placeholderCommentID && Number.isFinite(placeholderCommentID) && placeholderCommentID > 0) {
+      await github.rest.issues.updateComment({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        comment_id: placeholderCommentID,
+        body: appendMarker(reviewBody),
+      });
+    }
   } catch (e) {
     core.warning(`createReview failed; falling back to issue comment: ${e instanceof Error ? e.message : String(e)}`);
-    await postFallbackIssueComment({ github, context, body: raw });
+    await postFallbackIssueComment({ github, context, body: stripped.trim() || raw, placeholderCommentID });
   }
 };
