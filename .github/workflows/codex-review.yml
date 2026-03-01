@@ -21,19 +21,11 @@ jobs:
       pull-requests: write
 
     steps:
-      - name: Mint Codex GitHub App token (optional)
-        id: codex_token
-        if: ${{ secrets.CODEX_GITHUB_APP_ID != '' && secrets.CODEX_GITHUB_APP_PRIVATE_KEY != '' }}
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.CODEX_GITHUB_APP_ID }}
-          private-key: ${{ secrets.CODEX_GITHUB_APP_PRIVATE_KEY }}
-
       - name: Resolve PR context
         id: meta
         uses: actions/github-script@v7
         with:
-          github-token: ${{ steps.codex_token.outputs.token || github.token }}
+          github-token: ${{ github.token }}
           script: |
             const pr = context.payload.pull_request;
             core.setOutput('pr_number', String(pr.number));
@@ -44,7 +36,7 @@ jobs:
         id: placeholder
         uses: actions/github-script@v7
         with:
-          github-token: ${{ steps.codex_token.outputs.token || github.token }}
+          github-token: ${{ github.token }}
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
@@ -58,8 +50,9 @@ jobs:
               per_page: 100,
             });
 
+            const bot = 'github-actions[bot]';
             const existing = (list.data || [])
-              .filter((c) => (c.user?.type || '') === 'Bot')
+              .filter((c) => (c.user?.login || '') === bot)
               .filter((c) => String(c.body || '').includes(marker))
               .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())[0];
 
@@ -110,7 +103,7 @@ jobs:
       - name: Post review (PR review + inline threads)
         uses: actions/github-script@v7
         with:
-          github-token: ${{ steps.codex_token.outputs.token || github.token }}
+          github-token: ${{ github.token }}
           script: |
             const post = require('./.github/codex/scripts/post_review.js');
             process.env.PR_NUMBER = '${{ steps.meta.outputs.pr_number }}';
