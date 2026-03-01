@@ -122,7 +122,7 @@ module.exports = async ({ github, context, core }) => {
     }
     const path = (c?.path || '').trim();
     const body = (c?.body || '').trim();
-    const lineRaw = Number.parseInt(String(c?.line || ''), 10);
+    const lineRaw = Number.parseInt(c?.line, 10);
 
     if (!path || !body) {
       dropped.push({ reason: 'missing path/body', comment: c });
@@ -160,7 +160,12 @@ module.exports = async ({ github, context, core }) => {
 
   let reviewBody = stripped.trim() || '(no summary)';
   if (dropped.length > 0) {
-    const lines = dropped.slice(0, 8).map((d) => `- dropped: ${d.reason}`);
+    const lines = dropped.slice(0, 8).map((d) => {
+      const p = (d?.comment?.path || '').trim();
+      const l = Number.parseInt(d?.comment?.line, 10);
+      const loc = p ? (Number.isFinite(l) ? ` (${p}:${l})` : ` (${p})`) : '';
+      return `- dropped: ${d.reason}${loc}`;
+    });
     if (dropped.length > 8) lines.push(`- dropped: ... (${dropped.length - 8} more)`);
     reviewBody += `\n\n---\n\n### Publisher notes (non-blocking)\n${lines.join('\n')}\n`;
   }
