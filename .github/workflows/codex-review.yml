@@ -10,6 +10,12 @@ concurrency:
 
 jobs:
   codex_review:
+    if: >-
+      ${{
+        github.actor != 'github-actions[bot]' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        secrets.CODEX_API_KEY != ''
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -26,13 +32,11 @@ jobs:
             core.setOutput('pr_number', String(pr.number));
             core.setOutput('base_ref', String(pr.base.ref));
             core.setOutput('head_sha', String(pr.head.sha));
-            core.setOutput('head_repo', String(pr.head.repo.full_name));
-            core.setOutput('head_ref', String(pr.head.ref));
 
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ steps.meta.outputs.base_ref }}
+          ref: ${{ steps.meta.outputs.head_sha }}
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -42,12 +46,7 @@ jobs:
       - name: Generate PR diff
         run: |
           git fetch origin "${{ steps.meta.outputs.base_ref }}" --depth=1
-          if [ "${{ steps.meta.outputs.head_repo }}" = "${{ github.repository }}" ]; then
-            git fetch origin "${{ steps.meta.outputs.head_ref }}" --depth=1
-          else
-            git fetch --no-tags --depth=1 "https://github.com/${{ steps.meta.outputs.head_repo }}.git" "${{ steps.meta.outputs.head_ref }}"
-          fi
-          git diff --unified=3 "origin/${{ steps.meta.outputs.base_ref }}"...FETCH_HEAD > pr.diff || true
+          git diff --unified=3 "origin/${{ steps.meta.outputs.base_ref }}"..."${{ steps.meta.outputs.head_sha }}" > pr.diff || true
 
       - name: Install Codex CLI
         run: npm install -g @openai/codex
