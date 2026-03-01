@@ -11,6 +11,9 @@ import {
 } from '../../api/admin/usage';
 import { DateRangePicker, SelectPicker } from '../../components/DateRangePicker';
 import { SegmentedFrame } from '../../components/SegmentedFrame';
+import { ChannelSuggestInput } from '../../components/ChannelSuggestInput';
+import { ModelSuggestInput } from '../../components/ModelSuggestInput';
+import { UserSuggestInput } from '../../components/UserSuggestInput';
 import { UsageAdvancedFiltersDropdown, type UsageAdvancedFiltersDropdownHandle } from '../../components/UsageAdvancedFiltersDropdown';
 import { formatLatencyPairSeconds, formatSecondsFromMilliseconds } from '../../format/duration';
 import { formatIntComma } from '../../format/int';
@@ -72,9 +75,11 @@ export function UsageAdminPage() {
   const [beforeID, setBeforeID] = useState<number | undefined>(undefined);
   const [afterID, setAfterID] = useState<number | undefined>(undefined);
   const [filterUser, setFilterUser] = useState('');
-  const [filterKey, setFilterKey] = useState('');
+  const [filterUserID, setFilterUserID] = useState<number | undefined>(undefined);
   const [filterChannel, setFilterChannel] = useState('');
   const [filterModel, setFilterModel] = useState('');
+  const [filterChannelID, setFilterChannelID] = useState<number | undefined>(undefined);
+  const [filterModelExact, setFilterModelExact] = useState<string | undefined>(undefined);
   const advRef = useRef<UsageAdvancedFiltersDropdownHandle | null>(null);
 
   const [expandedID, setExpandedID] = useState<number | null>(null);
@@ -112,9 +117,11 @@ export function UsageAdminPage() {
       end: string;
       allTime: boolean;
       filterUser: string;
-      filterKey: string;
+      filterUserID: number | undefined;
       filterChannel: string;
       filterModel: string;
+      filterChannelID: number | undefined;
+      filterModelExact: string | undefined;
     }>;
   }) {
     setErr('');
@@ -126,13 +133,14 @@ export function UsageAdminPage() {
       const allTimeActive = allTimeValue && !startValue && !endValue;
       const indexParts: string[] = [];
       const q_user = (opts?.override?.filterUser ?? filterUser).trim();
-      const q_key = (opts?.override?.filterKey ?? filterKey).trim();
+      const q_user_id = opts?.override?.filterUserID ?? filterUserID;
       const q_channel = (opts?.override?.filterChannel ?? filterChannel).trim();
       const q_model = (opts?.override?.filterModel ?? filterModel).trim();
-      if (q_user) indexParts.push('user');
-      if (q_key) indexParts.push('key');
-      if (q_channel) indexParts.push('channel');
-      if (q_model) indexParts.push('model');
+      if (!q_user_id && q_user) indexParts.push('user');
+      const q_channel_id = opts?.override?.filterChannelID ?? filterChannelID;
+      const q_model_exact = (opts?.override?.filterModelExact ?? filterModelExact) || undefined;
+      if (!q_channel_id && q_channel) indexParts.push('channel');
+      if (!q_model_exact && q_model) indexParts.push('model');
       const index = indexParts.length ? indexParts.join(',') : undefined;
       const params: {
         start?: string;
@@ -141,18 +149,22 @@ export function UsageAdminPage() {
         limit?: number;
         before_id?: number;
         after_id?: number;
+        user_id?: number;
+        upstream_channel_id?: number;
+        model?: string;
         index?: string;
         q_user?: string;
-        q_key?: string;
         q_channel?: string;
         q_model?: string;
       } = {
         limit,
         index,
-        q_user: q_user || undefined,
-        q_key: q_key || undefined,
-        q_channel: q_channel || undefined,
-        q_model: q_model || undefined,
+        user_id: typeof q_user_id === 'number' && q_user_id > 0 ? q_user_id : undefined,
+        q_user: !q_user_id ? q_user || undefined : undefined,
+        upstream_channel_id: typeof q_channel_id === 'number' && q_channel_id > 0 ? q_channel_id : undefined,
+        model: q_model_exact ? q_model_exact : undefined,
+        q_channel: !q_channel_id ? q_channel || undefined : undefined,
+        q_model: !q_model_exact ? q_model || undefined : undefined,
       };
       if (allTimeActive) params.all_time = true;
       else {
@@ -428,21 +440,25 @@ export function UsageAdminPage() {
                         value: filterUser,
                         onChange: (v) => {
                           setFilterUser(v);
+                          setFilterUserID(undefined);
                           setBeforeID(undefined);
                           setAfterID(undefined);
                         },
-                      },
-                      {
-                        inputId: 'adminUsageFilterKeyValue',
-                        label: 'Key',
-                        title: 'Key 名称',
-                        placeholder: '输入 Key 名称',
-                        value: filterKey,
-                        onChange: (v) => {
-                          setFilterKey(v);
-                          setBeforeID(undefined);
-                          setAfterID(undefined);
-                        },
+                        render: ({ id, value, onChange, placeholder, disabled }) => (
+                          <UserSuggestInput
+                            id={id}
+                            value={value}
+                            placeholder={placeholder}
+                            disabled={disabled}
+                            onChange={onChange}
+                            onSelect={(u) => {
+                              setFilterUserID(u.id);
+                              setFilterUser(u.email || `@${u.username}`);
+                              setBeforeID(undefined);
+                              setAfterID(undefined);
+                            }}
+                          />
+                        ),
                       },
                       {
                         inputId: 'adminUsageFilterChannelValue',
@@ -452,8 +468,32 @@ export function UsageAdminPage() {
                         value: filterChannel,
                         onChange: (v) => {
                           setFilterChannel(v);
+                          setFilterChannelID(undefined);
                           setBeforeID(undefined);
                           setAfterID(undefined);
+                        },
+                        render: ({ id, value, onChange, placeholder, disabled }) => {
+                          const startValue = start.trim();
+                          const endValue = end.trim();
+                          const allTimeActive = !!allTime && !startValue && !endValue;
+                          return (
+                            <ChannelSuggestInput
+                              id={id}
+                              value={value}
+                              placeholder={placeholder}
+                              disabled={disabled}
+                              start={allTimeActive ? undefined : startValue || undefined}
+                              end={allTimeActive ? undefined : endValue || undefined}
+                              allTime={allTimeActive}
+                              onChange={onChange}
+                              onSelect={(ch) => {
+                                setFilterChannelID(ch.id);
+                                setFilterChannel(ch.name);
+                                setBeforeID(undefined);
+                                setAfterID(undefined);
+                              }}
+                            />
+                          );
                         },
                       },
                       {
@@ -464,8 +504,32 @@ export function UsageAdminPage() {
                         value: filterModel,
                         onChange: (v) => {
                           setFilterModel(v);
+                          setFilterModelExact(undefined);
                           setBeforeID(undefined);
                           setAfterID(undefined);
+                        },
+                        render: ({ id, value, onChange, placeholder, disabled }) => {
+                          const startValue = start.trim();
+                          const endValue = end.trim();
+                          const allTimeActive = !!allTime && !startValue && !endValue;
+                          return (
+                            <ModelSuggestInput
+                              id={id}
+                              value={value}
+                              placeholder={placeholder}
+                              disabled={disabled}
+                              start={allTimeActive ? undefined : startValue || undefined}
+                              end={allTimeActive ? undefined : endValue || undefined}
+                              allTime={allTimeActive}
+                              onChange={onChange}
+                              onSelect={(m) => {
+                                setFilterModelExact(m);
+                                setFilterModel(m);
+                                setBeforeID(undefined);
+                                setAfterID(undefined);
+                              }}
+                            />
+                          );
                         },
                       },
                     ]}
@@ -496,9 +560,11 @@ export function UsageAdminPage() {
                       setAllTime(false);
                       advRef.current?.close();
                       setFilterUser('');
-                      setFilterKey('');
+                      setFilterUserID(undefined);
                       setFilterChannel('');
                       setFilterModel('');
+                      setFilterChannelID(undefined);
+                      setFilterModelExact(undefined);
                       setBeforeID(undefined);
                       setAfterID(undefined);
                       void refresh({
@@ -507,9 +573,11 @@ export function UsageAdminPage() {
                           end: '',
                           allTime: false,
                           filterUser: '',
-                          filterKey: '',
+                          filterUserID: undefined,
                           filterChannel: '',
                           filterModel: '',
+                          filterChannelID: undefined,
+                          filterModelExact: undefined,
                         },
                       });
                     }}

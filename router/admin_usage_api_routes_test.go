@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -186,7 +187,7 @@ func TestAdminUsagePage_EventIncludesFirstTokenLatencyAndTokensPerSecond(t *test
 	}
 }
 
-func TestAdminUsagePage_IndexFilters_UserKeyAndChannel(t *testing.T) {
+func TestAdminUsagePage_IndexFilters_UserChannelAndModel(t *testing.T) {
 	st, closeDB := newTestSQLiteStore(t)
 	defer closeDB()
 
@@ -290,9 +291,6 @@ func TestAdminUsagePage_IndexFilters_UserKeyAndChannel(t *testing.T) {
 	if events := list("http://example.com/api/admin/usage?index=user&q=alice"); len(events) != 2 {
 		t.Fatalf("expected 2 events for user=alice, got %d", len(events))
 	}
-	if events := list("http://example.com/api/admin/usage?index=key&q=root-key"); len(events) != 1 {
-		t.Fatalf("expected 1 event for key=root-key, got %d", len(events))
-	}
 	if events := list("http://example.com/api/admin/usage?index=channel&q=channel-2"); len(events) != 2 {
 		t.Fatalf("expected 2 events for channel-2, got %d", len(events))
 	}
@@ -300,7 +298,19 @@ func TestAdminUsagePage_IndexFilters_UserKeyAndChannel(t *testing.T) {
 		t.Fatalf("expected 0 event for missing channel id, got %d", len(events))
 	}
 
-	events := list("http://example.com/api/admin/usage?index=user,key,channel,model&q_user=alice&q_key=alice-key&q_channel=channel-2&q_model=gpt")
+	baseline := list("http://example.com/api/admin/usage")
+	if len(baseline) != 3 {
+		t.Fatalf("expected baseline 3 events, got %d", len(baseline))
+	}
+	// /admin/usage does not index key; index=key/q_key should be ignored for compatibility.
+	if events := list("http://example.com/api/admin/usage?index=key&q=root-key"); len(events) != len(baseline) {
+		t.Fatalf("expected index=key to be ignored (len=%d), got %d", len(baseline), len(events))
+	}
+	if events := list("http://example.com/api/admin/usage?q_key=alice-key"); len(events) != len(baseline) {
+		t.Fatalf("expected q_key to be ignored (len=%d), got %d", len(baseline), len(events))
+	}
+
+	events := list("http://example.com/api/admin/usage?index=user,channel,model&q_user=alice&q_channel=channel-2&q_model=gpt")
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event for AND filters, got %d", len(events))
 	}
@@ -403,6 +413,580 @@ func TestAdminUsagePage_UpstreamUnavailable_ShowsDetailedErrorMessage(t *testing
 	}
 	if ev.ErrorMessage != errMsg {
 		t.Fatalf("expected error_message=%q, got %q", errMsg, ev.ErrorMessage)
+	}
+}
+
+func TestAdminUsagePage_UserIDFilter_Works(t *testing.T) {
+	st, closeDB := newTestSQLiteStore(t)
+	defer closeDB()
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	rootID, err := st.CreateUser(ctx, "root_userid_filter@example.com", "rootuseridfilter", pwHash, store.UserRoleRoot)
+	if err != nil {
+		t.Fatalf("CreateUser(root): %v", err)
+	}
+	aliceID, err := st.CreateUser(ctx, "alice_userid_filter@example.com", "aliceuseridfilter", pwHash, store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser(alice): %v", err)
+	}
+
+	rootTokenID, _, err := st.CreateUserToken(ctx, rootID, nil, "tok_root_userid_filter")
+	if err != nil {
+		t.Fatalf("CreateUserToken(root): %v", err)
+	}
+	aliceTokenID, _, err := st.CreateUserToken(ctx, aliceID, nil, "tok_alice_userid_filter")
+	if err != nil {
+		t.Fatalf("CreateUserToken(alice): %v", err)
+	}
+	ch1, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "channel-userid-filter-1", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel(ch1): %v", err)
+	}
+
+	createEvent := func(userID int64, tokenID int64, requestID string) {
+		model := "gpt-5.2"
+		usageID, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
+			RequestID:        requestID,
+			UserID:           userID,
+			TokenID:          tokenID,
+			Model:            &model,
+			ReservedUSD:      decimal.Zero,
+			ReserveExpiresAt: time.Now().Add(time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("ReserveUsage(%s): %v", requestID, err)
+		}
+		chRef := ch1
+		if err := st.CommitUsage(ctx, store.CommitUsageInput{
+			UsageEventID:      usageID,
+			UpstreamChannelID: &chRef,
+			CommittedUSD:      decimal.Zero,
+		}); err != nil {
+			t.Fatalf("CommitUsage(%s): %v", requestID, err)
+		}
+		if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
+			UsageEventID:      usageID,
+			Endpoint:          "/v1/responses",
+			Method:            "POST",
+			StatusCode:        200,
+			UpstreamChannelID: &chRef,
+		}); err != nil {
+			t.Fatalf("FinalizeUsageEvent(%s): %v", requestID, err)
+		}
+	}
+
+	createEvent(rootID, rootTokenID, "req_userid_filter_root")
+	createEvent(aliceID, aliceTokenID, "req_userid_filter_alice_1")
+	createEvent(aliceID, aliceTokenID, "req_userid_filter_alice_2")
+
+	engine, cookieName := newTestEngine(t, st)
+	sessionCookie := loginCookie(t, engine, cookieName, "root_userid_filter@example.com", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage?user_id="+strconv.FormatInt(aliceID, 10), nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(rootID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("admin usage status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Events []map[string]any `json:"events"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal admin usage: %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("admin usage expected success, got message=%q", got.Message)
+	}
+	if len(got.Data.Events) != 2 {
+		t.Fatalf("expected 2 events for user_id=%d, got %d", aliceID, len(got.Data.Events))
+	}
+	for _, e := range got.Data.Events {
+		idAny, ok := e["user_id"]
+		if !ok {
+			t.Fatalf("missing user_id in event: %v", e)
+		}
+		idNum, ok := idAny.(float64)
+		if !ok {
+			t.Fatalf("unexpected user_id type %T value=%v", idAny, idAny)
+		}
+		if int64(idNum) != aliceID {
+			t.Fatalf("expected user_id=%d, got %v", aliceID, idAny)
+		}
+	}
+}
+
+func TestAdminUsageUsersSuggest_StripsAtPrefix(t *testing.T) {
+	st, closeDB := newTestSQLiteStore(t)
+	defer closeDB()
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	rootID, err := st.CreateUser(ctx, "root_suggest@example.com", "rootsuggest", pwHash, store.UserRoleRoot)
+	if err != nil {
+		t.Fatalf("CreateUser(root): %v", err)
+	}
+	aliceID, err := st.CreateUser(ctx, "alice_suggest@example.com", "alice", pwHash, store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser(alice): %v", err)
+	}
+
+	engine, cookieName := newTestEngine(t, st)
+	sessionCookie := loginCookie(t, engine, cookieName, "root_suggest@example.com", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage/users/suggest?q=@ali", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(rootID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("admin suggest status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal admin suggest: %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("admin suggest expected success, got message=%q", got.Message)
+	}
+	found := false
+	for _, v := range got.Data {
+		if v.ID == aliceID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected suggest to include alice id=%d, got=%v", aliceID, got.Data)
+	}
+}
+
+func TestAdminUsagePage_UpstreamChannelIDFilter_Works(t *testing.T) {
+	st, closeDB := newTestSQLiteStore(t)
+	defer closeDB()
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	rootID, err := st.CreateUser(ctx, "root_chid_filter@example.com", "rootchidfilter", pwHash, store.UserRoleRoot)
+	if err != nil {
+		t.Fatalf("CreateUser(root): %v", err)
+	}
+	aliceID, err := st.CreateUser(ctx, "alice_chid_filter@example.com", "alicechidfilter", pwHash, store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser(alice): %v", err)
+	}
+
+	rootTokenID, _, err := st.CreateUserToken(ctx, rootID, nil, "tok_root_chid_filter")
+	if err != nil {
+		t.Fatalf("CreateUserToken(root): %v", err)
+	}
+	aliceTokenID, _, err := st.CreateUserToken(ctx, aliceID, nil, "tok_alice_chid_filter")
+	if err != nil {
+		t.Fatalf("CreateUserToken(alice): %v", err)
+	}
+
+	ch1, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "chid-channel-1", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel(ch1): %v", err)
+	}
+	ch2, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "chid-channel-2", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel(ch2): %v", err)
+	}
+
+	createEvent := func(userID int64, tokenID int64, requestID string, chID int64) {
+		model := "gpt-5.2"
+		usageID, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
+			RequestID:        requestID,
+			UserID:           userID,
+			TokenID:          tokenID,
+			Model:            &model,
+			ReservedUSD:      decimal.Zero,
+			ReserveExpiresAt: time.Now().Add(time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("ReserveUsage(%s): %v", requestID, err)
+		}
+		chRef := chID
+		if err := st.CommitUsage(ctx, store.CommitUsageInput{
+			UsageEventID:      usageID,
+			UpstreamChannelID: &chRef,
+			CommittedUSD:      decimal.Zero,
+		}); err != nil {
+			t.Fatalf("CommitUsage(%s): %v", requestID, err)
+		}
+		if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
+			UsageEventID:      usageID,
+			Endpoint:          "/v1/responses",
+			Method:            "POST",
+			StatusCode:        200,
+			UpstreamChannelID: &chRef,
+		}); err != nil {
+			t.Fatalf("FinalizeUsageEvent(%s): %v", requestID, err)
+		}
+	}
+
+	createEvent(rootID, rootTokenID, "req_chid_filter_root", ch1)
+	createEvent(aliceID, aliceTokenID, "req_chid_filter_alice_1", ch2)
+	createEvent(aliceID, aliceTokenID, "req_chid_filter_alice_2", ch2)
+
+	engine, cookieName := newTestEngine(t, st)
+	sessionCookie := loginCookie(t, engine, cookieName, "root_chid_filter@example.com", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage?upstream_channel_id="+strconv.FormatInt(ch2, 10), nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(rootID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("admin usage status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Events []map[string]any `json:"events"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal admin usage: %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("admin usage expected success, got message=%q", got.Message)
+	}
+	if len(got.Data.Events) != 2 {
+		t.Fatalf("expected 2 events for upstream_channel_id=%d, got %d", ch2, len(got.Data.Events))
+	}
+}
+
+func TestAdminUsagePage_ModelExactFilter_Works(t *testing.T) {
+	st, closeDB := newTestSQLiteStore(t)
+	defer closeDB()
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	rootID, err := st.CreateUser(ctx, "root_model_filter@example.com", "rootmodelfilter", pwHash, store.UserRoleRoot)
+	if err != nil {
+		t.Fatalf("CreateUser(root): %v", err)
+	}
+
+	tokenID, _, err := st.CreateUserToken(ctx, rootID, nil, "tok_root_model_filter")
+	if err != nil {
+		t.Fatalf("CreateUserToken(root): %v", err)
+	}
+	ch1, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "model-channel-1", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel(ch1): %v", err)
+	}
+
+	createEvent := func(requestID string, model string) {
+		usageID, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
+			RequestID:        requestID,
+			UserID:           rootID,
+			TokenID:          tokenID,
+			Model:            &model,
+			ReservedUSD:      decimal.Zero,
+			ReserveExpiresAt: time.Now().Add(time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("ReserveUsage(%s): %v", requestID, err)
+		}
+		chRef := ch1
+		if err := st.CommitUsage(ctx, store.CommitUsageInput{
+			UsageEventID:      usageID,
+			UpstreamChannelID: &chRef,
+			CommittedUSD:      decimal.Zero,
+		}); err != nil {
+			t.Fatalf("CommitUsage(%s): %v", requestID, err)
+		}
+		if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
+			UsageEventID:      usageID,
+			Endpoint:          "/v1/responses",
+			Method:            "POST",
+			StatusCode:        200,
+			UpstreamChannelID: &chRef,
+		}); err != nil {
+			t.Fatalf("FinalizeUsageEvent(%s): %v", requestID, err)
+		}
+	}
+
+	createEvent("req_model_exact_1", "gpt-5.2")
+	createEvent("req_model_exact_2", "gpt-4.1")
+
+	engine, cookieName := newTestEngine(t, st)
+	sessionCookie := loginCookie(t, engine, cookieName, "root_model_filter@example.com", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage?model=gpt-5.2", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(rootID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("admin usage status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Events []map[string]any `json:"events"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal admin usage: %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("admin usage expected success, got message=%q", got.Message)
+	}
+	if len(got.Data.Events) != 1 {
+		t.Fatalf("expected 1 event for model=gpt-5.2, got %d", len(got.Data.Events))
+	}
+	if m, _ := got.Data.Events[0]["model"].(string); m != "gpt-5.2" {
+		t.Fatalf("expected model=gpt-5.2, got %v", got.Data.Events[0]["model"])
+	}
+}
+
+func TestAdminUsageSuggest_Channels_RangeScoped(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	rootID, err := st.CreateUser(ctx, "root_suggest_ch@example.com", "rootsuggestch", pwHash, store.UserRoleRoot)
+	if err != nil {
+		t.Fatalf("CreateUser(root): %v", err)
+	}
+	tokenID, _, err := st.CreateUserToken(ctx, rootID, nil, "tok_suggest_ch")
+	if err != nil {
+		t.Fatalf("CreateUserToken: %v", err)
+	}
+	chIn, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "c-in", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel(chIn): %v", err)
+	}
+	chOut, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "c-out", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel(chOut): %v", err)
+	}
+
+	createEvent := func(requestID string, chID int64) int64 {
+		model := "gpt-5.2"
+		usageID, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
+			RequestID:        requestID,
+			UserID:           rootID,
+			TokenID:          tokenID,
+			Model:            &model,
+			ReservedUSD:      decimal.Zero,
+			ReserveExpiresAt: time.Now().Add(time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("ReserveUsage(%s): %v", requestID, err)
+		}
+		chRef := chID
+		if err := st.CommitUsage(ctx, store.CommitUsageInput{
+			UsageEventID:      usageID,
+			UpstreamChannelID: &chRef,
+			CommittedUSD:      decimal.Zero,
+		}); err != nil {
+			t.Fatalf("CommitUsage(%s): %v", requestID, err)
+		}
+		if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
+			UsageEventID:      usageID,
+			Endpoint:          "/v1/responses",
+			Method:            "POST",
+			StatusCode:        200,
+			UpstreamChannelID: &chRef,
+		}); err != nil {
+			t.Fatalf("FinalizeUsageEvent(%s): %v", requestID, err)
+		}
+		return usageID
+	}
+
+	_ = createEvent("req_suggest_ch_in", chIn)
+	outID := createEvent("req_suggest_ch_out", chOut)
+
+	oldTime := time.Now().UTC().Add(-48 * time.Hour)
+	oldTimeStr := oldTime.Format("2006-01-02 15:04:05")
+	if _, err := db.ExecContext(ctx, `UPDATE usage_events SET time=? WHERE id=?`, oldTimeStr, outID); err != nil {
+		t.Fatalf("update usage_events.time: %v", err)
+	}
+
+	loc, _ := time.LoadLocation("Asia/Shanghai")
+	day := time.Now().In(loc).Format("2006-01-02")
+
+	engine, cookieName := newTestEngine(t, st)
+	sessionCookie := loginCookie(t, engine, cookieName, "root_suggest_ch@example.com", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage/channels/suggest?q=c-&start="+day+"&end="+day, nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(rootID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("admin usage channels suggest status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal channels suggest: %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("channels suggest expected success, got message=%q", got.Message)
+	}
+	if len(got.Data) != 1 {
+		t.Fatalf("expected 1 channel suggest, got %d", len(got.Data))
+	}
+	if got.Data[0].ID != chIn {
+		t.Fatalf("expected channel id=%d, got %d", chIn, got.Data[0].ID)
+	}
+}
+
+func TestAdminUsageSuggest_Models_RangeScoped(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	rootID, err := st.CreateUser(ctx, "root_suggest_model@example.com", "rootsuggestmodel", pwHash, store.UserRoleRoot)
+	if err != nil {
+		t.Fatalf("CreateUser(root): %v", err)
+	}
+	tokenID, _, err := st.CreateUserToken(ctx, rootID, nil, "tok_suggest_model")
+	if err != nil {
+		t.Fatalf("CreateUserToken: %v", err)
+	}
+	ch1, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "m1", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel(ch1): %v", err)
+	}
+
+	createEvent := func(requestID string, model string) int64 {
+		usageID, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
+			RequestID:        requestID,
+			UserID:           rootID,
+			TokenID:          tokenID,
+			Model:            &model,
+			ReservedUSD:      decimal.Zero,
+			ReserveExpiresAt: time.Now().Add(time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("ReserveUsage(%s): %v", requestID, err)
+		}
+		chRef := ch1
+		if err := st.CommitUsage(ctx, store.CommitUsageInput{
+			UsageEventID:      usageID,
+			UpstreamChannelID: &chRef,
+			CommittedUSD:      decimal.Zero,
+		}); err != nil {
+			t.Fatalf("CommitUsage(%s): %v", requestID, err)
+		}
+		if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
+			UsageEventID:      usageID,
+			Endpoint:          "/v1/responses",
+			Method:            "POST",
+			StatusCode:        200,
+			UpstreamChannelID: &chRef,
+		}); err != nil {
+			t.Fatalf("FinalizeUsageEvent(%s): %v", requestID, err)
+		}
+		return usageID
+	}
+
+	_ = createEvent("req_suggest_model_in", "gpt-5.2")
+	outID := createEvent("req_suggest_model_out", "gpt-4.1")
+	oldTime := time.Now().UTC().Add(-48 * time.Hour)
+	oldTimeStr := oldTime.Format("2006-01-02 15:04:05")
+	if _, err := db.ExecContext(ctx, `UPDATE usage_events SET time=? WHERE id=?`, oldTimeStr, outID); err != nil {
+		t.Fatalf("update usage_events.time: %v", err)
+	}
+
+	loc, _ := time.LoadLocation("Asia/Shanghai")
+	day := time.Now().In(loc).Format("2006-01-02")
+
+	engine, cookieName := newTestEngine(t, st)
+	sessionCookie := loginCookie(t, engine, cookieName, "root_suggest_model@example.com", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage/models/suggest?q=gpt&start="+day+"&end="+day, nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(rootID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("admin usage models suggest status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    []struct {
+			Model string `json:"model"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal models suggest: %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("models suggest expected success, got message=%q", got.Message)
+	}
+	if len(got.Data) != 1 {
+		t.Fatalf("expected 1 model suggest, got %d", len(got.Data))
+	}
+	if got.Data[0].Model != "gpt-5.2" {
+		t.Fatalf("expected model=gpt-5.2, got %q", got.Data[0].Model)
 	}
 }
 

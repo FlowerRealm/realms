@@ -585,6 +585,45 @@ tr:hover .rlm-model-icon {
   overflow-x: hidden;
 }
 
+/* Anchored popovers: enter top->down, leave reverse. */
+.rlm-popover {
+  will-change: transform, opacity;
+  transform: translateY(-8px);
+  opacity: 0;
+}
+.rlm-popover.rlm-popover-enter {
+  transform: translateY(0);
+  opacity: 1;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+.rlm-popover.rlm-popover-leave {
+  transform: translateY(-8px);
+  opacity: 0;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rlm-popover,
+  .rlm-popover.rlm-popover-enter,
+  .rlm-popover.rlm-popover-leave {
+    transition: none !important;
+    transform: none !important;
+  }
+}
+
+/* Suggest dropdown: small, separate box (not the advanced filter panel). */
+.rlm-suggest-dropdown {
+  background: var(--rlm-surface-0, #fff);
+  border: 1px solid var(--rlm-border-soft, rgba(0, 0, 0, 0.08));
+  border-radius: 10px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+  max-height: min(320px, calc(100vh - 24px));
+  overflow-y: auto;
+}
+.rlm-suggest-dropdown .list-group-item {
+  border: 0;
+}
+
 /* Usage filters dropdown: single-row layout on desktop. */
 .rlm-usage-filter-panel .rlm-usage-filter-row {
   display: flex;

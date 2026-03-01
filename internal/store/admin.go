@@ -8,6 +8,12 @@ import (
 	"strings"
 )
 
+type UserLookup struct {
+	ID       int64
+	Email    string
+	Username string
+}
+
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT
@@ -32,6 +38,48 @@ ORDER BY id DESC
 		return nil, fmt.Errorf("遍历 users 失败: %w", err)
 	}
 
+	return out, nil
+}
+
+func (s *Store) SuggestUsers(ctx context.Context, q string, limit int) ([]UserLookup, error) {
+	q = strings.TrimSpace(q)
+	if strings.HasPrefix(q, "@") {
+		q = strings.TrimSpace(strings.TrimPrefix(q, "@"))
+	}
+	if q == "" {
+		return []UserLookup{}, nil
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	p := strings.ToLower(buildLikePattern(q))
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, email, username
+FROM users
+WHERE LOWER(email) LIKE ? OR LOWER(username) LIKE ?
+ORDER BY id DESC
+LIMIT ?
+`, p, p, limit)
+	if err != nil {
+		return nil, fmt.Errorf("查询 users suggest 失败: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]UserLookup, 0, limit)
+	for rows.Next() {
+		var v UserLookup
+		if err := rows.Scan(&v.ID, &v.Email, &v.Username); err != nil {
+			return nil, fmt.Errorf("扫描 users suggest 失败: %w", err)
+		}
+		out = append(out, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历 users suggest 失败: %w", err)
+	}
 	return out, nil
 }
 

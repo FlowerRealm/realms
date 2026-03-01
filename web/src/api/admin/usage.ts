@@ -137,14 +137,46 @@ export async function getAdminUsagePage(params: {
   limit?: number;
   before_id?: number;
   after_id?: number;
+  user_id?: number;
+  upstream_channel_id?: number;
+  model?: string;
   index?: string;
   q?: string;
   q_user?: string;
-  q_key?: string;
   q_channel?: string;
   q_model?: string;
 }) {
   const res = await api.get<APIResponse<AdminUsagePage>>('/api/admin/usage', { params });
+  return res.data;
+}
+
+export type AdminUsageUserSuggest = {
+  id: number;
+  email: string;
+  username: string;
+};
+
+export async function getAdminUsageUserSuggest(q: string, limit = 20) {
+  const params = { q, limit };
+  const res = await api.get<APIResponse<AdminUsageUserSuggest[]>>('/api/admin/usage/users/suggest', { params });
+  return res.data;
+}
+
+export type AdminUsageChannelSuggest = {
+  id: number;
+  name: string;
+  type: string;
+};
+
+export async function getAdminUsageChannelSuggest(params: { q: string; limit?: number; start?: string; end?: string; all_time?: boolean }) {
+  const res = await api.get<APIResponse<AdminUsageChannelSuggest[]>>('/api/admin/usage/channels/suggest', { params });
+  return res.data;
+}
+
+export type AdminUsageModelSuggest = { model: string };
+
+export async function getAdminUsageModelSuggest(params: { q: string; limit?: number; start?: string; end?: string; all_time?: boolean }) {
+  const res = await api.get<APIResponse<AdminUsageModelSuggest[]>>('/api/admin/usage/models/suggest', { params });
   return res.data;
 }
 

@@ -109,6 +109,9 @@ type adminUsageTimeSeriesResponse struct {
 
 func setAdminUsageAPIRoutes(r gin.IRoutes, opts Options) {
 	r.GET("/usage", adminUsagePageHandler(opts))
+	r.GET("/usage/users/suggest", adminUsageUsersSuggestHandler(opts))
+	r.GET("/usage/channels/suggest", adminUsageChannelsSuggestHandler(opts))
+	r.GET("/usage/models/suggest", adminUsageModelsSuggestHandler(opts))
 	r.GET("/usage/events/:event_id/detail", adminUsageEventDetailHandler(opts))
 	r.GET("/usage/timeseries", adminUsageTimeSeriesHandler(opts))
 }
@@ -122,6 +125,231 @@ func adminUsageFeatureDisabled(c *gin.Context, opts Options) bool {
 		return true
 	}
 	return false
+}
+
+type adminUsageResolvedRange struct {
+	Since      time.Time
+	Until      time.Time
+	SinceLocal time.Time
+	UntilLocal time.Time
+	StartStr   string
+	EndStr     string
+}
+
+func adminUsageResolveRange(c *gin.Context, opts Options, loc *time.Location, nowUTC time.Time, startStr string, endStr string, allTime bool) (adminUsageResolvedRange, bool) {
+	if c == nil || loc == nil {
+		return adminUsageResolvedRange{}, false
+	}
+
+	now := nowUTC.In(loc)
+	todayStartLocal := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	todayStr := todayStartLocal.Format("2006-01-02")
+
+	startStr = strings.TrimSpace(startStr)
+	endStr = strings.TrimSpace(endStr)
+	if allTime {
+		s, e, has, ok := resolveAllTimeGlobalStartEnd(c, opts, loc, todayStr)
+		if !ok {
+			return adminUsageResolvedRange{}, false
+		}
+		if has {
+			startStr = s
+			endStr = e
+		}
+	}
+	if startStr == "" {
+		startStr = todayStr
+	}
+	if endStr == "" {
+		endStr = startStr
+	}
+
+	sinceLocal, err := time.ParseInLocation("2006-01-02", startStr, loc)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "start 不合法（格式：YYYY-MM-DD）"})
+		return adminUsageResolvedRange{}, false
+	}
+	endDateLocal, err := time.ParseInLocation("2006-01-02", endStr, loc)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "end 不合法（格式：YYYY-MM-DD）"})
+		return adminUsageResolvedRange{}, false
+	}
+	if sinceLocal.After(endDateLocal) {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "start 不能晚于 end"})
+		return adminUsageResolvedRange{}, false
+	}
+	if endDateLocal.After(todayStartLocal) {
+		endDateLocal = todayStartLocal
+		endStr = todayStr
+	}
+	untilLocal := endDateLocal.AddDate(0, 0, 1)
+	if endStr == todayStr {
+		untilLocal = now
+	}
+
+	return adminUsageResolvedRange{
+		Since:      sinceLocal.UTC(),
+		Until:      untilLocal.UTC(),
+		SinceLocal: sinceLocal,
+		UntilLocal: untilLocal,
+		StartStr:   startStr,
+		EndStr:     endStr,
+	}, true
+}
+
+type adminUsageUserSuggestView struct {
+	ID       int64  `json:"id"`
+	Email    string `json:"email"`
+	Username string `json:"username"`
+}
+
+func adminUsageUsersSuggestHandler(opts Options) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if opts.Store == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			return
+		}
+		if adminUsageFeatureDisabled(c, opts) {
+			return
+		}
+
+		q := strings.TrimSpace(c.Query("q"))
+		if q == "" {
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": []adminUsageUserSuggestView{}})
+			return
+		}
+
+		limit := 20
+		if v := strings.TrimSpace(c.Query("limit")); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "limit 不合法"})
+				return
+			}
+			limit = n
+		}
+		if limit <= 0 {
+			limit = 20
+		}
+		if limit > 50 {
+			limit = 50
+		}
+
+		users, err := opts.Store.SuggestUsers(c.Request.Context(), q, limit)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
+			return
+		}
+		out := make([]adminUsageUserSuggestView, 0, len(users))
+		for _, u := range users {
+			out = append(out, adminUsageUserSuggestView{ID: u.ID, Email: u.Email, Username: u.Username})
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": out})
+	}
+}
+
+type adminUsageChannelSuggestView struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+func adminUsageChannelsSuggestHandler(opts Options) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if opts.Store == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			return
+		}
+		if adminUsageFeatureDisabled(c, opts) {
+			return
+		}
+
+		q := strings.TrimSpace(c.Query("q"))
+		if q == "" {
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": []adminUsageChannelSuggestView{}})
+			return
+		}
+
+		limit := 20
+		if v := strings.TrimSpace(c.Query("limit")); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "limit 不合法"})
+				return
+			}
+			limit = n
+		}
+
+		loc, _ := adminTimeLocation(c.Request.Context(), opts)
+		nowUTC := time.Now().UTC()
+		allTime := queryBool(strings.TrimSpace(c.Query("all_time")))
+		rng, ok := adminUsageResolveRange(c, opts, loc, nowUTC, c.Query("start"), c.Query("end"), allTime)
+		if !ok {
+			return
+		}
+
+		channels, err := opts.Store.SuggestUsageChannels(c.Request.Context(), rng.Since, rng.Until, q, limit)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
+			return
+		}
+		out := make([]adminUsageChannelSuggestView, 0, len(channels))
+		for _, ch := range channels {
+			out = append(out, adminUsageChannelSuggestView{ID: ch.ID, Name: ch.Name, Type: ch.Type})
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": out})
+	}
+}
+
+type adminUsageModelSuggestView struct {
+	Model string `json:"model"`
+}
+
+func adminUsageModelsSuggestHandler(opts Options) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if opts.Store == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			return
+		}
+		if adminUsageFeatureDisabled(c, opts) {
+			return
+		}
+
+		q := strings.TrimSpace(c.Query("q"))
+		if q == "" {
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": []adminUsageModelSuggestView{}})
+			return
+		}
+
+		limit := 20
+		if v := strings.TrimSpace(c.Query("limit")); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "limit 不合法"})
+				return
+			}
+			limit = n
+		}
+
+		loc, _ := adminTimeLocation(c.Request.Context(), opts)
+		nowUTC := time.Now().UTC()
+		allTime := queryBool(strings.TrimSpace(c.Query("all_time")))
+		rng, ok := adminUsageResolveRange(c, opts, loc, nowUTC, c.Query("start"), c.Query("end"), allTime)
+		if !ok {
+			return
+		}
+
+		models, err := opts.Store.SuggestUsageModels(c.Request.Context(), rng.Since, rng.Until, q, limit)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
+			return
+		}
+		out := make([]adminUsageModelSuggestView, 0, len(models))
+		for _, m := range models {
+			out = append(out, adminUsageModelSuggestView{Model: m})
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": out})
+	}
 }
 
 func adminUsagePageHandler(opts Options) gin.HandlerFunc {
@@ -138,8 +366,6 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 
 		nowUTC := time.Now().UTC()
 		now := nowUTC.In(loc)
-		todayStartLocal := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
-		todayStr := todayStartLocal.Format("2006-01-02")
 
 		q := c.Request.URL.Query()
 		startStr := strings.TrimSpace(q.Get("start"))
@@ -162,48 +388,16 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 			limit = 200
 		}
 
-		if allTime {
-			s, e, has, ok := resolveAllTimeGlobalStartEnd(c, opts, loc, todayStr)
-			if !ok {
-				return
-			}
-			if has {
-				startStr = s
-				endStr = e
-			}
-		}
-		if startStr == "" {
-			startStr = todayStr
-		}
-		if endStr == "" {
-			endStr = startStr
-		}
-
-		sinceLocal, err := time.ParseInLocation("2006-01-02", startStr, loc)
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "start 不合法（格式：YYYY-MM-DD）"})
+		rng, ok := adminUsageResolveRange(c, opts, loc, nowUTC, startStr, endStr, allTime)
+		if !ok {
 			return
 		}
-		endDateLocal, err := time.ParseInLocation("2006-01-02", endStr, loc)
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "end 不合法（格式：YYYY-MM-DD）"})
-			return
-		}
-		if sinceLocal.After(endDateLocal) {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "start 不能晚于 end"})
-			return
-		}
-		if endDateLocal.After(todayStartLocal) {
-			endDateLocal = todayStartLocal
-			endStr = todayStr
-		}
-		untilLocal := endDateLocal.AddDate(0, 0, 1)
-		if endStr == todayStr {
-			untilLocal = now
-		}
-
-		since := sinceLocal.UTC()
-		until := untilLocal.UTC()
+		sinceLocal := rng.SinceLocal
+		untilLocal := rng.UntilLocal
+		startStr = rng.StartStr
+		endStr = rng.EndStr
+		since := rng.Since
+		until := rng.Until
 
 		committed, reserved, err := opts.Store.SumCommittedAndReservedUSDAllRange(c.Request.Context(), store.UsageSumAllWithReservedRangeInput{
 			Since: since,
@@ -295,17 +489,38 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 		indexRaw := strings.TrimSpace(strings.ToLower(q.Get("index")))
 		query := strings.TrimSpace(q.Get("q"))
 		qUser := strings.TrimSpace(q.Get("q_user"))
-		qKey := strings.TrimSpace(q.Get("q_key"))
+		// /admin/usage 不展示也不索引 Key；为兼容旧客户端，这里读取但会忽略。
+		_ = strings.TrimSpace(q.Get("q_key"))
 		qChannel := strings.TrimSpace(q.Get("q_channel"))
 		qModel := strings.TrimSpace(q.Get("q_model"))
+		var upstreamChannelIDFilter *int64
+		if v := strings.TrimSpace(q.Get("upstream_channel_id")); v != "" {
+			id, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || id <= 0 {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "upstream_channel_id 不合法"})
+				return
+			}
+			upstreamChannelIDFilter = &id
+		}
+		var modelExactFilter *string
+		if v := strings.TrimSpace(q.Get("model")); v != "" {
+			modelExactFilter = &v
+		}
+		var userIDFilter *int64
+		if v := strings.TrimSpace(q.Get("user_id")); v != "" {
+			id, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || id <= 0 {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "user_id 不合法"})
+				return
+			}
+			userIDFilter = &id
+		}
 		var idx store.UsageEventsIndexFlags
 		for _, part := range strings.Split(indexRaw, ",") {
 			p := strings.TrimSpace(part)
 			switch p {
 			case string(store.UsageEventsIndexUser):
 				idx.User = true
-			case string(store.UsageEventsIndexKey):
-				idx.Key = true
 			case string(store.UsageEventsIndexChannel):
 				idx.Channel = true
 			case string(store.UsageEventsIndexModel):
@@ -313,17 +528,30 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 			}
 		}
 		filters := store.UsageEventsFilters{
-			User:    qUser,
-			Key:     qKey,
-			Channel: qChannel,
-			Model:   qModel,
+			UserID:            userIDFilter,
+			User:              qUser,
+			// /admin/usage 不支持 Key 过滤（且不应触发 user_tokens join）。
+			Key:               "",
+			Channel:           qChannel,
+			Model:             qModel,
+			UpstreamChannelID: upstreamChannelIDFilter,
+			ModelExact:        modelExactFilter,
+		}
+		if userIDFilter != nil {
+			filters.User = ""
+			idx.User = false
+		}
+		if upstreamChannelIDFilter != nil {
+			filters.Channel = ""
+			idx.Channel = false
+		}
+		if modelExactFilter != nil {
+			filters.Model = ""
+			idx.Model = false
 		}
 		if query != "" {
 			if idx.User && filters.User == "" {
 				filters.User = query
-			}
-			if idx.Key && filters.Key == "" {
-				filters.Key = query
 			}
 			if idx.Channel && filters.Channel == "" {
 				filters.Channel = query

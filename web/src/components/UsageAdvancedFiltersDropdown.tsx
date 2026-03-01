@@ -1,6 +1,7 @@
-import { forwardRef, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from 'react';
 
 import { useAnchoredPopover } from '../hooks/useAnchoredPopover';
+import { usePresence } from '../hooks/usePresence';
 
 export type UsageAdvancedFiltersDropdownHandle = {
   close: () => void;
@@ -13,6 +14,7 @@ export type UsageAdvancedFilterField = {
   placeholder?: string;
   value: string;
   onChange: (value: string) => void;
+  render?: (opts: { id: string; value: string; onChange: (value: string) => void; placeholder?: string; disabled?: boolean }) => ReactNode;
 };
 
 export const UsageAdvancedFiltersDropdown = forwardRef<UsageAdvancedFiltersDropdownHandle, {
@@ -21,10 +23,11 @@ export const UsageAdvancedFiltersDropdown = forwardRef<UsageAdvancedFiltersDropd
   fields: UsageAdvancedFilterField[];
 }>(function UsageAdvancedFiltersDropdown({ disabled, toggleTestId, fields }, ref) {
   const [open, setOpen] = useState(false);
+  const { present, phase } = usePresence(open, 160);
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const panelStyle = useAnchoredPopover({
-    open,
+    open: present,
     onClose: () => setOpen(false),
     triggerRef: btnRef,
     panelRef,
@@ -52,8 +55,12 @@ export const UsageAdvancedFiltersDropdown = forwardRef<UsageAdvancedFiltersDropd
         高级筛选
       </button>
 
-      {open ? (
-        <div ref={panelRef} className="rlm-usage-filter-dropdown card shadow-sm" style={panelStyle}>
+      {present ? (
+        <div
+          ref={panelRef}
+          className={`rlm-usage-filter-dropdown card shadow-sm rlm-popover ${phase === 'enter' ? 'rlm-popover-enter' : 'rlm-popover-leave'}`}
+          style={panelStyle}
+        >
           <div className="card-body p-2 rlm-usage-filter-panel">
             <div className="rlm-usage-filter-row">
               {fields.map((f) => (
@@ -64,15 +71,25 @@ export const UsageAdvancedFiltersDropdown = forwardRef<UsageAdvancedFiltersDropd
                         {f.label}
                       </span>
                     </span>
-                    <input
-                      id={f.inputId}
-                      type="text"
-                      className="form-control"
-                      placeholder={f.placeholder}
-                      value={f.value}
-                      onChange={(e) => f.onChange(e.target.value || '')}
-                      disabled={!!disabled}
-                    />
+                    {typeof f.render === 'function' ? (
+                      f.render({
+                        id: f.inputId,
+                        value: f.value,
+                        onChange: f.onChange,
+                        placeholder: f.placeholder,
+                        disabled: !!disabled,
+                      })
+                    ) : (
+                      <input
+                        id={f.inputId}
+                        type="text"
+                        className="form-control"
+                        placeholder={f.placeholder}
+                        value={f.value}
+                        onChange={(e) => f.onChange(e.target.value || '')}
+                        disabled={!!disabled}
+                      />
+                    )}
                   </div>
                 </div>
               ))}
@@ -90,4 +107,3 @@ export const UsageAdvancedFiltersDropdown = forwardRef<UsageAdvancedFiltersDropd
     </div>
   );
 });
-
