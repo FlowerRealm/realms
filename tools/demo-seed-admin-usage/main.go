@@ -118,7 +118,7 @@ func main() {
 		}
 		tokens, err2 := st.ListUserTokens(ctx, userID)
 		if err2 != nil {
-			return 0, "", err
+			return 0, "", err2
 		}
 		if len(tokens) == 0 {
 			return 0, "", err
