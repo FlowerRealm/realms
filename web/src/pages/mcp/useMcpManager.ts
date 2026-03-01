@@ -8,7 +8,9 @@ import { chooseActualServer, chooseActualServerForTargets, equalServerCore, stab
 
 type ConflictPick = 'codex' | 'claude' | 'gemini' | 'desired';
 
-type SaveDesiredFn = (next: Record<string, McpServerV2>, silent?: boolean) => Promise<void>;
+export type SaveDesiredResult = { ok: true } | { ok: false; error: string };
+
+type SaveDesiredFn = (next: Record<string, McpServerV2>, silent?: boolean) => Promise<SaveDesiredResult>;
 
 function getParseOKTargets(info: Record<TargetKey, { parse_error?: string }>): Record<TargetKey, boolean> {
   return {
@@ -150,7 +152,7 @@ export type UseMcpManagerResult = {
 
   refresh: () => Promise<void>;
   scanNow: (silent?: boolean) => Promise<void>;
-  saveDesired: (next: Record<string, McpServerV2>, silent?: boolean) => Promise<void>;
+  saveDesired: (next: Record<string, McpServerV2>, silent?: boolean) => Promise<SaveDesiredResult>;
   removeServer: (id: string) => void;
   confirmConflicts: () => Promise<void>;
   getDesiredServersSnapshot: () => Record<string, McpServerV2>;
@@ -166,7 +168,7 @@ export function useMcpManager(): UseMcpManagerResult {
   const lastAutoFixSig = useRef<string>('');
   const conflictModalOpen = useRef(false);
   const desiredServersRef = useRef<Record<string, McpServerV2>>({});
-  const saveDesiredRef = useRef<SaveDesiredFn>(async () => {});
+  const saveDesiredRef = useRef<SaveDesiredFn>(async () => ({ ok: true }));
 
   const [err, setErr] = useState('');
   const [notice, setNotice] = useState('');
@@ -372,7 +374,7 @@ export function useMcpManager(): UseMcpManagerResult {
     }
   }, [saving, targetInfo]);
 
-  const saveDesired = useCallback(async (next: Record<string, McpServerV2>, silent?: boolean) => {
+  const saveDesired = useCallback(async (next: Record<string, McpServerV2>, silent?: boolean): Promise<SaveDesiredResult> => {
     if (!silent) {
       setErr('');
       setNotice('');
@@ -388,8 +390,11 @@ export function useMcpManager(): UseMcpManagerResult {
       setDesiredServers(((res.data?.store?.servers || next) as Record<string, McpServerV2>) || {});
       await scanNow(true);
       if (!silent) setNotice('已生效');
+      return { ok: true };
     } catch (e) {
-      setErr(e instanceof Error ? e.message : '保存失败');
+      const msg = e instanceof Error ? e.message : '保存失败';
+      setErr(msg);
+      return { ok: false, error: msg };
     } finally {
       setSaving(false);
     }

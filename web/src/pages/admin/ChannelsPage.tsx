@@ -17,10 +17,12 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS } from '@dnd-kit/utilities';
 
 import { useAuth } from '../../auth/AuthContext';
+import { AutoSaveIndicator } from '../../components/AutoSaveIndicator';
 import { BootstrapModal } from '../../components/BootstrapModal';
 import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { closeModalById } from '../../components/modal';
 import { PortalDragOverlay } from '../../components/PortalDragOverlay';
+import { useAutoSave } from '../../hooks/useAutoSave';
 import { formatSecondsFromMilliseconds } from '../../format/duration';
 import { formatIntComma } from '../../format/int';
 import {
@@ -242,6 +244,7 @@ export function ChannelsPage() {
   const [settingsChannel, setSettingsChannel] = useState<Channel | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'common' | 'keys' | 'models' | 'advanced'>('common');
+  const [settingsAutosaveResetKey, setSettingsAutosaveResetKey] = useState(0);
 
   const [editName, setEditName] = useState('');
   const [editGroups, setEditGroups] = useState('');
@@ -271,7 +274,6 @@ export function ChannelsPage() {
   const [bindings, setBindings] = useState<ChannelModelBinding[]>([]);
   const [selectedModelIDs, setSelectedModelIDs] = useState<string[]>([]);
   const [modelRedirects, setModelRedirects] = useState<Record<string, string>>({});
-  const [modelsSaving, setModelsSaving] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
 
   const [metaOpenAIOrganization, setMetaOpenAIOrganization] = useState('');
@@ -937,6 +939,7 @@ export function ChannelsPage() {
       setStatusCodeMapping(ch.status_code_mapping || '');
 
       setModelSearch('');
+      setSettingsAutosaveResetKey((x) => x + 1);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败');
       setSettingsChannel(null);
@@ -949,60 +952,250 @@ export function ChannelsPage() {
     }
   }, [applyChannelModelBindings]);
 
-  async function saveModelsConfig() {
-    if (!settingsChannelID) return;
-    setErr('');
-    setNotice('');
-    setModelsSaving(true);
-    try {
-      const selected = selectedModelIDs
-        .map((m) => m.trim())
-        .filter((m) => m !== '');
-      const selectedSet = new Set<string>(selected);
-
-      const bindingByPublicID = new Map<string, ChannelModelBinding>();
-      for (const b of bindings) {
-        bindingByPublicID.set(b.public_id, b);
-      }
-
-      for (const b of bindings) {
-        const enabled = selectedSet.has(b.public_id);
-        const desiredStatus = enabled ? 1 : 0;
-        const redirected = (modelRedirects[b.public_id] || '').trim();
-        const desiredUpstreamModel = enabled ? redirected || b.public_id : b.upstream_model;
-
-        if (b.status === desiredStatus && (!enabled || b.upstream_model === desiredUpstreamModel)) continue;
-        const res = await updateChannelModel(settingsChannelID, {
-          id: b.id,
-          public_id: b.public_id,
-          upstream_model: desiredUpstreamModel.trim() || b.public_id,
-          status: desiredStatus,
-        });
-        if (!res.success) throw new Error(res.message || '保存失败');
-      }
-
-      for (const publicID of selected) {
-        if (bindingByPublicID.has(publicID)) continue;
-        const redirected = (modelRedirects[publicID] || '').trim();
-        const upstreamModel = redirected || publicID;
-        const res = await createChannelModel(settingsChannelID, publicID, upstreamModel, 1);
-        if (!res.success) throw new Error(res.message || '创建失败');
-      }
-
-      setNotice('已保存模型配置');
-      await reloadBindings(settingsChannelID);
-      await refreshWithCurrentRange();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '保存失败');
-    } finally {
-      setModelsSaving(false);
-    }
-  }
-
   useEffect(() => {
     if (!settingsChannelID) return;
     void loadChannelSettings(settingsChannelID);
   }, [settingsChannelID, loadChannelSettings]);
+
+  const validateJSON = (raw: string, kind: 'object' | 'array'): string => {
+    const s = (raw || '').trim();
+    if (!s) return '';
+    try {
+      const v = JSON.parse(s) as unknown;
+      if (kind === 'array') {
+        if (!Array.isArray(v)) return 'JSON 必须为数组';
+        return '';
+      }
+      if (!v || typeof v !== 'object' || Array.isArray(v)) return 'JSON 必须为对象';
+      return '';
+    } catch {
+      return 'JSON 不合法';
+    }
+  };
+
+  const commonAutosave = useAutoSave({
+    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'common',
+    resetKey: settingsAutosaveResetKey,
+    value: { name: editName, status: editStatus, base_url: editBaseURL, groups: editGroups, priority: editPriority, promotion: editPromotion },
+    validate: (v) => {
+      if (!settingsChannelID) return '未选择渠道';
+      if (!v.name.trim()) return '名称不能为空';
+      if (!v.base_url.trim()) return '接口基础地址不能为空';
+      return '';
+    },
+    save: async (v) => {
+      if (!settingsChannelID) return;
+      const res = await updateChannel({
+        id: settingsChannelID,
+        name: v.name.trim(),
+        status: v.status,
+        base_url: v.base_url.trim(),
+        groups: v.groups.trim(),
+        priority: Number.parseInt(v.priority, 10) || 0,
+        promotion: !!v.promotion,
+      });
+      if (!res.success) throw new Error(res.message || '保存失败');
+      setSettingsChannelName(v.name.trim());
+      setSettingsChannel((prev) => (prev ? { ...prev, name: v.name.trim(), status: v.status, base_url: v.base_url.trim(), groups: v.groups.trim(), priority: Number.parseInt(v.priority, 10) || 0, promotion: !!v.promotion } : prev));
+      setChannels((prev) => prev.map((c) => (c.id === settingsChannelID ? { ...c, name: v.name.trim(), status: v.status, base_url: v.base_url.trim(), groups: v.groups.trim(), priority: Number.parseInt(v.priority, 10) || 0, promotion: !!v.promotion } : c)));
+    },
+  });
+
+  const requestPolicyAutosave = useAutoSave({
+    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'common',
+    resetKey: settingsAutosaveResetKey,
+    value: { allow_service_tier: editAllowServiceTier, disable_store: editDisableStore, allow_safety_identifier: editAllowSafetyIdentifier },
+    save: async (v) => {
+      if (!settingsChannelID) return;
+      const res = await updateChannel({
+        id: settingsChannelID,
+        allow_service_tier: v.allow_service_tier,
+        disable_store: v.disable_store,
+        allow_safety_identifier: v.allow_safety_identifier,
+      });
+      if (!res.success) throw new Error(res.message || '保存失败');
+      setSettingsChannel((prev) =>
+        prev
+          ? { ...prev, allow_service_tier: v.allow_service_tier, disable_store: v.disable_store, allow_safety_identifier: v.allow_safety_identifier }
+          : prev,
+      );
+      setChannels((prev) =>
+        prev.map((c) => (c.id === settingsChannelID ? { ...c, allow_service_tier: v.allow_service_tier, disable_store: v.disable_store, allow_safety_identifier: v.allow_safety_identifier } : c)),
+      );
+    },
+  });
+
+  async function saveModelsConfigOrThrow() {
+    if (!settingsChannelID) throw new Error('未选择渠道');
+    const selected = selectedModelIDs
+      .map((m) => m.trim())
+      .filter((m) => m !== '');
+    const selectedSet = new Set<string>(selected);
+
+    const bindingByPublicID = new Map<string, ChannelModelBinding>();
+    for (const b of bindings) bindingByPublicID.set(b.public_id, b);
+
+    for (const b of bindings) {
+      const enabled = selectedSet.has(b.public_id);
+      const desiredStatus = enabled ? 1 : 0;
+      const redirected = (modelRedirects[b.public_id] || '').trim();
+      const desiredUpstreamModel = enabled ? redirected || b.public_id : b.upstream_model;
+
+      if (b.status === desiredStatus && (!enabled || b.upstream_model === desiredUpstreamModel)) continue;
+      const res = await updateChannelModel(settingsChannelID, {
+        id: b.id,
+        public_id: b.public_id,
+        upstream_model: desiredUpstreamModel.trim() || b.public_id,
+        status: desiredStatus,
+      });
+      if (!res.success) throw new Error(res.message || '保存失败');
+    }
+
+    for (const publicID of selected) {
+      if (bindingByPublicID.has(publicID)) continue;
+      const redirected = (modelRedirects[publicID] || '').trim();
+      const upstreamModel = redirected || publicID;
+      const res = await createChannelModel(settingsChannelID, publicID, upstreamModel, 1);
+      if (!res.success) throw new Error(res.message || '创建失败');
+    }
+
+    await reloadBindings(settingsChannelID);
+  }
+
+  const modelsAutosave = useAutoSave({
+    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'models',
+    resetKey: settingsAutosaveResetKey,
+    debounceMs: 1200,
+    value: { selectedModelIDs, modelRedirects },
+    validate: () => {
+      if (!selectedModelIDs.length) return '请先在上方选择模型';
+      return '';
+    },
+    save: async () => {
+      await saveModelsConfigOrThrow();
+    },
+  });
+
+  const metaAutosave = useAutoSave({
+    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'advanced',
+    resetKey: settingsAutosaveResetKey,
+    value: {
+      openai_organization: metaOpenAIOrganization,
+      test_model: metaTestModel,
+      tag: metaTag,
+      remark: metaRemark,
+      weight: metaWeight,
+      auto_ban: metaAutoBan,
+    },
+    save: async (v) => {
+      if (!settingsChannelID) return;
+      const res = await updateChannelMeta(settingsChannelID, {
+        openai_organization: v.openai_organization.trim() || null,
+        test_model: v.test_model.trim() || null,
+        tag: v.tag.trim() || null,
+        remark: v.remark.trim() || null,
+        weight: Number.parseInt(v.weight, 10) || 0,
+        auto_ban: v.auto_ban,
+      });
+      if (!res.success) throw new Error(res.message || '保存失败');
+    },
+  });
+
+  const settingAutosave = useAutoSave({
+    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'advanced',
+    resetKey: settingsAutosaveResetKey,
+    debounceMs: 800,
+    value: {
+      thinking_to_content: settingThinkingToContent,
+      pass_through_body_enabled: settingPassThroughBodyEnabled,
+      proxy: settingProxy,
+      system_prompt: settingSystemPrompt,
+      system_prompt_override: settingSystemPromptOverride,
+    },
+    save: async (v) => {
+      if (!settingsChannelID) return;
+      const res = await updateChannelSetting(settingsChannelID, v);
+      if (!res.success) throw new Error(res.message || '保存失败');
+    },
+  });
+
+  const paramAutosave = useAutoSave({
+    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'advanced',
+    resetKey: settingsAutosaveResetKey,
+    debounceMs: 1000,
+    value: paramOverride,
+    validate: (v) => validateJSON(v, 'object'),
+    save: async (v) => {
+      if (!settingsChannelID) return;
+      const res = await updateChannelParamOverride(settingsChannelID, v);
+      if (!res.success) throw new Error(res.message || '保存失败');
+    },
+  });
+
+  const headerAutosave = useAutoSave({
+    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'advanced',
+    resetKey: settingsAutosaveResetKey,
+    debounceMs: 1000,
+    value: headerOverride,
+    validate: (v) => validateJSON(v, 'object'),
+    save: async (v) => {
+      if (!settingsChannelID) return;
+      const res = await updateChannelHeaderOverride(settingsChannelID, v);
+      if (!res.success) throw new Error(res.message || '保存失败');
+    },
+  });
+
+  const suffixAutosave = useAutoSave({
+    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'advanced',
+    resetKey: settingsAutosaveResetKey,
+    debounceMs: 1000,
+    value: modelSuffixPreserve,
+    validate: (v) => validateJSON(v, 'array'),
+    save: async (v) => {
+      if (!settingsChannelID) return;
+      const res = await updateChannelModelSuffixPreserve(settingsChannelID, v);
+      if (!res.success) throw new Error(res.message || '保存失败');
+    },
+  });
+
+  const whitelistAutosave = useAutoSave({
+    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'advanced',
+    resetKey: settingsAutosaveResetKey,
+    debounceMs: 1000,
+    value: requestBodyWhitelist,
+    validate: (v) => validateJSON(v, 'array'),
+    save: async (v) => {
+      if (!settingsChannelID) return;
+      const res = await updateChannelRequestBodyWhitelist(settingsChannelID, v);
+      if (!res.success) throw new Error(res.message || '保存失败');
+    },
+  });
+
+  const blacklistAutosave = useAutoSave({
+    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'advanced',
+    resetKey: settingsAutosaveResetKey,
+    debounceMs: 1000,
+    value: requestBodyBlacklist,
+    validate: (v) => validateJSON(v, 'array'),
+    save: async (v) => {
+      if (!settingsChannelID) return;
+      const res = await updateChannelRequestBodyBlacklist(settingsChannelID, v);
+      if (!res.success) throw new Error(res.message || '保存失败');
+    },
+  });
+
+  const statusCodeAutosave = useAutoSave({
+    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'advanced',
+    resetKey: settingsAutosaveResetKey,
+    debounceMs: 1000,
+    value: statusCodeMapping,
+    validate: (v) => validateJSON(v, 'object'),
+    save: async (v) => {
+      if (!settingsChannelID) return;
+      const res = await updateChannelStatusCodeMapping(settingsChannelID, v);
+      if (!res.success) throw new Error(res.message || '保存失败');
+    },
+  });
 
   useEffect(() => {
     const ChartCtor = (window as unknown as { Chart?: ChartConstructor }).Chart;
@@ -2008,7 +2201,7 @@ export function ChannelsPage() {
                   取消
                 </button>
                 <button type="submit" className="btn btn-primary px-4">
-                  保存
+                  确认设置
                 </button>
               </div>
             </form>
@@ -2199,7 +2392,6 @@ export function ChannelsPage() {
           setBindings([]);
           setSelectedModelIDs([]);
           setModelRedirects({});
-          setModelsSaving(false);
           setModelSearch('');
 
           setMetaOpenAIOrganization('');
@@ -2267,28 +2459,9 @@ export function ChannelsPage() {
                   <div className="card-body">
                     <form
                       className="row g-3"
-                      onSubmit={async (e) => {
+                      onSubmit={(e) => {
                         e.preventDefault();
-                        if (!settingsChannelID) return;
-                        setErr('');
-                        setNotice('');
-                        try {
-                          const res = await updateChannel({
-                            id: settingsChannelID,
-                            name: editName.trim(),
-                            status: editStatus,
-                            base_url: editBaseURL.trim(),
-                            groups: editGroups.trim(),
-                            priority: Number.parseInt(editPriority, 10) || 0,
-                            promotion: editPromotion,
-                          });
-                          if (!res.success) throw new Error(res.message || '保存失败');
-                          setNotice('已保存');
-                          setSettingsChannelName(editName.trim());
-                          await refreshWithCurrentRange();
-                        } catch (e) {
-                          setErr(e instanceof Error ? e.message : '保存失败');
-                        }
+                        commonAutosave.flush();
                       }}
                     >
                       <div className="col-md-8">
@@ -2362,9 +2535,7 @@ export function ChannelsPage() {
                       </div>
 
                       <div className="col-12">
-                        <button type="submit" className="btn btn-primary btn-sm" disabled={loading}>
-                          <i className="ri-save-line me-1"></i>保存
-                        </button>
+                        <AutoSaveIndicator status={commonAutosave.status} blockedReason={commonAutosave.blockedReason} error={commonAutosave.error} onRetry={commonAutosave.retry} />
                       </div>
                     </form>
                   </div>
@@ -2374,24 +2545,9 @@ export function ChannelsPage() {
                   <div className="card-header bg-white fw-bold py-3">请求字段策略</div>
                   <div className="card-body">
                     <form
-                      onSubmit={async (e) => {
+                      onSubmit={(e) => {
                         e.preventDefault();
-                        if (!settingsChannelID) return;
-                        setErr('');
-                        setNotice('');
-                        try {
-                          const res = await updateChannel({
-                            id: settingsChannelID,
-                            allow_service_tier: editAllowServiceTier,
-                            disable_store: editDisableStore,
-                            allow_safety_identifier: editAllowSafetyIdentifier,
-                          });
-                          if (!res.success) throw new Error(res.message || '保存失败');
-                          setNotice('已保存');
-                          await refreshWithCurrentRange();
-                        } catch (e) {
-                          setErr(e instanceof Error ? e.message : '保存失败');
-                        }
+                        requestPolicyAutosave.flush();
                       }}
                     >
                       <div className="d-flex flex-column gap-2">
@@ -2429,9 +2585,9 @@ export function ChannelsPage() {
                           <div className="form-text small text-muted">可能暴露用户信息；默认会过滤。</div>
                         </div>
                       </div>
-                      <button type="submit" className="btn btn-primary btn-sm mt-3" disabled={loading}>
-                        <i className="ri-save-line me-1"></i>保存策略
-                      </button>
+                      <div className="mt-3">
+                        <AutoSaveIndicator status={requestPolicyAutosave.status} blockedReason={requestPolicyAutosave.blockedReason} error={requestPolicyAutosave.error} onRetry={requestPolicyAutosave.retry} />
+                      </div>
                     </form>
                   </div>
                 </div>
@@ -2906,9 +3062,7 @@ export function ChannelsPage() {
                     )}
 
                     <div className="d-flex justify-content-end mt-3">
-                      <button type="button" className="btn btn-primary btn-sm" onClick={saveModelsConfig} disabled={modelsSaving}>
-                        <i className="ri-save-line me-1"></i>保存模型配置
-                      </button>
+                      <AutoSaveIndicator status={modelsAutosave.status} blockedReason={modelsAutosave.blockedReason} error={modelsAutosave.error} onRetry={modelsAutosave.retry} />
                     </div>
                   </div>
                 </div>
@@ -2922,26 +3076,9 @@ export function ChannelsPage() {
                   <div className="card-body">
                     <form
                       className="row g-3"
-                      onSubmit={async (e) => {
+                      onSubmit={(e) => {
                         e.preventDefault();
-                        if (!settingsChannelID) return;
-                        setErr('');
-                        setNotice('');
-                        try {
-                          const res = await updateChannelMeta(settingsChannelID, {
-                            openai_organization: metaOpenAIOrganization.trim() || null,
-                            test_model: metaTestModel.trim() || null,
-                            tag: metaTag.trim() || null,
-                            remark: metaRemark.trim() || null,
-                            weight: Number.parseInt(metaWeight, 10) || 0,
-                            auto_ban: metaAutoBan,
-                          });
-                          if (!res.success) throw new Error(res.message || '保存失败');
-                          setNotice(res.message || '已保存');
-                          await refreshWithCurrentRange();
-                        } catch (e) {
-                          setErr(e instanceof Error ? e.message : '保存失败');
-                        }
+                        metaAutosave.flush();
                       }}
                     >
                       {settingsChannel.type === 'openai_compatible' ? (
@@ -2982,9 +3119,7 @@ export function ChannelsPage() {
                         <div className="form-text small text-muted">仅用于管理端备注（不参与调度）。</div>
                       </div>
                       <div className="col-12">
-                        <button type="submit" className="btn btn-primary btn-sm">
-                          <i className="ri-save-line me-1"></i>保存
-                        </button>
+                        <AutoSaveIndicator status={metaAutosave.status} blockedReason={metaAutosave.blockedReason} error={metaAutosave.error} onRetry={metaAutosave.retry} />
                       </div>
                     </form>
                   </div>
@@ -2994,24 +3129,9 @@ export function ChannelsPage() {
                   <div className="card-header bg-white fw-bold py-3">请求处理设置</div>
                   <div className="card-body">
                     <form
-                      onSubmit={async (e) => {
+                      onSubmit={(e) => {
                         e.preventDefault();
-                        if (!settingsChannelID) return;
-                        setErr('');
-                        setNotice('');
-                        try {
-                          const res = await updateChannelSetting(settingsChannelID, {
-                            thinking_to_content: settingThinkingToContent,
-                            pass_through_body_enabled: settingPassThroughBodyEnabled,
-                            proxy: settingProxy,
-                            system_prompt: settingSystemPrompt,
-                            system_prompt_override: settingSystemPromptOverride,
-                          });
-                          if (!res.success) throw new Error(res.message || '保存失败');
-                          setNotice(res.message || '已保存');
-                        } catch (e) {
-                          setErr(e instanceof Error ? e.message : '保存失败');
-                        }
+                        settingAutosave.flush();
                       }}
                     >
                       <div className="d-flex flex-column gap-2">
@@ -3086,9 +3206,9 @@ export function ChannelsPage() {
                         <div className="form-text small text-muted">当请求已包含 system/instructions 时：是否将“系统提示词”拼接到最前。</div>
                       </div>
 
-                      <button type="submit" className="btn btn-primary btn-sm mt-3">
-                        <i className="ri-save-line me-1"></i>保存
-                      </button>
+                      <div className="mt-3">
+                        <AutoSaveIndicator status={settingAutosave.status} blockedReason={settingAutosave.blockedReason} error={settingAutosave.error} onRetry={settingAutosave.retry} />
+                      </div>
                     </form>
                   </div>
                 </div>
@@ -3097,18 +3217,9 @@ export function ChannelsPage() {
                   <div className="card-header bg-white fw-bold py-3">参数改写</div>
                   <div className="card-body">
                     <form
-                      onSubmit={async (e) => {
+                      onSubmit={(e) => {
                         e.preventDefault();
-                        if (!settingsChannelID) return;
-                        setErr('');
-                        setNotice('');
-                        try {
-                          const res = await updateChannelParamOverride(settingsChannelID, paramOverride);
-                          if (!res.success) throw new Error(res.message || '保存失败');
-                          setNotice(res.message || '已保存');
-                        } catch (e) {
-                          setErr(e instanceof Error ? e.message : '保存失败');
-                        }
+                        paramAutosave.flush();
                       }}
                     >
                       <textarea
@@ -3119,9 +3230,9 @@ export function ChannelsPage() {
                         placeholder='{"operations":[{"path":"metadata.channel","mode":"set","value":"example"}]}'
                       />
                       <div className="form-text small text-muted mt-2">留空表示禁用。JSON 必须为对象，会在转发前按渠道应用。</div>
-                      <button type="submit" className="btn btn-primary btn-sm mt-3">
-                        <i className="ri-save-line me-1"></i>保存改写
-                      </button>
+                      <div className="mt-3">
+                        <AutoSaveIndicator status={paramAutosave.status} blockedReason={paramAutosave.blockedReason} error={paramAutosave.error} onRetry={paramAutosave.retry} />
+                      </div>
                     </form>
                   </div>
                 </div>
@@ -3130,18 +3241,9 @@ export function ChannelsPage() {
                   <div className="card-header bg-white fw-bold py-3">请求头覆盖</div>
                   <div className="card-body">
                     <form
-                      onSubmit={async (e) => {
+                      onSubmit={(e) => {
                         e.preventDefault();
-                        if (!settingsChannelID) return;
-                        setErr('');
-                        setNotice('');
-                        try {
-                          const res = await updateChannelHeaderOverride(settingsChannelID, headerOverride);
-                          if (!res.success) throw new Error(res.message || '保存失败');
-                          setNotice(res.message || '已保存');
-                        } catch (e) {
-                          setErr(e instanceof Error ? e.message : '保存失败');
-                        }
+                        headerAutosave.flush();
                       }}
                     >
                       <textarea
@@ -3154,9 +3256,9 @@ export function ChannelsPage() {
                       <div className="form-text small text-muted mt-2">
                         留空表示禁用。JSON 必须为对象，value 必须为字符串；支持变量 <code>{'{api_key}'}</code>（会替换为该渠道实际使用的上游 key/token）。
                       </div>
-                      <button type="submit" className="btn btn-primary btn-sm mt-3">
-                        <i className="ri-save-line me-1"></i>保存
-                      </button>
+                      <div className="mt-3">
+                        <AutoSaveIndicator status={headerAutosave.status} blockedReason={headerAutosave.blockedReason} error={headerAutosave.error} onRetry={headerAutosave.retry} />
+                      </div>
                     </form>
                   </div>
                 </div>
@@ -3165,18 +3267,9 @@ export function ChannelsPage() {
                   <div className="card-header bg-white fw-bold py-3">模型后缀保护名单</div>
                   <div className="card-body">
                     <form
-                      onSubmit={async (e) => {
+                      onSubmit={(e) => {
                         e.preventDefault();
-                        if (!settingsChannelID) return;
-                        setErr('');
-                        setNotice('');
-                        try {
-                          const res = await updateChannelModelSuffixPreserve(settingsChannelID, modelSuffixPreserve);
-                          if (!res.success) throw new Error(res.message || '保存失败');
-                          setNotice(res.message || '已保存');
-                        } catch (e) {
-                          setErr(e instanceof Error ? e.message : '保存失败');
-                        }
+                        suffixAutosave.flush();
                       }}
                     >
                       <textarea
@@ -3189,9 +3282,9 @@ export function ChannelsPage() {
                       <div className="form-text small text-muted mt-2">
                         留空表示禁用。JSON 必须为数组；命中时跳过模型后缀解析（<code>-low/-medium/-high/-minimal/-none/-xhigh</code>）。
                       </div>
-                      <button type="submit" className="btn btn-primary btn-sm mt-3">
-                        <i className="ri-save-line me-1"></i>保存
-                      </button>
+                      <div className="mt-3">
+                        <AutoSaveIndicator status={suffixAutosave.status} blockedReason={suffixAutosave.blockedReason} error={suffixAutosave.error} onRetry={suffixAutosave.retry} />
+                      </div>
                     </form>
                   </div>
                 </div>
@@ -3202,18 +3295,9 @@ export function ChannelsPage() {
                     <div className="row g-3">
                       <div className="col-12 col-lg-6">
                         <form
-                          onSubmit={async (e) => {
+                          onSubmit={(e) => {
                             e.preventDefault();
-                            if (!settingsChannelID) return;
-                            setErr('');
-                            setNotice('');
-                            try {
-                              const res = await updateChannelRequestBodyWhitelist(settingsChannelID, requestBodyWhitelist);
-                              if (!res.success) throw new Error(res.message || '保存失败');
-                              setNotice(res.message || '已保存白名单');
-                            } catch (e) {
-                              setErr(e instanceof Error ? e.message : '保存失败');
-                            }
+                            whitelistAutosave.flush();
                           }}
                         >
                           <label className="form-label fw-medium mb-1">白名单（仅保留）</label>
@@ -3227,25 +3311,16 @@ export function ChannelsPage() {
                           <div className="form-text small text-muted mt-2">
                             留空表示禁用。JSON 必须为数组，每项为 JSON path（gjson/sjson 语法）；启用后会先“仅保留白名单字段”，再应用黑名单与参数改写。
                           </div>
-                          <button type="submit" className="btn btn-primary btn-sm mt-3">
-                            <i className="ri-save-line me-1"></i>保存白名单
-                          </button>
+                          <div className="mt-3">
+                            <AutoSaveIndicator status={whitelistAutosave.status} blockedReason={whitelistAutosave.blockedReason} error={whitelistAutosave.error} onRetry={whitelistAutosave.retry} />
+                          </div>
                         </form>
                       </div>
                       <div className="col-12 col-lg-6">
                         <form
-                          onSubmit={async (e) => {
+                          onSubmit={(e) => {
                             e.preventDefault();
-                            if (!settingsChannelID) return;
-                            setErr('');
-                            setNotice('');
-                            try {
-                              const res = await updateChannelRequestBodyBlacklist(settingsChannelID, requestBodyBlacklist);
-                              if (!res.success) throw new Error(res.message || '保存失败');
-                              setNotice(res.message || '已保存黑名单');
-                            } catch (e) {
-                              setErr(e instanceof Error ? e.message : '保存失败');
-                            }
+                            blacklistAutosave.flush();
                           }}
                         >
                           <label className="form-label fw-medium mb-1">黑名单（删除字段）</label>
@@ -3259,9 +3334,9 @@ export function ChannelsPage() {
                           <div className="form-text small text-muted mt-2">
                             留空表示禁用。JSON 必须为数组，每项为 JSON path（gjson/sjson 语法）；会在每次 selection 转发前按渠道应用。
                           </div>
-                          <button type="submit" className="btn btn-primary btn-sm mt-3">
-                            <i className="ri-save-line me-1"></i>保存黑名单
-                          </button>
+                          <div className="mt-3">
+                            <AutoSaveIndicator status={blacklistAutosave.status} blockedReason={blacklistAutosave.blockedReason} error={blacklistAutosave.error} onRetry={blacklistAutosave.retry} />
+                          </div>
                         </form>
                       </div>
                     </div>
@@ -3272,18 +3347,9 @@ export function ChannelsPage() {
                   <div className="card-header bg-white fw-bold py-3">状态码映射</div>
                   <div className="card-body">
                     <form
-                      onSubmit={async (e) => {
+                      onSubmit={(e) => {
                         e.preventDefault();
-                        if (!settingsChannelID) return;
-                        setErr('');
-                        setNotice('');
-                        try {
-                          const res = await updateChannelStatusCodeMapping(settingsChannelID, statusCodeMapping);
-                          if (!res.success) throw new Error(res.message || '保存失败');
-                          setNotice(res.message || '已保存');
-                        } catch (e) {
-                          setErr(e instanceof Error ? e.message : '保存失败');
-                        }
+                        statusCodeAutosave.flush();
                       }}
                     >
                       <textarea
@@ -3294,9 +3360,9 @@ export function ChannelsPage() {
                         placeholder='{"401":"200","429":"200"}'
                       />
                       <div className="form-text small text-muted mt-2">留空表示禁用。仅影响对下游返回的 HTTP 状态码，不影响内部 failover 判定与日志/用量记录。</div>
-                      <button type="submit" className="btn btn-primary btn-sm mt-3">
-                        <i className="ri-save-line me-1"></i>保存
-                      </button>
+                      <div className="mt-3">
+                        <AutoSaveIndicator status={statusCodeAutosave.status} blockedReason={statusCodeAutosave.blockedReason} error={statusCodeAutosave.error} onRetry={statusCodeAutosave.retry} />
+                      </div>
                     </form>
                   </div>
                 </div>

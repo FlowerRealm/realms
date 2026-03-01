@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { BootstrapModal } from '../../components/BootstrapModal';
+import { AutoSaveIndicator } from '../../components/AutoSaveIndicator';
 import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { closeModalById } from '../../components/modal';
+import { useAutoSave } from '../../hooks/useAutoSave';
 import {
   createAdminChannelGroup,
   deleteAdminChannelGroup,
@@ -61,6 +63,35 @@ export function ChannelGroupsPage() {
     setEditDesc(editing.description || '');
     setEditMultiplier(editing.price_multiplier || '1');
   }, [editing]);
+
+  const editAutosave = useAutoSave({
+    enabled: !!editing && !loading,
+    resetKey: editing?.id || 0,
+    value: { name: editName, description: editDesc, price_multiplier: editMultiplier },
+    validate: (v) => {
+      if (!editing) return '未选择渠道组';
+      if (!v.name.trim()) return '名称不能为空';
+      return '';
+    },
+    save: async (v) => {
+      if (!editing) return;
+      setErr('');
+      setNotice('');
+      const oldName = (editing.name || '').trim();
+      const newName = v.name.trim();
+      const res = await updateAdminChannelGroup(editing.id, {
+        name: newName && newName !== oldName ? newName : undefined,
+        description: v.description.trim() || null,
+        price_multiplier: v.price_multiplier.trim() || undefined,
+        status: editing.status,
+      });
+      if (!res.success) throw new Error(res.message || '保存失败');
+      const effectiveName = newName || oldName;
+      setItems((prev) => prev.map((x) => (x.id === editing.id ? { ...x, name: effectiveName, description: v.description.trim() || null, price_multiplier: v.price_multiplier.trim() || '1' } : x)));
+      setEditing((prev) => (prev ? { ...prev, name: effectiveName, description: v.description.trim() || null, price_multiplier: v.price_multiplier.trim() || '1' } : prev));
+      setNotice('已自动保存');
+    },
+  });
 
   return (
     <div className="fade-in-up">
@@ -333,27 +364,9 @@ export function ChannelGroupsPage() {
         ) : (
           <form
             className="row g-3"
-            onSubmit={async (e) => {
+            onSubmit={(e) => {
               e.preventDefault();
-              if (!editing) return;
-              setErr('');
-              setNotice('');
-              try {
-                const oldName = (editing.name || '').trim();
-                const newName = editName.trim();
-                const res = await updateAdminChannelGroup(editing.id, {
-                  name: newName && newName !== oldName ? newName : undefined,
-                  description: editDesc.trim() || null,
-                  price_multiplier: editMultiplier.trim() || undefined,
-                  status: editing.status,
-                });
-                if (!res.success) throw new Error(res.message || '保存失败');
-                setNotice('已保存');
-                closeModalById('editChannelGroupModal');
-                await refresh();
-              } catch (e) {
-                setErr(e instanceof Error ? e.message : '保存失败');
-              }
+              editAutosave.flush();
             }}
           >
             <div className="col-12">
@@ -377,9 +390,7 @@ export function ChannelGroupsPage() {
               <button type="button" className="btn btn-light" data-bs-dismiss="modal">
                 取消
               </button>
-              <button className="btn btn-primary px-4" type="submit">
-                保存
-              </button>
+              <AutoSaveIndicator status={editAutosave.status} blockedReason={editAutosave.blockedReason} error={editAutosave.error} onRetry={editAutosave.retry} />
             </div>
           </form>
         )}

@@ -350,7 +350,7 @@ export function SubscriptionsPage() {
               取消
             </button>
             <button className="btn btn-primary px-4" type="submit" disabled={loading}>
-              保存
+              创建
             </button>
           </div>
         </form>

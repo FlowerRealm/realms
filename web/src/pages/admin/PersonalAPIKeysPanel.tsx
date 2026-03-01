@@ -232,7 +232,7 @@ export function PersonalAPIKeysPanel() {
                       closeModalById('createPersonalAPIKeyModal');
                     }}
                   >
-                    我已保存，关闭
+                    我已复制，关闭
                   </button>
                 </div>
               </div>

@@ -9,6 +9,8 @@ import {
   type AdminSubscriptionPlan,
 } from '../../api/admin/billing';
 import { SegmentedFrame } from '../../components/SegmentedFrame';
+import { AutoSaveIndicator } from '../../components/AutoSaveIndicator';
+import { useAutoSave } from '../../hooks/useAutoSave';
 
 export function SubscriptionEditPage() {
   const params = useParams();
@@ -20,6 +22,7 @@ export function SubscriptionEditPage() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const [notice, setNotice] = useState('');
+  const [autosaveResetKey, setAutosaveResetKey] = useState(0);
 
   const [name, setName] = useState('');
   const [groupName, setGroupName] = useState('default');
@@ -67,6 +70,7 @@ export function SubscriptionEditPage() {
         setLimit1d(p.limit_1d || '');
         setLimit5h(p.limit_5h || '');
       }
+      setAutosaveResetKey((x) => x + 1);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败');
       setPlan(null);
@@ -80,6 +84,54 @@ export function SubscriptionEditPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planId]);
 
+  const autosaveValue = useMemo(() => {
+    if (!plan) return null;
+    return {
+      name: name.trim(),
+      group_name: groupName,
+      price_multiplier: priceMultiplier.trim() || undefined,
+      price_cny: priceCNY.trim(),
+      duration_days: Number.parseInt(durationDays, 10) || 30,
+      status,
+      limit_30d: limit30d.trim() || undefined,
+      limit_7d: limit7d.trim() || undefined,
+      limit_1d: limit1d.trim() || undefined,
+      limit_5h: limit5h.trim() || undefined,
+    };
+  }, [durationDays, groupName, limit1d, limit30d, limit5h, limit7d, name, plan, priceCNY, priceMultiplier, status]);
+
+  const autosave = useAutoSave({
+    enabled: !!plan && !loading && !saving,
+    value: autosaveValue,
+    resetKey: autosaveResetKey,
+    validate: (v) => {
+      if (!plan) return '未加载';
+      if (!v) return '未加载';
+      if (!v.name.trim()) return '名称不能为空';
+      if (!v.price_cny.trim()) return '价格不能为空';
+      const n = v.duration_days;
+      if (!Number.isFinite(n) || n <= 0) return '有效期不合法';
+      return '';
+    },
+    save: async (v) => {
+      if (!plan) return;
+      if (!v) return;
+      setErr('');
+      setNotice('');
+      setSaving(true);
+      try {
+        const res = await updateAdminSubscriptionPlan(plan.id, v);
+        if (!res.success) throw new Error(res.message || '保存失败');
+        setNotice('已自动保存');
+      } finally {
+        setSaving(false);
+      }
+    },
+    afterSave: async () => {
+      await refresh();
+    },
+  });
+
   return (
     <div className="fade-in-up">
       <SegmentedFrame>
@@ -88,6 +140,7 @@ export function SubscriptionEditPage() {
             <h3 className="mb-0 fw-bold">编辑套餐</h3>
             {plan ? <div className="text-muted small mt-1">#{plan.id} · code={plan.code}</div> : null}
           </div>
+          <AutoSaveIndicator status={autosave.status} blockedReason={autosave.blockedReason} error={autosave.error} onRetry={autosave.retry} className="small" />
         </div>
 
         <div>
@@ -113,34 +166,11 @@ export function SubscriptionEditPage() {
             <div className="card border-0 mb-0">
               <div className="card-body p-4">
                 <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                setErr('');
-                setNotice('');
-                setSaving(true);
-                try {
-                  const res = await updateAdminSubscriptionPlan(plan.id, {
-                    name: name.trim(),
-                    group_name: groupName,
-                    price_multiplier: priceMultiplier.trim() || undefined,
-                    price_cny: priceCNY.trim(),
-                    duration_days: Number.parseInt(durationDays, 10) || 30,
-                    status,
-                    limit_30d: limit30d.trim() || undefined,
-                    limit_7d: limit7d.trim() || undefined,
-                    limit_1d: limit1d.trim() || undefined,
-                    limit_5h: limit5h.trim() || undefined,
-                  });
-                  if (!res.success) throw new Error(res.message || '保存失败');
-                  setNotice('已保存');
-                  await refresh();
-                } catch (e) {
-                  setErr(e instanceof Error ? e.message : '保存失败');
-                } finally {
-                  setSaving(false);
-                }
-              }}
-            >
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    autosave.flush();
+                  }}
+                >
               <div className="row g-3">
                 <div className="col-md-6">
                   <label className="form-label">名称</label>
@@ -234,9 +264,6 @@ export function SubscriptionEditPage() {
                     }}
                   >
                     删除
-                  </button>
-                  <button className="btn btn-primary" type="submit" disabled={saving}>
-                    {saving ? '保存中…' : '保存'}
                   </button>
                 </div>
               </div>

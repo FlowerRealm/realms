@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 
+import { AutoSaveIndicator } from '../../components/AutoSaveIndicator';
 import { BootstrapModal } from '../../components/BootstrapModal';
 import { DividedStack } from '../../components/DividedStack';
 import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { closeModalById } from '../../components/modal';
+import { useAutoSave } from '../../hooks/useAutoSave';
 import {
   createAdminPaymentChannel,
   deleteAdminPaymentChannel,
@@ -83,6 +85,105 @@ export function PaymentChannelsPage() {
     setEditEPayPartnerID(editing.epay_partner_id || '');
     setEditEPayKey('');
   }, [editing]);
+
+  const editTrackValue = useMemo(() => {
+    if (!editing) return null;
+    return {
+      id: editing.id,
+      type: editing.type,
+      name: editName,
+      enabled: editEnabled,
+      stripe_currency: editStripeCurrency,
+      epay_gateway: editEPayGateway,
+      epay_partner_id: editEPayPartnerID,
+      // secrets are write-only: do NOT include in tracking signature
+      stripe_secret_key: '',
+      stripe_webhook_secret: '',
+      epay_key: '',
+    };
+  }, [editEPayGateway, editEPayPartnerID, editEnabled, editName, editStripeCurrency, editing]);
+
+  const editAutosave = useAutoSave({
+    enabled: !!editing && !loading,
+    resetKey: editing?.id || 0,
+    value: {
+      name: editName,
+      enabled: editEnabled,
+      stripe_currency: editStripeCurrency,
+      stripe_secret_key: editStripeSecret,
+      stripe_webhook_secret: editStripeWebhookSecret,
+      epay_gateway: editEPayGateway,
+      epay_partner_id: editEPayPartnerID,
+      epay_key: editEPayKey,
+    },
+    trackValue: editTrackValue,
+    validate: (v) => {
+      if (!editing) return '未选择支付渠道';
+      if (!v.name.trim()) return '渠道名称不能为空';
+      if (editing.type === 'stripe') {
+        const cur = v.stripe_currency.trim();
+        if (cur && !/^[a-z]{3}$/i.test(cur)) return 'currency 不合法';
+      }
+      if (editing.type === 'epay') {
+        if (!v.epay_gateway.trim()) return 'gateway 不能为空';
+        if (!v.epay_partner_id.trim()) return 'partner_id 不能为空';
+      }
+      return '';
+    },
+    save: async (v) => {
+      if (!editing) return;
+      setErr('');
+      setNotice('');
+      const res = await updateAdminPaymentChannel(editing.id, {
+        name: v.name.trim(),
+        enabled: v.enabled,
+        stripe_currency: editing.type === 'stripe' ? v.stripe_currency.trim() || undefined : undefined,
+        stripe_secret_key: editing.type === 'stripe' && v.stripe_secret_key.trim() ? v.stripe_secret_key.trim() : undefined,
+        stripe_webhook_secret: editing.type === 'stripe' && v.stripe_webhook_secret.trim() ? v.stripe_webhook_secret.trim() : undefined,
+        epay_gateway: editing.type === 'epay' ? v.epay_gateway.trim() || undefined : undefined,
+        epay_partner_id: editing.type === 'epay' ? v.epay_partner_id.trim() || undefined : undefined,
+        epay_key: editing.type === 'epay' && v.epay_key.trim() ? v.epay_key.trim() : undefined,
+      });
+      if (!res.success) throw new Error(res.message || '保存失败');
+
+      const nextStatus = v.enabled ? 1 : 0;
+      setItems((prev) =>
+        prev.map((x) =>
+          x.id === editing.id
+            ? {
+                ...x,
+                name: v.name.trim(),
+                status: nextStatus,
+                stripe_currency: editing.type === 'stripe' ? v.stripe_currency.trim() || x.stripe_currency : x.stripe_currency,
+                epay_gateway: editing.type === 'epay' ? v.epay_gateway.trim() || x.epay_gateway : x.epay_gateway,
+                epay_partner_id: editing.type === 'epay' ? v.epay_partner_id.trim() || x.epay_partner_id : x.epay_partner_id,
+              }
+            : x,
+        ),
+      );
+      setEditing((prev) =>
+        prev
+          ? {
+              ...prev,
+              name: v.name.trim(),
+              status: nextStatus,
+              stripe_currency: prev.type === 'stripe' ? v.stripe_currency.trim() || prev.stripe_currency : prev.stripe_currency,
+              epay_gateway: prev.type === 'epay' ? v.epay_gateway.trim() || prev.epay_gateway : prev.epay_gateway,
+              epay_partner_id: prev.type === 'epay' ? v.epay_partner_id.trim() || prev.epay_partner_id : prev.epay_partner_id,
+            }
+          : prev,
+      );
+
+      if (editing.type === 'stripe') {
+        if (v.stripe_secret_key.trim()) setEditStripeSecret('');
+        if (v.stripe_webhook_secret.trim()) setEditStripeWebhookSecret('');
+      } else {
+        if (v.epay_key.trim()) setEditEPayKey('');
+      }
+
+      setNotice(res.message || '已自动保存');
+    },
+  });
 
   return (
     <div className="fade-in-up">
@@ -352,29 +453,9 @@ export function PaymentChannelsPage() {
         ) : (
           <form
             className="row g-3"
-            onSubmit={async (e) => {
+            onSubmit={(e) => {
               e.preventDefault();
-              if (!editing) return;
-              setErr('');
-              setNotice('');
-              try {
-                const res = await updateAdminPaymentChannel(editing.id, {
-                  name: editName.trim(),
-                  enabled: editEnabled,
-                  stripe_currency: editing.type === 'stripe' ? editStripeCurrency.trim() || undefined : undefined,
-                  stripe_secret_key: editing.type === 'stripe' && editStripeSecret.trim() ? editStripeSecret.trim() : undefined,
-                  stripe_webhook_secret: editing.type === 'stripe' && editStripeWebhookSecret.trim() ? editStripeWebhookSecret.trim() : undefined,
-                  epay_gateway: editing.type === 'epay' ? editEPayGateway.trim() || undefined : undefined,
-                  epay_partner_id: editing.type === 'epay' ? editEPayPartnerID.trim() || undefined : undefined,
-                  epay_key: editing.type === 'epay' && editEPayKey.trim() ? editEPayKey.trim() : undefined,
-                });
-                if (!res.success) throw new Error(res.message || '保存失败');
-                setNotice(res.message || '已保存');
-                closeModalById('editPaymentChannelModal');
-                await refresh();
-              } catch (e) {
-                setErr(e instanceof Error ? e.message : '保存失败');
-              }
+              editAutosave.flush();
             }}
           >
             <div className="col-md-8">
@@ -460,9 +541,7 @@ export function PaymentChannelsPage() {
               <button type="button" className="btn btn-light" data-bs-dismiss="modal">
                 取消
               </button>
-              <button className="btn btn-primary px-4" type="submit">
-                保存
-              </button>
+              <AutoSaveIndicator status={editAutosave.status} blockedReason={editAutosave.blockedReason} error={editAutosave.error} onRetry={editAutosave.retry} />
             </div>
           </form>
         )}

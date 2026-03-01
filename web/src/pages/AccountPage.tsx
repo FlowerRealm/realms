@@ -205,7 +205,7 @@ export function AccountPage() {
                     </div>
                   </div>
                   <button type="submit" className="btn btn-primary" disabled={!emailVerificationEnabled}>
-                    保存并重新登录
+                    更新并重新登录
                   </button>
                 </form>
               </div>
@@ -266,7 +266,7 @@ export function AccountPage() {
                     <div className="form-text">修改成功后会强制登出所有已登录会话。</div>
                   </div>
                   <button type="submit" className="btn btn-primary">
-                    保存并重新登录
+                    更新并重新登录
                   </button>
                 </form>
               </div>

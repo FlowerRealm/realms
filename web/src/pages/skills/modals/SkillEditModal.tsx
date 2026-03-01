@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import { BootstrapModal } from '../../../components/BootstrapModal';
 
 import type { SkillV1, SkillsTargetKey } from '../../../api/admin/skills';
@@ -33,7 +35,7 @@ export function SkillEditModal(props: {
   setImportApplyAfter: (v: boolean) => void;
 
   onImport: () => void;
-  onSave: () => void;
+  autosaveIndicator?: ReactNode;
 }) {
   const {
     saving,
@@ -51,7 +53,7 @@ export function SkillEditModal(props: {
     importApplyAfter,
     setImportApplyAfter,
     onImport,
-    onSave,
+    autosaveIndicator,
   } = props;
 
   return (
@@ -69,9 +71,9 @@ export function SkillEditModal(props: {
               导入并生效
             </button>
           ) : (
-            <button type="button" className="btn btn-primary px-4" disabled={saving} onClick={onSave}>
-              保存并生效
-            </button>
+            <div className="d-flex align-items-center gap-2">
+              {autosaveIndicator || null}
+            </div>
           )}
         </>
       }

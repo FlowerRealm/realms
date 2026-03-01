@@ -3,8 +3,10 @@ import { Navigate } from 'react-router-dom';
 
 import type { SkillV1, SkillsStoreV1, SkillsTargetKey } from '../api/admin/skills';
 import { useAuth } from '../auth/AuthContext';
+import { AutoSaveIndicator } from '../components/AutoSaveIndicator';
 import { BootstrapModal } from '../components/BootstrapModal';
 import { closeModalById, showModalById } from '../components/modal';
+import { useAutoSave } from '../hooks/useAutoSave';
 
 import { useSkillsManager } from './skills/useSkillsManager';
 import { SkillEditModal, type SkillEditDraft } from './skills/modals/SkillEditModal';
@@ -217,32 +219,37 @@ export function SkillsPage() {
     });
   }
 
-  async function saveDraftToStore() {
-    const sk = draftToSkill(draft, editing);
-    if (!sk.id.trim()) {
-      setErr('ID 不能为空');
-      return;
-    }
-    if (!sk.title.trim()) {
-      setErr('标题不能为空');
-      return;
-    }
-    if (!sk.prompt.trim()) {
-      setErr('Prompt 不能为空');
-      return;
-    }
-
-    const next: SkillsStoreV1 = { version: store.version || 1, skills: { ...(store.skills || {}) } };
-    if (!editing && next.skills[sk.id]) {
-      setErr('ID 已存在');
-      return;
-    }
-    const id = editing ? editing.id : sk.id;
-    next.skills[id] = { ...sk, id };
-
-    closeModalById('skillsEditModal');
-    await saveStore(next, true);
+  function validateSkillID(id: string): boolean {
+    const v = (id || '').trim();
+    if (!v) return false;
+    if (v.includes('/') || v.includes('\\')) return false;
+    return /^[A-Za-z0-9._-]+$/.test(v);
   }
+
+  const draftAutosave = useAutoSave({
+    enabled: !saving && (editing !== null || createMode === 'manual'),
+    resetKey: `${createMode}:${editing?.id || 'new'}`,
+    value: draft,
+    validate: (d) => {
+      if (createMode !== 'manual') return '当前为导入模式';
+      const id = (d.id || '').trim();
+      if (!validateSkillID(id)) return 'ID 不合法';
+      if (!((d.title || '').trim())) return '标题不能为空';
+      if (!((d.prompt || '').trim())) return 'Prompt 不能为空';
+      if (!editing && (store.skills || {})[id]) return 'ID 已存在';
+      return '';
+    },
+    save: async (d) => {
+      if (createMode !== 'manual') return;
+      const sk = draftToSkill(d, editing);
+      const next: SkillsStoreV1 = { version: store.version || 1, skills: { ...(store.skills || {}) } };
+      const id = editing ? editing.id : sk.id;
+      next.skills[id] = { ...sk, id };
+      const res = await saveStore(next, true);
+      if (!res.ok) throw new Error(res.error);
+      if (!editing) setEditing({ ...sk, id });
+    },
+  });
 
   async function doImport() {
     if (importMode === 'replace') {
@@ -348,6 +355,7 @@ export function SkillsPage() {
           <p className="text-muted small mb-0">自动读取当前生效的 skills/commands，并保持配置一致。</p>
         </div>
         <div className="d-flex gap-2">
+          <AutoSaveIndicator status={draftAutosave.status} blockedReason={draftAutosave.blockedReason} error={draftAutosave.error} onRetry={draftAutosave.retry} className="small align-self-center" />
           <button className="btn btn-light border" type="button" disabled={loading || saving || scanning} onClick={() => void scanNow()}>
             <span className="me-1 material-symbols-rounded">refresh</span> 刷新
           </button>
@@ -523,7 +531,7 @@ export function SkillsPage() {
         importApplyAfter={importApplyAfter}
         setImportApplyAfter={setImportApplyAfter}
         onImport={() => void doImport()}
-        onSave={() => void saveDraftToStore()}
+        autosaveIndicator={<AutoSaveIndicator status={draftAutosave.status} blockedReason={draftAutosave.blockedReason} error={draftAutosave.error} onRetry={draftAutosave.retry} />}
       />
 
       <SkillsConflictModal

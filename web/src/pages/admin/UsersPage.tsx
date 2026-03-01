@@ -432,7 +432,7 @@ export function UsersPage() {
                 取消
               </button>
               <button className="btn btn-primary px-4" type="submit">
-                保存
+                确认更改
               </button>
             </div>
           </form>
