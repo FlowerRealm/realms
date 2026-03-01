@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -217,6 +218,22 @@ func adminUsageParseSuggestLimit(c *gin.Context) (int, bool) {
 		limit = 50
 	}
 	return limit, true
+}
+
+func adminUsageParseInt64Param(c *gin.Context, q url.Values, key string, errorMsg string) (*int64, bool) {
+	if c == nil {
+		return nil, false
+	}
+	raw := strings.TrimSpace(q.Get(key))
+	if raw == "" {
+		return nil, true
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": errorMsg})
+		return nil, false
+	}
+	return &id, true
 }
 
 type adminUsageUserSuggestView struct {
@@ -494,27 +511,17 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 		_ = strings.TrimSpace(q.Get("q_key"))
 		qChannel := strings.TrimSpace(q.Get("q_channel"))
 		qModel := strings.TrimSpace(q.Get("q_model"))
-		var upstreamChannelIDFilter *int64
-		if v := strings.TrimSpace(q.Get("upstream_channel_id")); v != "" {
-			id, err := strconv.ParseInt(v, 10, 64)
-			if err != nil || id <= 0 {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "upstream_channel_id 不合法"})
-				return
-			}
-			upstreamChannelIDFilter = &id
+		upstreamChannelIDFilter, ok := adminUsageParseInt64Param(c, q, "upstream_channel_id", "upstream_channel_id 不合法")
+		if !ok {
+			return
 		}
 		var modelExactFilter *string
 		if v := strings.TrimSpace(q.Get("model")); v != "" {
 			modelExactFilter = &v
 		}
-		var userIDFilter *int64
-		if v := strings.TrimSpace(q.Get("user_id")); v != "" {
-			id, err := strconv.ParseInt(v, 10, 64)
-			if err != nil || id <= 0 {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "user_id 不合法"})
-				return
-			}
-			userIDFilter = &id
+		userIDFilter, ok := adminUsageParseInt64Param(c, q, "user_id", "user_id 不合法")
+		if !ok {
+			return
 		}
 		var idx store.UsageEventsIndexFlags
 		for _, part := range strings.Split(indexRaw, ",") {
