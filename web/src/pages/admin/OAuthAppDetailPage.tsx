@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
 import {
@@ -7,7 +7,9 @@ import {
   updateAdminOAuthApp,
   type AdminOAuthApp,
 } from '../../api/admin/oauthApps';
+import { AutoSaveIndicator } from '../../components/AutoSaveIndicator';
 import { SegmentedFrame } from '../../components/SegmentedFrame';
+import { useAutoSave } from '../../hooks/useAutoSave';
 
 function parseURIs(raw: string): string[] {
   return raw
@@ -26,6 +28,7 @@ export function OAuthAppDetailPage() {
   const [err, setErr] = useState('');
   const [notice, setNotice] = useState('');
   const [rotatedSecret, setRotatedSecret] = useState('');
+  const [autosaveResetKey, setAutosaveResetKey] = useState(0);
 
   const [name, setName] = useState('');
   const [status, setStatus] = useState(1);
@@ -44,6 +47,7 @@ export function OAuthAppDetailPage() {
       setName(a?.name || '');
       setStatus(a?.status || 0);
       setRedirectURIsRaw((a?.redirect_uris || []).join('\n'));
+      setAutosaveResetKey((x) => x + 1);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败');
       setApp(null);
@@ -56,6 +60,40 @@ export function OAuthAppDetailPage() {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appId]);
+
+  const autosaveValue = useMemo(() => {
+    if (!app) return null;
+    return { name: name.trim(), status, redirect_uris: parseURIs(redirectURIsRaw) };
+  }, [app, name, redirectURIsRaw, status]);
+
+  const autosave = useAutoSave({
+    enabled: !!app && !loading && !saving,
+    value: autosaveValue,
+    resetKey: autosaveResetKey,
+    validate: (v) => {
+      if (!app) return '未加载';
+      if (!v) return '未加载';
+      if (!v.name.trim()) return '名称不能为空';
+      return '';
+    },
+    save: async (v) => {
+      if (!app) return;
+      if (!v) return;
+      setErr('');
+      setNotice('');
+      setSaving(true);
+      try {
+        const res = await updateAdminOAuthApp(app.id, v);
+        if (!res.success) throw new Error(res.message || '保存失败');
+        setNotice(res.message || '已自动保存');
+      } finally {
+        setSaving(false);
+      }
+    },
+    afterSave: async () => {
+      await refresh();
+    },
+  });
 
   return (
     <div className="fade-in-up">
@@ -70,6 +108,7 @@ export function OAuthAppDetailPage() {
                 </div>
               ) : null}
             </div>
+            <AutoSaveIndicator status={autosave.status} blockedReason={autosave.blockedReason} error={autosave.error} onRetry={autosave.retry} className="small" />
           </div>
 
           {rotatedSecret ? (
@@ -106,23 +145,7 @@ export function OAuthAppDetailPage() {
               className="row g-3"
               onSubmit={async (e) => {
                 e.preventDefault();
-                setErr('');
-                setNotice('');
-                setSaving(true);
-                try {
-                  const res = await updateAdminOAuthApp(app.id, {
-                    name: name.trim(),
-                    status,
-                    redirect_uris: parseURIs(redirectURIsRaw),
-                  });
-                  if (!res.success) throw new Error(res.message || '保存失败');
-                  setNotice(res.message || '已保存');
-                  await refresh();
-                } catch (e) {
-                  setErr(e instanceof Error ? e.message : '保存失败');
-                } finally {
-                  setSaving(false);
-                }
+                autosave.flush();
               }}
             >
               <div className="col-md-6">
@@ -162,9 +185,6 @@ export function OAuthAppDetailPage() {
                   }}
                 >
                   生成/轮换 Secret
-                </button>
-                <button className="btn btn-primary" type="submit" disabled={saving}>
-                  {saving ? '保存中…' : '保存'}
                 </button>
               </div>
             </form>

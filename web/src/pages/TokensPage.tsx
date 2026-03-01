@@ -29,12 +29,14 @@ import {
   type UserToken,
 } from '../api/tokens';
 import { getUsageWindows, type UsageWindow } from '../api/usage';
+import { AutoSaveIndicator } from '../components/AutoSaveIndicator';
 import { BootstrapModal } from '../components/BootstrapModal';
 import { DividedStack } from '../components/DividedStack';
 import { SegmentedFrame } from '../components/SegmentedFrame';
 import { closeModalById } from '../components/modal';
 import { PortalDragOverlay } from '../components/PortalDragOverlay';
 import { formatUSDPlain } from '../format/money';
+import { useAutoSave } from '../hooks/useAutoSave';
 import { cacheHitRate, formatLocalDate, formatLocalDateTimeMinute } from './usage/usageUtils';
 
 type UseSortableReturn = ReturnType<typeof useSortable>;
@@ -129,6 +131,7 @@ export function TokensPage() {
   const [tokenGroupsData, setTokenGroupsData] = useState<UserTokenChannelGroups | null>(null);
   const [loading, setLoading] = useState(false);
   const [reordering, setReordering] = useState(false);
+  const [tokenGroupsAutosaveResetKey, setTokenGroupsAutosaveResetKey] = useState(0);
   const [err, setErr] = useState('');
   const [notice, setNotice] = useState('');
   const [channels, setChannels] = useState<TokenChannelGroupRow[]>([]);
@@ -339,6 +342,51 @@ export function TokensPage() {
     return channels.find((ch) => ch.id === draggingID) || null;
   }, [channels, draggingID]);
 
+  const desiredGroupNames = normalizeChannelGroupSections(channels).map((ch) => ch.name);
+
+  const tokenGroupsAutosave = useAutoSave({
+    enabled: !!tokenGroupsToken && !loading,
+    resetKey: tokenGroupsAutosaveResetKey,
+    value: { tokenID: tokenGroupsToken?.id || 0, groupNames: desiredGroupNames },
+    validate: (v) => {
+      if (!v.tokenID) return '未选择 Token';
+      if (!v.groupNames.length) return '至少选择 1 个渠道组';
+      return '';
+    },
+    save: async (v) => {
+      const tokenID = v.tokenID;
+      if (!tokenID) return;
+      setErr('');
+      setNotice('');
+      setReordering(true);
+      try {
+        const res = await replaceUserTokenChannelGroups(tokenID, v.groupNames);
+        if (!res.success) throw new Error(res.message || '保存失败');
+        const refreshed = await getUserTokenChannelGroups(tokenID);
+        if (refreshed.success) {
+          const d = refreshed.data || null;
+          setTokenGroupsData(d);
+          const orderNames = normalizeGroupOrder((d?.bindings || []).map((x) => (x.channel_group_name || '').trim()).filter((x) => x));
+          const rows: TokenChannelGroupRow[] = orderNames.map((name) => {
+            const option = (d?.allowed_channel_groups || []).find((g) => g.name === name);
+            return {
+              id: getChannelGroupID(name),
+              name,
+              status: option?.status ?? 1,
+              price_multiplier: option?.price_multiplier || '1',
+              description: option?.description || null,
+            };
+          });
+          setChannels(normalizeChannelGroupSections(rows));
+          setTokenGroupsAutosaveResetKey((x) => x + 1);
+        }
+        setNotice('已自动保存');
+      } finally {
+        setReordering(false);
+      }
+    },
+  });
+
   useEffect(() => {
     if (!draggingID) return;
     const prevCursor = document.body.style.cursor;
@@ -476,6 +524,7 @@ export function TokensPage() {
         };
       });
       setChannels(normalizeChannelGroupSections(rows));
+      setTokenGroupsAutosaveResetKey((x) => x + 1);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '加载失败';
       setErr(msg);
@@ -1230,52 +1279,7 @@ export function TokensPage() {
               <button type="button" className="btn btn-light" data-bs-dismiss="modal" disabled={reordering}>
                 关闭
               </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={loading || reordering}
-	                onClick={async () => {
-	                  if (!tokenGroupsToken) return;
-	                  if (channels.length === 0) {
-	                    setErr('至少选择 1 个渠道组');
-	                    return;
-	                  }
-	                  setErr('');
-	                  setNotice('');
-	                  setReordering(true);
-	                  try {
-                    const res = await replaceUserTokenChannelGroups(
-                      tokenGroupsToken.id,
-                      normalizeChannelGroupSections(channels).map((ch) => ch.name),
-                    );
-                    if (!res.success) throw new Error(res.message || '保存失败');
-                    const refreshed = await getUserTokenChannelGroups(tokenGroupsToken.id);
-                    if (refreshed.success) {
-                      const d = refreshed.data || null;
-                      setTokenGroupsData(d);
-                      const orderNames = normalizeGroupOrder((d?.bindings || []).map((x) => (x.channel_group_name || '').trim()).filter((x) => x));
-                      const rows: TokenChannelGroupRow[] = orderNames.map((name) => {
-                        const option = (d?.allowed_channel_groups || []).find((g) => g.name === name);
-                        return {
-                          id: getChannelGroupID(name),
-                          name,
-                          status: option?.status ?? 1,
-                          price_multiplier: option?.price_multiplier || '1',
-                          description: option?.description || null,
-                        };
-                      });
-                      setChannels(normalizeChannelGroupSections(rows));
-                    }
-                    setNotice('已保存');
-                  } catch (e) {
-                    setErr(e instanceof Error ? e.message : '保存失败');
-                  } finally {
-                    setReordering(false);
-                  }
-                }}
-              >
-                {reordering ? '保存中…' : '保存'}
-              </button>
+              <AutoSaveIndicator status={tokenGroupsAutosave.status} blockedReason={tokenGroupsAutosave.blockedReason} error={tokenGroupsAutosave.error} onRetry={tokenGroupsAutosave.retry} className="small align-self-center" />
             </div>
           </div>
         )}

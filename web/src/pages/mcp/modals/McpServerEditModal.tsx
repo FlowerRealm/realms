@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import { BootstrapModal } from '../../../components/BootstrapModal';
 
 import type { ImportSource, McpType, Row } from '../mcpTypes';
@@ -22,7 +24,7 @@ export function McpServerEditModal(props: {
   setImportContent: (v: string) => void;
 
   onImport: () => void;
-  onSave: () => void;
+  autosaveIndicator?: ReactNode;
   onHiddenReset: () => void;
 }) {
   const {
@@ -40,7 +42,7 @@ export function McpServerEditModal(props: {
     importContent,
     setImportContent,
     onImport,
-    onSave,
+    autosaveIndicator,
     onHiddenReset,
   } = props;
 
@@ -59,9 +61,9 @@ export function McpServerEditModal(props: {
               导入并生效
             </button>
           ) : (
-            <button type="button" className="btn btn-primary px-4" disabled={saving} onClick={onSave}>
-              保存并生效
-            </button>
+            <div className="d-flex align-items-center gap-2">
+              {autosaveIndicator || null}
+            </div>
           )}
         </>
       }

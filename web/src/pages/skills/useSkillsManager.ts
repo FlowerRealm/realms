@@ -51,7 +51,7 @@ export type UseSkillsManagerResult = {
 
   refresh: () => Promise<void>;
   scanNow: (silent?: boolean) => Promise<void>;
-  saveStore: (next: SkillsStoreV1, applyOnSave?: boolean) => Promise<void>;
+  saveStore: (next: SkillsStoreV1, applyOnSave?: boolean) => Promise<{ ok: true } | { ok: false; error: string }>;
   applyNow: (opts?: Pick<ApplyAdminSkillsRequest, 'targets' | 'remove_ids' | 'force' | 'resolutions'>) => Promise<void>;
   importFrom: (source: SkillsTargetKey, mode: 'merge' | 'replace', applyAfter: boolean) => Promise<void>;
   removeSkill: (id: string) => Promise<void>;
@@ -114,7 +114,7 @@ export function useSkillsManager(): UseSkillsManagerResult {
     }
   }, []);
 
-  const saveStore = useCallback(async (next: SkillsStoreV1, applyOnSave?: boolean) => {
+  const saveStore = useCallback(async (next: SkillsStoreV1, applyOnSave?: boolean): Promise<{ ok: true } | { ok: false; error: string }> => {
     setErr('');
     setNotice('');
     setSaving(true);
@@ -127,8 +127,11 @@ export function useSkillsManager(): UseSkillsManagerResult {
       setConflicts(res.data?.conflicts || []);
       await refresh();
       setNotice(applyOnSave ? '已保存并尝试应用' : '已保存');
+      return { ok: true };
     } catch (e) {
-      setErr(e instanceof Error ? e.message : '保存失败');
+      const msg = e instanceof Error ? e.message : '保存失败';
+      setErr(msg);
+      return { ok: false, error: msg };
     } finally {
       setSaving(false);
     }

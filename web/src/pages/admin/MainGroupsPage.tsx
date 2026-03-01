@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { listAdminChannelGroups, type AdminChannelGroup } from '../../api/admin/channelGroups';
 import {
@@ -11,10 +11,12 @@ import {
   type AdminMainGroup,
   type UpdateAdminMainGroupRequest,
 } from '../../api/admin/mainGroups';
+import { AutoSaveIndicator } from '../../components/AutoSaveIndicator';
 import { BootstrapModal } from '../../components/BootstrapModal';
 import { DividedStack } from '../../components/DividedStack';
 import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { closeModalById } from '../../components/modal';
+import { useAutoSave } from '../../hooks/useAutoSave';
 
 function statusBadge(status: number): { cls: string; label: string } {
   if (status === 1) return { cls: 'badge rounded-pill bg-success bg-opacity-10 text-success px-2', label: '启用' };
@@ -37,11 +39,14 @@ export function MainGroupsPage() {
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [editStatus, setEditStatus] = useState(1);
+  const [editAutosaveResetKey, setEditAutosaveResetKey] = useState(0);
+  const editPathNameRef = useRef('');
 
   const [subgroupsFor, setSubgroupsFor] = useState<AdminMainGroup | null>(null);
   const [subgroupsLoading, setSubgroupsLoading] = useState(false);
   const [subgroups, setSubgroups] = useState<string[]>([]);
   const [addSubgroup, setAddSubgroup] = useState('');
+  const [subgroupsAutosaveResetKey, setSubgroupsAutosaveResetKey] = useState(0);
 
   const selectableChannelGroups = useMemo(() => channelGroups.filter((g) => g.status === 1).slice().sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')), [channelGroups]);
   const channelGroupByName = useMemo(() => {
@@ -78,6 +83,8 @@ export function MainGroupsPage() {
     setEditName((editing.name || '').toString().trim());
     setEditDesc((editing.description || '').toString());
     setEditStatus(editing.status || 0);
+    editPathNameRef.current = (editing.name || '').toString().trim();
+    setEditAutosaveResetKey((x) => x + 1);
   }, [editing]);
 
   async function openSubgroupsModal(g: AdminMainGroup) {
@@ -98,6 +105,7 @@ export function MainGroupsPage() {
         dedup.push(name);
       }
       setSubgroups(dedup);
+      setSubgroupsAutosaveResetKey((x) => x + 1);
     } catch (e) {
       setSubgroups([]);
       setErr(e instanceof Error ? e.message : '加载子组失败');
@@ -121,6 +129,74 @@ export function MainGroupsPage() {
       return [...prev, v];
     });
   }
+
+  const editAutosave = useAutoSave({
+    enabled: !!editing && !saving,
+    resetKey: editAutosaveResetKey,
+    value: { name: editName, description: editDesc, status: editStatus },
+    validate: (v) => {
+      if (!editing) return '未选择用户分组';
+      if (!v.name.trim()) return '名称不能为空';
+      return '';
+    },
+    save: async (v) => {
+      if (!editing) return;
+      const baseName = (editPathNameRef.current || '').trim() || (editing.name || '').trim();
+      const newName = v.name.trim();
+      const req: UpdateAdminMainGroupRequest = { description: v.description.trim() || undefined, status: v.status };
+      if (newName !== baseName) req.new_name = newName;
+
+      setErr('');
+      setNotice('');
+      setSaving(true);
+      try {
+        const res = await updateAdminMainGroup(baseName, req);
+        if (!res.success) throw new Error(res.message || '保存失败');
+        const effectiveName = (req.new_name || baseName).trim();
+        editPathNameRef.current = effectiveName;
+        setGroups((prev) => {
+          const next = prev.slice();
+          const idx = next.findIndex((g) => g.name === baseName);
+          if (idx >= 0) {
+            next[idx] = { ...(next[idx] || ({} as AdminMainGroup)), name: effectiveName, description: req.description, status: req.status };
+          }
+          return next;
+        });
+        setEditing((prev) => {
+          if (!prev) return prev;
+          if (prev.name !== baseName) return prev;
+          return { ...prev, name: effectiveName, description: req.description, status: req.status };
+        });
+        setNotice('已自动保存');
+      } finally {
+        setSaving(false);
+      }
+    },
+  });
+
+  const subgroupsAutosave = useAutoSave({
+    enabled: !!subgroupsFor && !saving && !subgroupsLoading,
+    resetKey: subgroupsAutosaveResetKey,
+    value: { name: (subgroupsFor?.name || '').trim(), subgroups },
+    validate: (v) => {
+      if (!v.name) return '未选择用户分组';
+      return '';
+    },
+    save: async (v) => {
+      const name = (v.name || '').trim();
+      if (!name) return;
+      setErr('');
+      setNotice('');
+      setSaving(true);
+      try {
+        const res = await replaceAdminMainGroupSubgroups(name, v.subgroups);
+        if (!res.success) throw new Error(res.message || '保存失败');
+        setNotice('已自动保存');
+      } finally {
+        setSaving(false);
+      }
+    },
+  });
 
   return (
     <div className="fade-in-up">
@@ -309,29 +385,15 @@ export function MainGroupsPage() {
           <div className="text-muted">未选择用户分组。</div>
         ) : (
           <form
-            onSubmit={async (e) => {
+            onSubmit={(e) => {
               e.preventDefault();
-              setErr('');
-	              setNotice('');
-	              setSaving(true);
-	              try {
-	                const name = (editing.name || '').trim();
-                  const newName = editName.trim();
-                  const req: UpdateAdminMainGroupRequest = { description: editDesc.trim() || undefined, status: editStatus };
-                  if (newName !== name) req.new_name = newName;
-	                const res = await updateAdminMainGroup(name, req);
-	                if (!res.success) throw new Error(res.message || '保存失败');
-                closeModalById('editMainGroupModal');
-                setNotice('已保存');
-                await refresh();
-              } catch (e) {
-                setErr(e instanceof Error ? e.message : '保存失败');
-              } finally {
-                setSaving(false);
-              }
+              editAutosave.flush();
             }}
           >
 	            <div className="row g-3">
+                <div className="col-12 d-flex justify-content-end">
+                  <AutoSaveIndicator status={editAutosave.status} blockedReason={editAutosave.blockedReason} error={editAutosave.error} onRetry={editAutosave.retry} />
+                </div>
 	              <div className="col-12 col-md-6">
 	                <label className="form-label">名称</label>
 	                <input className="form-control font-monospace" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="例如: team_a" />
@@ -347,11 +409,6 @@ export function MainGroupsPage() {
               <div className="col-12">
                 <label className="form-label">描述</label>
                 <input className="form-control" value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="可选" />
-              </div>
-              <div className="col-12 d-grid">
-                <button className="btn btn-primary" type="submit" disabled={saving}>
-                  {saving ? '保存中…' : '保存'}
-                </button>
               </div>
             </div>
           </form>
@@ -370,29 +427,7 @@ export function MainGroupsPage() {
 	          <div>
 	            <div className="d-flex align-items-center justify-content-between mb-3">
 	              <div className="text-muted small">子组是可绑定的“渠道组”（用于限制 Token 的可选范围）。</div>
-	              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                disabled={saving || subgroupsLoading}
-                onClick={async () => {
-                  setErr('');
-                  setNotice('');
-                  setSaving(true);
-                  try {
-                    const name = (subgroupsFor.name || '').trim();
-                    const res = await replaceAdminMainGroupSubgroups(name, subgroups);
-                    if (!res.success) throw new Error(res.message || '保存失败');
-                    closeModalById('editMainGroupSubgroupsModal');
-                    setNotice('已保存');
-                  } catch (e) {
-                    setErr(e instanceof Error ? e.message : '保存失败');
-                  } finally {
-                    setSaving(false);
-                  }
-                }}
-              >
-                {saving ? '保存中…' : '保存'}
-              </button>
+                <AutoSaveIndicator status={subgroupsAutosave.status} blockedReason={subgroupsAutosave.blockedReason} error={subgroupsAutosave.error} onRetry={subgroupsAutosave.retry} />
             </div>
 
             {subgroupsLoading ? <div className="text-muted small">加载中…</div> : null}

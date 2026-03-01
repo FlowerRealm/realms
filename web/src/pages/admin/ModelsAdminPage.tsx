@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 
+import { AutoSaveIndicator } from '../../components/AutoSaveIndicator';
 import { BootstrapModal } from '../../components/BootstrapModal';
 import { DividedStack } from '../../components/DividedStack';
 import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { closeModalById } from '../../components/modal';
+import { useAutoSave } from '../../hooks/useAutoSave';
 import { listAdminChannelGroups, type AdminChannelGroup } from '../../api/admin/channelGroups';
 import {
   createManagedModelAdmin,
@@ -148,6 +150,43 @@ export function ModelsAdminPage() {
     if (!editing) return;
     setEditForm(modelToForm(editing, defaultGroupName));
   }, [editing, defaultGroupName]);
+
+  const editAutosave = useAutoSave({
+    enabled: !!editing,
+    resetKey: editing?.id || 0,
+    value: editForm,
+    validate: (v) => {
+      if (!editing) return '未选择模型';
+      if (!(v.public_id || '').trim()) return 'public_id 不能为空';
+      return '';
+    },
+    save: async (v) => {
+      if (!editing) return;
+      setErr('');
+      setNotice('');
+      setSaving(true);
+      try {
+        const nextModel: ManagedModel = {
+          ...editing,
+          public_id: v.public_id.trim(),
+          group_name: v.group_name.trim() || defaultGroupName,
+          owned_by: v.owned_by.trim() ? v.owned_by.trim() : null,
+          input_usd_per_1m: v.input_usd_per_1m,
+          output_usd_per_1m: v.output_usd_per_1m,
+          cache_input_usd_per_1m: v.cache_input_usd_per_1m,
+          cache_output_usd_per_1m: v.cache_output_usd_per_1m,
+          status: v.status,
+        };
+        const res = await updateManagedModelAdmin(nextModel);
+        if (!res.success) throw new Error(res.message || '保存失败');
+        setModels((prev) => prev.map((m) => (m.id === editing.id ? nextModel : m)));
+        setEditing(nextModel);
+        setNotice('已自动保存');
+      } finally {
+        setSaving(false);
+      }
+    },
+  });
 
   useEffect(() => {
     setCreateForm((prev) => {
@@ -552,7 +591,7 @@ export function ModelsAdminPage() {
               取消
             </button>
             <button className="btn btn-primary px-4" type="submit" disabled={saving || !createForm.public_id.trim()}>
-              保存
+              创建
             </button>
           </div>
         </form>
@@ -751,33 +790,9 @@ export function ModelsAdminPage() {
         ) : (
           <form
             className="row g-3"
-            onSubmit={async (e) => {
+            onSubmit={(e) => {
               e.preventDefault();
-              if (!editing) return;
-              setErr('');
-              setNotice('');
-              setSaving(true);
-              try {
-                const res = await updateManagedModelAdmin({
-                  ...editing,
-                  public_id: editForm.public_id.trim(),
-                  group_name: editForm.group_name.trim() || defaultGroupName,
-                  owned_by: editForm.owned_by.trim() ? editForm.owned_by.trim() : null,
-                  input_usd_per_1m: editForm.input_usd_per_1m,
-                  output_usd_per_1m: editForm.output_usd_per_1m,
-                  cache_input_usd_per_1m: editForm.cache_input_usd_per_1m,
-                  cache_output_usd_per_1m: editForm.cache_output_usd_per_1m,
-                  status: editForm.status,
-                });
-                if (!res.success) throw new Error(res.message || '保存失败');
-                setNotice('已保存');
-                closeModalById('editModelModal');
-                await refresh();
-              } catch (e) {
-                setErr(e instanceof Error ? e.message : '保存失败');
-              } finally {
-                setSaving(false);
-              }
+              editAutosave.flush();
             }}
           >
             <div className="col-md-8">
@@ -843,9 +858,7 @@ export function ModelsAdminPage() {
               <button type="button" className="btn btn-light" data-bs-dismiss="modal">
                 取消
               </button>
-              <button className="btn btn-primary px-4" type="submit" disabled={saving}>
-                保存
-              </button>
+              <AutoSaveIndicator status={editAutosave.status} blockedReason={editAutosave.blockedReason} error={editAutosave.error} onRetry={editAutosave.retry} />
             </div>
           </form>
         )}

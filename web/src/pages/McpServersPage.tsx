@@ -3,7 +3,9 @@ import { Navigate } from 'react-router-dom';
 
 import { parseAdminMcp, type McpServerV2 } from '../api/admin/mcp';
 import { useAuth } from '../auth/AuthContext';
+import { AutoSaveIndicator } from '../components/AutoSaveIndicator';
 import { closeModalById, showModalById } from '../components/modal';
+import { useAutoSave } from '../hooks/useAutoSave';
 
 import type { ImportPick, ImportSource, Row, TargetKey, UnionRow } from './mcp/mcpTypes';
 import { chooseActualServer, equalServerCore, mainSummary, serverType, targetEnabledForServer, typeBadge } from './mcp/mcpUtils';
@@ -143,34 +145,33 @@ export function McpServersPage() {
     })();
   }
 
-  function saveFormToDesired() {
-    const id = form.id.trim();
-    if (!id) {
-      setErr('ID 不能为空');
-      return;
-    }
-    const t = form.type;
-    if (t === 'stdio' && !form.command.trim()) {
-      setErr('command 不能为空');
-      return;
-    }
-    if ((t === 'http' || t === 'sse') && !form.url.trim()) {
-      setErr('url 不能为空');
-      return;
-    }
-    const startup = parseTimeoutFieldMs(form.startup_timeout_ms);
-    const tool = parseTimeoutFieldMs(form.tool_timeout_ms);
-    if (startup < 0 || tool < 0) {
-      setErr('timeout 必须是非负整数（毫秒）');
-      return;
-    }
-    const server = buildServer(t, form);
-
-    const next = { ...(desiredServers || {}) };
-    next[id] = server;
-    closeModalById('mcpEditModal');
-    void saveDesired(next);
-  }
+  const formAutosave = useAutoSave({
+    enabled: !saving && (!!editing || createMode === 'manual'),
+    resetKey: `${createMode}:${editing?.id || 'new'}`,
+    value: form,
+    validate: (f) => {
+      const id = (f.id || '').trim();
+      if (!id) return 'ID 不能为空';
+      if (!editing && (desiredServers || {})[id]) return 'ID 已存在';
+      const t = f.type;
+      if (t === 'stdio' && !f.command.trim()) return 'command 不能为空';
+      if ((t === 'http' || t === 'sse') && !f.url.trim()) return 'url 不能为空';
+      const startup = parseTimeoutFieldMs(f.startup_timeout_ms);
+      const tool = parseTimeoutFieldMs(f.tool_timeout_ms);
+      if (startup < 0 || tool < 0) return 'timeout 必须是非负整数（毫秒）';
+      return '';
+    },
+    save: async (f) => {
+      const id = f.id.trim();
+      const t = f.type;
+      const server = buildServer(t, f);
+      const next = { ...(desiredServers || {}) };
+      next[id] = server;
+      const res = await saveDesired(next, true);
+      if (!res.ok) throw new Error(res.error);
+      if (!editing) setEditing({ id, server });
+    },
+  });
 
   function computeImportConflictIDs(desired: Record<string, McpServerV2>, imported: Record<string, McpServerV2>): string[] {
     const out: string[] = [];
@@ -482,7 +483,7 @@ export function McpServersPage() {
         importContent={importContent}
         setImportContent={setImportContent}
         onImport={() => void startImport()}
-        onSave={saveFormToDesired}
+        autosaveIndicator={<AutoSaveIndicator status={formAutosave.status} blockedReason={formAutosave.blockedReason} error={formAutosave.error} onRetry={formAutosave.retry} />}
         onHiddenReset={() => {}}
       />
 

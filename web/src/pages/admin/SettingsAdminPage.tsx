@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { getAdminSettings, resetAdminSettings, updateAdminSettings, type AdminSettings, type FeatureBanItem, type UpdateAdminSettingsRequest } from '../../api/admin/settings';
 import { useAuth } from '../../auth/AuthContext';
+import { AutoSaveIndicator } from '../../components/AutoSaveIndicator';
 import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { TimeZoneInput } from '../../components/TimeZoneInput';
+import { useAutoSave } from '../../hooks/useAutoSave';
 import { PersonalAPIKeysPanel } from './PersonalAPIKeysPanel';
 
 type TabKey = 'features' | 'api_keys' | 'base' | 'email' | 'billing';
@@ -61,6 +63,7 @@ export function SettingsAdminPage() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const [notice, setNotice] = useState('');
+  const [autosaveResetKey, setAutosaveResetKey] = useState(0);
 
   const showBillingTab = useMemo(() => {
     const v = settings?.features?.billing_disabled;
@@ -94,6 +97,21 @@ export function SettingsAdminPage() {
     }
   }
 
+  const refreshSilent = useCallback(async () => {
+    try {
+      const res = await getAdminSettings();
+      if (!res.success) return;
+      const s = res.data || null;
+      setSettings(s);
+      if (s) {
+        setForm(initForm(s));
+        setAutosaveResetKey((x) => x + 1);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   useEffect(() => {
     void refresh();
   }, []);
@@ -105,6 +123,35 @@ export function SettingsAdminPage() {
     }
   }, [isPersonalMode, tab]);
 
+  const autosaveTrackForm = useMemo(() => {
+    if (!form) return null;
+    return { ...form, smtp_token: '' };
+  }, [form]);
+
+  const autosave = useAutoSave({
+    enabled: !!form && !loading && !saving,
+    value: form as UpdateAdminSettingsRequest,
+    trackValue: autosaveTrackForm,
+    resetKey: autosaveResetKey,
+    validate: (v) => {
+      if (!v) return '未加载';
+      if (typeof v.smtp_port !== 'number' || !Number.isFinite(v.smtp_port) || v.smtp_port <= 0) return 'SMTP port 不合法';
+      return '';
+    },
+    save: async (v) => {
+      setErr('');
+      const res = await updateAdminSettings(v);
+      if (!res.success) throw new Error(res.message || '保存失败');
+      setNotice(res.message || '已自动保存');
+      if ((v.smtp_token || '').trim()) {
+        setForm((prev) => (prev ? { ...prev, smtp_token: '' } : prev));
+      }
+    },
+    afterSave: async () => {
+      await refreshSilent();
+    },
+  });
+
   return (
     <div className="fade-in-up">
       <div className="d-flex justify-content-between align-items-center mb-4">
@@ -112,6 +159,7 @@ export function SettingsAdminPage() {
           <h3 className="mb-1 fw-bold">系统设置</h3>
           <p className="text-muted small mb-0">少量运行期配置（持久化到数据库，优先于启动期默认值）。</p>
         </div>
+        <AutoSaveIndicator status={autosave.status} blockedReason={autosave.blockedReason} error={autosave.error} onRetry={autosave.retry} className="small" />
       </div>
 
       {notice ? (
@@ -194,29 +242,6 @@ export function SettingsAdminPage() {
                 disabled={saving}
               >
                 恢复默认
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={async () => {
-                  if (!form) return;
-                  setErr('');
-                  setNotice('');
-                  setSaving(true);
-                  try {
-                    const res = await updateAdminSettings(form);
-                    if (!res.success) throw new Error(res.message || '保存失败');
-                    setNotice(res.message || '已保存');
-                    await refresh();
-                  } catch (e) {
-                    setErr(e instanceof Error ? e.message : '保存失败');
-                  } finally {
-                    setSaving(false);
-                  }
-                }}
-                disabled={saving}
-              >
-                {saving ? '保存中…' : '保存'}
               </button>
             </div>
           </div>
