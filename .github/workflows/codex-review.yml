@@ -3,28 +3,13 @@ name: Codex PR Review
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-  issue_comment:
-    types: [created]
 
 concurrency:
-  group: codex-review-${{ github.event.pull_request.number || github.event.issue.number }}
+  group: codex-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
   codex_review:
-    if: >-
-      ${{
-        github.actor != 'github-actions[bot]' &&
-        (
-          github.event_name == 'pull_request' ||
-          (
-            github.event_name == 'issue_comment' &&
-            github.event.issue.pull_request &&
-            contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
-            contains(toLower(github.event.comment.body), '@codex')
-          )
-        )
-      }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -37,45 +22,12 @@ jobs:
         with:
           github-token: ${{ github.token }}
           script: |
-            function parseExtraPrompt(body) {
-              const text = String(body || '');
-              const quoted = /@codex\s+"([^"]*)"/i.exec(text);
-              if (quoted) return (quoted[1] || '').trim();
-              const unquoted = /@codex\s+([^\n\r]*)/i.exec(text);
-              if (unquoted) return (unquoted[1] || '').trim();
-              return '';
-            }
-
-            if (context.eventName === 'pull_request') {
-              const pr = context.payload.pull_request;
-              core.setOutput('pr_number', String(pr.number));
-              core.setOutput('base_ref', String(pr.base.ref));
-              core.setOutput('head_sha', String(pr.head.sha));
-              core.setOutput('head_repo', String(pr.head.repo.full_name));
-              core.setOutput('head_ref', String(pr.head.ref));
-              core.setOutput('extra_prompt', '');
-              return;
-            }
-
-            const issue = context.payload.issue;
-            if (!issue || !issue.pull_request) {
-              core.setFailed('issue_comment event is not a PR comment');
-              return;
-            }
-
-            const prNumber = Number(issue.number);
-            const pr = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: prNumber
-            });
-
-            core.setOutput('pr_number', String(prNumber));
-            core.setOutput('base_ref', String(pr.data.base.ref));
-            core.setOutput('head_sha', String(pr.data.head.sha));
-            core.setOutput('head_repo', String(pr.data.head.repo.full_name));
-            core.setOutput('head_ref', String(pr.data.head.ref));
-            core.setOutput('extra_prompt', parseExtraPrompt(context.payload.comment?.body || ''));
+            const pr = context.payload.pull_request;
+            core.setOutput('pr_number', String(pr.number));
+            core.setOutput('base_ref', String(pr.base.ref));
+            core.setOutput('head_sha', String(pr.head.sha));
+            core.setOutput('head_repo', String(pr.head.repo.full_name));
+            core.setOutput('head_ref', String(pr.head.ref));
 
       - uses: actions/checkout@v4
         with:
@@ -106,10 +58,6 @@ jobs:
           CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
         run: |
           PROMPT="$(cat .github/codex/prompts/review.md)"
-          EXTRA="${{ steps.meta.outputs.extra_prompt }}"
-          if [ -n "$EXTRA" ]; then
-            PROMPT="$(printf "%s\n\nExtra user request (optional): %s" "$PROMPT" "$EXTRA")"
-          fi
           codex exec --profile pr_review "$PROMPT" > codex-output.md
 
       - name: Post review (PR review + inline threads)
