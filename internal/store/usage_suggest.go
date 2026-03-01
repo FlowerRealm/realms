@@ -78,7 +78,7 @@ FROM usage_events ue
 WHERE ue.time >= ? AND ue.time < ?
   AND ue.state <> ?
   AND ue.model IS NOT NULL
-  AND TRIM(ue.model) <> ''
+  AND ue.model <> ''
   AND ue.model LIKE ?
 GROUP BY ue.model
 ORDER BY last_id DESC

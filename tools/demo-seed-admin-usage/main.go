@@ -112,18 +112,24 @@ func main() {
 		if n == "" {
 			n = "seed-key"
 		}
-		id, _, err := st.CreateUserToken(ctx, userID, &n, raw)
-		if err == nil && id > 0 {
-			return id, raw, nil
-		}
-		tokens, err2 := st.ListUserTokens(ctx, userID)
-		if err2 != nil {
-			return 0, "", err2
-		}
-		if len(tokens) == 0 {
+		tokens, err := st.ListUserTokens(ctx, userID)
+		if err != nil {
 			return 0, "", err
 		}
-		return tokens[0].ID, "", nil
+		for _, tok := range tokens {
+			if tok.ID <= 0 || tok.Name == nil {
+				continue
+			}
+			if strings.TrimSpace(*tok.Name) == n {
+				return tok.ID, "", nil
+			}
+		}
+
+		id, _, err := st.CreateUserToken(ctx, userID, &n, raw)
+		if err != nil {
+			return 0, "", err
+		}
+		return id, raw, nil
 	}
 
 	token1, tokenPlain1, err := getOrCreateToken(user1.ID, tokenName1, rawToken1)
@@ -142,10 +148,6 @@ func main() {
 		if name == "" {
 			return 0, fmt.Errorf("channel name 不能为空")
 		}
-		id, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, name, "", 0, false, false, false, false)
-		if err == nil && id > 0 {
-			return id, nil
-		}
 		channels, err2 := st.ListUpstreamChannels(ctx)
 		if err2 != nil {
 			return 0, err2
@@ -155,7 +157,11 @@ func main() {
 				return ch.ID, nil
 			}
 		}
-		return 0, err
+		id, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, name, "", 0, false, false, false, false)
+		if err != nil {
+			return 0, err
+		}
+		return id, nil
 	}
 
 	chA, err := getOrCreateChannel("seed-channel-A")
