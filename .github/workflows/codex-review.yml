@@ -98,9 +98,7 @@ jobs:
           PROMPT="$(cat .github/codex/prompts/review.md)"
           EXTRA="${{ steps.meta.outputs.extra_prompt }}"
           if [ -n "$EXTRA" ]; then
-            PROMPT="$PROMPT
-
-Extra user request (optional): $EXTRA"
+            PROMPT="$(printf "%s\n\nExtra user request (optional): %s" "$PROMPT" "$EXTRA")"
           fi
           codex exec --profile pr_review "$PROMPT" > codex-output.md
 
