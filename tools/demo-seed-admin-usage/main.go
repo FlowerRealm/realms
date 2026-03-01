@@ -148,7 +148,7 @@ func main() {
 		}
 		channels, err2 := st.ListUpstreamChannels(ctx)
 		if err2 != nil {
-			return 0, err
+			return 0, err2
 		}
 		for _, ch := range channels {
 			if strings.TrimSpace(ch.Name) == name {
