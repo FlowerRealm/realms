@@ -284,6 +284,20 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 	routeKeyHash := h.sched.RouteKeyHash(routeKey)
 
 	usageID := int64(0)
+	userRelease, userSlotErr := h.acquireUserSlot(r.Context(), p.UserID)
+	if userSlotErr != nil {
+		fail := classifyConcurrencyAcquireFailure(userSlotErr)
+		resp := h.buildFailoverExhaustedResponse("openai", fail)
+		cw := &countingResponseWriter{ResponseWriter: w}
+		writeOpenAIErrorWithRetryAfter(cw, resp.Status, resp.ErrType, resp.Message, resp.RetryAfterSeconds)
+		if !resp.SkipMonitoring {
+			h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), resp.Status, resp.ErrorClass, resp.Message, time.Since(reqStart), stream)
+		}
+		return
+	}
+	if userRelease != nil {
+		defer userRelease()
+	}
 	if h.quota != nil {
 		res, err := h.quota.Reserve(r.Context(), quota.ReserveInput{
 			RequestID:       middleware.GetRequestID(r.Context()),
@@ -314,18 +328,32 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 			_ = h.quota.Void(bookCtx, usageID)
 			cancel()
 		}
-		h.auditUpstreamError(r.Context(), r.URL.Path, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", 0)
+		resp := h.buildFailoverExhaustedResponse("openai", proxyFailureInfo{})
+		if !resp.SkipMonitoring {
+			h.auditUpstreamError(r.Context(), r.URL.Path, p, nil, optionalString(publicModel), resp.Status, resp.ErrorClass, 0)
+		}
 		cw := &countingResponseWriter{ResponseWriter: w}
-		http.Error(cw, "上游不可用", http.StatusBadGateway)
-		h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream)
-		h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
+		writeOpenAIErrorWithRetryAfter(cw, resp.Status, resp.ErrType, resp.Message, resp.RetryAfterSeconds)
+		if !resp.SkipMonitoring {
+			h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), resp.Status, resp.ErrorClass, resp.Message, time.Since(reqStart), stream)
+		}
+		finalClass := resp.ErrorClass
+		if resp.SkipMonitoring {
+			finalClass = ""
+		}
+		h.finalizeUsageEvent(r, usageID, nil, resp.Status, finalClass, resp.UsageMessage, time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
 		return
 	}
 
 	router := scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, routeKeyHash, cons)
 	bestFailure := proxyFailureInfo{}
-	const absoluteMaxAttempts = 1000
-	for i := 0; i < absoluteMaxAttempts; i++ {
+	loopStart := time.Now()
+	switches := 0
+	backoff := h.initialBackoff()
+	for {
+		if h.failoverExhausted(loopStart, switches) {
+			break
+		}
 		sel, err := router.Next(r.Context())
 		if err != nil {
 			if h.finalizeIfCanceled(r, usageID, nil, reqStart, stream, reqBytes) {
@@ -348,6 +376,17 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), usageID, reqStart, reqBytes, 1, &bestFailure) {
 			return
 		}
+		switches++
+		if h.failoverExhausted(loopStart, switches) {
+			break
+		}
+		if !h.waitBackoff(r.Context(), backoff) {
+			if h.finalizeIfCanceled(r, usageID, nil, reqStart, stream, reqBytes) {
+				return
+			}
+			break
+		}
+		backoff = h.nextBackoff(backoff)
 	}
 
 	if usageID != 0 && h.quota != nil {
@@ -355,9 +394,18 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 		_ = h.quota.Void(bookCtx, usageID)
 		cancel()
 	}
-	h.auditUpstreamError(r.Context(), r.URL.Path, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", 0)
+	resp := h.buildFailoverExhaustedResponse("openai", bestFailure)
+	if !resp.SkipMonitoring {
+		h.auditUpstreamError(r.Context(), r.URL.Path, p, nil, optionalString(publicModel), resp.Status, resp.ErrorClass, 0)
+	}
 	cw := &countingResponseWriter{ResponseWriter: w}
-	http.Error(cw, "上游不可用", http.StatusBadGateway)
-	h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream)
-	h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", upstreamUnavailableUsageMessage(bestFailure), time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
+	writeOpenAIErrorWithRetryAfter(cw, resp.Status, resp.ErrType, resp.Message, resp.RetryAfterSeconds)
+	if !resp.SkipMonitoring {
+		h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), resp.Status, resp.ErrorClass, resp.Message, time.Since(reqStart), stream)
+	}
+	finalClass := resp.ErrorClass
+	if resp.SkipMonitoring {
+		finalClass = ""
+	}
+	h.finalizeUsageEvent(r, usageID, nil, resp.Status, finalClass, resp.UsageMessage, time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
 }

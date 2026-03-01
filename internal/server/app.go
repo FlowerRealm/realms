@@ -26,7 +26,9 @@ import (
 	openaiapi "realms/internal/api/openai"
 	"realms/internal/assets"
 	"realms/internal/codexoauth"
+	"realms/internal/concurrency"
 	"realms/internal/config"
+	"realms/internal/errorpassthrough"
 	"realms/internal/personalconfig"
 	"realms/internal/proxylog"
 	"realms/internal/quota"
@@ -50,6 +52,7 @@ type App struct {
 	store         *store.Store
 	personalCfg   *personalconfig.Syncer
 	codexOAuth    *codexoauth.Flow
+	concurrency   *concurrency.Manager
 	exec          *upstream.Executor
 	openai        *openaiapi.Handler
 	sched         *scheduler.Scheduler
@@ -100,12 +103,42 @@ func NewApp(opts AppOptions) (*App, error) {
 	openaiHandler := openaiapi.NewHandler(st, st, sched, exec, proxyLog, st, personalMode, qp, st, st, st, upstream.SSEPumpOptions{
 		InitialLineBytes: 64 << 10,
 	}, sub2api)
+	openaiHandler.SetGatewayPolicy(openaiapi.GatewayPolicy{
+		MaxRetryAttempts:         opts.Config.Gateway.MaxRetryAttempts,
+		RetryBaseDelay:           time.Duration(opts.Config.Gateway.RetryBaseDelayMS) * time.Millisecond,
+		RetryMaxDelay:            time.Duration(opts.Config.Gateway.RetryMaxDelayMS) * time.Millisecond,
+		MaxRetryElapsed:          time.Duration(opts.Config.Gateway.MaxRetryElapsedMS) * time.Millisecond,
+		MaxFailoverSwitches:      opts.Config.Gateway.MaxFailoverSwitches,
+		UserMaxConcurrency:       opts.Config.Gateway.UserMaxConcurrency,
+		CredentialMaxConcurrency: opts.Config.Gateway.CredentialMaxConcurrency,
+	})
+
+	var concMgr *concurrency.Manager
+	if strings.TrimSpace(opts.Config.Redis.Addr) != "" {
+		concMgr = concurrency.NewManager(concurrency.Options{
+			Addr:           opts.Config.Redis.Addr,
+			Password:       opts.Config.Redis.Password,
+			DB:             opts.Config.Redis.DB,
+			KeyPrefix:      opts.Config.Redis.KeyPrefix,
+			WaitTimeout:    time.Duration(opts.Config.Gateway.WaitTimeoutMS) * time.Millisecond,
+			WaitQueueExtra: opts.Config.Gateway.WaitQueueExtraSlots,
+			InitialBackoff: time.Duration(opts.Config.Gateway.RetryBaseDelayMS) * time.Millisecond,
+			MaxBackoff:     time.Duration(opts.Config.Gateway.RetryMaxDelayMS) * time.Millisecond,
+		})
+		if concMgr.Enabled() {
+			openaiHandler.SetConcurrencyManager(concMgr)
+		}
+	}
+	if opts.Config.Gateway.EnableErrorPassthrough {
+		openaiHandler.SetErrorPassthroughMatcher(errorpassthrough.NewService(st, 10*time.Second))
+	}
 
 	app := &App{
 		cfg:           opts.Config,
 		db:            opts.DB,
 		store:         st,
 		codexOAuth:    oauthFlow,
+		concurrency:   concMgr,
 		exec:          exec,
 		openai:        openaiHandler,
 		sched:         sched,
@@ -317,6 +350,19 @@ func quotaProvider(st *store.Store, cfg config.Config) quota.Provider {
 
 func (a *App) Handler() http.Handler {
 	return a.engine
+}
+
+func (a *App) Close() error {
+	if a == nil {
+		return nil
+	}
+	if a.personalCfg != nil {
+		a.personalCfg.StopWatcher()
+	}
+	if a.concurrency != nil {
+		return a.concurrency.Close()
+	}
+	return nil
 }
 
 func localBaseURL(cfg config.Config) string {

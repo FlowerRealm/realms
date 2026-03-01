@@ -18,6 +18,8 @@ type Config struct {
 	Mode       Mode             `yaml:"mode"`
 	Server     ServerConfig     `yaml:"server"`
 	DB         DBConfig         `yaml:"db"`
+	Redis      RedisConfig      `yaml:"redis"`
+	Gateway    GatewayConfig    `yaml:"gateway"`
 	Sub2API    Sub2APIConfig    `yaml:"sub2api"`
 	Security   SecurityConfig   `yaml:"security"`
 	Debug      DebugConfig      `yaml:"debug"`
@@ -94,6 +96,29 @@ type DBConfig struct {
 	// MigrationLockTimeoutSeconds 是 MySQL 启启动迁移等待锁的超时（秒）。
 	// - 0 表示不等待（立即失败）
 	MigrationLockTimeoutSeconds int `yaml:"migration_lock_timeout_seconds"`
+}
+
+type RedisConfig struct {
+	Addr      string `yaml:"addr"`
+	Password  string `yaml:"password"`
+	DB        int    `yaml:"db"`
+	KeyPrefix string `yaml:"key_prefix"`
+}
+
+type GatewayConfig struct {
+	MaxRetryAttempts  int `yaml:"max_retry_attempts"`
+	RetryBaseDelayMS  int `yaml:"retry_base_delay_ms"`
+	RetryMaxDelayMS   int `yaml:"retry_max_delay_ms"`
+	MaxRetryElapsedMS int `yaml:"max_retry_elapsed_ms"`
+
+	MaxFailoverSwitches int `yaml:"max_failover_switches"`
+
+	UserMaxConcurrency       int `yaml:"user_max_concurrency"`
+	CredentialMaxConcurrency int `yaml:"credential_max_concurrency"`
+	WaitTimeoutMS            int `yaml:"wait_timeout_ms"`
+	WaitQueueExtraSlots      int `yaml:"wait_queue_extra_slots"`
+
+	EnableErrorPassthrough bool `yaml:"enable_error_passthrough"`
 }
 
 type Sub2APIConfig struct {
@@ -217,6 +242,44 @@ func normalizeAndValidate(cfg Config) (Config, error) {
 	}
 	if cfg.Sub2API.TimeoutMS < 1000 {
 		cfg.Sub2API.TimeoutMS = 1000
+	}
+
+	cfg.Redis.Addr = strings.TrimSpace(cfg.Redis.Addr)
+	cfg.Redis.Password = strings.TrimSpace(cfg.Redis.Password)
+	cfg.Redis.KeyPrefix = strings.TrimSpace(cfg.Redis.KeyPrefix)
+	if cfg.Redis.KeyPrefix == "" {
+		cfg.Redis.KeyPrefix = "realms"
+	}
+	if cfg.Redis.DB < 0 {
+		return Config{}, errors.New("redis.db 不能为负数")
+	}
+
+	if cfg.Gateway.MaxRetryAttempts <= 0 {
+		cfg.Gateway.MaxRetryAttempts = 5
+	}
+	if cfg.Gateway.MaxRetryAttempts > 20 {
+		cfg.Gateway.MaxRetryAttempts = 20
+	}
+	if cfg.Gateway.RetryBaseDelayMS <= 0 {
+		cfg.Gateway.RetryBaseDelayMS = 300
+	}
+	if cfg.Gateway.RetryMaxDelayMS <= 0 {
+		cfg.Gateway.RetryMaxDelayMS = 3000
+	}
+	if cfg.Gateway.RetryMaxDelayMS < cfg.Gateway.RetryBaseDelayMS {
+		cfg.Gateway.RetryMaxDelayMS = cfg.Gateway.RetryBaseDelayMS
+	}
+	if cfg.Gateway.MaxRetryElapsedMS <= 0 {
+		cfg.Gateway.MaxRetryElapsedMS = 10000
+	}
+	if cfg.Gateway.MaxFailoverSwitches <= 0 {
+		cfg.Gateway.MaxFailoverSwitches = 8
+	}
+	if cfg.Gateway.WaitTimeoutMS <= 0 {
+		cfg.Gateway.WaitTimeoutMS = 30000
+	}
+	if cfg.Gateway.WaitQueueExtraSlots < 0 {
+		cfg.Gateway.WaitQueueExtraSlots = 0
 	}
 
 	cfg.Tickets.AttachmentsDir = strings.TrimSpace(cfg.Tickets.AttachmentsDir)
@@ -347,6 +410,19 @@ func defaultConfig() Config {
 			MigrationLockName:           "realms.schema_migrations",
 			MigrationLockTimeoutSeconds: 30,
 		},
+		Redis: RedisConfig{
+			KeyPrefix: "realms",
+		},
+		Gateway: GatewayConfig{
+			MaxRetryAttempts:       5,
+			RetryBaseDelayMS:       300,
+			RetryMaxDelayMS:        3000,
+			MaxRetryElapsedMS:      10000,
+			MaxFailoverSwitches:    8,
+			WaitTimeoutMS:          30000,
+			WaitQueueExtraSlots:    20,
+			EnableErrorPassthrough: true,
+		},
 		SMTP: SMTPConfig{
 			SMTPPort: 587,
 		},
@@ -394,6 +470,71 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("REALMS_DB_MIGRATION_LOCK_TIMEOUT_SECONDS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.DB.MigrationLockTimeoutSeconds = n
+		}
+	}
+	if v := os.Getenv("REALMS_REDIS_ADDR"); v != "" {
+		cfg.Redis.Addr = v
+	}
+	if v := os.Getenv("REALMS_REDIS_PASSWORD"); v != "" {
+		cfg.Redis.Password = v
+	}
+	if v := os.Getenv("REALMS_REDIS_DB"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Redis.DB = n
+		}
+	}
+	if v := os.Getenv("REALMS_REDIS_KEY_PREFIX"); v != "" {
+		cfg.Redis.KeyPrefix = v
+	}
+
+	if v := os.Getenv("REALMS_GATEWAY_MAX_RETRY_ATTEMPTS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Gateway.MaxRetryAttempts = n
+		}
+	}
+	if v := os.Getenv("REALMS_GATEWAY_RETRY_BASE_DELAY_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Gateway.RetryBaseDelayMS = n
+		}
+	}
+	if v := os.Getenv("REALMS_GATEWAY_RETRY_MAX_DELAY_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Gateway.RetryMaxDelayMS = n
+		}
+	}
+	if v := os.Getenv("REALMS_GATEWAY_MAX_RETRY_ELAPSED_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Gateway.MaxRetryElapsedMS = n
+		}
+	}
+	if v := os.Getenv("REALMS_GATEWAY_MAX_FAILOVER_SWITCHES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Gateway.MaxFailoverSwitches = n
+		}
+	}
+	if v := os.Getenv("REALMS_GATEWAY_USER_MAX_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Gateway.UserMaxConcurrency = n
+		}
+	}
+	if v := os.Getenv("REALMS_GATEWAY_CREDENTIAL_MAX_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Gateway.CredentialMaxConcurrency = n
+		}
+	}
+	if v := os.Getenv("REALMS_GATEWAY_WAIT_TIMEOUT_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Gateway.WaitTimeoutMS = n
+		}
+	}
+	if v := os.Getenv("REALMS_GATEWAY_WAIT_QUEUE_EXTRA_SLOTS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Gateway.WaitQueueExtraSlots = n
+		}
+	}
+	if v := os.Getenv("REALMS_GATEWAY_ENABLE_ERROR_PASSTHROUGH"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.Gateway.EnableErrorPassthrough = b
 		}
 	}
 

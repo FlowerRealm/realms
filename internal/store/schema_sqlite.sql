@@ -606,6 +606,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS `uk_oauth_app_tokens_token_id` ON `oauth_app_t
 CREATE INDEX IF NOT EXISTS `idx_oauth_app_tokens_user_id` ON `oauth_app_tokens` (`user_id`);
 CREATE INDEX IF NOT EXISTS `idx_oauth_app_tokens_app_id` ON `oauth_app_tokens` (`app_id`);
 
+CREATE TABLE IF NOT EXISTS `error_passthrough_rules` (
+  `id` INTEGER PRIMARY KEY AUTOINCREMENT,
+  `name` TEXT NOT NULL,
+  `enabled` INTEGER NOT NULL DEFAULT 1,
+  `priority` INTEGER NOT NULL DEFAULT 100,
+  `error_codes_json` TEXT NOT NULL DEFAULT '[]',
+  `keywords_json` TEXT NOT NULL DEFAULT '[]',
+  `match_mode` TEXT NOT NULL DEFAULT 'any',
+  `platforms_json` TEXT NOT NULL DEFAULT '[]',
+  `passthrough_code` INTEGER NOT NULL DEFAULT 0,
+  `response_code` INTEGER NULL,
+  `passthrough_body` INTEGER NOT NULL DEFAULT 0,
+  `custom_message` TEXT NULL,
+  `skip_monitoring` INTEGER NOT NULL DEFAULT 0,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS `idx_error_passthrough_rules_enabled` ON `error_passthrough_rules` (`enabled`);
+CREATE INDEX IF NOT EXISTS `idx_error_passthrough_rules_priority` ON `error_passthrough_rules` (`priority`);
+
 -- Seed: 内置 Codex OAuth 渠道
 INSERT INTO upstream_channels(type, name, `groups`, status, priority, promotion, last_test_at, last_test_latency_ms, last_test_ok, created_at, updated_at)
 SELECT 'codex_oauth', 'Codex OAuth', '', 1, 0, 0, NULL, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP

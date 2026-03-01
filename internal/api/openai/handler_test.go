@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"realms/internal/auth"
+	"realms/internal/concurrency"
 	"realms/internal/middleware"
 	"realms/internal/quota"
 	"realms/internal/scheduler"
@@ -654,6 +655,33 @@ type staticFeatures struct {
 
 func (f staticFeatures) FeatureStateEffective(_ context.Context, _ bool) store.FeatureState {
 	return f.fs
+}
+
+type fakeConcurrencyManager struct {
+	userErr error
+	credErr error
+}
+
+func (m *fakeConcurrencyManager) AcquireUserSlotWithWait(_ context.Context, _ int64, _ int, _ func() error) (func(), error) {
+	return func() {}, m.userErr
+}
+
+func (m *fakeConcurrencyManager) AcquireCredentialSlotWithWait(_ context.Context, _ string, _ int) (func(), error) {
+	return func() {}, m.credErr
+}
+
+type fakePassthroughMatcher struct {
+	status int
+	msg    string
+	skip   bool
+	match  bool
+}
+
+func (m fakePassthroughMatcher) Match(_ string, _ int, _ []byte) (int, string, bool, bool) {
+	if !m.match {
+		return 0, "", false, false
+	}
+	return m.status, m.msg, m.skip, true
 }
 
 type recordingAudit struct {
@@ -3432,5 +3460,161 @@ func TestResponses_ContextCanceledDuringRouterNext_FinalizesAsClientDisconnect(t
 	}
 	if u.calls[0].StatusCode != 0 {
 		t.Fatalf("expected status_code=0, got=%d", u.calls[0].StatusCode)
+	}
+}
+
+func TestResponses_FailoverExhausted429MapsToRateLimitError(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"m1": {ID: 1, PublicID: "m1", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"m1": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "m1", Status: 1},
+			},
+		},
+	}
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, statusDoer{
+		status: http.StatusTooManyRequests,
+		body:   `{"error":{"message":"raw upstream 429"}}`,
+	}, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+	h.SetGatewayPolicy(GatewayPolicy{MaxFailoverSwitches: 1})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"rate_limit_error"`) {
+		t.Fatalf("expected rate_limit_error body, got=%s", rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "raw upstream 429") {
+		t.Fatalf("expected stable message, got=%s", rr.Body.String())
+	}
+	if rr.Header().Get("Retry-After") != "30" {
+		t.Fatalf("expected Retry-After=30, got=%q", rr.Header().Get("Retry-After"))
+	}
+}
+
+func TestResponses_UserConcurrencyQueueFullReturns429(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"m1": {ID: 1, PublicID: "m1", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"m1": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "m1", Status: 1},
+			},
+		},
+	}
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, &okDoer{}, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+	h.SetGatewayPolicy(GatewayPolicy{UserMaxConcurrency: 1})
+	h.SetConcurrencyManager(&fakeConcurrencyManager{userErr: concurrency.ErrQueueFull})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"rate_limit_error"`) {
+		t.Fatalf("expected rate_limit_error, got=%s", rr.Body.String())
+	}
+}
+
+func TestResponses_FailoverExhaustedAppliesPassthroughMatcher(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"m1": {ID: 1, PublicID: "m1", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"m1": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "m1", Status: 1},
+			},
+		},
+	}
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, statusDoer{
+		status: http.StatusTooManyRequests,
+		body:   `{"error":{"message":"upstream throttled"}}`,
+	}, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+	h.SetGatewayPolicy(GatewayPolicy{MaxFailoverSwitches: 1})
+	h.SetErrorPassthroughMatcher(fakePassthroughMatcher{
+		status: http.StatusTeapot,
+		msg:    "自定义透传错误",
+		match:  true,
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusTeapot {
+		t.Fatalf("expected 418, got=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "自定义透传错误") {
+		t.Fatalf("expected passthrough message, got=%s", rr.Body.String())
 	}
 }

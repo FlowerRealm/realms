@@ -68,6 +68,11 @@ func main() {
 		slog.Error("初始化服务失败", "err", err)
 		os.Exit(1)
 	}
+	defer func() {
+		if err := app.Close(); err != nil {
+			slog.Warn("释放应用资源失败", "err", err)
+		}
+	}()
 
 	httpServer := &http.Server{
 		Addr:    cfg.Server.Addr,
