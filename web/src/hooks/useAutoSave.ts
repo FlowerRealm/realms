@@ -58,6 +58,7 @@ export function useAutoSave<T>(opts: UseAutoSaveOptions<T>): UseAutoSaveResult {
 
   const enabled = isEnabled(opts);
   const dirty = enabled && trackingSig !== baselineSigRef.current;
+  const lastResetKeyRef = useRef<UseAutoSaveOptions<T>['resetKey']>(opts.resetKey);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -169,14 +170,19 @@ export function useAutoSave<T>(opts: UseAutoSaveOptions<T>): UseAutoSaveResult {
 
   useEffect(() => {
     if (!enabled) return;
-    if (opts.resetKey === undefined) return;
+    const resetKey = opts.resetKey;
+    if (resetKey === undefined) {
+      lastResetKeyRef.current = resetKey;
+      return;
+    }
+    if (lastResetKeyRef.current === resetKey) return;
+    lastResetKeyRef.current = resetKey;
     baselineSigRef.current = trackingSig;
     setStatus('idle');
     setBlockedReason('');
     setError('');
     clearTimer();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, opts.resetKey]);
+  }, [enabled, opts.resetKey, trackingSig, clearTimer]);
 
   useEffect(() => {
     if (!enabled) return;

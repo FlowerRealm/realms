@@ -77,6 +77,52 @@ function statusBadge(status: number): { cls: string; label: string } {
   return { cls: 'badge bg-secondary bg-opacity-10 text-secondary border', label: '禁用' };
 }
 
+type ChannelPatch = Partial<{
+  name: string;
+  status: number;
+  base_url: string;
+  groups: string;
+  priority: number;
+  promotion: boolean;
+  allow_service_tier: boolean;
+  disable_store: boolean;
+  allow_safety_identifier: boolean;
+}>;
+
+function parseGroupsCSV(raw: string): string[] {
+  const s = raw.trim();
+  if (!s) return [];
+  const uniq = new Set<string>();
+  for (const part of s.split(',')) {
+    const v = part.trim();
+    if (v) uniq.add(v);
+  }
+  return Array.from(uniq);
+}
+
+function toggleGroupsCSV(raw: string, name: string, checked: boolean): string {
+  const set = new Set(parseGroupsCSV(raw));
+  if (checked) set.add(name);
+  else set.delete(name);
+  return Array.from(set).join(',');
+}
+
+function validateJSON(raw: string, kind: 'object' | 'array'): string {
+  const s = (raw || '').trim();
+  if (!s) return '';
+  try {
+    const v = JSON.parse(s) as unknown;
+    if (kind === 'array') {
+      if (!Array.isArray(v)) return 'JSON 必须为数组';
+      return '';
+    }
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return 'JSON 必须为对象';
+    return '';
+  } catch {
+    return 'JSON 不合法';
+  }
+}
+
 type UseSortableReturn = ReturnType<typeof useSortable>;
 type SortableRowRenderArgs = Pick<
   UseSortableReturn,
@@ -177,6 +223,741 @@ type ChannelPointerTarget = {
   name: string;
   groups: string;
 };
+
+function ChannelCommonTab({
+  enabled,
+  resetKey,
+  channelID,
+  isPersonalMode,
+  channelGroups,
+  editName,
+  setEditName,
+  editStatus,
+  setEditStatus,
+  editBaseURL,
+  setEditBaseURL,
+  editGroups,
+  setEditGroups,
+  editPriority,
+  setEditPriority,
+  editPromotion,
+  setEditPromotion,
+  editAllowServiceTier,
+  setEditAllowServiceTier,
+  editDisableStore,
+  setEditDisableStore,
+  editAllowSafetyIdentifier,
+  setEditAllowSafetyIdentifier,
+  applyChannelPatch,
+}: {
+  enabled: boolean;
+  resetKey: number;
+  channelID: number;
+  isPersonalMode: boolean;
+  channelGroups: AdminChannelGroup[];
+  editName: string;
+  setEditName: (v: string) => void;
+  editStatus: number;
+  setEditStatus: (v: number) => void;
+  editBaseURL: string;
+  setEditBaseURL: (v: string) => void;
+  editGroups: string;
+  setEditGroups: (v: string) => void;
+  editPriority: string;
+  setEditPriority: (v: string) => void;
+  editPromotion: boolean;
+  setEditPromotion: (v: boolean) => void;
+  editAllowServiceTier: boolean;
+  setEditAllowServiceTier: (v: boolean) => void;
+  editDisableStore: boolean;
+  setEditDisableStore: (v: boolean) => void;
+  editAllowSafetyIdentifier: boolean;
+  setEditAllowSafetyIdentifier: (v: boolean) => void;
+  applyChannelPatch: (id: number, patch: ChannelPatch) => void;
+}) {
+  const commonAutosave = useAutoSave({
+    enabled,
+    resetKey,
+    value: { name: editName, status: editStatus, base_url: editBaseURL, groups: editGroups, priority: editPriority, promotion: editPromotion },
+    validate: (v) => {
+      if (!v.name.trim()) return '名称不能为空';
+      if (!v.base_url.trim()) return '接口基础地址不能为空';
+      return '';
+    },
+    save: async (v) => {
+      const res = await updateChannel({
+        id: channelID,
+        name: v.name.trim(),
+        status: v.status,
+        base_url: v.base_url.trim(),
+        groups: v.groups.trim(),
+        priority: Number.parseInt(v.priority, 10) || 0,
+        promotion: !!v.promotion,
+      });
+      if (!res.success) throw new Error(res.message || '保存失败');
+      applyChannelPatch(channelID, {
+        name: v.name.trim(),
+        status: v.status,
+        base_url: v.base_url.trim(),
+        groups: v.groups.trim(),
+        priority: Number.parseInt(v.priority, 10) || 0,
+        promotion: !!v.promotion,
+      });
+    },
+  });
+
+  const requestPolicyAutosave = useAutoSave({
+    enabled,
+    resetKey,
+    value: { allow_service_tier: editAllowServiceTier, disable_store: editDisableStore, allow_safety_identifier: editAllowSafetyIdentifier },
+    save: async (v) => {
+      const res = await updateChannel({
+        id: channelID,
+        allow_service_tier: v.allow_service_tier,
+        disable_store: v.disable_store,
+        allow_safety_identifier: v.allow_safety_identifier,
+      });
+      if (!res.success) throw new Error(res.message || '保存失败');
+      applyChannelPatch(channelID, {
+        allow_service_tier: v.allow_service_tier,
+        disable_store: v.disable_store,
+        allow_safety_identifier: v.allow_safety_identifier,
+      });
+    },
+  });
+
+  return (
+    <div className="d-flex flex-column gap-3">
+      <div className="card border-0 shadow-sm">
+        <div className="card-header bg-white fw-bold py-3">常用设置</div>
+        <div className="card-body">
+          <form
+            className="row g-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              commonAutosave.flush();
+            }}
+          >
+            <div className="col-md-8">
+              <label className="form-label fw-medium">名称</label>
+              <input className="form-control" value={editName} onChange={(e) => setEditName(e.target.value)} required />
+            </div>
+            <div className="col-md-4">
+              <label className="form-label fw-medium">状态</label>
+              <select className="form-select" value={editStatus} onChange={(e) => setEditStatus(Number.parseInt(e.target.value, 10) || 0)}>
+                <option value={1}>启用</option>
+                <option value={0}>禁用</option>
+              </select>
+            </div>
+            <div className="col-12">
+              <label className="form-label fw-medium">接口基础地址</label>
+              <input className="form-control font-monospace" value={editBaseURL} onChange={(e) => setEditBaseURL(e.target.value)} required />
+              <div className="form-text small text-muted">保存后立即生效；密钥与模型绑定可在本弹窗继续配置。</div>
+            </div>
+
+            <div className="col-12">
+              {isPersonalMode ? null : (
+                <>
+                  <label className="form-label fw-medium">渠道组设置</label>
+                  <div className="card p-2" style={{ maxHeight: 260, overflowY: 'auto' }}>
+                    {channelGroups.length === 0 ? (
+                      <div className="text-muted small px-2 py-1">暂无渠道组（请先到“渠道组”创建）。</div>
+                    ) : (
+                      channelGroups.map((g) => {
+                        const selected = parseGroupsCSV(editGroups).includes(g.name);
+                        const disabled = g.status !== 1 && !selected;
+                        return (
+                          <div className="form-check" key={g.id}>
+                            <input
+                              className="form-check-input"
+                              type="checkbox"
+                              id={`group_edit_${channelID}_${g.name}`}
+                              checked={selected}
+                              disabled={disabled}
+                              onChange={(e) => setEditGroups(toggleGroupsCSV(editGroups, g.name, e.target.checked))}
+                            />
+                            <label className="form-check-label w-100" htmlFor={`group_edit_${channelID}_${g.name}`}>
+                              {g.name} {g.status !== 1 ? <span className="badge bg-secondary ms-1 smaller">禁用</span> : null}
+                            </label>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                  <div className="form-text small text-muted mt-2">用于上游调度选择渠道。</div>
+                </>
+              )}
+            </div>
+
+            <div className="col-md-6">
+              <label className="form-label fw-medium">优先级</label>
+              <input className="form-control" value={editPriority} onChange={(e) => setEditPriority(e.target.value)} inputMode="numeric" />
+            </div>
+            <div className="col-md-6 d-flex align-items-end">
+              <div className="form-check">
+                <input className="form-check-input" type="checkbox" id="editPromotion" checked={editPromotion} onChange={(e) => setEditPromotion(e.target.checked)} />
+                <label className="form-check-label" htmlFor="editPromotion">
+                  优先（promotion）
+                </label>
+              </div>
+            </div>
+
+            <div className="col-12">
+              <AutoSaveIndicator status={commonAutosave.status} blockedReason={commonAutosave.blockedReason} error={commonAutosave.error} onRetry={commonAutosave.retry} />
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div className="card border-0 shadow-sm">
+        <div className="card-header bg-white fw-bold py-3">请求字段策略</div>
+        <div className="card-body">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              requestPolicyAutosave.flush();
+            }}
+          >
+            <div className="d-flex flex-column gap-2">
+              <div className="form-check">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="editAllowServiceTier"
+                  checked={editAllowServiceTier}
+                  onChange={(e) => setEditAllowServiceTier(e.target.checked)}
+                />
+                <label className="form-check-label" htmlFor="editAllowServiceTier">
+                  允许透传 <code>service_tier</code>
+                </label>
+                <div className="form-text small text-muted">可能触发上游额外计费；默认会过滤。</div>
+              </div>
+              <div className="form-check">
+                <input className="form-check-input" type="checkbox" id="editDisableStore" checked={editDisableStore} onChange={(e) => setEditDisableStore(e.target.checked)} />
+                <label className="form-check-label" htmlFor="editDisableStore">
+                  禁用透传 <code>store</code>
+                </label>
+                <div className="form-text small text-muted">涉及数据存储授权；默认允许透传。</div>
+              </div>
+              <div className="form-check">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="editAllowSafetyIdentifier"
+                  checked={editAllowSafetyIdentifier}
+                  onChange={(e) => setEditAllowSafetyIdentifier(e.target.checked)}
+                />
+                <label className="form-check-label" htmlFor="editAllowSafetyIdentifier">
+                  允许透传 <code>safety_identifier</code>
+                </label>
+                <div className="form-text small text-muted">可能暴露用户信息；默认会过滤。</div>
+              </div>
+            </div>
+            <div className="mt-3">
+              <AutoSaveIndicator
+                status={requestPolicyAutosave.status}
+                blockedReason={requestPolicyAutosave.blockedReason}
+                error={requestPolicyAutosave.error}
+                onRetry={requestPolicyAutosave.retry}
+              />
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChannelAdvancedTab({
+  enabled,
+  resetKey,
+  channelID,
+  channelType,
+  metaOpenAIOrganization,
+  setMetaOpenAIOrganization,
+  metaTestModel,
+  setMetaTestModel,
+  metaTag,
+  setMetaTag,
+  metaWeight,
+  setMetaWeight,
+  metaAutoBan,
+  setMetaAutoBan,
+  metaRemark,
+  setMetaRemark,
+  settingThinkingToContent,
+  setSettingThinkingToContent,
+  settingPassThroughBodyEnabled,
+  setSettingPassThroughBodyEnabled,
+  settingProxy,
+  setSettingProxy,
+  settingSystemPrompt,
+  setSettingSystemPrompt,
+  settingSystemPromptOverride,
+  setSettingSystemPromptOverride,
+  paramOverride,
+  setParamOverride,
+  headerOverride,
+  setHeaderOverride,
+  modelSuffixPreserve,
+  setModelSuffixPreserve,
+  requestBodyWhitelist,
+  setRequestBodyWhitelist,
+  requestBodyBlacklist,
+  setRequestBodyBlacklist,
+  statusCodeMapping,
+  setStatusCodeMapping,
+}: {
+  enabled: boolean;
+  resetKey: number;
+  channelID: number;
+  channelType: string;
+  metaOpenAIOrganization: string;
+  setMetaOpenAIOrganization: (v: string) => void;
+  metaTestModel: string;
+  setMetaTestModel: (v: string) => void;
+  metaTag: string;
+  setMetaTag: (v: string) => void;
+  metaWeight: string;
+  setMetaWeight: (v: string) => void;
+  metaAutoBan: boolean;
+  setMetaAutoBan: (v: boolean) => void;
+  metaRemark: string;
+  setMetaRemark: (v: string) => void;
+  settingThinkingToContent: boolean;
+  setSettingThinkingToContent: (v: boolean) => void;
+  settingPassThroughBodyEnabled: boolean;
+  setSettingPassThroughBodyEnabled: (v: boolean) => void;
+  settingProxy: string;
+  setSettingProxy: (v: string) => void;
+  settingSystemPrompt: string;
+  setSettingSystemPrompt: (v: string) => void;
+  settingSystemPromptOverride: boolean;
+  setSettingSystemPromptOverride: (v: boolean) => void;
+  paramOverride: string;
+  setParamOverride: (v: string) => void;
+  headerOverride: string;
+  setHeaderOverride: (v: string) => void;
+  modelSuffixPreserve: string;
+  setModelSuffixPreserve: (v: string) => void;
+  requestBodyWhitelist: string;
+  setRequestBodyWhitelist: (v: string) => void;
+  requestBodyBlacklist: string;
+  setRequestBodyBlacklist: (v: string) => void;
+  statusCodeMapping: string;
+  setStatusCodeMapping: (v: string) => void;
+}) {
+  const metaAutosave = useAutoSave({
+    enabled,
+    resetKey,
+    value: {
+      openai_organization: metaOpenAIOrganization,
+      test_model: metaTestModel,
+      tag: metaTag,
+      remark: metaRemark,
+      weight: metaWeight,
+      auto_ban: metaAutoBan,
+    },
+    save: async (v) => {
+      const res = await updateChannelMeta(channelID, {
+        openai_organization: v.openai_organization.trim() || null,
+        test_model: v.test_model.trim() || null,
+        tag: v.tag.trim() || null,
+        remark: v.remark.trim() || null,
+        weight: Number.parseInt(v.weight, 10) || 0,
+        auto_ban: v.auto_ban,
+      });
+      if (!res.success) throw new Error(res.message || '保存失败');
+    },
+  });
+
+  const settingAutosave = useAutoSave({
+    enabled,
+    resetKey,
+    debounceMs: 800,
+    value: {
+      thinking_to_content: settingThinkingToContent,
+      pass_through_body_enabled: settingPassThroughBodyEnabled,
+      proxy: settingProxy,
+      system_prompt: settingSystemPrompt,
+      system_prompt_override: settingSystemPromptOverride,
+    },
+    save: async (v) => {
+      const res = await updateChannelSetting(channelID, v);
+      if (!res.success) throw new Error(res.message || '保存失败');
+    },
+  });
+
+  const paramAutosave = useAutoSave({
+    enabled,
+    resetKey,
+    debounceMs: 1000,
+    value: paramOverride,
+    validate: (v) => validateJSON(v, 'object'),
+    save: async (v) => {
+      const res = await updateChannelParamOverride(channelID, v);
+      if (!res.success) throw new Error(res.message || '保存失败');
+    },
+  });
+
+  const headerAutosave = useAutoSave({
+    enabled,
+    resetKey,
+    debounceMs: 1000,
+    value: headerOverride,
+    validate: (v) => validateJSON(v, 'object'),
+    save: async (v) => {
+      const res = await updateChannelHeaderOverride(channelID, v);
+      if (!res.success) throw new Error(res.message || '保存失败');
+    },
+  });
+
+  const suffixAutosave = useAutoSave({
+    enabled,
+    resetKey,
+    debounceMs: 1000,
+    value: modelSuffixPreserve,
+    validate: (v) => validateJSON(v, 'array'),
+    save: async (v) => {
+      const res = await updateChannelModelSuffixPreserve(channelID, v);
+      if (!res.success) throw new Error(res.message || '保存失败');
+    },
+  });
+
+  const whitelistAutosave = useAutoSave({
+    enabled,
+    resetKey,
+    debounceMs: 1000,
+    value: requestBodyWhitelist,
+    validate: (v) => validateJSON(v, 'array'),
+    save: async (v) => {
+      const res = await updateChannelRequestBodyWhitelist(channelID, v);
+      if (!res.success) throw new Error(res.message || '保存失败');
+    },
+  });
+
+  const blacklistAutosave = useAutoSave({
+    enabled,
+    resetKey,
+    debounceMs: 1000,
+    value: requestBodyBlacklist,
+    validate: (v) => validateJSON(v, 'array'),
+    save: async (v) => {
+      const res = await updateChannelRequestBodyBlacklist(channelID, v);
+      if (!res.success) throw new Error(res.message || '保存失败');
+    },
+  });
+
+  const statusCodeAutosave = useAutoSave({
+    enabled,
+    resetKey,
+    debounceMs: 1000,
+    value: statusCodeMapping,
+    validate: (v) => validateJSON(v, 'object'),
+    save: async (v) => {
+      const res = await updateChannelStatusCodeMapping(channelID, v);
+      if (!res.success) throw new Error(res.message || '保存失败');
+    },
+  });
+
+  return (
+    <div className="d-flex flex-column gap-3">
+      <div className="card border-0 shadow-sm">
+        <div className="card-header bg-white fw-bold py-3">渠道属性</div>
+        <div className="card-body">
+          <form
+            className="row g-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              metaAutosave.flush();
+            }}
+          >
+            {channelType === 'openai_compatible' ? (
+              <div className="col-md-6">
+                <label className="form-label fw-medium">OpenAI Organization（组织 ID）</label>
+                <input className="form-control font-monospace" value={metaOpenAIOrganization} onChange={(e) => setMetaOpenAIOrganization(e.target.value)} placeholder="org_xxx" />
+                <div className="form-text small text-muted">
+                  会注入到上游请求头 <code>OpenAI-Organization</code>；可被“请求头覆盖”覆盖。
+                </div>
+              </div>
+            ) : null}
+            <div className="col-md-6">
+              <label className="form-label fw-medium">默认测试模型</label>
+              <input className="form-control font-monospace" value={metaTestModel} onChange={(e) => setMetaTestModel(e.target.value)} placeholder="留空=自动选择" />
+              <div className="form-text small text-muted">用于“测试”按钮：优先级高于模型绑定与默认值。</div>
+            </div>
+            <div className="col-md-6">
+              <label className="form-label fw-medium">标记（Tag）</label>
+              <input className="form-control" value={metaTag} onChange={(e) => setMetaTag(e.target.value)} placeholder="例如：prod-1" />
+              <div className="form-text small text-muted">用于标记/检索（仅保存，不参与调度）。</div>
+            </div>
+            <div className="col-md-6">
+              <label className="form-label fw-medium">权重（可选）</label>
+              <input className="form-control" type="number" min={0} value={metaWeight} onChange={(e) => setMetaWeight(e.target.value)} />
+              <div className="form-text small text-muted">当前不参与调度（Realms 调度以渠道组/优先级/推荐为准）。</div>
+            </div>
+            <div className="col-md-6">
+              <label className="form-label fw-medium">自动封禁</label>
+              <select className="form-select" value={metaAutoBan ? '1' : '0'} onChange={(e) => setMetaAutoBan(e.target.value === '1')}>
+                <option value="1">启用</option>
+                <option value="0">禁用</option>
+              </select>
+              <div className="form-text small text-muted">禁用后：失败不会封禁该渠道（credential 冷却仍生效）。</div>
+            </div>
+            <div className="col-12">
+              <label className="form-label fw-medium">备注</label>
+              <input className="form-control" value={metaRemark} onChange={(e) => setMetaRemark(e.target.value)} placeholder="可选" />
+              <div className="form-text small text-muted">仅用于管理端备注（不参与调度）。</div>
+            </div>
+            <div className="col-12">
+              <AutoSaveIndicator status={metaAutosave.status} blockedReason={metaAutosave.blockedReason} error={metaAutosave.error} onRetry={metaAutosave.retry} />
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div className="card border-0 shadow-sm">
+        <div className="card-header bg-white fw-bold py-3">请求处理设置</div>
+        <div className="card-body">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              settingAutosave.flush();
+            }}
+          >
+            <div className="d-flex flex-column gap-2">
+              <div className="form-check">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="setting_thinking_to_content"
+                  checked={settingThinkingToContent}
+                  onChange={(e) => setSettingThinkingToContent(e.target.checked)}
+                />
+                <label className="form-check-label" htmlFor="setting_thinking_to_content">
+                  推理内容合并到正文
+                </label>
+                <div className="form-text small text-muted">
+                  将流式 <code>reasoning_content</code> 转为 <code>&lt;think&gt;...&lt;/think&gt;</code> 并拼接到 <code>content</code> 中返回。
+                </div>
+              </div>
+              <div className="form-check">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="setting_pass_through_body_enabled"
+                  checked={settingPassThroughBodyEnabled}
+                  onChange={(e) => setSettingPassThroughBodyEnabled(e.target.checked)}
+                />
+                <label className="form-check-label" htmlFor="setting_pass_through_body_enabled">
+                  透传请求体（不改写）
+                </label>
+                <div className="form-text small text-muted">启用后：该渠道将直接透传原始请求体（不再应用模型改写/策略/黑白名单/参数改写/系统提示）。</div>
+              </div>
+            </div>
+
+            <div className="mt-3">
+              <label className="form-label fw-medium">代理（可选）</label>
+              <input
+                className="form-control font-monospace"
+                value={settingProxy}
+                onChange={(e) => setSettingProxy(e.target.value)}
+                placeholder="http(s)://host:port 或 socks5://host:port；留空=继承环境代理；direct=禁用"
+              />
+              <div className="form-text small text-muted">按渠道指定上游网络代理。</div>
+            </div>
+
+            <div className="mt-3">
+              <label className="form-label fw-medium">系统提示词（可选）</label>
+              <textarea
+                className="form-control font-monospace"
+                rows={4}
+                value={settingSystemPrompt}
+                onChange={(e) => setSettingSystemPrompt(e.target.value)}
+                placeholder="可选：统一注入系统提示"
+              />
+              <div className="form-text small text-muted">
+                对 <code>/v1/chat/completions</code> 注入 system 消息；对 <code>/v1/responses</code> 注入 instructions。
+              </div>
+            </div>
+
+            <div className="form-check mt-2">
+              <input
+                className="form-check-input"
+                type="checkbox"
+                id="setting_system_prompt_override"
+                checked={settingSystemPromptOverride}
+                onChange={(e) => setSettingSystemPromptOverride(e.target.checked)}
+              />
+              <label className="form-check-label" htmlFor="setting_system_prompt_override">
+                始终拼接系统提示词
+              </label>
+              <div className="form-text small text-muted">当请求已包含 system/instructions 时：是否将“系统提示词”拼接到最前。</div>
+            </div>
+
+            <div className="mt-3">
+              <AutoSaveIndicator status={settingAutosave.status} blockedReason={settingAutosave.blockedReason} error={settingAutosave.error} onRetry={settingAutosave.retry} />
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div className="card border-0 shadow-sm">
+        <div className="card-header bg-white fw-bold py-3">参数改写</div>
+        <div className="card-body">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              paramAutosave.flush();
+            }}
+          >
+            <textarea
+              className="form-control font-monospace"
+              rows={10}
+              value={paramOverride}
+              onChange={(e) => setParamOverride(e.target.value)}
+              placeholder='{"operations":[{"path":"metadata.channel","mode":"set","value":"example"}]}'
+            />
+            <div className="form-text small text-muted mt-2">留空表示禁用。JSON 必须为对象，会在转发前按渠道应用。</div>
+            <div className="mt-3">
+              <AutoSaveIndicator status={paramAutosave.status} blockedReason={paramAutosave.blockedReason} error={paramAutosave.error} onRetry={paramAutosave.retry} />
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div className="card border-0 shadow-sm">
+        <div className="card-header bg-white fw-bold py-3">请求头覆盖</div>
+        <div className="card-body">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              headerAutosave.flush();
+            }}
+          >
+            <textarea
+              className="form-control font-monospace"
+              rows={10}
+              value={headerOverride}
+              onChange={(e) => setHeaderOverride(e.target.value)}
+              placeholder='{"OpenAI-Organization":"org_xxx","X-Proxy-Key":"{api_key}"}'
+            />
+            <div className="form-text small text-muted mt-2">
+              留空表示禁用。JSON 必须为对象，value 必须为字符串；支持变量 <code>{'{api_key}'}</code>（会替换为该渠道实际使用的上游 key/token）。
+            </div>
+            <div className="mt-3">
+              <AutoSaveIndicator status={headerAutosave.status} blockedReason={headerAutosave.blockedReason} error={headerAutosave.error} onRetry={headerAutosave.retry} />
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div className="card border-0 shadow-sm">
+        <div className="card-header bg-white fw-bold py-3">模型后缀保护名单</div>
+        <div className="card-body">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              suffixAutosave.flush();
+            }}
+          >
+            <textarea
+              className="form-control font-monospace"
+              rows={6}
+              value={modelSuffixPreserve}
+              onChange={(e) => setModelSuffixPreserve(e.target.value)}
+              placeholder='["o1-mini-high","gpt-5-mini-high"]'
+            />
+            <div className="form-text small text-muted mt-2">
+              留空表示禁用。JSON 必须为数组；命中时跳过模型后缀解析（<code>-low/-medium/-high/-minimal/-none/-xhigh</code>）。
+            </div>
+            <div className="mt-3">
+              <AutoSaveIndicator status={suffixAutosave.status} blockedReason={suffixAutosave.blockedReason} error={suffixAutosave.error} onRetry={suffixAutosave.retry} />
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div className="card border-0 shadow-sm">
+        <div className="card-header bg-white fw-bold py-3">请求体黑白名单</div>
+        <div className="card-body">
+          <div className="row g-3">
+            <div className="col-12 col-lg-6">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  whitelistAutosave.flush();
+                }}
+              >
+                <label className="form-label fw-medium mb-1">白名单（仅保留）</label>
+                <textarea
+                  className="form-control font-monospace"
+                  rows={8}
+                  value={requestBodyWhitelist}
+                  onChange={(e) => setRequestBodyWhitelist(e.target.value)}
+                  placeholder='["model","input","max_output_tokens","metadata.channel"]'
+                />
+                <div className="form-text small text-muted mt-2">
+                  留空表示禁用。JSON 必须为数组，每项为 JSON path（gjson/sjson 语法）；启用后会先“仅保留白名单字段”，再应用黑名单与参数改写。
+                </div>
+                <div className="mt-3">
+                  <AutoSaveIndicator status={whitelistAutosave.status} blockedReason={whitelistAutosave.blockedReason} error={whitelistAutosave.error} onRetry={whitelistAutosave.retry} />
+                </div>
+              </form>
+            </div>
+            <div className="col-12 col-lg-6">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  blacklistAutosave.flush();
+                }}
+              >
+                <label className="form-label fw-medium mb-1">黑名单（删除字段）</label>
+                <textarea
+                  className="form-control font-monospace"
+                  rows={8}
+                  value={requestBodyBlacklist}
+                  onChange={(e) => setRequestBodyBlacklist(e.target.value)}
+                  placeholder='["metadata.sensitive","user","store"]'
+                />
+                <div className="form-text small text-muted mt-2">
+                  留空表示禁用。JSON 必须为数组，每项为 JSON path（gjson/sjson 语法）；会在每次 selection 转发前按渠道应用。
+                </div>
+                <div className="mt-3">
+                  <AutoSaveIndicator status={blacklistAutosave.status} blockedReason={blacklistAutosave.blockedReason} error={blacklistAutosave.error} onRetry={blacklistAutosave.retry} />
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="card border-0 shadow-sm">
+        <div className="card-header bg-white fw-bold py-3">状态码映射</div>
+        <div className="card-body">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              statusCodeAutosave.flush();
+            }}
+          >
+            <textarea
+              className="form-control font-monospace"
+              rows={6}
+              value={statusCodeMapping}
+              onChange={(e) => setStatusCodeMapping(e.target.value)}
+              placeholder='{"401":"200","429":"200"}'
+            />
+            <div className="form-text small text-muted mt-2">留空表示禁用。仅影响对下游返回的 HTTP 状态码，不影响内部 failover 判定与日志/用量记录。</div>
+            <div className="mt-3">
+              <AutoSaveIndicator status={statusCodeAutosave.status} blockedReason={statusCodeAutosave.blockedReason} error={statusCodeAutosave.error} onRetry={statusCodeAutosave.retry} />
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function ChannelsPage() {
   const { user } = useAuth();
@@ -296,6 +1077,15 @@ export function ChannelsPage() {
   const [requestBodyBlacklist, setRequestBodyBlacklist] = useState('');
   const [statusCodeMapping, setStatusCodeMapping] = useState('');
   const oauthQueryHandled = useRef(false);
+
+  const applyChannelPatch = useCallback(
+    (id: number, patch: ChannelPatch) => {
+      if (patch.name !== undefined) setSettingsChannelName(patch.name);
+      setSettingsChannel((prev) => (prev && prev.id === id ? ({ ...prev, ...patch } as Channel) : prev));
+      setChannels((prev) => prev.map((c) => (c.id === id ? ({ ...c, ...patch } as ChannelAdminItem) : c)));
+    },
+    [setChannels, setSettingsChannel, setSettingsChannelName],
+  );
 
   const enabledCount = useMemo(() => channels.filter((c) => c.status === 1).length, [channels]);
   const disabledCount = useMemo(() => channels.length - enabledCount, [channels.length, enabledCount]);
@@ -616,25 +1406,6 @@ export function ChannelsPage() {
     }
     return out;
   }, [pointerTarget, channelGroupByName]);
-
-  function parseGroupsCSV(raw: string): string[] {
-    const s = raw.trim();
-    if (!s) return [];
-    const uniq = new Set<string>();
-    for (const part of s.split(',')) {
-      const v = part.trim();
-      if (v) uniq.add(v);
-    }
-    return Array.from(uniq);
-  }
-
-  function toggleGroupsCSV(raw: string, name: string, checked: boolean): string {
-    const set = new Set(parseGroupsCSV(raw));
-    if (checked) set.add(name);
-    else set.delete(name);
-    const out = Array.from(set);
-    return out.join(',');
-  }
 
   function sameIDOrder(a: number[], b: number[]): boolean {
     if (a.length !== b.length) return false;
@@ -957,74 +1728,6 @@ export function ChannelsPage() {
     void loadChannelSettings(settingsChannelID);
   }, [settingsChannelID, loadChannelSettings]);
 
-  const validateJSON = (raw: string, kind: 'object' | 'array'): string => {
-    const s = (raw || '').trim();
-    if (!s) return '';
-    try {
-      const v = JSON.parse(s) as unknown;
-      if (kind === 'array') {
-        if (!Array.isArray(v)) return 'JSON 必须为数组';
-        return '';
-      }
-      if (!v || typeof v !== 'object' || Array.isArray(v)) return 'JSON 必须为对象';
-      return '';
-    } catch {
-      return 'JSON 不合法';
-    }
-  };
-
-  const commonAutosave = useAutoSave({
-    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'common',
-    resetKey: settingsAutosaveResetKey,
-    value: { name: editName, status: editStatus, base_url: editBaseURL, groups: editGroups, priority: editPriority, promotion: editPromotion },
-    validate: (v) => {
-      if (!settingsChannelID) return '未选择渠道';
-      if (!v.name.trim()) return '名称不能为空';
-      if (!v.base_url.trim()) return '接口基础地址不能为空';
-      return '';
-    },
-    save: async (v) => {
-      if (!settingsChannelID) return;
-      const res = await updateChannel({
-        id: settingsChannelID,
-        name: v.name.trim(),
-        status: v.status,
-        base_url: v.base_url.trim(),
-        groups: v.groups.trim(),
-        priority: Number.parseInt(v.priority, 10) || 0,
-        promotion: !!v.promotion,
-      });
-      if (!res.success) throw new Error(res.message || '保存失败');
-      setSettingsChannelName(v.name.trim());
-      setSettingsChannel((prev) => (prev ? { ...prev, name: v.name.trim(), status: v.status, base_url: v.base_url.trim(), groups: v.groups.trim(), priority: Number.parseInt(v.priority, 10) || 0, promotion: !!v.promotion } : prev));
-      setChannels((prev) => prev.map((c) => (c.id === settingsChannelID ? { ...c, name: v.name.trim(), status: v.status, base_url: v.base_url.trim(), groups: v.groups.trim(), priority: Number.parseInt(v.priority, 10) || 0, promotion: !!v.promotion } : c)));
-    },
-  });
-
-  const requestPolicyAutosave = useAutoSave({
-    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'common',
-    resetKey: settingsAutosaveResetKey,
-    value: { allow_service_tier: editAllowServiceTier, disable_store: editDisableStore, allow_safety_identifier: editAllowSafetyIdentifier },
-    save: async (v) => {
-      if (!settingsChannelID) return;
-      const res = await updateChannel({
-        id: settingsChannelID,
-        allow_service_tier: v.allow_service_tier,
-        disable_store: v.disable_store,
-        allow_safety_identifier: v.allow_safety_identifier,
-      });
-      if (!res.success) throw new Error(res.message || '保存失败');
-      setSettingsChannel((prev) =>
-        prev
-          ? { ...prev, allow_service_tier: v.allow_service_tier, disable_store: v.disable_store, allow_safety_identifier: v.allow_safety_identifier }
-          : prev,
-      );
-      setChannels((prev) =>
-        prev.map((c) => (c.id === settingsChannelID ? { ...c, allow_service_tier: v.allow_service_tier, disable_store: v.disable_store, allow_safety_identifier: v.allow_safety_identifier } : c)),
-      );
-    },
-  });
-
   async function saveModelsConfigOrThrow() {
     if (!settingsChannelID) throw new Error('未选择渠道');
     const selected = selectedModelIDs
@@ -1073,127 +1776,6 @@ export function ChannelsPage() {
     },
     save: async () => {
       await saveModelsConfigOrThrow();
-    },
-  });
-
-  const metaAutosave = useAutoSave({
-    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'advanced',
-    resetKey: settingsAutosaveResetKey,
-    value: {
-      openai_organization: metaOpenAIOrganization,
-      test_model: metaTestModel,
-      tag: metaTag,
-      remark: metaRemark,
-      weight: metaWeight,
-      auto_ban: metaAutoBan,
-    },
-    save: async (v) => {
-      if (!settingsChannelID) return;
-      const res = await updateChannelMeta(settingsChannelID, {
-        openai_organization: v.openai_organization.trim() || null,
-        test_model: v.test_model.trim() || null,
-        tag: v.tag.trim() || null,
-        remark: v.remark.trim() || null,
-        weight: Number.parseInt(v.weight, 10) || 0,
-        auto_ban: v.auto_ban,
-      });
-      if (!res.success) throw new Error(res.message || '保存失败');
-    },
-  });
-
-  const settingAutosave = useAutoSave({
-    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'advanced',
-    resetKey: settingsAutosaveResetKey,
-    debounceMs: 800,
-    value: {
-      thinking_to_content: settingThinkingToContent,
-      pass_through_body_enabled: settingPassThroughBodyEnabled,
-      proxy: settingProxy,
-      system_prompt: settingSystemPrompt,
-      system_prompt_override: settingSystemPromptOverride,
-    },
-    save: async (v) => {
-      if (!settingsChannelID) return;
-      const res = await updateChannelSetting(settingsChannelID, v);
-      if (!res.success) throw new Error(res.message || '保存失败');
-    },
-  });
-
-  const paramAutosave = useAutoSave({
-    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'advanced',
-    resetKey: settingsAutosaveResetKey,
-    debounceMs: 1000,
-    value: paramOverride,
-    validate: (v) => validateJSON(v, 'object'),
-    save: async (v) => {
-      if (!settingsChannelID) return;
-      const res = await updateChannelParamOverride(settingsChannelID, v);
-      if (!res.success) throw new Error(res.message || '保存失败');
-    },
-  });
-
-  const headerAutosave = useAutoSave({
-    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'advanced',
-    resetKey: settingsAutosaveResetKey,
-    debounceMs: 1000,
-    value: headerOverride,
-    validate: (v) => validateJSON(v, 'object'),
-    save: async (v) => {
-      if (!settingsChannelID) return;
-      const res = await updateChannelHeaderOverride(settingsChannelID, v);
-      if (!res.success) throw new Error(res.message || '保存失败');
-    },
-  });
-
-  const suffixAutosave = useAutoSave({
-    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'advanced',
-    resetKey: settingsAutosaveResetKey,
-    debounceMs: 1000,
-    value: modelSuffixPreserve,
-    validate: (v) => validateJSON(v, 'array'),
-    save: async (v) => {
-      if (!settingsChannelID) return;
-      const res = await updateChannelModelSuffixPreserve(settingsChannelID, v);
-      if (!res.success) throw new Error(res.message || '保存失败');
-    },
-  });
-
-  const whitelistAutosave = useAutoSave({
-    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'advanced',
-    resetKey: settingsAutosaveResetKey,
-    debounceMs: 1000,
-    value: requestBodyWhitelist,
-    validate: (v) => validateJSON(v, 'array'),
-    save: async (v) => {
-      if (!settingsChannelID) return;
-      const res = await updateChannelRequestBodyWhitelist(settingsChannelID, v);
-      if (!res.success) throw new Error(res.message || '保存失败');
-    },
-  });
-
-  const blacklistAutosave = useAutoSave({
-    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'advanced',
-    resetKey: settingsAutosaveResetKey,
-    debounceMs: 1000,
-    value: requestBodyBlacklist,
-    validate: (v) => validateJSON(v, 'array'),
-    save: async (v) => {
-      if (!settingsChannelID) return;
-      const res = await updateChannelRequestBodyBlacklist(settingsChannelID, v);
-      if (!res.success) throw new Error(res.message || '保存失败');
-    },
-  });
-
-  const statusCodeAutosave = useAutoSave({
-    enabled: !!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'advanced',
-    resetKey: settingsAutosaveResetKey,
-    debounceMs: 1000,
-    value: statusCodeMapping,
-    validate: (v) => validateJSON(v, 'object'),
-    save: async (v) => {
-      if (!settingsChannelID) return;
-      const res = await updateChannelStatusCodeMapping(settingsChannelID, v);
-      if (!res.success) throw new Error(res.message || '保存失败');
     },
   });
 
@@ -2453,145 +3035,32 @@ export function ChannelsPage() {
             </ul>
 
             {settingsTab === 'common' ? (
-              <div className="d-flex flex-column gap-3">
-                <div className="card border-0 shadow-sm">
-                  <div className="card-header bg-white fw-bold py-3">常用设置</div>
-                  <div className="card-body">
-                    <form
-                      className="row g-3"
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        commonAutosave.flush();
-                      }}
-                    >
-                      <div className="col-md-8">
-                        <label className="form-label fw-medium">名称</label>
-                        <input className="form-control" value={editName} onChange={(e) => setEditName(e.target.value)} required />
-                      </div>
-                      <div className="col-md-4">
-                        <label className="form-label fw-medium">状态</label>
-                        <select className="form-select" value={editStatus} onChange={(e) => setEditStatus(Number.parseInt(e.target.value, 10) || 0)}>
-                          <option value={1}>启用</option>
-                          <option value={0}>禁用</option>
-                        </select>
-                      </div>
-                      <div className="col-12">
-                        <label className="form-label fw-medium">接口基础地址</label>
-                        <input className="form-control font-monospace" value={editBaseURL} onChange={(e) => setEditBaseURL(e.target.value)} required />
-                        <div className="form-text small text-muted">保存后立即生效；密钥与模型绑定可在本弹窗继续配置。</div>
-                      </div>
-
-                      <div className="col-12">
-                        {isPersonalMode ? null : (
-                          <>
-                            <label className="form-label fw-medium">渠道组设置</label>
-                            <div className="card p-2" style={{ maxHeight: 260, overflowY: 'auto' }}>
-                              {channelGroups.length === 0 ? (
-                                <div className="text-muted small px-2 py-1">暂无渠道组（请先到“渠道组”创建）。</div>
-                              ) : (
-                                channelGroups.map((g) => {
-                                  const selected = parseGroupsCSV(editGroups).includes(g.name);
-                                  const disabled = g.status !== 1 && !selected;
-                                  return (
-                                    <div className="form-check" key={g.id}>
-                                      <input
-                                        className="form-check-input"
-                                        type="checkbox"
-                                        id={`group_edit_${settingsChannelID}_${g.name}`}
-                                        checked={selected}
-                                        disabled={disabled}
-                                        onChange={(e) => setEditGroups(toggleGroupsCSV(editGroups, g.name, e.target.checked))}
-                                      />
-                                      <label className="form-check-label w-100" htmlFor={`group_edit_${settingsChannelID}_${g.name}`}>
-                                        {g.name} {g.status !== 1 ? <span className="badge bg-secondary ms-1 smaller">禁用</span> : null}
-                                      </label>
-                                    </div>
-                                  );
-                                })
-                              )}
-                            </div>
-                            <div className="form-text small text-muted mt-2">用于上游调度选择渠道。</div>
-                          </>
-                        )}
-                      </div>
-
-                      <div className="col-md-6">
-                        <label className="form-label fw-medium">优先级</label>
-                        <input className="form-control" value={editPriority} onChange={(e) => setEditPriority(e.target.value)} inputMode="numeric" />
-                      </div>
-                      <div className="col-md-6 d-flex align-items-end">
-                        <div className="form-check">
-                          <input
-                            className="form-check-input"
-                            type="checkbox"
-                            id="editPromotion"
-                            checked={editPromotion}
-                            onChange={(e) => setEditPromotion(e.target.checked)}
-                          />
-                          <label className="form-check-label" htmlFor="editPromotion">
-                            优先（promotion）
-                          </label>
-                        </div>
-                      </div>
-
-                      <div className="col-12">
-                        <AutoSaveIndicator status={commonAutosave.status} blockedReason={commonAutosave.blockedReason} error={commonAutosave.error} onRetry={commonAutosave.retry} />
-                      </div>
-                    </form>
-                  </div>
-                </div>
-
-                <div className="card border-0 shadow-sm">
-                  <div className="card-header bg-white fw-bold py-3">请求字段策略</div>
-                  <div className="card-body">
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        requestPolicyAutosave.flush();
-                      }}
-                    >
-                      <div className="d-flex flex-column gap-2">
-                        <div className="form-check">
-                          <input
-                            className="form-check-input"
-                            type="checkbox"
-                            id="editAllowServiceTier"
-                            checked={editAllowServiceTier}
-                            onChange={(e) => setEditAllowServiceTier(e.target.checked)}
-                          />
-                          <label className="form-check-label" htmlFor="editAllowServiceTier">
-                            允许透传 <code>service_tier</code>
-                          </label>
-                          <div className="form-text small text-muted">可能触发上游额外计费；默认会过滤。</div>
-                        </div>
-                        <div className="form-check">
-                          <input className="form-check-input" type="checkbox" id="editDisableStore" checked={editDisableStore} onChange={(e) => setEditDisableStore(e.target.checked)} />
-                          <label className="form-check-label" htmlFor="editDisableStore">
-                            禁用透传 <code>store</code>
-                          </label>
-                          <div className="form-text small text-muted">涉及数据存储授权；默认允许透传。</div>
-                        </div>
-                        <div className="form-check">
-                          <input
-                            className="form-check-input"
-                            type="checkbox"
-                            id="editAllowSafetyIdentifier"
-                            checked={editAllowSafetyIdentifier}
-                            onChange={(e) => setEditAllowSafetyIdentifier(e.target.checked)}
-                          />
-                          <label className="form-check-label" htmlFor="editAllowSafetyIdentifier">
-                            允许透传 <code>safety_identifier</code>
-                          </label>
-                          <div className="form-text small text-muted">可能暴露用户信息；默认会过滤。</div>
-                        </div>
-                      </div>
-                      <div className="mt-3">
-                        <AutoSaveIndicator status={requestPolicyAutosave.status} blockedReason={requestPolicyAutosave.blockedReason} error={requestPolicyAutosave.error} onRetry={requestPolicyAutosave.retry} />
-                      </div>
-                    </form>
-                  </div>
-                </div>
-              </div>
+              <ChannelCommonTab
+                enabled={!!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'common'}
+                resetKey={settingsAutosaveResetKey}
+                channelID={settingsChannelID}
+                isPersonalMode={isPersonalMode}
+                channelGroups={channelGroups}
+                editName={editName}
+                setEditName={setEditName}
+                editStatus={editStatus}
+                setEditStatus={setEditStatus}
+                editBaseURL={editBaseURL}
+                setEditBaseURL={setEditBaseURL}
+                editGroups={editGroups}
+                setEditGroups={setEditGroups}
+                editPriority={editPriority}
+                setEditPriority={setEditPriority}
+                editPromotion={editPromotion}
+                setEditPromotion={setEditPromotion}
+                editAllowServiceTier={editAllowServiceTier}
+                setEditAllowServiceTier={setEditAllowServiceTier}
+                editDisableStore={editDisableStore}
+                setEditDisableStore={setEditDisableStore}
+                editAllowSafetyIdentifier={editAllowSafetyIdentifier}
+                setEditAllowSafetyIdentifier={setEditAllowSafetyIdentifier}
+                applyChannelPatch={applyChannelPatch}
+              />
             ) : null}
 
             {settingsTab === 'keys' ? (
@@ -3070,303 +3539,46 @@ export function ChannelsPage() {
             ) : null}
 
             {settingsTab === 'advanced' ? (
-              <div className="d-flex flex-column gap-3">
-                <div className="card border-0 shadow-sm">
-                  <div className="card-header bg-white fw-bold py-3">渠道属性</div>
-                  <div className="card-body">
-                    <form
-                      className="row g-3"
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        metaAutosave.flush();
-                      }}
-                    >
-                      {settingsChannel.type === 'openai_compatible' ? (
-                        <div className="col-md-6">
-                          <label className="form-label fw-medium">OpenAI Organization（组织 ID）</label>
-                          <input className="form-control font-monospace" value={metaOpenAIOrganization} onChange={(e) => setMetaOpenAIOrganization(e.target.value)} placeholder="org_xxx" />
-                          <div className="form-text small text-muted">
-                            会注入到上游请求头 <code>OpenAI-Organization</code>；可被“请求头覆盖”覆盖。
-                          </div>
-                        </div>
-                      ) : null}
-                      <div className="col-md-6">
-                        <label className="form-label fw-medium">默认测试模型</label>
-                        <input className="form-control font-monospace" value={metaTestModel} onChange={(e) => setMetaTestModel(e.target.value)} placeholder="留空=自动选择" />
-                        <div className="form-text small text-muted">用于“测试”按钮：优先级高于模型绑定与默认值。</div>
-                      </div>
-                      <div className="col-md-6">
-                        <label className="form-label fw-medium">标记（Tag）</label>
-                        <input className="form-control" value={metaTag} onChange={(e) => setMetaTag(e.target.value)} placeholder="例如：prod-1" />
-                        <div className="form-text small text-muted">用于标记/检索（仅保存，不参与调度）。</div>
-                      </div>
-                      <div className="col-md-6">
-                        <label className="form-label fw-medium">权重（可选）</label>
-                        <input className="form-control" type="number" min={0} value={metaWeight} onChange={(e) => setMetaWeight(e.target.value)} />
-                        <div className="form-text small text-muted">当前不参与调度（Realms 调度以渠道组/优先级/推荐为准）。</div>
-                      </div>
-                      <div className="col-md-6">
-                        <label className="form-label fw-medium">自动封禁</label>
-                        <select className="form-select" value={metaAutoBan ? '1' : '0'} onChange={(e) => setMetaAutoBan(e.target.value === '1')}>
-                          <option value="1">启用</option>
-                          <option value="0">禁用</option>
-                        </select>
-                        <div className="form-text small text-muted">禁用后：失败不会封禁该渠道（credential 冷却仍生效）。</div>
-                      </div>
-                      <div className="col-12">
-                        <label className="form-label fw-medium">备注</label>
-                        <input className="form-control" value={metaRemark} onChange={(e) => setMetaRemark(e.target.value)} placeholder="可选" />
-                        <div className="form-text small text-muted">仅用于管理端备注（不参与调度）。</div>
-                      </div>
-                      <div className="col-12">
-                        <AutoSaveIndicator status={metaAutosave.status} blockedReason={metaAutosave.blockedReason} error={metaAutosave.error} onRetry={metaAutosave.retry} />
-                      </div>
-                    </form>
-                  </div>
-                </div>
-
-                <div className="card border-0 shadow-sm">
-                  <div className="card-header bg-white fw-bold py-3">请求处理设置</div>
-                  <div className="card-body">
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        settingAutosave.flush();
-                      }}
-                    >
-                      <div className="d-flex flex-column gap-2">
-                        <div className="form-check">
-                          <input
-                            className="form-check-input"
-                            type="checkbox"
-                            id="setting_thinking_to_content"
-                            checked={settingThinkingToContent}
-                            onChange={(e) => setSettingThinkingToContent(e.target.checked)}
-                          />
-                          <label className="form-check-label" htmlFor="setting_thinking_to_content">
-                            推理内容合并到正文
-                          </label>
-                          <div className="form-text small text-muted">
-                            将流式 <code>reasoning_content</code> 转为 <code>&lt;think&gt;...&lt;/think&gt;</code> 并拼接到 <code>content</code> 中返回。
-                          </div>
-                        </div>
-                        <div className="form-check">
-                          <input
-                            className="form-check-input"
-                            type="checkbox"
-                            id="setting_pass_through_body_enabled"
-                            checked={settingPassThroughBodyEnabled}
-                            onChange={(e) => setSettingPassThroughBodyEnabled(e.target.checked)}
-                          />
-                          <label className="form-check-label" htmlFor="setting_pass_through_body_enabled">
-                            透传请求体（不改写）
-                          </label>
-                          <div className="form-text small text-muted">
-                            启用后：该渠道将直接透传原始请求体（不再应用模型改写/策略/黑白名单/参数改写/系统提示）。
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-3">
-                        <label className="form-label fw-medium">代理（可选）</label>
-                        <input
-                          className="form-control font-monospace"
-                          value={settingProxy}
-                          onChange={(e) => setSettingProxy(e.target.value)}
-                          placeholder="http(s)://host:port 或 socks5://host:port；留空=继承环境代理；direct=禁用"
-                        />
-                        <div className="form-text small text-muted">按渠道指定上游网络代理。</div>
-                      </div>
-
-                      <div className="mt-3">
-                        <label className="form-label fw-medium">系统提示词（可选）</label>
-                        <textarea
-                          className="form-control font-monospace"
-                          rows={4}
-                          value={settingSystemPrompt}
-                          onChange={(e) => setSettingSystemPrompt(e.target.value)}
-                          placeholder="可选：统一注入系统提示"
-                        />
-                        <div className="form-text small text-muted">
-                          对 <code>/v1/chat/completions</code> 注入 system 消息；对 <code>/v1/responses</code> 注入 instructions。
-                        </div>
-                      </div>
-
-                      <div className="form-check mt-2">
-                        <input
-                          className="form-check-input"
-                          type="checkbox"
-                          id="setting_system_prompt_override"
-                          checked={settingSystemPromptOverride}
-                          onChange={(e) => setSettingSystemPromptOverride(e.target.checked)}
-                        />
-                        <label className="form-check-label" htmlFor="setting_system_prompt_override">
-                          始终拼接系统提示词
-                        </label>
-                        <div className="form-text small text-muted">当请求已包含 system/instructions 时：是否将“系统提示词”拼接到最前。</div>
-                      </div>
-
-                      <div className="mt-3">
-                        <AutoSaveIndicator status={settingAutosave.status} blockedReason={settingAutosave.blockedReason} error={settingAutosave.error} onRetry={settingAutosave.retry} />
-                      </div>
-                    </form>
-                  </div>
-                </div>
-
-                <div className="card border-0 shadow-sm">
-                  <div className="card-header bg-white fw-bold py-3">参数改写</div>
-                  <div className="card-body">
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        paramAutosave.flush();
-                      }}
-                    >
-                      <textarea
-                        className="form-control font-monospace"
-                        rows={10}
-                        value={paramOverride}
-                        onChange={(e) => setParamOverride(e.target.value)}
-                        placeholder='{"operations":[{"path":"metadata.channel","mode":"set","value":"example"}]}'
-                      />
-                      <div className="form-text small text-muted mt-2">留空表示禁用。JSON 必须为对象，会在转发前按渠道应用。</div>
-                      <div className="mt-3">
-                        <AutoSaveIndicator status={paramAutosave.status} blockedReason={paramAutosave.blockedReason} error={paramAutosave.error} onRetry={paramAutosave.retry} />
-                      </div>
-                    </form>
-                  </div>
-                </div>
-
-                <div className="card border-0 shadow-sm">
-                  <div className="card-header bg-white fw-bold py-3">请求头覆盖</div>
-                  <div className="card-body">
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        headerAutosave.flush();
-                      }}
-                    >
-                      <textarea
-                        className="form-control font-monospace"
-                        rows={10}
-                        value={headerOverride}
-                        onChange={(e) => setHeaderOverride(e.target.value)}
-                        placeholder='{"OpenAI-Organization":"org_xxx","X-Proxy-Key":"{api_key}"}'
-                      />
-                      <div className="form-text small text-muted mt-2">
-                        留空表示禁用。JSON 必须为对象，value 必须为字符串；支持变量 <code>{'{api_key}'}</code>（会替换为该渠道实际使用的上游 key/token）。
-                      </div>
-                      <div className="mt-3">
-                        <AutoSaveIndicator status={headerAutosave.status} blockedReason={headerAutosave.blockedReason} error={headerAutosave.error} onRetry={headerAutosave.retry} />
-                      </div>
-                    </form>
-                  </div>
-                </div>
-
-                <div className="card border-0 shadow-sm">
-                  <div className="card-header bg-white fw-bold py-3">模型后缀保护名单</div>
-                  <div className="card-body">
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        suffixAutosave.flush();
-                      }}
-                    >
-                      <textarea
-                        className="form-control font-monospace"
-                        rows={6}
-                        value={modelSuffixPreserve}
-                        onChange={(e) => setModelSuffixPreserve(e.target.value)}
-                        placeholder='["o1-mini-high","gpt-5-mini-high"]'
-                      />
-                      <div className="form-text small text-muted mt-2">
-                        留空表示禁用。JSON 必须为数组；命中时跳过模型后缀解析（<code>-low/-medium/-high/-minimal/-none/-xhigh</code>）。
-                      </div>
-                      <div className="mt-3">
-                        <AutoSaveIndicator status={suffixAutosave.status} blockedReason={suffixAutosave.blockedReason} error={suffixAutosave.error} onRetry={suffixAutosave.retry} />
-                      </div>
-                    </form>
-                  </div>
-                </div>
-
-                <div className="card border-0 shadow-sm">
-                  <div className="card-header bg-white fw-bold py-3">请求体黑白名单</div>
-                  <div className="card-body">
-                    <div className="row g-3">
-                      <div className="col-12 col-lg-6">
-                        <form
-                          onSubmit={(e) => {
-                            e.preventDefault();
-                            whitelistAutosave.flush();
-                          }}
-                        >
-                          <label className="form-label fw-medium mb-1">白名单（仅保留）</label>
-                          <textarea
-                            className="form-control font-monospace"
-                            rows={8}
-                            value={requestBodyWhitelist}
-                            onChange={(e) => setRequestBodyWhitelist(e.target.value)}
-                            placeholder='["model","input","max_output_tokens","metadata.channel"]'
-                          />
-                          <div className="form-text small text-muted mt-2">
-                            留空表示禁用。JSON 必须为数组，每项为 JSON path（gjson/sjson 语法）；启用后会先“仅保留白名单字段”，再应用黑名单与参数改写。
-                          </div>
-                          <div className="mt-3">
-                            <AutoSaveIndicator status={whitelistAutosave.status} blockedReason={whitelistAutosave.blockedReason} error={whitelistAutosave.error} onRetry={whitelistAutosave.retry} />
-                          </div>
-                        </form>
-                      </div>
-                      <div className="col-12 col-lg-6">
-                        <form
-                          onSubmit={(e) => {
-                            e.preventDefault();
-                            blacklistAutosave.flush();
-                          }}
-                        >
-                          <label className="form-label fw-medium mb-1">黑名单（删除字段）</label>
-                          <textarea
-                            className="form-control font-monospace"
-                            rows={8}
-                            value={requestBodyBlacklist}
-                            onChange={(e) => setRequestBodyBlacklist(e.target.value)}
-                            placeholder='["metadata.sensitive","user","store"]'
-                          />
-                          <div className="form-text small text-muted mt-2">
-                            留空表示禁用。JSON 必须为数组，每项为 JSON path（gjson/sjson 语法）；会在每次 selection 转发前按渠道应用。
-                          </div>
-                          <div className="mt-3">
-                            <AutoSaveIndicator status={blacklistAutosave.status} blockedReason={blacklistAutosave.blockedReason} error={blacklistAutosave.error} onRetry={blacklistAutosave.retry} />
-                          </div>
-                        </form>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="card border-0 shadow-sm">
-                  <div className="card-header bg-white fw-bold py-3">状态码映射</div>
-                  <div className="card-body">
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        statusCodeAutosave.flush();
-                      }}
-                    >
-                      <textarea
-                        className="form-control font-monospace"
-                        rows={6}
-                        value={statusCodeMapping}
-                        onChange={(e) => setStatusCodeMapping(e.target.value)}
-                        placeholder='{"401":"200","429":"200"}'
-                      />
-                      <div className="form-text small text-muted mt-2">留空表示禁用。仅影响对下游返回的 HTTP 状态码，不影响内部 failover 判定与日志/用量记录。</div>
-                      <div className="mt-3">
-                        <AutoSaveIndicator status={statusCodeAutosave.status} blockedReason={statusCodeAutosave.blockedReason} error={statusCodeAutosave.error} onRetry={statusCodeAutosave.retry} />
-                      </div>
-                    </form>
-                  </div>
-                </div>
-              </div>
+              <ChannelAdvancedTab
+                enabled={!!settingsChannelID && !!settingsChannel && !settingsLoading && settingsTab === 'advanced'}
+                resetKey={settingsAutosaveResetKey}
+                channelID={settingsChannelID}
+                channelType={settingsChannel.type}
+                metaOpenAIOrganization={metaOpenAIOrganization}
+                setMetaOpenAIOrganization={setMetaOpenAIOrganization}
+                metaTestModel={metaTestModel}
+                setMetaTestModel={setMetaTestModel}
+                metaTag={metaTag}
+                setMetaTag={setMetaTag}
+                metaWeight={metaWeight}
+                setMetaWeight={setMetaWeight}
+                metaAutoBan={metaAutoBan}
+                setMetaAutoBan={setMetaAutoBan}
+                metaRemark={metaRemark}
+                setMetaRemark={setMetaRemark}
+                settingThinkingToContent={settingThinkingToContent}
+                setSettingThinkingToContent={setSettingThinkingToContent}
+                settingPassThroughBodyEnabled={settingPassThroughBodyEnabled}
+                setSettingPassThroughBodyEnabled={setSettingPassThroughBodyEnabled}
+                settingProxy={settingProxy}
+                setSettingProxy={setSettingProxy}
+                settingSystemPrompt={settingSystemPrompt}
+                setSettingSystemPrompt={setSettingSystemPrompt}
+                settingSystemPromptOverride={settingSystemPromptOverride}
+                setSettingSystemPromptOverride={setSettingSystemPromptOverride}
+                paramOverride={paramOverride}
+                setParamOverride={setParamOverride}
+                headerOverride={headerOverride}
+                setHeaderOverride={setHeaderOverride}
+                modelSuffixPreserve={modelSuffixPreserve}
+                setModelSuffixPreserve={setModelSuffixPreserve}
+                requestBodyWhitelist={requestBodyWhitelist}
+                setRequestBodyWhitelist={setRequestBodyWhitelist}
+                requestBodyBlacklist={requestBodyBlacklist}
+                setRequestBodyBlacklist={setRequestBodyBlacklist}
+                statusCodeMapping={statusCodeMapping}
+                setStatusCodeMapping={setStatusCodeMapping}
+              />
             ) : null}
           </>
         )}
