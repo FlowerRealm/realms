@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type RefObject } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
 
 type PopoverPos = { left: number; top: number };
 
@@ -14,9 +14,14 @@ export function useAnchoredPopover(opts: {
   const margin = typeof opts.margin === 'number' ? opts.margin : 12;
   const offset = typeof opts.offset === 'number' ? opts.offset : 8;
   const [pos, setPos] = useState<PopoverPos | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
-  useEffect(() => {
-    if (!open) return;
+  useLayoutEffect(() => {
+    if (!open) {
+      setPos(null);
+      return;
+    }
 
     const reposition = () => {
       const btn = triggerRef.current;
@@ -39,20 +44,19 @@ export function useAnchoredPopover(opts: {
       setPos({ left, top });
     };
 
-    const raf1 = requestAnimationFrame(() => {
-      reposition();
-      requestAnimationFrame(() => reposition());
-    });
+    setPos(null);
+    reposition();
+    const raf1 = requestAnimationFrame(() => reposition());
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
     };
     const onPointerDown = (e: MouseEvent | PointerEvent) => {
       const target = e.target as Node | null;
       if (!target) return;
       if (panelRef.current && panelRef.current.contains(target)) return;
       if (triggerRef.current && triggerRef.current.contains(target)) return;
-      onClose();
+      onCloseRef.current();
     };
     const onResize = () => reposition();
     const onScroll = () => reposition();
@@ -67,10 +71,16 @@ export function useAnchoredPopover(opts: {
       window.removeEventListener('scroll', onScroll, true);
       cancelAnimationFrame(raf1);
     };
-  }, [margin, offset, onClose, open, panelRef, triggerRef]);
+  }, [margin, offset, open, panelRef, triggerRef]);
 
   return useMemo((): CSSProperties => {
-    return { position: 'fixed', left: pos?.left ?? margin, top: pos?.top ?? margin };
-  }, [margin, pos]);
+    const hidden = open && pos == null;
+    return {
+      position: 'fixed',
+      left: pos?.left ?? margin,
+      top: pos?.top ?? margin,
+      visibility: hidden ? 'hidden' : 'visible',
+      pointerEvents: hidden ? 'none' : undefined,
+    };
+  }, [margin, open, pos]);
 }
-

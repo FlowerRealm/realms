@@ -158,6 +158,7 @@ CREATE TABLE IF NOT EXISTS `upstream_channels` (
   `created_at` DATETIME NOT NULL,
   `updated_at` DATETIME NOT NULL
 );
+CREATE INDEX IF NOT EXISTS `idx_upstream_channels_name` ON `upstream_channels` (`name`);
 
 CREATE TABLE IF NOT EXISTS `upstream_endpoints` (
   `id` INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -313,7 +314,9 @@ CREATE INDEX IF NOT EXISTS `idx_usage_events_user_id_id` ON `usage_events` (`use
 CREATE INDEX IF NOT EXISTS `idx_usage_events_time_id` ON `usage_events` (`time`, `id`);
 CREATE INDEX IF NOT EXISTS `idx_usage_events_token_time_id` ON `usage_events` (`token_id`, `time`, `id`);
 CREATE INDEX IF NOT EXISTS `idx_usage_events_upstream_channel_time_id` ON `usage_events` (`upstream_channel_id`, `time`, `id`);
+CREATE INDEX IF NOT EXISTS `idx_usage_events_time_upstream_channel_id` ON `usage_events` (`time`, `upstream_channel_id`, `id`);
 CREATE INDEX IF NOT EXISTS `idx_usage_events_model` ON `usage_events` (`model`);
+CREATE INDEX IF NOT EXISTS `idx_usage_events_time_model_id` ON `usage_events` (`time`, `model`, `id`);
 
 CREATE TABLE IF NOT EXISTS `subscription_plans` (
   `id` INTEGER PRIMARY KEY AUTOINCREMENT,

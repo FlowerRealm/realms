@@ -1020,10 +1020,13 @@ type UsageEventsIndexFlags struct {
 }
 
 type UsageEventsFilters struct {
-	User    string
-	Key     string
-	Channel string
-	Model   string
+	UserID            *int64
+	UpstreamChannelID *int64
+	ModelExact        *string
+	User              string
+	Key               string
+	Channel           string
+	Model             string
 }
 
 func buildLikePattern(raw string) string {
@@ -1107,6 +1110,15 @@ func (s *Store) ListUsageEventsWithUserRangeFiltered(ctx context.Context, since,
 		return nil, errors.New("before_id 与 after_id 不能同时使用")
 	}
 
+	if f.UserID != nil && *f.UserID <= 0 {
+		f.UserID = nil
+	}
+	if f.UpstreamChannelID != nil && *f.UpstreamChannelID <= 0 {
+		f.UpstreamChannelID = nil
+	}
+	if f.ModelExact != nil && strings.TrimSpace(*f.ModelExact) == "" {
+		f.ModelExact = nil
+	}
 	f.User = strings.TrimSpace(f.User)
 	f.Key = strings.TrimSpace(f.Key)
 	f.Channel = strings.TrimSpace(f.Channel)
@@ -1121,7 +1133,10 @@ func (s *Store) ListUsageEventsWithUserRangeFiltered(ctx context.Context, since,
 		extraWhere.WriteString(" AND ut.name LIKE ?\n")
 		args = append(args, buildLikePattern(f.Key))
 	}
-	if idx.Channel && f.Channel != "" {
+	if f.UpstreamChannelID != nil && *f.UpstreamChannelID > 0 {
+		extraWhere.WriteString(" AND ue.upstream_channel_id = ?\n")
+		args = append(args, *f.UpstreamChannelID)
+	} else if idx.Channel && f.Channel != "" {
 		if n, err := strconv.ParseInt(f.Channel, 10, 64); err == nil && n > 0 {
 			extraWhere.WriteString(" AND ue.upstream_channel_id = ?\n")
 			args = append(args, n)
@@ -1131,11 +1146,17 @@ func (s *Store) ListUsageEventsWithUserRangeFiltered(ctx context.Context, since,
 			args = append(args, buildLikePattern(f.Channel))
 		}
 	}
-	if idx.Model && f.Model != "" {
+	if f.ModelExact != nil && strings.TrimSpace(*f.ModelExact) != "" {
+		extraWhere.WriteString(" AND ue.model = ?\n")
+		args = append(args, strings.TrimSpace(*f.ModelExact))
+	} else if idx.Model && f.Model != "" {
 		extraWhere.WriteString(" AND ue.model LIKE ?\n")
 		args = append(args, buildLikePattern(f.Model))
 	}
-	if idx.User && f.User != "" {
+	if f.UserID != nil && *f.UserID > 0 {
+		extraWhere.WriteString(" AND ue.user_id = ?\n")
+		args = append(args, *f.UserID)
+	} else if idx.User && f.User != "" {
 		extraWhere.WriteString(" AND (u.email LIKE ? OR u.username LIKE ?)\n")
 		p := buildLikePattern(f.User)
 		args = append(args, p, p)

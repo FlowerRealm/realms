@@ -20,27 +20,26 @@ func allTimeStartEndByFirst(first time.Time, loc *time.Location, todayStr string
 
 type firstUsageEventTimeGetter func(ctx context.Context) (first time.Time, has bool, err error)
 
-func resolveAllTimeStartEnd(c *gin.Context, getFirst firstUsageEventTimeGetter, loc *time.Location, todayStr string) (start string, end string, has bool, ok bool) {
-	first, has, err := getFirst(c.Request.Context())
+func resolveAllTimeStartEnd(ctx context.Context, getFirst firstUsageEventTimeGetter, loc *time.Location, todayStr string) (start string, end string, has bool, err error) {
+	first, has, err := getFirst(ctx)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
-		return "", "", false, false
+		return "", "", false, err
 	}
 	if !has {
-		return "", "", false, true
+		return "", "", false, nil
 	}
 	start, end = allTimeStartEndByFirst(first, loc, todayStr)
-	return start, end, true, true
+	return start, end, true, nil
 }
 
-func resolveAllTimeGlobalStartEnd(c *gin.Context, opts Options, loc *time.Location, todayStr string) (start string, end string, has bool, ok bool) {
-	return resolveAllTimeStartEnd(c, func(ctx context.Context) (time.Time, bool, error) {
+func resolveAllTimeGlobalStartEnd(ctx context.Context, opts Options, loc *time.Location, todayStr string) (start string, end string, has bool, err error) {
+	return resolveAllTimeStartEnd(ctx, func(ctx context.Context) (time.Time, bool, error) {
 		return opts.Store.GetFirstUsageEventTimeGlobal(ctx)
 	}, loc, todayStr)
 }
 
-func resolveAllTimeChannelStartEnd(c *gin.Context, opts Options, loc *time.Location, todayStr string, channelID int64) (start string, end string, has bool, ok bool) {
-	return resolveAllTimeStartEnd(c, func(ctx context.Context) (time.Time, bool, error) {
+func resolveAllTimeChannelStartEnd(ctx context.Context, opts Options, loc *time.Location, todayStr string, channelID int64) (start string, end string, has bool, err error) {
+	return resolveAllTimeStartEnd(ctx, func(ctx context.Context) (time.Time, bool, error) {
 		return opts.Store.GetFirstUsageEventTimeByChannel(ctx, channelID)
 	}, loc, todayStr)
 }
