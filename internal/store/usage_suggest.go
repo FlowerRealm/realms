@@ -20,10 +20,7 @@ func (s *Store) SuggestUsageChannels(ctx context.Context, since, until time.Time
 		return []UpstreamChannelLite{}, nil
 	}
 	if limit <= 0 {
-		limit = 20
-	}
-	if limit > 50 {
-		limit = 50
+		return []UpstreamChannelLite{}, nil
 	}
 
 	p := buildLikePattern(q)
@@ -64,10 +61,7 @@ func (s *Store) SuggestUsageModels(ctx context.Context, since, until time.Time, 
 		return []string{}, nil
 	}
 	if limit <= 0 {
-		limit = 20
-	}
-	if limit > 50 {
-		limit = 50
+		return []string{}, nil
 	}
 
 	p := buildLikePattern(q)
