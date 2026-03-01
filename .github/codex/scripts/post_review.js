@@ -60,7 +60,7 @@ function normalizeLine(ranges, line) {
       if (line >= r.start && line <= r.end) return line;
     }
   }
-  return ranges[0].start;
+  return null;
 }
 
 function safeSuggestion(s) {
@@ -180,4 +180,3 @@ module.exports = async ({ github, context, core }) => {
     await postFallbackIssueComment({ github, context, body: raw });
   }
 };
-
