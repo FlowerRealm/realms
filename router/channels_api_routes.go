@@ -248,8 +248,9 @@ func channelsPageHandler(opts Options) gin.HandlerFunc {
 		endStr := strings.TrimSpace(q.Get("end"))
 		allTime := queryBool(q.Get("all_time"))
 		if allTime {
-			s, e, has, ok := resolveAllTimeGlobalStartEnd(c, opts, loc, todayStr)
-			if !ok {
+			s, e, has, err := resolveAllTimeGlobalStartEnd(c.Request.Context(), opts, loc, todayStr)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
 				return
 			}
 			if has {
@@ -447,8 +448,9 @@ func channelTimeSeriesHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 		if allTime {
-			s, e, has, ok := resolveAllTimeChannelStartEnd(c, opts, loc, todayStr, channelID)
-			if !ok {
+			s, e, has, err := resolveAllTimeChannelStartEnd(c.Request.Context(), opts, loc, todayStr, channelID)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
 				return
 			}
 			if has {
