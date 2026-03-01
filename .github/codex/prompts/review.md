@@ -203,6 +203,11 @@
 ## 5. 输出格式(必须严格按此结构)
 > 你的输出会直接作为 PR 评论。请用 Markdown。
 
+### 5.0 Extra user request（可选，可能为空）
+GitHub 评论可能包含 `@codex "..."` 之类的额外请求。若你看到输入里附带 `Extra user request (optional): ...`：
+- 把它当作“额外关注点/额外问题”，但依然必须以 `pr.diff` 为主做审查并锚定证据。
+- 若该请求与 `pr.diff` 无关或无法从仓库/测试证据支持，写明“无法确认/与本 PR 无关”，放在 `Context (Non-blocking)`。
+
 ### 5.1 TL;DR(3~8 行)
 - PR 做了什么(1~2 行)
 - 风险等级:High / Medium / Low(并给 1 行理由)
@@ -227,6 +232,32 @@
 ### 5.6 Context (Non-blocking) / Follow-ups（可选）
 - 只用于“为了理解 diff 才看的全局上下文”或“与本次 diff 相关但不应阻塞的后续改进”
 - 必须明确写：为什么与本次 diff 相关、以及为什么不阻塞
+
+### 5.7 Machine-readable JSON（必须输出，用于生成 GitHub inline review threads）
+除 Markdown 总览外，你**必须**在输出末尾追加一个机器可解析的 JSON 块，用于 GitHub PR inline review comments（线程自带 Resolve）：
+
+要求：
+- JSON 只能出现在下面这段 HTML 注释标记中；不要在其他地方再输出 JSON。
+- `comments[].path` 必须来自 `pr.diff` 的文件路径（仓库根目录相对路径）。
+- `comments[].line` 必须是该文件在 `pr.diff` 的变更 hunk 中 **新增侧(右侧)** 的行号。
+- `comments[].body` 用 Markdown，短结论 + 证据(锚定 diff) + 可执行改法。
+- `comments[].suggestion` 可选：用于 GitHub 的 ```suggestion``` 块（不要包含三反引号围栏），尽量 ≤ 15 行，仅局部替换。
+
+模板（照抄结构，填内容）：
+
+<!-- CODEX_REVIEW_JSON_V1_BEGIN
+{
+  "version": 1,
+  "comments": [
+    {
+      "path": "path/in/repo.go",
+      "line": 123,
+      "body": "简短结论 + 证据 + 改法",
+      "suggestion": "可选：替换代码片段"
+    }
+  ]
+}
+CODEX_REVIEW_JSON_V1_END -->
 
 ---
 
