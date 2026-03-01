@@ -197,6 +197,28 @@ func adminUsageResolveRange(c *gin.Context, opts Options, loc *time.Location, no
 	}, true
 }
 
+func adminUsageParseSuggestLimit(c *gin.Context) (int, bool) {
+	if c == nil {
+		return 0, false
+	}
+	limit := 20
+	if v := strings.TrimSpace(c.Query("limit")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "limit 不合法"})
+			return 0, false
+		}
+		limit = n
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	return limit, true
+}
+
 type adminUsageUserSuggestView struct {
 	ID       int64  `json:"id"`
 	Email    string `json:"email"`
@@ -219,20 +241,9 @@ func adminUsageUsersSuggestHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
-		limit := 20
-		if v := strings.TrimSpace(c.Query("limit")); v != "" {
-			n, err := strconv.Atoi(v)
-			if err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "limit 不合法"})
-				return
-			}
-			limit = n
-		}
-		if limit <= 0 {
-			limit = 20
-		}
-		if limit > 50 {
-			limit = 50
+		limit, ok := adminUsageParseSuggestLimit(c)
+		if !ok {
+			return
 		}
 
 		users, err := opts.Store.SuggestUsers(c.Request.Context(), q, limit)
@@ -270,14 +281,9 @@ func adminUsageChannelsSuggestHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
-		limit := 20
-		if v := strings.TrimSpace(c.Query("limit")); v != "" {
-			n, err := strconv.Atoi(v)
-			if err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "limit 不合法"})
-				return
-			}
-			limit = n
+		limit, ok := adminUsageParseSuggestLimit(c)
+		if !ok {
+			return
 		}
 
 		loc, _ := adminTimeLocation(c.Request.Context(), opts)
@@ -321,14 +327,9 @@ func adminUsageModelsSuggestHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
-		limit := 20
-		if v := strings.TrimSpace(c.Query("limit")); v != "" {
-			n, err := strconv.Atoi(v)
-			if err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "limit 不合法"})
-				return
-			}
-			limit = n
+		limit, ok := adminUsageParseSuggestLimit(c)
+		if !ok {
+			return
 		}
 
 		loc, _ := adminTimeLocation(c.Request.Context(), opts)

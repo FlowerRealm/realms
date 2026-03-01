@@ -56,11 +56,13 @@ func (s *Store) SuggestUsers(ctx context.Context, q string, limit int) ([]UserLo
 		limit = 50
 	}
 
-	p := strings.ToLower(buildLikePattern(q))
+	// Use prefix-match (buildLikePattern) for index-friendliness, and avoid LOWER() on columns.
+	// In MySQL, default utf8mb4_*_ci collations are case-insensitive; in SQLite, LIKE is typically case-insensitive for ASCII.
+	p := buildLikePattern(q)
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, email, username
 FROM users
-WHERE LOWER(email) LIKE ? OR LOWER(username) LIKE ?
+WHERE email LIKE ? OR username LIKE ?
 ORDER BY id DESC
 LIMIT ?
 `, p, p, limit)
