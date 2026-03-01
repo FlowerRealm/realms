@@ -33,7 +33,6 @@ FROM usage_events ue
 JOIN upstream_channels uc ON uc.id=ue.upstream_channel_id
 WHERE ue.time >= ? AND ue.time < ?
   AND ue.state <> ?
-  AND ue.upstream_channel_id IS NOT NULL
   AND ue.upstream_channel_id > 0
   AND uc.name LIKE ?
 GROUP BY uc.id, uc.name, uc.type
