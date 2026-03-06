@@ -754,6 +754,7 @@ func TestNewConcurrencyManager_PingFailureReturnsError(t *testing.T) {
 	mgr, err := newConcurrencyManager(config.Config{
 		Redis: config.RedisConfig{Addr: addr},
 		Gateway: config.GatewayConfig{
+			UserMaxConcurrency:  1,
 			WaitTimeoutMS:       30000,
 			RetryBaseDelayMS:    300,
 			RetryMaxDelayMS:     3000,
@@ -777,6 +778,7 @@ func TestNewConcurrencyManager_PingSuccessReturnsManager(t *testing.T) {
 	mgr, err := newConcurrencyManager(config.Config{
 		Redis: config.RedisConfig{Addr: mr.Addr(), KeyPrefix: "server-test"},
 		Gateway: config.GatewayConfig{
+			UserMaxConcurrency:  1,
 			WaitTimeoutMS:       1500,
 			RetryBaseDelayMS:    120,
 			RetryMaxDelayMS:     980,
@@ -790,4 +792,31 @@ func TestNewConcurrencyManager_PingSuccessReturnsManager(t *testing.T) {
 		t.Fatalf("expected enabled manager")
 	}
 	defer func() { _ = mgr.Close() }()
+}
+
+func TestNewConcurrencyManager_SkipsRedisWhenConcurrencyDisabled(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	mgr, err := newConcurrencyManager(config.Config{
+		Redis: config.RedisConfig{Addr: addr},
+		Gateway: config.GatewayConfig{
+			UserMaxConcurrency:       0,
+			CredentialMaxConcurrency: 0,
+			WaitTimeoutMS:            30000,
+			RetryBaseDelayMS:         300,
+			RetryMaxDelayMS:          3000,
+			WaitQueueExtraSlots:      20,
+		},
+	})
+	if err != nil {
+		t.Fatalf("newConcurrencyManager should skip optional redis when concurrency disabled: %v", err)
+	}
+	if mgr != nil {
+		t.Fatalf("expected nil manager when concurrency is disabled")
+	}
 }

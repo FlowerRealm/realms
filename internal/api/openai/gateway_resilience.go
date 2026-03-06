@@ -230,14 +230,14 @@ func classifyConcurrencyAcquireFailure(err error) proxyFailureInfo {
 	case errors.Is(err, concurrency.ErrQueueFull):
 		return proxyFailureInfo{
 			Valid:      true,
-			Class:      "upstream_throttled",
+			Class:      "local_throttled",
 			StatusCode: http.StatusTooManyRequests,
 			Message:    "并发等待队列已满",
 		}
 	case errors.Is(err, concurrency.ErrWaitTimeout):
 		return proxyFailureInfo{
 			Valid:      true,
-			Class:      "upstream_throttled",
+			Class:      "local_throttled",
 			StatusCode: http.StatusTooManyRequests,
 			Message:    "并发等待超时",
 		}
@@ -252,7 +252,7 @@ func classifyConcurrencyAcquireFailure(err error) proxyFailureInfo {
 
 func (h *Handler) buildFailoverExhaustedResponse(platform string, best proxyFailureInfo) gatewayErrorResponse {
 	resp := mapFailoverFailure(best)
-	if h == nil || h.errorPassthrough == nil || best.StatusCode <= 0 {
+	if h == nil || h.errorPassthrough == nil || best.StatusCode <= 0 || !strings.HasPrefix(strings.TrimSpace(best.Class), "upstream_") {
 		return resp
 	}
 	status, msg, skip, matched := h.errorPassthrough.Match(platform, best.StatusCode, best.Body)

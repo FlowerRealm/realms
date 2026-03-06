@@ -66,6 +66,9 @@ func newConcurrencyManager(cfg config.Config) (*concurrency.Manager, error) {
 	if addr == "" {
 		return nil, nil
 	}
+	if cfg.Gateway.UserMaxConcurrency <= 0 && cfg.Gateway.CredentialMaxConcurrency <= 0 {
+		return nil, nil
+	}
 	mgr := concurrency.NewManager(concurrency.Options{
 		Addr:           addr,
 		Password:       cfg.Redis.Password,

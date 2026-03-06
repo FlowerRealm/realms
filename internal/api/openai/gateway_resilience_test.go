@@ -90,3 +90,25 @@ func TestBuildFailoverExhaustedResponse_AllowsStatusOnlyPassthrough(t *testing.T
 		t.Fatalf("response message = %q, want %q", resp.Message, "status-only passthrough")
 	}
 }
+
+func TestBuildFailoverExhaustedResponse_DoesNotPassthroughLocalConcurrencyFailure(t *testing.T) {
+	matcher := &passthroughMatcherRecorder{}
+	h := &Handler{errorPassthrough: matcher}
+
+	resp := h.buildFailoverExhaustedResponse("openai", proxyFailureInfo{
+		Valid:      true,
+		StatusCode: http.StatusTooManyRequests,
+		Class:      "local_throttled",
+		Message:    "并发等待队列已满",
+	})
+
+	if matcher.called {
+		t.Fatal("expected passthrough matcher not to be called for local concurrency failure")
+	}
+	if resp.Status != http.StatusTooManyRequests {
+		t.Fatalf("response status = %d, want %d", resp.Status, http.StatusTooManyRequests)
+	}
+	if resp.Message != "请求过于频繁，请稍后重试" {
+		t.Fatalf("response message = %q, want %q", resp.Message, "请求过于频繁，请稍后重试")
+	}
+}
