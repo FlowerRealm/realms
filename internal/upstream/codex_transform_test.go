@@ -30,11 +30,11 @@ func TestApplyCodexOAuthTransform_Basics(t *testing.T) {
 	seedOpencodeInstructionsCache(t, "cached-instructions")
 
 	reqBody := map[string]any{
-		"model":            "gpt-5",
-		"stream":           false,
-		"store":            true,
+		"model":             "gpt-5",
+		"stream":            false,
+		"store":             true,
 		"max_output_tokens": 123,
-		"temperature":      0.5,
+		"temperature":       0.5,
 		"input": []any{
 			map[string]any{"type": "tool_call", "id": "call1"},
 			map[string]any{"type": "input_text", "text": "hi", "id": "t1", "call_id": "c1"},
@@ -147,5 +147,72 @@ func TestApplyCodexOAuthTransform_PreservesReferencesWhenItemReferencePresent(t 
 	item0, _ := input[0].(map[string]any)
 	if strings.TrimSpace(stringFromAny(item0["type"])) != "item_reference" {
 		t.Fatalf("expected item_reference to be preserved, got %#v", item0)
+	}
+}
+
+func TestApplyCodexOAuthTransform_CLI_CanonicalizesInstructionAlias(t *testing.T) {
+	seedOpencodeInstructionsCache(t, "cached-instructions")
+
+	reqBody := map[string]any{
+		"model":       "gpt-5.2",
+		"stream":      true,
+		"store":       false,
+		"input":       "hi",
+		"instruction": "user-instruction",
+	}
+
+	applyCodexOAuthTransform(reqBody, true)
+
+	if got := strings.TrimSpace(stringFromAny(reqBody["instructions"])); got != "user-instruction" {
+		t.Fatalf("instructions = %q, want %q", got, "user-instruction")
+	}
+	if _, ok := reqBody["instruction"]; ok {
+		t.Fatalf("expected instruction alias to be removed, got %#v", reqBody["instruction"])
+	}
+}
+
+func TestApplyCodexOAuthTransform_CLI_PrefersInstructionsOverInstructionAlias(t *testing.T) {
+	seedOpencodeInstructionsCache(t, "cached-instructions")
+
+	reqBody := map[string]any{
+		"model":        "gpt-5.2",
+		"stream":       true,
+		"store":        false,
+		"input":        "hi",
+		"instruction":  "alias-instruction",
+		"instructions": "canonical-instruction",
+	}
+
+	applyCodexOAuthTransform(reqBody, true)
+
+	if got := strings.TrimSpace(stringFromAny(reqBody["instructions"])); got != "canonical-instruction" {
+		t.Fatalf("instructions = %q, want %q", got, "canonical-instruction")
+	}
+	if _, ok := reqBody["instruction"]; ok {
+		t.Fatalf("expected instruction alias to be removed, got %#v", reqBody["instruction"])
+	}
+}
+
+func TestApplyCodexOAuthTransform_NonCLI_PrefixesExistingInstructionsWithoutDuplication(t *testing.T) {
+	seedOpencodeInstructionsCache(t, "cached-instructions")
+
+	reqBody := map[string]any{
+		"model":        "gpt-5.2",
+		"stream":       true,
+		"store":        false,
+		"input":        "hi",
+		"instructions": "user-instruction",
+	}
+
+	applyCodexOAuthTransform(reqBody, false)
+	first := strings.TrimSpace(stringFromAny(reqBody["instructions"]))
+	if first != "cached-instructions\n\nuser-instruction" {
+		t.Fatalf("instructions = %q, want %q", first, "cached-instructions\n\nuser-instruction")
+	}
+
+	applyCodexOAuthTransform(reqBody, false)
+	second := strings.TrimSpace(stringFromAny(reqBody["instructions"]))
+	if second != first {
+		t.Fatalf("expected instructions prefix to be deduplicated, got %q want %q", second, first)
 	}
 }
