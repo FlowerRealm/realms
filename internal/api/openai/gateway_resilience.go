@@ -252,7 +252,7 @@ func classifyConcurrencyAcquireFailure(err error) proxyFailureInfo {
 
 func (h *Handler) buildFailoverExhaustedResponse(platform string, best proxyFailureInfo) gatewayErrorResponse {
 	resp := mapFailoverFailure(best)
-	if h == nil || h.errorPassthrough == nil || best.StatusCode <= 0 || len(best.Body) == 0 {
+	if h == nil || h.errorPassthrough == nil || best.StatusCode <= 0 {
 		return resp
 	}
 	status, msg, skip, matched := h.errorPassthrough.Match(platform, best.StatusCode, best.Body)

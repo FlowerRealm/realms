@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"net/http"
 	"testing"
 	"time"
 )
@@ -57,5 +58,35 @@ func TestFailoverExhausted_ConfiguredZeroDisablesFailover(t *testing.T) {
 	}
 	if !h.failoverExhausted(time.Now(), 1) {
 		t.Fatal("first switch should exhaust zero-switch policy")
+	}
+}
+
+type passthroughMatcherRecorder struct {
+	called bool
+}
+
+func (m *passthroughMatcherRecorder) Match(_ string, _ int, _ []byte) (int, string, bool, bool) {
+	m.called = true
+	return http.StatusTeapot, "status-only passthrough", false, true
+}
+
+func TestBuildFailoverExhaustedResponse_AllowsStatusOnlyPassthrough(t *testing.T) {
+	matcher := &passthroughMatcherRecorder{}
+	h := &Handler{errorPassthrough: matcher}
+
+	resp := h.buildFailoverExhaustedResponse("openai", proxyFailureInfo{
+		Valid:      true,
+		StatusCode: http.StatusTooManyRequests,
+		Class:      "upstream_throttled",
+	})
+
+	if !matcher.called {
+		t.Fatal("expected passthrough matcher to be called for status-only failure")
+	}
+	if resp.Status != http.StatusTeapot {
+		t.Fatalf("response status = %d, want %d", resp.Status, http.StatusTeapot)
+	}
+	if resp.Message != "status-only passthrough" {
+		t.Fatalf("response message = %q, want %q", resp.Message, "status-only passthrough")
 	}
 }
