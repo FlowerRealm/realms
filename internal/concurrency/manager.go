@@ -181,8 +181,10 @@ func (m *Manager) acquireWithWait(ctx context.Context, scope string, maxConcurre
 	defer timer.Stop()
 
 	var pingTicker *time.Ticker
+	var pingCh <-chan time.Time
 	if onPing != nil {
 		pingTicker = time.NewTicker(10 * time.Second)
+		pingCh = pingTicker.C
 		defer pingTicker.Stop()
 	}
 
@@ -205,24 +207,10 @@ func (m *Manager) acquireWithWait(ctx context.Context, scope string, maxConcurre
 			}
 			backoff = m.nextBackoff(backoff)
 			timer.Reset(backoff)
-		default:
-			if pingTicker != nil {
-				select {
-				case <-waitCtx.Done():
-					if errors.Is(waitCtx.Err(), context.DeadlineExceeded) {
-						return nil, ErrWaitTimeout
-					}
-					return nil, waitCtx.Err()
-				case <-pingTicker.C:
-					if err := onPing(); err != nil {
-						return nil, err
-					}
-				default:
-					time.Sleep(10 * time.Millisecond)
-				}
-				continue
+		case <-pingCh:
+			if err := onPing(); err != nil {
+				return nil, err
 			}
-			time.Sleep(10 * time.Millisecond)
 		}
 	}
 }

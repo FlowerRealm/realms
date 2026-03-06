@@ -764,21 +764,21 @@ func upstreamUnavailableUsageMessage(best proxyFailureInfo) string {
 }
 
 func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p auth.Principal, sel scheduler.Selection, body []byte, wantStream bool, model *string, usageID int64, reqStart time.Time, reqBytes int64, retries int, bestFailure *proxyFailureInfo) bool {
-	releaseCred, err := h.acquireCredentialSlot(r.Context(), sel)
-	if err != nil {
-		if h.finalizeIfCanceled(r, usageID, &sel, reqStart, wantStream, reqBytes) {
-			return true
-		}
-		recordProxyFailure(bestFailure, classifyConcurrencyAcquireFailure(err))
-		return false
-	}
-	if releaseCred != nil {
-		defer releaseCred()
-	}
 	retries = h.sameSelectionRetries(retries)
 	backoff := h.initialBackoff()
 	for i := 0; i < retries; i++ {
+		releaseCred, err := h.acquireCredentialSlot(r.Context(), sel)
+		if err != nil {
+			if h.finalizeIfCanceled(r, usageID, &sel, reqStart, wantStream, reqBytes) {
+				return true
+			}
+			recordProxyFailure(bestFailure, classifyConcurrencyAcquireFailure(err))
+			return false
+		}
 		decision, failure := h.proxyOnce(w, r, sel, body, wantStream, model, p, usageID, reqStart, reqBytes)
+		if releaseCred != nil {
+			releaseCred()
+		}
 		if failure.Valid {
 			recordProxyFailure(bestFailure, failure)
 		}

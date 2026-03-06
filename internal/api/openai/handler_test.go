@@ -658,8 +658,10 @@ func (f staticFeatures) FeatureStateEffective(_ context.Context, _ bool) store.F
 }
 
 type fakeConcurrencyManager struct {
-	userErr error
-	credErr error
+	userErr          error
+	credErr          error
+	credAcquireCalls int
+	credReleaseCalls int
 }
 
 func (m *fakeConcurrencyManager) AcquireUserSlotWithWait(_ context.Context, _ int64, _ int, _ func() error) (func(), error) {
@@ -667,7 +669,10 @@ func (m *fakeConcurrencyManager) AcquireUserSlotWithWait(_ context.Context, _ in
 }
 
 func (m *fakeConcurrencyManager) AcquireCredentialSlotWithWait(_ context.Context, _ string, _ int) (func(), error) {
-	return func() {}, m.credErr
+	m.credAcquireCalls++
+	return func() {
+		m.credReleaseCalls++
+	}, m.credErr
 }
 
 type fakePassthroughMatcher struct {
@@ -801,6 +806,9 @@ func TestResponses_RetrySameSelectionOnNetworkErrorBeforeFailover(t *testing.T) 
 
 	sched := scheduler.New(fs)
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+	conc := &fakeConcurrencyManager{}
+	h.gateway.credentialMaxConcurrency = 1
+	h.SetConcurrencyManager(conc)
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -826,6 +834,9 @@ func TestResponses_RetrySameSelectionOnNetworkErrorBeforeFailover(t *testing.T) 
 	}
 	if calls[0].ChannelID != 1 || calls[1].ChannelID != 1 {
 		t.Fatalf("expected retry to stay on same channel, got calls=%+v", calls)
+	}
+	if conc.credAcquireCalls != 2 || conc.credReleaseCalls != 2 {
+		t.Fatalf("expected credential slot per attempt, got acquires=%d releases=%d", conc.credAcquireCalls, conc.credReleaseCalls)
 	}
 }
 
