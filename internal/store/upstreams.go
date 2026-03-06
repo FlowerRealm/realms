@@ -23,7 +23,7 @@ const (
 func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, error) {
 	rows, err := s.db.QueryContext(ctx,
 		"SELECT id, type, name, `groups`, status, priority, promotion,\n"+
-			"       allow_service_tier, disable_store, allow_safety_identifier,\n"+
+			"       allow_service_tier, fast_mode, disable_store, allow_safety_identifier,\n"+
 			"       openai_organization, test_model, tag, remark, weight, auto_ban, setting,\n"+
 			"       param_override,\n"+
 			"       header_override,\n"+
@@ -46,6 +46,7 @@ func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, er
 		var c UpstreamChannel
 		var promotion int
 		var allowServiceTier int
+		var fastMode int
 		var disableStore int
 		var allowSafetyIdentifier int
 		var openAIOrganization sql.NullString
@@ -63,7 +64,7 @@ func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, er
 		var requestBodyWhitelist sql.NullString
 		var lastOK int
 		if err := rows.Scan(&c.ID, &c.Type, &c.Name, &c.Groups, &c.Status, &c.Priority, &promotion,
-			&allowServiceTier, &disableStore, &allowSafetyIdentifier,
+			&allowServiceTier, &fastMode, &disableStore, &allowSafetyIdentifier,
 			&openAIOrganization, &testModel, &tag, &remark, &weight, &autoBan, &setting,
 			&paramOverride,
 			&headerOverride,
@@ -77,6 +78,7 @@ func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, er
 		}
 		c.Promotion = promotion != 0
 		c.AllowServiceTier = allowServiceTier != 0
+		c.FastMode = fastMode != 0
 		c.DisableStore = disableStore != 0
 		c.AllowSafetyIdentifier = allowSafetyIdentifier != 0
 		if openAIOrganization.Valid && strings.TrimSpace(openAIOrganization.String) != "" {
@@ -138,6 +140,10 @@ func (s *Store) CountUpstreamChannels(ctx context.Context) (int64, error) {
 }
 
 func (s *Store) CreateUpstreamChannel(ctx context.Context, typ, name, groups string, priority int, promotion bool, allowServiceTier bool, disableStore bool, allowSafetyIdentifier bool) (int64, error) {
+	return s.CreateUpstreamChannelWithRequestPolicy(ctx, typ, name, groups, priority, promotion, allowServiceTier, disableStore, allowSafetyIdentifier, true)
+}
+
+func (s *Store) CreateUpstreamChannelWithRequestPolicy(ctx context.Context, typ, name, groups string, priority int, promotion bool, allowServiceTier bool, disableStore bool, allowSafetyIdentifier bool, fastMode bool) (int64, error) {
 	p := 0
 	if promotion {
 		p = 1
@@ -145,6 +151,10 @@ func (s *Store) CreateUpstreamChannel(ctx context.Context, typ, name, groups str
 	allowServiceTierInt := 0
 	if allowServiceTier {
 		allowServiceTierInt = 1
+	}
+	fastModeInt := 1
+	if !fastMode {
+		fastModeInt = 0
 	}
 	disableStoreInt := 0
 	if disableStore {
@@ -164,10 +174,11 @@ func (s *Store) CreateUpstreamChannel(ctx context.Context, typ, name, groups str
 	defer func() { _ = tx.Rollback() }()
 
 	res, err := tx.ExecContext(ctx,
-		"INSERT INTO upstream_channels(type, name, `groups`, status, priority, promotion, allow_service_tier, disable_store, allow_safety_identifier, created_at, updated_at)\n"+
-			"VALUES(?, ?, ?, 1, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)\n",
+		"INSERT INTO upstream_channels(type, name, `groups`, status, priority, promotion, allow_service_tier, fast_mode, disable_store, allow_safety_identifier, created_at, updated_at)\n"+
+			"VALUES(?, ?, ?, 1, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)\n",
 		typ, name, groups, priority, p,
 		allowServiceTierInt,
+		fastModeInt,
 		disableStoreInt,
 		allowSafetyIdentifierInt,
 	)
@@ -236,7 +247,7 @@ VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	return id, nil
 }
 
-func (s *Store) UpdateUpstreamChannelBasics(ctx context.Context, channelID int64, name string, status int, priority int, promotion bool, allowServiceTier bool, disableStore bool, allowSafetyIdentifier bool) error {
+func (s *Store) UpdateUpstreamChannelBasics(ctx context.Context, channelID int64, name string, status int, priority int, promotion bool, allowServiceTier bool, disableStore bool, allowSafetyIdentifier bool, fastMode bool) error {
 	if channelID == 0 {
 		return errors.New("channelID 不能为空")
 	}
@@ -253,6 +264,10 @@ func (s *Store) UpdateUpstreamChannelBasics(ctx context.Context, channelID int64
 	allowServiceTierInt := 0
 	if allowServiceTier {
 		allowServiceTierInt = 1
+	}
+	fastModeInt := 1
+	if !fastMode {
+		fastModeInt = 0
 	}
 	disableStoreInt := 0
 	if disableStore {
@@ -276,11 +291,12 @@ SET name=?,
     priority=?,
     promotion=?,
     allow_service_tier=?,
+    fast_mode=?,
     disable_store=?,
     allow_safety_identifier=?,
     updated_at=CURRENT_TIMESTAMP
 WHERE id=?
-`, name, status, priority, promotionInt, allowServiceTierInt, disableStoreInt, allowSafetyIdentifierInt, channelID)
+`, name, status, priority, promotionInt, allowServiceTierInt, fastModeInt, disableStoreInt, allowSafetyIdentifierInt, channelID)
 	if err != nil {
 		return fmt.Errorf("更新 upstream_channel 失败: %w", err)
 	}
@@ -350,6 +366,7 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 	var c UpstreamChannel
 	var promotion int
 	var allowServiceTier int
+	var fastMode int
 	var disableStore int
 	var allowSafetyIdentifier int
 	var openAIOrganization sql.NullString
@@ -368,7 +385,7 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 	var lastOK int
 	err := s.db.QueryRowContext(ctx,
 		"SELECT id, type, name, `groups`, status, priority, promotion,\n"+
-			"       allow_service_tier, disable_store, allow_safety_identifier,\n"+
+			"       allow_service_tier, fast_mode, disable_store, allow_safety_identifier,\n"+
 			"       openai_organization, test_model, tag, remark, weight, auto_ban, setting,\n"+
 			"       param_override,\n"+
 			"       header_override,\n"+
@@ -382,7 +399,7 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 			"WHERE id=?\n",
 		id,
 	).Scan(&c.ID, &c.Type, &c.Name, &c.Groups, &c.Status, &c.Priority, &promotion,
-		&allowServiceTier, &disableStore, &allowSafetyIdentifier,
+		&allowServiceTier, &fastMode, &disableStore, &allowSafetyIdentifier,
 		&openAIOrganization, &testModel, &tag, &remark, &weight, &autoBan, &setting,
 		&paramOverride,
 		&headerOverride,
@@ -400,6 +417,7 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 	}
 	c.Promotion = promotion != 0
 	c.AllowServiceTier = allowServiceTier != 0
+	c.FastMode = fastMode != 0
 	c.DisableStore = disableStore != 0
 	c.AllowSafetyIdentifier = allowSafetyIdentifier != 0
 	if openAIOrganization.Valid && strings.TrimSpace(openAIOrganization.String) != "" {
@@ -447,13 +465,17 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 	return c, nil
 }
 
-func (s *Store) UpdateUpstreamChannelRequestPolicy(ctx context.Context, channelID int64, allowServiceTier bool, disableStore bool, allowSafetyIdentifier bool) error {
+func (s *Store) UpdateUpstreamChannelRequestPolicy(ctx context.Context, channelID int64, allowServiceTier bool, disableStore bool, allowSafetyIdentifier bool, fastMode bool) error {
 	if channelID == 0 {
 		return errors.New("channelID 不能为空")
 	}
 	allowServiceTierInt := 0
 	if allowServiceTier {
 		allowServiceTierInt = 1
+	}
+	fastModeInt := 1
+	if !fastMode {
+		fastModeInt = 0
 	}
 	disableStoreInt := 0
 	if disableStore {
@@ -465,9 +487,9 @@ func (s *Store) UpdateUpstreamChannelRequestPolicy(ctx context.Context, channelI
 	}
 	_, err := s.db.ExecContext(ctx, `
 UPDATE upstream_channels
-SET allow_service_tier=?, disable_store=?, allow_safety_identifier=?, updated_at=CURRENT_TIMESTAMP
+SET allow_service_tier=?, fast_mode=?, disable_store=?, allow_safety_identifier=?, updated_at=CURRENT_TIMESTAMP
 WHERE id=?
-`, allowServiceTierInt, disableStoreInt, allowSafetyIdentifierInt, channelID)
+`, allowServiceTierInt, fastModeInt, disableStoreInt, allowSafetyIdentifierInt, channelID)
 	if err != nil {
 		return fmt.Errorf("更新 upstream_channel request policy 失败: %w", err)
 	}

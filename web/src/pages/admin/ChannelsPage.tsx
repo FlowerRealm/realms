@@ -85,6 +85,7 @@ type ChannelPatch = Partial<{
   priority: number;
   promotion: boolean;
   allow_service_tier: boolean;
+  fast_mode: boolean;
   disable_store: boolean;
   allow_safety_identifier: boolean;
 }>;
@@ -244,6 +245,8 @@ function ChannelCommonTab({
   setEditPromotion,
   editAllowServiceTier,
   setEditAllowServiceTier,
+  editFastMode,
+  setEditFastMode,
   editDisableStore,
   setEditDisableStore,
   editAllowSafetyIdentifier,
@@ -269,6 +272,8 @@ function ChannelCommonTab({
   setEditPromotion: (v: boolean) => void;
   editAllowServiceTier: boolean;
   setEditAllowServiceTier: (v: boolean) => void;
+  editFastMode: boolean;
+  setEditFastMode: (v: boolean) => void;
   editDisableStore: boolean;
   setEditDisableStore: (v: boolean) => void;
   editAllowSafetyIdentifier: boolean;
@@ -309,17 +314,19 @@ function ChannelCommonTab({
   const requestPolicyAutosave = useAutoSave({
     enabled,
     resetKey,
-    value: { allow_service_tier: editAllowServiceTier, disable_store: editDisableStore, allow_safety_identifier: editAllowSafetyIdentifier },
+    value: { allow_service_tier: editAllowServiceTier, fast_mode: editFastMode, disable_store: editDisableStore, allow_safety_identifier: editAllowSafetyIdentifier },
     save: async (v) => {
       const res = await updateChannel({
         id: channelID,
         allow_service_tier: v.allow_service_tier,
+        fast_mode: v.fast_mode,
         disable_store: v.disable_store,
         allow_safety_identifier: v.allow_safety_identifier,
       });
       if (!res.success) throw new Error(res.message || '保存失败');
       applyChannelPatch(channelID, {
         allow_service_tier: v.allow_service_tier,
+        fast_mode: v.fast_mode,
         disable_store: v.disable_store,
         allow_safety_identifier: v.allow_safety_identifier,
       });
@@ -431,6 +438,13 @@ function ChannelCommonTab({
                   允许透传 <code>service_tier</code>
                 </label>
                 <div className="form-text small text-muted">可能触发上游额外计费；默认会过滤。</div>
+              </div>
+              <div className="form-check">
+                <input className="form-check-input" type="checkbox" id="editFastMode" checked={editFastMode} onChange={(e) => setEditFastMode(e.target.checked)} />
+                <label className="form-check-label" htmlFor="editFastMode">
+                  允许用户使用 Fast mode（<code>service_tier="priority"</code>）
+                </label>
+                <div className="form-text small text-muted">仅控制是否允许透传 Fast；不会自动把请求改写成 Fast。关闭后只会删除 <code>service_tier="priority"</code>。</div>
               </div>
               <div className="form-check">
                 <input className="form-check-input" type="checkbox" id="editDisableStore" checked={editDisableStore} onChange={(e) => setEditDisableStore(e.target.checked)} />
@@ -1017,6 +1031,7 @@ export function ChannelsPage() {
   const [createPriority, setCreatePriority] = useState('0');
   const [createPromotion, setCreatePromotion] = useState(false);
   const [createAllowServiceTier, setCreateAllowServiceTier] = useState(false);
+  const [createFastMode, setCreateFastMode] = useState(true);
   const [createDisableStore, setCreateDisableStore] = useState(false);
   const [createAllowSafetyIdentifier, setCreateAllowSafetyIdentifier] = useState(false);
 
@@ -1034,6 +1049,7 @@ export function ChannelsPage() {
   const [editPriority, setEditPriority] = useState('0');
   const [editPromotion, setEditPromotion] = useState(false);
   const [editAllowServiceTier, setEditAllowServiceTier] = useState(false);
+  const [editFastMode, setEditFastMode] = useState(true);
   const [editDisableStore, setEditDisableStore] = useState(false);
   const [editAllowSafetyIdentifier, setEditAllowSafetyIdentifier] = useState(false);
 
@@ -1659,6 +1675,7 @@ export function ChannelsPage() {
       setEditPriority(String(ch.priority || 0));
       setEditPromotion(!!ch.promotion);
       setEditAllowServiceTier(!!ch.allow_service_tier);
+      setEditFastMode(ch.fast_mode !== false);
       setEditDisableStore(!!ch.disable_store);
       setEditAllowSafetyIdentifier(!!ch.allow_safety_identifier);
 
@@ -2804,6 +2821,7 @@ export function ChannelsPage() {
           setCreatePriority('0');
           setCreatePromotion(false);
           setCreateAllowServiceTier(false);
+          setCreateFastMode(true);
           setCreateDisableStore(false);
           setCreateAllowSafetyIdentifier(false);
         }}
@@ -2824,6 +2842,7 @@ export function ChannelsPage() {
                 priority: Number.parseInt(createPriority, 10) || 0,
                 promotion: createPromotion,
                 allow_service_tier: createAllowServiceTier,
+                fast_mode: createFastMode,
                 disable_store: createDisableStore,
                 allow_safety_identifier: createAllowSafetyIdentifier,
               });
@@ -2916,6 +2935,13 @@ export function ChannelsPage() {
               <label className="form-check-label" htmlFor="createAllowServiceTier">
                 允许透传 <code>service_tier</code>
               </label>
+            </div>
+            <div className="form-check">
+              <input className="form-check-input" type="checkbox" id="createFastMode" checked={createFastMode} onChange={(e) => setCreateFastMode(e.target.checked)} />
+              <label className="form-check-label" htmlFor="createFastMode">
+                允许用户使用 Fast mode（<code>service_tier="priority"</code>）
+              </label>
+              <div className="form-text small text-muted">默认允许。该开关只控制是否接受 Fast，不会自动开启 Fast。</div>
             </div>
             <div className="form-check">
               <input className="form-check-input" type="checkbox" id="createDisableStore" checked={createDisableStore} onChange={(e) => setCreateDisableStore(e.target.checked)} />
@@ -3055,6 +3081,8 @@ export function ChannelsPage() {
                 setEditPromotion={setEditPromotion}
                 editAllowServiceTier={editAllowServiceTier}
                 setEditAllowServiceTier={setEditAllowServiceTier}
+                editFastMode={editFastMode}
+                setEditFastMode={setEditFastMode}
                 editDisableStore={editDisableStore}
                 setEditDisableStore={setEditDisableStore}
                 editAllowSafetyIdentifier={editAllowSafetyIdentifier}

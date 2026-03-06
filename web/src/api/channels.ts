@@ -21,6 +21,7 @@ export type Channel = {
   base_url?: string;
 
   allow_service_tier: boolean;
+  fast_mode?: boolean;
   disable_store: boolean;
   allow_safety_identifier: boolean;
 
@@ -112,6 +113,7 @@ type CreateChannelRequest = {
   priority?: number;
   promotion?: boolean;
   allow_service_tier?: boolean;
+  fast_mode?: boolean;
   disable_store?: boolean;
   allow_safety_identifier?: boolean;
 };
@@ -126,6 +128,7 @@ type UpdateChannelRequest = {
   priority?: number;
   promotion?: boolean;
   allow_service_tier?: boolean;
+  fast_mode?: boolean;
   disable_store?: boolean;
   allow_safety_identifier?: boolean;
 };

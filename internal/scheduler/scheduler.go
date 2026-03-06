@@ -33,6 +33,7 @@ type Selection struct {
 	RouteGroup    string
 
 	AllowServiceTier       bool
+	FastMode               bool
 	DisableStore           bool
 	AllowSafetyIdentifier  bool
 	OpenAIOrganization     *string
@@ -90,14 +91,14 @@ type Scheduler struct {
 	groupPointerSync        map[int64]groupPointerSyncState
 }
 
-	type Constraints struct {
-		RequireChannelType string
-		RequireChannelID   int64
-		RequireCredentialKey string
-		AllowGroups        map[string]struct{}
-		AllowGroupOrder    []string
-		AllowChannelIDs    map[int64]struct{}
-	}
+type Constraints struct {
+	RequireChannelType   string
+	RequireChannelID     int64
+	RequireCredentialKey string
+	AllowGroups          map[string]struct{}
+	AllowGroupOrder      []string
+	AllowChannelIDs      map[int64]struct{}
+}
 
 type Options struct {
 	DisableCodexOAuth bool
@@ -390,13 +391,13 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 			}
 			return eps[i].ID > eps[j].ID
 		})
-			for _, ep := range eps {
-				sel, ok, err := s.selectCredential(ctx, ch, ep, now, routeKeyHash, cons)
-				if err != nil {
-					if claimedProbe {
-						s.state.ReleaseChannelProbeClaim(ch.ID)
-					}
-					return Selection{}, err
+		for _, ep := range eps {
+			sel, ok, err := s.selectCredential(ctx, ch, ep, now, routeKeyHash, cons)
+			if err != nil {
+				if claimedProbe {
+					s.state.ReleaseChannelProbeClaim(ch.ID)
+				}
+				return Selection{}, err
 			}
 			if ok {
 				s.state.RecordRPM(sel.CredentialKey(), now)
@@ -514,6 +515,7 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			ChannelType:            ch.Type,
 			ChannelGroups:          ch.Groups,
 			AllowServiceTier:       ch.AllowServiceTier,
+			FastMode:               ch.FastMode,
 			DisableStore:           ch.DisableStore,
 			AllowSafetyIdentifier:  ch.AllowSafetyIdentifier,
 			OpenAIOrganization:     ch.OpenAIOrganization,
@@ -587,6 +589,7 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			ChannelType:            ch.Type,
 			ChannelGroups:          ch.Groups,
 			AllowServiceTier:       ch.AllowServiceTier,
+			FastMode:               ch.FastMode,
 			DisableStore:           ch.DisableStore,
 			AllowSafetyIdentifier:  ch.AllowSafetyIdentifier,
 			OpenAIOrganization:     ch.OpenAIOrganization,
@@ -673,6 +676,7 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			ChannelType:            ch.Type,
 			ChannelGroups:          ch.Groups,
 			AllowServiceTier:       ch.AllowServiceTier,
+			FastMode:               ch.FastMode,
 			DisableStore:           ch.DisableStore,
 			AllowSafetyIdentifier:  ch.AllowSafetyIdentifier,
 			OpenAIOrganization:     ch.OpenAIOrganization,

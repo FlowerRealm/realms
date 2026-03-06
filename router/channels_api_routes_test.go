@@ -3,8 +3,8 @@ package router
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -90,12 +90,12 @@ func TestChannels_PageAndInUse_RootFlow(t *testing.T) {
 	})
 	engine.Use(sessions.Sessions(cookieName, sessionStore))
 
-		SetRouter(engine, Options{
-			Store:                st,
-			PersonalMode:         false,
-			AdminTimeZoneDefault: "UTC",
-			FrontendIndexPage:    []byte("<!doctype html><html><body>INDEX</body></html>"),
-		})
+	SetRouter(engine, Options{
+		Store:                st,
+		PersonalMode:         false,
+		AdminTimeZoneDefault: "UTC",
+		FrontendIndexPage:    []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
 
 	// login
 	loginBody, _ := json.Marshal(map[string]any{
@@ -545,11 +545,11 @@ func TestChannels_SettingsAndCredentials_RootFlow(t *testing.T) {
 	})
 	engine.Use(sessions.Sessions(cookieName, sessionStore))
 
-		SetRouter(engine, Options{
-			Store:             st,
-			PersonalMode:      false,
-			FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
-		})
+	SetRouter(engine, Options{
+		Store:             st,
+		PersonalMode:      false,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
 
 	// login
 	loginBody, _ := json.Marshal(map[string]any{
@@ -694,6 +694,7 @@ func TestChannels_SettingsAndCredentials_RootFlow(t *testing.T) {
 		Data    struct {
 			ID        int64   `json:"id"`
 			Status    int     `json:"status"`
+			FastMode  bool    `json:"fast_mode"`
 			TestModel *string `json:"test_model"`
 			Weight    int     `json:"weight"`
 			AutoBan   bool    `json:"auto_ban"`
@@ -714,11 +715,15 @@ func TestChannels_SettingsAndCredentials_RootFlow(t *testing.T) {
 	if detailResp.Data.AutoBan {
 		t.Fatalf("expected auto_ban=false, got true")
 	}
+	if !detailResp.Data.FastMode {
+		t.Fatalf("expected fast_mode=true by default, got false")
+	}
 
 	// manual disable channel
 	updateBody, _ := json.Marshal(map[string]any{
-		"id":     chID,
-		"status": 0,
+		"id":        chID,
+		"status":    0,
+		"fast_mode": false,
 	})
 	req = httptest.NewRequest(http.MethodPut, "http://example.com/api/channel", bytes.NewReader(updateBody))
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
@@ -754,6 +759,9 @@ func TestChannels_SettingsAndCredentials_RootFlow(t *testing.T) {
 	}
 	if !detailResp.Success || detailResp.Data.Status != 0 {
 		t.Fatalf("expected channel status=0 after disable, got %#v", detailResp)
+	}
+	if detailResp.Data.FastMode {
+		t.Fatalf("expected channel fast_mode=false after update, got true")
 	}
 }
 
@@ -823,13 +831,13 @@ func TestChannels_CodexOAuthAccounts_RootFlow(t *testing.T) {
 	})
 	engine.Use(sessions.Sessions(cookieName, sessionStore))
 
-		SetRouter(engine, Options{
-			Store:             st,
-			PersonalMode:      false,
-			FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
-			StartCodexOAuth: func(_ context.Context, endpointID int64, actorUserID int64) (string, error) {
-				startEndpointID = endpointID
-				startActorUserID = actorUserID
+	SetRouter(engine, Options{
+		Store:             st,
+		PersonalMode:      false,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+		StartCodexOAuth: func(_ context.Context, endpointID int64, actorUserID int64) (string, error) {
+			startEndpointID = endpointID
+			startActorUserID = actorUserID
 			return "https://chatgpt.com/oauth/authorize?state=s1", nil
 		},
 		CompleteCodexOAuth: func(_ context.Context, endpointID int64, actorUserID int64, state string, code string) error {

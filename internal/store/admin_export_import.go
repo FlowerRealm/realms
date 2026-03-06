@@ -12,7 +12,7 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-const AdminConfigExportVersion = 7
+const AdminConfigExportVersion = 8
 
 type AdminConfigExport struct {
 	Version    int       `json:"version"`
@@ -65,6 +65,7 @@ type AdminConfigUpstreamChannel struct {
 	Setting            json.RawMessage `json:"setting,omitempty"`
 
 	AllowServiceTier      bool            `json:"allow_service_tier,omitempty"`
+	FastMode              *bool           `json:"fast_mode,omitempty"`
 	DisableStore          bool            `json:"disable_store,omitempty"`
 	AllowSafetyIdentifier bool            `json:"allow_safety_identifier,omitempty"`
 	ParamOverride         json.RawMessage `json:"param_override,omitempty"`
@@ -223,6 +224,7 @@ func (s *Store) ExportAdminConfig(ctx context.Context) (AdminConfigExport, error
 		if strings.TrimSpace(ch.RequestBodyWhitelist) != "" {
 			requestBodyWhitelist = json.RawMessage(strings.TrimSpace(ch.RequestBodyWhitelist))
 		}
+		fastMode := ch.FastMode
 		out.UpstreamChannels = append(out.UpstreamChannels, AdminConfigUpstreamChannel{
 			Type:                  strings.TrimSpace(ch.Type),
 			Name:                  strings.TrimSpace(ch.Name),
@@ -238,6 +240,7 @@ func (s *Store) ExportAdminConfig(ctx context.Context) (AdminConfigExport, error
 			AutoBan:               autoBan,
 			Setting:               setting,
 			AllowServiceTier:      ch.AllowServiceTier,
+			FastMode:              &fastMode,
 			DisableStore:          ch.DisableStore,
 			AllowSafetyIdentifier: ch.AllowSafetyIdentifier,
 			ParamOverride:         paramOverride,
@@ -412,17 +415,17 @@ ON CONFLICT(name) DO UPDATE SET
 		}
 	}
 
-		ensureGroupID := func(name string) (int64, error) {
-			name = strings.TrimSpace(name)
-			if name == "" {
-				return 0, errors.New("渠道组名称不能为空")
-			}
-			id, ok := groupIDByName[name]
-			if !ok || id == 0 {
-				return 0, fmt.Errorf("渠道组不存在: %s", name)
-			}
-			return id, nil
+	ensureGroupID := func(name string) (int64, error) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return 0, errors.New("渠道组名称不能为空")
 		}
+		id, ok := groupIDByName[name]
+		if !ok || id == 0 {
+			return 0, fmt.Errorf("渠道组不存在: %s", name)
+		}
+		return id, nil
+	}
 
 	channelIDByKey := make(map[string]int64)
 
@@ -484,6 +487,14 @@ ON CONFLICT(name) DO UPDATE SET
 		allowServiceTier := 0
 		if ch.AllowServiceTier {
 			allowServiceTier = 1
+		}
+		fastMode := true
+		if in.Version >= 8 && ch.FastMode != nil {
+			fastMode = *ch.FastMode
+		}
+		fastModeInt := 1
+		if !fastMode {
+			fastModeInt = 0
 		}
 		disableStore := 0
 		if ch.DisableStore {
@@ -585,6 +596,18 @@ VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CUR
 								nullableString(&paramOverride), nullableString(&headerOverride), nullableString(&statusCodeMapping),
 								nullableString(&modelSuffixPreserve), nullableString(&requestBodyBlacklist), nullableString(&requestBodyWhitelist),
 							}
+							if in.Version >= 8 {
+								stmtInsert = `
+INSERT INTO upstream_channels(type, name, ` + "`groups`" + `, status, priority, promotion, openai_organization, test_model, tag, remark, weight, auto_ban, setting, allow_service_tier, fast_mode, disable_store, allow_safety_identifier, param_override, header_override, status_code_mapping, model_suffix_preserve, request_body_blacklist, request_body_whitelist, created_at, updated_at)
+VALUES(?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+`
+								args = []any{typ, name, ch.Status, ch.Priority, p,
+									nullableString(&openAIOrganization), nullableString(&testModel), nullableString(&tag), nullableString(&remark), weight, autoBanInt, nullableString(&setting),
+									allowServiceTier, fastModeInt, disableStore, allowSafetyIdentifier,
+									nullableString(&paramOverride), nullableString(&headerOverride), nullableString(&statusCodeMapping),
+									nullableString(&modelSuffixPreserve), nullableString(&requestBodyBlacklist), nullableString(&requestBodyWhitelist),
+								}
+							}
 						}
 					}
 				} else if in.Version >= 3 {
@@ -677,6 +700,36 @@ WHERE id=?
 							nullableString(&paramOverride), nullableString(&headerOverride), nullableString(&statusCodeMapping),
 							nullableString(&modelSuffixPreserve), nullableString(&requestBodyBlacklist), nullableString(&requestBodyWhitelist),
 							id,
+						}
+						if in.Version >= 8 {
+							stmtUpdate = `
+UPDATE upstream_channels
+SET name=COALESCE(NULLIF(?, ''), name),
+    status=?, priority=?, promotion=?,
+    openai_organization=?,
+    test_model=?,
+    tag=?,
+    remark=?,
+    weight=?,
+    auto_ban=?,
+    setting=?,
+    allow_service_tier=?, fast_mode=?, disable_store=?, allow_safety_identifier=?,
+    param_override=?,
+    header_override=?,
+    status_code_mapping=?,
+    model_suffix_preserve=?,
+    request_body_blacklist=?,
+    request_body_whitelist=?,
+    updated_at=CURRENT_TIMESTAMP
+WHERE id=?
+`
+							args = []any{name, ch.Status, ch.Priority, p,
+								nullableString(&openAIOrganization), nullableString(&testModel), nullableString(&tag), nullableString(&remark), weight, autoBanInt, nullableString(&setting),
+								allowServiceTier, fastModeInt, disableStore, allowSafetyIdentifier,
+								nullableString(&paramOverride), nullableString(&headerOverride), nullableString(&statusCodeMapping),
+								nullableString(&modelSuffixPreserve), nullableString(&requestBodyBlacklist), nullableString(&requestBodyWhitelist),
+								id,
+							}
 						}
 					}
 				}

@@ -37,11 +37,11 @@ type MainGroupSubgroup struct {
 }
 
 type TokenChannelGroupBinding struct {
-	TokenID           int64
-	ChannelGroupName  string
-	Priority          int
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	TokenID          int64
+	ChannelGroupName string
+	Priority         int
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type ChannelGroup struct {
@@ -107,6 +107,7 @@ type UpstreamChannel struct {
 	Promotion bool
 
 	AllowServiceTier      bool
+	FastMode              bool
 	DisableStore          bool
 	AllowSafetyIdentifier bool
 	OpenAIOrganization    *string

@@ -137,6 +137,7 @@ CREATE TABLE IF NOT EXISTS `upstream_channels` (
   `priority` INTEGER NOT NULL DEFAULT 0,
   `promotion` INTEGER NOT NULL DEFAULT 0,
   `allow_service_tier` INTEGER NOT NULL DEFAULT 0,
+  `fast_mode` INTEGER NOT NULL DEFAULT 1,
   `disable_store` INTEGER NOT NULL DEFAULT 0,
   `allow_safety_identifier` INTEGER NOT NULL DEFAULT 0,
   `openai_organization` TEXT NULL,

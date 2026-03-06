@@ -31,6 +31,7 @@ type channelView struct {
 	BaseURL   string `json:"base_url,omitempty"`
 
 	AllowServiceTier      bool `json:"allow_service_tier"`
+	FastMode              bool `json:"fast_mode"`
 	DisableStore          bool `json:"disable_store"`
 	AllowSafetyIdentifier bool `json:"allow_safety_identifier"`
 
@@ -135,6 +136,7 @@ func listChannelsHandler(opts Options) gin.HandlerFunc {
 				Promotion: ch.Promotion,
 
 				AllowServiceTier:      ch.AllowServiceTier,
+				FastMode:              ch.FastMode,
 				DisableStore:          ch.DisableStore,
 				AllowSafetyIdentifier: ch.AllowSafetyIdentifier,
 
@@ -344,6 +346,7 @@ func channelsPageHandler(opts Options) gin.HandlerFunc {
 				Promotion: ch.Promotion,
 
 				AllowServiceTier:      ch.AllowServiceTier,
+				FastMode:              ch.FastMode,
 				DisableStore:          ch.DisableStore,
 				AllowSafetyIdentifier: ch.AllowSafetyIdentifier,
 
@@ -550,6 +553,7 @@ func getChannelHandler(opts Options) gin.HandlerFunc {
 			Promotion: ch.Promotion,
 
 			AllowServiceTier:      ch.AllowServiceTier,
+			FastMode:              ch.FastMode,
 			DisableStore:          ch.DisableStore,
 			AllowSafetyIdentifier: ch.AllowSafetyIdentifier,
 
@@ -602,6 +606,7 @@ type createChannelRequest struct {
 	Priority              int     `json:"priority"`
 	Promotion             bool    `json:"promotion"`
 	AllowServiceTier      bool    `json:"allow_service_tier"`
+	FastMode              *bool   `json:"fast_mode,omitempty"`
 	DisableStore          bool    `json:"disable_store"`
 	AllowSafetyIdentifier bool    `json:"allow_safety_identifier"`
 }
@@ -663,7 +668,12 @@ func createChannelHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
-		id, err := opts.Store.CreateUpstreamChannel(c.Request.Context(), req.Type, req.Name, req.Groups, req.Priority, req.Promotion, req.AllowServiceTier, req.DisableStore, req.AllowSafetyIdentifier)
+		fastMode := true
+		if req.FastMode != nil {
+			fastMode = *req.FastMode
+		}
+
+		id, err := opts.Store.CreateUpstreamChannelWithRequestPolicy(c.Request.Context(), req.Type, req.Name, req.Groups, req.Priority, req.Promotion, req.AllowServiceTier, req.DisableStore, req.AllowSafetyIdentifier, fastMode)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建失败"})
 			return
@@ -711,6 +721,7 @@ type updateChannelRequest struct {
 	Priority              *int    `json:"priority,omitempty"`
 	Promotion             *bool   `json:"promotion,omitempty"`
 	AllowServiceTier      *bool   `json:"allow_service_tier,omitempty"`
+	FastMode              *bool   `json:"fast_mode,omitempty"`
 	DisableStore          *bool   `json:"disable_store,omitempty"`
 	AllowSafetyIdentifier *bool   `json:"allow_safety_identifier,omitempty"`
 }
@@ -837,6 +848,10 @@ func updateChannelHandler(opts Options) gin.HandlerFunc {
 		if req.AllowServiceTier != nil {
 			allowServiceTier = *req.AllowServiceTier
 		}
+		fastMode := ch.FastMode
+		if req.FastMode != nil {
+			fastMode = *req.FastMode
+		}
 		disableStore := ch.DisableStore
 		if req.DisableStore != nil {
 			disableStore = *req.DisableStore
@@ -846,7 +861,7 @@ func updateChannelHandler(opts Options) gin.HandlerFunc {
 			allowSafetyIdentifier = *req.AllowSafetyIdentifier
 		}
 
-		if err := opts.Store.UpdateUpstreamChannelBasics(c.Request.Context(), ch.ID, name, status, priority, promotion, allowServiceTier, disableStore, allowSafetyIdentifier); err != nil {
+		if err := opts.Store.UpdateUpstreamChannelBasics(c.Request.Context(), ch.ID, name, status, priority, promotion, allowServiceTier, disableStore, allowSafetyIdentifier, fastMode); err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "更新失败"})
 			return
 		}
