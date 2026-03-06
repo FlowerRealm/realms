@@ -37,6 +37,13 @@ func TestSanitizeMessagesPayload_StripsMCPServersWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestSanitizeMessagesPayload_RejectsInvalidTokenAliasType(t *testing.T) {
+	_, err := sanitizeMessagesPayload([]byte(`{"model":"m1","messages":[{"role":"user","content":"hi"}],"max_tokens_to_sample":"bad"}`), 0, true)
+	if !errors.Is(err, errInvalidJSON) {
+		t.Fatalf("expected errInvalidJSON, got=%v", err)
+	}
+}
+
 func TestSanitizeChatCompletionsPayload_PreservesUnknownAndNormalizesSpecialFields(t *testing.T) {
 	payload, err := sanitizeChatCompletionsPayload([]byte(`{"model":"m1","messages":[{"role":"user","content":"hi"}],"max_output_tokens":9,"unknown":123,"stream_options":{"include_usage":false},"web_search_options":{}}`), 0)
 	if err != nil {
@@ -73,6 +80,20 @@ func TestSanitizeChatCompletionsPayload_RejectsInvalidSearchContextSize(t *testi
 
 func TestSanitizeChatCompletionsPayload_RejectsNonArrayMessages(t *testing.T) {
 	_, err := sanitizeChatCompletionsPayload([]byte(`{"model":"m1","messages":"not-an-array"}`), 0)
+	if !errors.Is(err, errInvalidJSON) {
+		t.Fatalf("expected errInvalidJSON, got=%v", err)
+	}
+}
+
+func TestSanitizeChatCompletionsPayload_RejectsInvalidMessageElements(t *testing.T) {
+	_, err := sanitizeChatCompletionsPayload([]byte(`{"model":"m1","messages":[123]}`), 0)
+	if !errors.Is(err, errInvalidJSON) {
+		t.Fatalf("expected errInvalidJSON, got=%v", err)
+	}
+}
+
+func TestSanitizeChatCompletionsPayload_RejectsInvalidTokenType(t *testing.T) {
+	_, err := sanitizeChatCompletionsPayload([]byte(`{"model":"m1","messages":[{"role":"user","content":"hi"}],"max_output_tokens":"bad"}`), 0)
 	if !errors.Is(err, errInvalidJSON) {
 		t.Fatalf("expected errInvalidJSON, got=%v", err)
 	}

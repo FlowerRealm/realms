@@ -16,20 +16,28 @@ func unmarshalRequestPayload(body []byte) (map[string]any, error) {
 	return out, nil
 }
 
-func normalizeIntFieldValue(payload map[string]any, key string) *int64 {
+func normalizeJSONIntFieldValue(payload map[string]any, key string) (*int64, bool, error) {
 	if payload == nil {
-		return nil
+		return nil, false, nil
 	}
 	value, ok := payload[key]
 	if !ok {
-		return nil
+		return nil, false, nil
 	}
-	n := intFromAny(value)
-	if n == nil {
-		return nil
+	if value == nil {
+		delete(payload, key)
+		return nil, false, nil
 	}
-	payload[key] = *n
-	return n
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, true, errInvalidJSON
+	}
+	var n int64
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return nil, true, errInvalidJSON
+	}
+	payload[key] = n
+	return &n, true, nil
 }
 
 func deletePayloadKeys(payload map[string]any, keys ...string) {
@@ -52,6 +60,14 @@ func hasChatMessages(payload map[string]any) (bool, error) {
 	items, ok := raw.([]any)
 	if !ok {
 		return false, errInvalidJSON
+	}
+	for _, item := range items {
+		if item == nil {
+			return false, errInvalidJSON
+		}
+		if _, ok := item.(map[string]any); !ok {
+			return false, errInvalidJSON
+		}
 	}
 	return len(items) > 0, nil
 }
@@ -148,24 +164,45 @@ func sanitizeMessagesPayload(body []byte, defaultMaxTokens int, allowMCPServers 
 		return nil, errors.New("messages 不能为空")
 	}
 
+	maxTokens, hasMaxTokens, err := normalizeJSONIntFieldValue(out, "max_tokens")
+	if err != nil {
+		return nil, err
+	}
+	maxOutputTokens, hasMaxOutputTokens, err := normalizeJSONIntFieldValue(out, "max_output_tokens")
+	if err != nil {
+		return nil, err
+	}
+	maxCompletionTokens, hasMaxCompletionTokens, err := normalizeJSONIntFieldValue(out, "max_completion_tokens")
+	if err != nil {
+		return nil, err
+	}
+	maxTokensToSample, hasMaxTokensToSample, err := normalizeJSONIntFieldValue(out, "max_tokens_to_sample")
+	if err != nil {
+		return nil, err
+	}
+
 	switch {
-	case normalizeIntFieldValue(out, "max_tokens") != nil:
+	case hasMaxTokens:
 		deletePayloadKeys(out, "max_output_tokens", "max_completion_tokens", "max_tokens_to_sample")
-	case normalizeIntFieldValue(out, "max_output_tokens") != nil:
-		out["max_tokens"] = out["max_output_tokens"]
+	case hasMaxOutputTokens:
+		out["max_tokens"] = *maxOutputTokens
+		maxTokens = maxOutputTokens
 		deletePayloadKeys(out, "max_output_tokens", "max_completion_tokens", "max_tokens_to_sample")
-	case normalizeIntFieldValue(out, "max_completion_tokens") != nil:
-		out["max_tokens"] = out["max_completion_tokens"]
+	case hasMaxCompletionTokens:
+		out["max_tokens"] = *maxCompletionTokens
+		maxTokens = maxCompletionTokens
 		deletePayloadKeys(out, "max_output_tokens", "max_completion_tokens", "max_tokens_to_sample")
-	case normalizeIntFieldValue(out, "max_tokens_to_sample") != nil:
-		out["max_tokens"] = out["max_tokens_to_sample"]
+	case hasMaxTokensToSample:
+		out["max_tokens"] = *maxTokensToSample
+		maxTokens = maxTokensToSample
 		deletePayloadKeys(out, "max_output_tokens", "max_completion_tokens", "max_tokens_to_sample")
 	}
 
-	if normalizeIntFieldValue(out, "max_tokens") == nil && defaultMaxTokens > 0 {
+	if maxTokens == nil && defaultMaxTokens > 0 {
 		out["max_tokens"] = int64(defaultMaxTokens)
+		v := int64(defaultMaxTokens)
+		maxTokens = &v
 	}
-	maxTokens := normalizeIntFieldValue(out, "max_tokens")
 	if maxTokens == nil || *maxTokens <= 0 {
 		return nil, errors.New("max_tokens 不能为空")
 	}
@@ -198,17 +235,31 @@ func sanitizeChatCompletionsPayload(body []byte, defaultMaxTokens int) (map[stri
 		return nil, err
 	}
 
+	maxCompletionTokens, hasMaxCompletionTokens, err := normalizeJSONIntFieldValue(out, "max_completion_tokens")
+	if err != nil {
+		return nil, err
+	}
+	maxTokens, hasMaxTokens, err := normalizeJSONIntFieldValue(out, "max_tokens")
+	if err != nil {
+		return nil, err
+	}
+	maxOutputTokens, hasMaxOutputTokens, err := normalizeJSONIntFieldValue(out, "max_output_tokens")
+	if err != nil {
+		return nil, err
+	}
+
 	switch {
-	case normalizeIntFieldValue(out, "max_completion_tokens") != nil:
+	case hasMaxCompletionTokens:
 		deletePayloadKeys(out, "max_tokens", "max_output_tokens")
-	case normalizeIntFieldValue(out, "max_tokens") != nil:
+	case hasMaxTokens:
 		deletePayloadKeys(out, "max_completion_tokens", "max_output_tokens")
-	case normalizeIntFieldValue(out, "max_output_tokens") != nil:
-		out["max_tokens"] = out["max_output_tokens"]
+	case hasMaxOutputTokens:
+		out["max_tokens"] = *maxOutputTokens
+		maxTokens = maxOutputTokens
 		deletePayloadKeys(out, "max_completion_tokens", "max_output_tokens")
 	}
 
-	if normalizeIntFieldValue(out, "max_completion_tokens") == nil && normalizeIntFieldValue(out, "max_tokens") == nil && defaultMaxTokens > 0 {
+	if maxCompletionTokens == nil && maxTokens == nil && defaultMaxTokens > 0 {
 		out["max_tokens"] = int64(defaultMaxTokens)
 	}
 
