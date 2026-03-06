@@ -45,6 +45,11 @@ type Handler struct {
 	features FeatureResolver
 	selfMode bool
 
+	gateway           gatewayOptions
+	gatewayConfigured bool
+	concurrency       concurrencyManager
+	errorPassthrough  errorPassthroughMatcher
+
 	quota quota.Provider
 	audit AuditSink
 	usage UsageEventSink
@@ -119,6 +124,7 @@ func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *
 		proxyLog:        proxyLog,
 		features:        features,
 		selfMode:        selfMode,
+		gateway:         defaultGatewayOptions(),
 		quota:           qp,
 		audit:           audit,
 		usage:           usage,
@@ -550,6 +556,20 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	}
 
 	usageID := int64(0)
+	userRelease, userSlotErr := h.acquireUserSlot(r.Context(), p.UserID)
+	if userSlotErr != nil {
+		fail := classifyConcurrencyAcquireFailure(userSlotErr)
+		resp := h.buildFailoverExhaustedResponse("openai", fail)
+		cw := &countingResponseWriter{ResponseWriter: w}
+		writeOpenAIErrorWithRetryAfter(cw, resp.Status, resp.ErrType, resp.Message, resp.RetryAfterSeconds)
+		if !resp.SkipMonitoring {
+			h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), resp.Status, resp.ErrorClass, resp.Message, time.Since(reqStart), stream)
+		}
+		return
+	}
+	if userRelease != nil {
+		defer userRelease()
+	}
 	if h.quota != nil && r != nil && r.URL != nil && r.URL.Path == "/v1/responses" {
 		res, err := h.quota.Reserve(r.Context(), quota.ReserveInput{
 			RequestID:       middleware.GetRequestID(r.Context()),
@@ -576,19 +596,33 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 
 	if h.groups == nil && !h.selfMode {
 		h.voidQuotaBestEffort(usageID)
-		h.auditUpstreamError(r.Context(), r.URL.Path, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", 0)
+		resp := h.buildFailoverExhaustedResponse("openai", proxyFailureInfo{})
+		if !resp.SkipMonitoring {
+			h.auditUpstreamError(r.Context(), r.URL.Path, p, nil, optionalString(publicModel), resp.Status, resp.ErrorClass, 0)
+		}
 		cw := &countingResponseWriter{ResponseWriter: w}
-		http.Error(cw, "上游不可用", http.StatusBadGateway)
-		h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream)
-		h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
+		writeOpenAIErrorWithRetryAfter(cw, resp.Status, resp.ErrType, resp.Message, resp.RetryAfterSeconds)
+		if !resp.SkipMonitoring {
+			h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), resp.Status, resp.ErrorClass, resp.Message, time.Since(reqStart), stream)
+		}
+		finalClass := resp.ErrorClass
+		if resp.SkipMonitoring {
+			finalClass = ""
+		}
+		h.finalizeUsageEvent(r, usageID, nil, resp.Status, finalClass, resp.UsageMessage, time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
 		return
 	}
 
 	router := scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
 	var lastSel *scheduler.Selection
 	bestFailure := proxyFailureInfo{}
-	const absoluteMaxAttempts = 1000
-	for i := 0; i < absoluteMaxAttempts; i++ {
+	loopStart := time.Now()
+	switches := 0
+	backoff := h.initialBackoff()
+	for {
+		if h.failoverExhausted(loopStart, switches) {
+			break
+		}
 		sel, err := router.Next(r.Context())
 		if err != nil {
 			if h.finalizeIfCanceled(r, usageID, nil, reqStart, stream, reqBytes) {
@@ -619,9 +653,10 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), usageID, reqStart, reqBytes, 2, &bestFailure) {
+		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), usageID, reqStart, reqBytes, loopStart, 2, &bestFailure) {
 			return
 		}
+		switches++
 		if bindingActive && !bindingCleared {
 			h.clearCodexStickyBindingBestEffort(r.Context(), p.UserID, stickyRouteKeyHash)
 			bindingCleared = true
@@ -633,14 +668,33 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-Realms-Codex-Prev-Credential", boundRoute.credentialKey)
 			router = scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
 		}
+		if h.failoverExhausted(loopStart, switches) {
+			break
+		}
+		if !h.waitBackoffWithinRetryElapsed(r.Context(), loopStart, backoff) {
+			if h.finalizeIfCanceled(r, usageID, lastSel, reqStart, stream, reqBytes) {
+				return
+			}
+			break
+		}
+		backoff = h.nextBackoff(backoff)
 	}
 
 	h.voidQuotaBestEffort(usageID)
-	h.auditUpstreamError(r.Context(), r.URL.Path, p, lastSel, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", 0)
+	resp := h.buildFailoverExhaustedResponse("openai", bestFailure)
+	if !resp.SkipMonitoring {
+		h.auditUpstreamError(r.Context(), r.URL.Path, p, lastSel, optionalString(publicModel), resp.Status, resp.ErrorClass, 0)
+	}
 	cw := &countingResponseWriter{ResponseWriter: w}
-	http.Error(cw, "上游不可用", http.StatusBadGateway)
-	h.maybeLogProxyFailure(r.Context(), r, p, lastSel, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), stream)
-	h.finalizeUsageEvent(r, usageID, lastSel, http.StatusBadGateway, "upstream_unavailable", upstreamUnavailableUsageMessage(bestFailure), time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
+	writeOpenAIErrorWithRetryAfter(cw, resp.Status, resp.ErrType, resp.Message, resp.RetryAfterSeconds)
+	if !resp.SkipMonitoring {
+		h.maybeLogProxyFailure(r.Context(), r, p, lastSel, optionalString(publicModel), resp.Status, resp.ErrorClass, resp.Message, time.Since(reqStart), stream)
+	}
+	finalClass := resp.ErrorClass
+	if resp.SkipMonitoring {
+		finalClass = ""
+	}
+	h.finalizeUsageEvent(r, usageID, lastSel, resp.Status, finalClass, resp.UsageMessage, time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
 }
 
 type proxyAttemptDecision int
@@ -656,6 +710,7 @@ type proxyFailureInfo struct {
 	Class      string
 	StatusCode int
 	Message    string
+	Body       []byte
 }
 
 func (fi proxyFailureInfo) score() int {
@@ -675,9 +730,22 @@ func recordProxyFailure(best *proxyFailureInfo, next proxyFailureInfo) {
 	if best == nil || !next.Valid || strings.TrimSpace(next.Message) == "" {
 		return
 	}
+	if len(next.Body) > 0 {
+		next.Body = cloneProxyFailureBody(next.Body)
+	}
 	if !best.Valid || next.score() > best.score() || next.score() == best.score() {
 		*best = next
 	}
+}
+
+func cloneProxyFailureBody(body []byte) []byte {
+	if len(body) == 0 {
+		return nil
+	}
+	if len(body) > failoverErrorBodyMaxBytes {
+		body = body[:failoverErrorBodyMaxBytes]
+	}
+	return append([]byte(nil), body...)
 }
 
 func formatProxyFailureDetail(fi proxyFailureInfo) string {
@@ -705,12 +773,22 @@ func upstreamUnavailableUsageMessage(best proxyFailureInfo) string {
 	return "上游不可用；最后一次失败: " + detail
 }
 
-func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p auth.Principal, sel scheduler.Selection, body []byte, wantStream bool, model *string, usageID int64, reqStart time.Time, reqBytes int64, retries int, bestFailure *proxyFailureInfo) bool {
-	if retries <= 0 {
-		retries = 1
-	}
+func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p auth.Principal, sel scheduler.Selection, body []byte, wantStream bool, model *string, usageID int64, reqStart time.Time, reqBytes int64, loopStart time.Time, retries int, bestFailure *proxyFailureInfo) bool {
+	retries = h.sameSelectionRetries(retries)
+	backoff := h.initialBackoff()
 	for i := 0; i < retries; i++ {
+		releaseCred, err := h.acquireCredentialSlot(r.Context(), sel)
+		if err != nil {
+			if h.finalizeIfCanceled(r, usageID, &sel, reqStart, wantStream, reqBytes) {
+				return true
+			}
+			recordProxyFailure(bestFailure, classifyConcurrencyAcquireFailure(err))
+			return false
+		}
 		decision, failure := h.proxyOnce(w, r, sel, body, wantStream, model, p, usageID, reqStart, reqBytes)
+		if releaseCred != nil {
+			releaseCred()
+		}
 		if failure.Valid {
 			recordProxyFailure(bestFailure, failure)
 		}
@@ -719,6 +797,13 @@ func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p aut
 			return true
 		case proxyAttemptRetrySameSelection:
 			if i+1 < retries {
+				if !h.waitBackoffWithinRetryElapsed(r.Context(), loopStart, backoff) {
+					if h.finalizeIfCanceled(r, usageID, &sel, reqStart, wantStream, reqBytes) {
+						return true
+					}
+					return false
+				}
+				backoff = h.nextBackoff(backoff)
 				continue
 			}
 			return false
@@ -808,6 +893,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 					Class:      errorClass,
 					StatusCode: resp.StatusCode,
 					Message:    failMsg,
+					Body:       bodyBytes,
 				}
 			}
 
@@ -1521,6 +1607,7 @@ func trimSummary(s string) string {
 
 const (
 	upstreamErrorBodyMaxBytes        = 64 << 10
+	failoverErrorBodyMaxBytes        = 8 << 10
 	upstreamNonStreamExtractMaxBytes = 2 << 20
 )
 
