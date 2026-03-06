@@ -1,0 +1,52 @@
+package store_test
+
+import (
+	"context"
+	"path/filepath"
+	"testing"
+
+	"realms/internal/store"
+)
+
+func TestUpstreamChannel_FastModeDefaultsTrueAndCanBeDisabled(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	ctx := context.Background()
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "fast-default", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel: %v", err)
+	}
+
+	ch, err := st.GetUpstreamChannelByID(ctx, channelID)
+	if err != nil {
+		t.Fatalf("GetUpstreamChannelByID: %v", err)
+	}
+	if !ch.FastMode {
+		t.Fatalf("expected fast_mode=true by default, got false")
+	}
+
+	if err := st.UpdateUpstreamChannelRequestPolicy(ctx, channelID, ch.AllowServiceTier, ch.DisableStore, ch.AllowSafetyIdentifier, false); err != nil {
+		t.Fatalf("UpdateUpstreamChannelRequestPolicy: %v", err)
+	}
+
+	ch, err = st.GetUpstreamChannelByID(ctx, channelID)
+	if err != nil {
+		t.Fatalf("GetUpstreamChannelByID(after): %v", err)
+	}
+	if ch.FastMode {
+		t.Fatalf("expected fast_mode=false after update, got true")
+	}
+}

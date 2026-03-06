@@ -38,6 +38,9 @@ func TestRebuildRuntimeFromBundle_RoundTripWithSecretsAndDeletions(t *testing.T)
 		if err != nil {
 			t.Fatalf("CreateUpstreamChannel: %v", err)
 		}
+		if err := st.UpdateUpstreamChannelRequestPolicy(ctx, chID, false, false, false, false); err != nil {
+			t.Fatalf("UpdateUpstreamChannelRequestPolicy: %v", err)
+		}
 		if _, err := st.CreateUpstreamEndpoint(ctx, chID, "https://example.com/v1", 0); err != nil {
 			t.Fatalf("CreateUpstreamEndpoint: %v", err)
 		}
@@ -145,6 +148,9 @@ func TestRebuildRuntimeFromBundle_RoundTripWithSecretsAndDeletions(t *testing.T)
 		}
 		if ch1 == nil {
 			t.Fatalf("expected ch1 to exist after rebuild, got %#v", chs)
+		}
+		if ch1.FastMode {
+			t.Fatalf("expected ch1.fast_mode=false after rebuild, got true")
 		}
 		ep2, err := dstStore.GetUpstreamEndpointByChannelID(ctx, ch1.ID)
 		if err != nil {

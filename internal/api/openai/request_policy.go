@@ -1,8 +1,11 @@
 package openai
 
 import (
+	"strings"
+
 	"realms/internal/scheduler"
 
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -21,6 +24,11 @@ func applyChannelRequestPolicy(body []byte, sel scheduler.Selection) ([]byte, er
 	out := body
 	var err error
 	if !sel.AllowServiceTier {
+		out, err = sjson.DeleteBytes(out, "service_tier")
+		if err != nil {
+			return nil, err
+		}
+	} else if !sel.FastMode && strings.EqualFold(strings.TrimSpace(gjson.GetBytes(out, "service_tier").String()), "priority") {
 		out, err = sjson.DeleteBytes(out, "service_tier")
 		if err != nil {
 			return nil, err

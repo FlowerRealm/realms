@@ -119,6 +119,10 @@ VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		if ch.AllowServiceTier {
 			allowServiceTier = 1
 		}
+		fastMode := 1
+		if ch.FastMode != nil && !*ch.FastMode {
+			fastMode = 0
+		}
 		disableStore := 0
 		if ch.DisableStore {
 			disableStore = 1
@@ -151,18 +155,18 @@ VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO upstream_channels(
   type, name, `+"`groups`"+`, status, priority, promotion,
-  allow_service_tier, disable_store, allow_safety_identifier,
+  allow_service_tier, fast_mode, disable_store, allow_safety_identifier,
   openai_organization, test_model, tag, remark, weight, auto_ban, setting,
   param_override, header_override, status_code_mapping, model_suffix_preserve, request_body_blacklist, request_body_whitelist,
   created_at, updated_at
 )
 VALUES(?, ?, ?, ?, ?, ?,
-       ?, ?, ?,
+       ?, ?, ?, ?,
        ?, ?, ?, ?, ?, ?, ?,
        ?, ?, ?, ?, ?, ?,
        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `, typ, name, groups, status, ch.Priority, promo,
-			allowServiceTier, disableStore, allowSafetyIdentifier,
+			allowServiceTier, fastMode, disableStore, allowSafetyIdentifier,
 			openAIOrg, testModel, tag, remark, weight, autoBan, setting,
 			paramOverride, headerOverride, statusCodeMapping, modelSuffixPreserve, requestBodyBlacklist, requestBodyWhitelist,
 		); err != nil {

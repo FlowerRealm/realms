@@ -52,6 +52,7 @@ func ensureSQLiteUpstreamChannelRequestPolicyColumns(db *sql.DB) error {
 	}
 	need := []addCol{
 		{name: "allow_service_tier", ddl: "ALTER TABLE upstream_channels ADD COLUMN allow_service_tier INTEGER NOT NULL DEFAULT 0"},
+		{name: "fast_mode", ddl: "ALTER TABLE upstream_channels ADD COLUMN fast_mode INTEGER NOT NULL DEFAULT 1"},
 		{name: "disable_store", ddl: "ALTER TABLE upstream_channels ADD COLUMN disable_store INTEGER NOT NULL DEFAULT 0"},
 		{name: "allow_safety_identifier", ddl: "ALTER TABLE upstream_channels ADD COLUMN allow_safety_identifier INTEGER NOT NULL DEFAULT 0"},
 	}
