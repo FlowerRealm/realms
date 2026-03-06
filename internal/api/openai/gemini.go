@@ -337,14 +337,14 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if h.tryWithSelection(w, req2, p, sel, rewritten, wantStream, optionalString(publicModel), usageID, reqStart, reqBytes, 2, &bestFailure) {
+		if h.tryWithSelection(w, req2, p, sel, rewritten, wantStream, optionalString(publicModel), usageID, reqStart, reqBytes, loopStart, 2, &bestFailure) {
 			return
 		}
 		switches++
 		if h.failoverExhausted(loopStart, switches) {
 			break
 		}
-		if !h.waitBackoff(r.Context(), backoff) {
+		if !h.waitBackoffWithinRetryElapsed(r.Context(), loopStart, backoff) {
 			if h.finalizeIfCanceled(r, usageID, nil, reqStart, wantStream, reqBytes) {
 				return
 			}

@@ -191,6 +191,28 @@ func (h *Handler) nextBackoff(current time.Duration) time.Duration {
 	return next
 }
 
+func (h *Handler) backoffWithinRetryElapsed(start time.Time, d time.Duration) (time.Duration, bool) {
+	if d <= 0 {
+		return 0, true
+	}
+	if h == nil || h.gateway.maxRetryElapsed <= 0 || start.IsZero() {
+		return d, true
+	}
+	remaining := h.gateway.maxRetryElapsed - time.Since(start)
+	if remaining <= 0 || d > remaining {
+		return 0, false
+	}
+	return d, true
+}
+
+func (h *Handler) waitBackoffWithinRetryElapsed(ctx context.Context, start time.Time, d time.Duration) bool {
+	waitFor, ok := h.backoffWithinRetryElapsed(start, d)
+	if !ok {
+		return false
+	}
+	return h.waitBackoff(ctx, waitFor)
+}
+
 func (h *Handler) waitBackoff(ctx context.Context, d time.Duration) bool {
 	if d <= 0 {
 		return true

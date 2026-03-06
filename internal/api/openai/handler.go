@@ -653,7 +653,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), usageID, reqStart, reqBytes, 2, &bestFailure) {
+		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), usageID, reqStart, reqBytes, loopStart, 2, &bestFailure) {
 			return
 		}
 		switches++
@@ -671,7 +671,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		if h.failoverExhausted(loopStart, switches) {
 			break
 		}
-		if !h.waitBackoff(r.Context(), backoff) {
+		if !h.waitBackoffWithinRetryElapsed(r.Context(), loopStart, backoff) {
 			if h.finalizeIfCanceled(r, usageID, lastSel, reqStart, stream, reqBytes) {
 				return
 			}
@@ -731,11 +731,21 @@ func recordProxyFailure(best *proxyFailureInfo, next proxyFailureInfo) {
 		return
 	}
 	if len(next.Body) > 0 {
-		next.Body = append([]byte(nil), next.Body...)
+		next.Body = cloneProxyFailureBody(next.Body)
 	}
 	if !best.Valid || next.score() > best.score() || next.score() == best.score() {
 		*best = next
 	}
+}
+
+func cloneProxyFailureBody(body []byte) []byte {
+	if len(body) == 0 {
+		return nil
+	}
+	if len(body) > failoverErrorBodyMaxBytes {
+		body = body[:failoverErrorBodyMaxBytes]
+	}
+	return append([]byte(nil), body...)
 }
 
 func formatProxyFailureDetail(fi proxyFailureInfo) string {
@@ -763,7 +773,7 @@ func upstreamUnavailableUsageMessage(best proxyFailureInfo) string {
 	return "上游不可用；最后一次失败: " + detail
 }
 
-func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p auth.Principal, sel scheduler.Selection, body []byte, wantStream bool, model *string, usageID int64, reqStart time.Time, reqBytes int64, retries int, bestFailure *proxyFailureInfo) bool {
+func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p auth.Principal, sel scheduler.Selection, body []byte, wantStream bool, model *string, usageID int64, reqStart time.Time, reqBytes int64, loopStart time.Time, retries int, bestFailure *proxyFailureInfo) bool {
 	retries = h.sameSelectionRetries(retries)
 	backoff := h.initialBackoff()
 	for i := 0; i < retries; i++ {
@@ -787,7 +797,7 @@ func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p aut
 			return true
 		case proxyAttemptRetrySameSelection:
 			if i+1 < retries {
-				if !h.waitBackoff(r.Context(), backoff) {
+				if !h.waitBackoffWithinRetryElapsed(r.Context(), loopStart, backoff) {
 					if h.finalizeIfCanceled(r, usageID, &sel, reqStart, wantStream, reqBytes) {
 						return true
 					}
@@ -1597,6 +1607,7 @@ func trimSummary(s string) string {
 
 const (
 	upstreamErrorBodyMaxBytes        = 64 << 10
+	failoverErrorBodyMaxBytes        = 8 << 10
 	upstreamNonStreamExtractMaxBytes = 2 << 20
 )
 

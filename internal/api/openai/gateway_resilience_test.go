@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"bytes"
 	"net/http"
 	"testing"
 	"time"
@@ -58,6 +59,53 @@ func TestFailoverExhausted_ConfiguredZeroDisablesFailover(t *testing.T) {
 	}
 	if !h.failoverExhausted(time.Now(), 1) {
 		t.Fatal("first switch should exhaust zero-switch policy")
+	}
+}
+
+func TestBackoffWithinRetryElapsed_AllowsDelayInsideBudget(t *testing.T) {
+	h := &Handler{}
+	h.SetGatewayPolicy(GatewayPolicy{MaxRetryElapsed: 100 * time.Millisecond})
+
+	got, ok := h.backoffWithinRetryElapsed(time.Now().Add(-40*time.Millisecond), 20*time.Millisecond)
+	if !ok {
+		t.Fatal("expected backoff within budget to be allowed")
+	}
+	if got != 20*time.Millisecond {
+		t.Fatalf("backoff = %s, want %s", got, 20*time.Millisecond)
+	}
+}
+
+func TestBackoffWithinRetryElapsed_RejectsDelayOutsideBudget(t *testing.T) {
+	h := &Handler{}
+	h.SetGatewayPolicy(GatewayPolicy{MaxRetryElapsed: 100 * time.Millisecond})
+
+	got, ok := h.backoffWithinRetryElapsed(time.Now().Add(-95*time.Millisecond), 20*time.Millisecond)
+	if ok {
+		t.Fatal("expected backoff beyond budget to be rejected")
+	}
+	if got != 0 {
+		t.Fatalf("backoff = %s, want 0", got)
+	}
+}
+
+func TestRecordProxyFailure_TruncatesStoredBody(t *testing.T) {
+	huge := bytes.Repeat([]byte("a"), failoverErrorBodyMaxBytes+256)
+	var best proxyFailureInfo
+
+	recordProxyFailure(&best, proxyFailureInfo{
+		Valid:      true,
+		Class:      "upstream_status",
+		StatusCode: http.StatusTooManyRequests,
+		Message:    "upstream throttled",
+		Body:       huge,
+	})
+
+	if len(best.Body) != failoverErrorBodyMaxBytes {
+		t.Fatalf("stored body len = %d, want %d", len(best.Body), failoverErrorBodyMaxBytes)
+	}
+	huge[0] = 'b'
+	if best.Body[0] != 'a' {
+		t.Fatal("expected stored body to be copied")
 	}
 }
 

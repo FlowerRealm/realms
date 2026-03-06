@@ -373,14 +373,14 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 			h.finalizeUsageEvent(r, usageID, &sel, http.StatusInternalServerError, "rewrite_body", "请求体处理失败", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
 			return
 		}
-		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), usageID, reqStart, reqBytes, 1, &bestFailure) {
+		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), usageID, reqStart, reqBytes, loopStart, 1, &bestFailure) {
 			return
 		}
 		switches++
 		if h.failoverExhausted(loopStart, switches) {
 			break
 		}
-		if !h.waitBackoff(r.Context(), backoff) {
+		if !h.waitBackoffWithinRetryElapsed(r.Context(), loopStart, backoff) {
 			if h.finalizeIfCanceled(r, usageID, nil, reqStart, stream, reqBytes) {
 				return
 			}
