@@ -12,9 +12,11 @@ import (
 type fakeSource struct {
 	rules []store.ErrorPassthroughRule
 	err   error
+	calls int
 }
 
 func (f *fakeSource) ListErrorPassthroughRules(_ context.Context) ([]store.ErrorPassthroughRule, error) {
+	f.calls++
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -125,3 +127,22 @@ func TestMatch_UsesCachedRulesWhenReloadFails(t *testing.T) {
 func ptr(s string) *string { return &s }
 
 func intPtr(v int) *int { return &v }
+
+func TestMatch_CachesEmptyRuleSet(t *testing.T) {
+	src := &fakeSource{}
+	svc := NewService(src, time.Minute)
+
+	if _, _, _, matched := svc.Match("openai", 429, nil); matched {
+		t.Fatalf("expected no match with empty rules")
+	}
+	if src.calls != 1 {
+		t.Fatalf("expected first load to hit source once, got=%d", src.calls)
+	}
+
+	if _, _, _, matched := svc.Match("openai", 429, nil); matched {
+		t.Fatalf("expected no match with empty rules")
+	}
+	if src.calls != 1 {
+		t.Fatalf("expected empty rule set to be cached, got source calls=%d", src.calls)
+	}
+}

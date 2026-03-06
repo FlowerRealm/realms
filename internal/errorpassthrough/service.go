@@ -115,7 +115,7 @@ func (s *Service) loadRules(ctx context.Context) []compiledRule {
 	now := s.now()
 
 	s.mu.RLock()
-	if len(s.rules) > 0 && now.Before(s.expiresAt) {
+	if !s.expiresAt.IsZero() && now.Before(s.expiresAt) {
 		out := s.rules
 		s.mu.RUnlock()
 		return out
@@ -126,7 +126,7 @@ func (s *Service) loadRules(ctx context.Context) []compiledRule {
 	defer s.mu.Unlock()
 
 	now = s.now()
-	if len(s.rules) > 0 && now.Before(s.expiresAt) {
+	if !s.expiresAt.IsZero() && now.Before(s.expiresAt) {
 		return s.rules
 	}
 

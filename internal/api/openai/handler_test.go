@@ -3629,3 +3629,56 @@ func TestResponses_FailoverExhaustedAppliesPassthroughMatcher(t *testing.T) {
 		t.Fatalf("expected passthrough message, got=%s", rr.Body.String())
 	}
 }
+
+func TestGeminiProxy_UserConcurrencyQueueFullReturnsGeminiErrorShape(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"m1": {ID: 1, PublicID: "m1", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"m1": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "m1", Status: 1},
+			},
+		},
+	}
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, &okDoer{}, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+	h.SetGatewayPolicy(GatewayPolicy{UserMaxConcurrency: 1})
+	h.SetConcurrencyManager(&fakeConcurrencyManager{userErr: concurrency.ErrQueueFull})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1beta/models/m1:generateContent", bytes.NewReader([]byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.GeminiProxy), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), `"type":"error"`) {
+		t.Fatalf("expected non-OpenAI Gemini error shape, got=%s", rr.Body.String())
+	}
+	if gjson.Get(rr.Body.String(), "error.code").Int() != int64(http.StatusTooManyRequests) {
+		t.Fatalf("expected error.code=429, got body=%s", rr.Body.String())
+	}
+	if gjson.Get(rr.Body.String(), "error.status").String() != "RESOURCE_EXHAUSTED" {
+		t.Fatalf("expected error.status=RESOURCE_EXHAUSTED, got body=%s", rr.Body.String())
+	}
+}

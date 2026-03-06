@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -237,7 +238,7 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 		fail := classifyConcurrencyAcquireFailure(userSlotErr)
 		resp := h.buildFailoverExhaustedResponse("gemini", fail)
 		cw := &countingResponseWriter{ResponseWriter: w}
-		writeOpenAIErrorWithRetryAfter(cw, resp.Status, resp.ErrType, resp.Message, resp.RetryAfterSeconds)
+		writeGeminiErrorWithRetryAfter(cw, resp.Status, resp.Message, resp.RetryAfterSeconds)
 		if !resp.SkipMonitoring {
 			h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), resp.Status, resp.ErrorClass, resp.Message, time.Since(reqStart), wantStream)
 		}
@@ -281,7 +282,7 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 			h.auditUpstreamError(r.Context(), r.URL.Path, p, nil, optionalString(publicModel), resp.Status, resp.ErrorClass, 0)
 		}
 		cw := &countingResponseWriter{ResponseWriter: w}
-		writeOpenAIErrorWithRetryAfter(cw, resp.Status, resp.ErrType, resp.Message, resp.RetryAfterSeconds)
+		writeGeminiErrorWithRetryAfter(cw, resp.Status, resp.Message, resp.RetryAfterSeconds)
 		if !resp.SkipMonitoring {
 			h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), resp.Status, resp.ErrorClass, resp.Message, time.Since(reqStart), wantStream)
 		}
@@ -362,7 +363,7 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 		h.auditUpstreamError(r.Context(), r.URL.Path, p, nil, optionalString(publicModel), resp.Status, resp.ErrorClass, 0)
 	}
 	cw := &countingResponseWriter{ResponseWriter: w}
-	writeOpenAIErrorWithRetryAfter(cw, resp.Status, resp.ErrType, resp.Message, resp.RetryAfterSeconds)
+	writeGeminiErrorWithRetryAfter(cw, resp.Status, resp.Message, resp.RetryAfterSeconds)
 	if !resp.SkipMonitoring {
 		h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), resp.Status, resp.ErrorClass, resp.Message, time.Since(reqStart), wantStream)
 	}
@@ -391,4 +392,53 @@ func extractGeminiMaxOutputTokens(body []byte) *int64 {
 		}
 	}
 	return nil
+}
+
+func writeGeminiErrorWithRetryAfter(w http.ResponseWriter, status int, message string, retryAfterSeconds int) {
+	if w == nil {
+		return
+	}
+	if status <= 0 {
+		status = http.StatusInternalServerError
+	}
+	if retryAfterSeconds > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error": map[string]any{
+			"code":    status,
+			"message": strings.TrimSpace(message),
+			"status":  geminiErrorStatus(status),
+		},
+	})
+}
+
+func geminiErrorStatus(status int) string {
+	switch status {
+	case http.StatusBadRequest:
+		return "INVALID_ARGUMENT"
+	case http.StatusUnauthorized:
+		return "UNAUTHENTICATED"
+	case http.StatusForbidden:
+		return "PERMISSION_DENIED"
+	case http.StatusNotFound:
+		return "NOT_FOUND"
+	case http.StatusConflict:
+		return "ABORTED"
+	case http.StatusTooManyRequests:
+		return "RESOURCE_EXHAUSTED"
+	case http.StatusRequestTimeout, http.StatusGatewayTimeout:
+		return "DEADLINE_EXCEEDED"
+	case http.StatusNotImplemented:
+		return "UNIMPLEMENTED"
+	case http.StatusServiceUnavailable, http.StatusBadGateway:
+		return "UNAVAILABLE"
+	default:
+		if status >= 500 {
+			return "INTERNAL"
+		}
+		return "UNKNOWN"
+	}
 }
