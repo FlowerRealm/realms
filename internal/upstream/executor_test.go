@@ -278,6 +278,61 @@ func TestExecutor_CodexOAuth_LeavesPathAndBody(t *testing.T) {
 	}
 }
 
+func TestExecutor_CodexOAuth_CanonicalizesInstructionAliasAndPreservesUserInstructions(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cacheDir := filepath.Join(home, ".opencode", "cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatalf("mkdir cache dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheDir, "opencode-codex-header.txt"), []byte("cached-instructions"), 0o644); err != nil {
+		t.Fatalf("write cache content: %v", err)
+	}
+	metaBytes, _ := json.Marshal(opencodeCacheMetadata{LastChecked: time.Now().UnixMilli()})
+	if err := os.WriteFile(filepath.Join(cacheDir, "opencode-codex-header-meta.json"), metaBytes, 0o644); err != nil {
+		t.Fatalf("write cache meta: %v", err)
+	}
+
+	exec := &Executor{
+		st: &fakeUpstreamStore{
+			codexSecret: store.CodexOAuthSecret{
+				AccountID:    "acc",
+				AccessToken:  "at",
+				RefreshToken: "rt",
+			},
+		},
+		upstreamTimeout: 2 * time.Minute,
+	}
+
+	body := []byte(`{"model":"gpt-5.2","prompt_cache_key":"pc1","input":"hi","instruction":"user-instruction"}`)
+	r := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader(body))
+
+	req, err := exec.buildRequest(context.Background(), scheduler.Selection{
+		BaseURL:        "https://127.0.0.1/backend-api/codex",
+		CredentialType: scheduler.CredentialTypeCodex,
+		CredentialID:   123,
+	}, r, body)
+	if err != nil {
+		t.Fatalf("buildRequest returned error: %v", err)
+	}
+
+	gotBody, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("read request body: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(gotBody, &payload); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if _, ok := payload["instruction"]; ok {
+		t.Fatalf("expected instruction alias to be removed, got=%#v", payload["instruction"])
+	}
+	if got := strings.TrimSpace(stringFromAny(payload["instructions"])); got != "cached-instructions\n\nuser-instruction" {
+		t.Fatalf("instructions = %q, want %q", got, "cached-instructions\n\nuser-instruction")
+	}
+}
+
 func TestCopyCodexOAuthWhitelistedHeaders(t *testing.T) {
 	src := make(http.Header)
 	src.Set("Accept-Language", "zh-CN")
