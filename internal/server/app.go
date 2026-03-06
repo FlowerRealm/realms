@@ -61,6 +61,31 @@ type App struct {
 	engine        *gin.Engine
 }
 
+func newConcurrencyManager(cfg config.Config) (*concurrency.Manager, error) {
+	addr := strings.TrimSpace(cfg.Redis.Addr)
+	if addr == "" {
+		return nil, nil
+	}
+	mgr := concurrency.NewManager(concurrency.Options{
+		Addr:           addr,
+		Password:       cfg.Redis.Password,
+		DB:             cfg.Redis.DB,
+		KeyPrefix:      cfg.Redis.KeyPrefix,
+		WaitTTL:        time.Duration(cfg.Gateway.WaitTimeoutMS+cfg.Gateway.RetryMaxDelayMS)*time.Millisecond + time.Second,
+		WaitTimeout:    time.Duration(cfg.Gateway.WaitTimeoutMS) * time.Millisecond,
+		WaitQueueExtra: cfg.Gateway.WaitQueueExtraSlots,
+		InitialBackoff: time.Duration(cfg.Gateway.RetryBaseDelayMS) * time.Millisecond,
+		MaxBackoff:     time.Duration(cfg.Gateway.RetryMaxDelayMS) * time.Millisecond,
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := mgr.PingContext(ctx); err != nil {
+		_ = mgr.Close()
+		return nil, fmt.Errorf("ping redis: %w", err)
+	}
+	return mgr, nil
+}
+
 func NewApp(opts AppOptions) (*App, error) {
 	personalMode := opts.Config.IsPersonalMode()
 
@@ -113,21 +138,12 @@ func NewApp(opts AppOptions) (*App, error) {
 		CredentialMaxConcurrency: opts.Config.Gateway.CredentialMaxConcurrency,
 	})
 
-	var concMgr *concurrency.Manager
-	if strings.TrimSpace(opts.Config.Redis.Addr) != "" {
-		concMgr = concurrency.NewManager(concurrency.Options{
-			Addr:           opts.Config.Redis.Addr,
-			Password:       opts.Config.Redis.Password,
-			DB:             opts.Config.Redis.DB,
-			KeyPrefix:      opts.Config.Redis.KeyPrefix,
-			WaitTimeout:    time.Duration(opts.Config.Gateway.WaitTimeoutMS) * time.Millisecond,
-			WaitQueueExtra: opts.Config.Gateway.WaitQueueExtraSlots,
-			InitialBackoff: time.Duration(opts.Config.Gateway.RetryBaseDelayMS) * time.Millisecond,
-			MaxBackoff:     time.Duration(opts.Config.Gateway.RetryMaxDelayMS) * time.Millisecond,
-		})
-		if concMgr.Enabled() {
-			openaiHandler.SetConcurrencyManager(concMgr)
-		}
+	concMgr, err := newConcurrencyManager(opts.Config)
+	if err != nil {
+		return nil, err
+	}
+	if concMgr != nil {
+		openaiHandler.SetConcurrencyManager(concMgr)
 	}
 	if opts.Config.Gateway.EnableErrorPassthrough {
 		openaiHandler.SetErrorPassthroughMatcher(errorpassthrough.NewService(st, 10*time.Second))

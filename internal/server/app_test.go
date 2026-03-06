@@ -3,12 +3,14 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
@@ -739,4 +741,53 @@ func TestCodexOAuthRedirectURI(t *testing.T) {
 			t.Fatalf("codexOAuthRedirectURI = %q, want %q", got, "http://localhost:8080/auth/callback")
 		}
 	})
+}
+
+func TestNewConcurrencyManager_PingFailureReturnsError(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	mgr, err := newConcurrencyManager(config.Config{
+		Redis: config.RedisConfig{Addr: addr},
+		Gateway: config.GatewayConfig{
+			WaitTimeoutMS:       30000,
+			RetryBaseDelayMS:    300,
+			RetryMaxDelayMS:     3000,
+			WaitQueueExtraSlots: 20,
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected ping redis error")
+	}
+	if mgr != nil {
+		t.Fatalf("expected nil manager on ping failure")
+	}
+	if !strings.Contains(err.Error(), "ping redis") {
+		t.Fatalf("expected wrapped ping redis error, got %v", err)
+	}
+}
+
+func TestNewConcurrencyManager_PingSuccessReturnsManager(t *testing.T) {
+	mr := miniredis.RunT(t)
+
+	mgr, err := newConcurrencyManager(config.Config{
+		Redis: config.RedisConfig{Addr: mr.Addr(), KeyPrefix: "server-test"},
+		Gateway: config.GatewayConfig{
+			WaitTimeoutMS:       1500,
+			RetryBaseDelayMS:    120,
+			RetryMaxDelayMS:     980,
+			WaitQueueExtraSlots: 13,
+		},
+	})
+	if err != nil {
+		t.Fatalf("newConcurrencyManager: %v", err)
+	}
+	if mgr == nil || !mgr.Enabled() {
+		t.Fatalf("expected enabled manager")
+	}
+	defer func() { _ = mgr.Close() }()
 }

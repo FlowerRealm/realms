@@ -34,15 +34,25 @@ type Options struct {
 	WaitQueueExtra int
 }
 
+func deriveWaitTTL(waitTimeout, maxBackoff time.Duration) time.Duration {
+	if waitTimeout <= 0 {
+		waitTimeout = 30 * time.Second
+	}
+	if maxBackoff <= 0 {
+		maxBackoff = 2 * time.Second
+	}
+	return waitTimeout + maxBackoff + time.Second
+}
+
 func DefaultOptions() Options {
 	return Options{
 		KeyPrefix:      "realms",
 		SlotTTL:        30 * time.Minute,
-		WaitTTL:        2 * time.Minute,
 		WaitTimeout:    30 * time.Second,
 		InitialBackoff: 100 * time.Millisecond,
 		MaxBackoff:     2 * time.Second,
 		WaitQueueExtra: 20,
+		WaitTTL:        deriveWaitTTL(30*time.Second, 2*time.Second),
 	}
 }
 
@@ -55,17 +65,11 @@ type Manager struct {
 
 func NewManager(opts Options) *Manager {
 	opts.Addr = strings.TrimSpace(opts.Addr)
-	if opts.Addr == "" {
-		return &Manager{opts: opts}
-	}
 	if strings.TrimSpace(opts.KeyPrefix) == "" {
 		opts.KeyPrefix = "realms"
 	}
 	if opts.SlotTTL <= 0 {
 		opts.SlotTTL = 30 * time.Minute
-	}
-	if opts.WaitTTL <= 0 {
-		opts.WaitTTL = 2 * time.Minute
 	}
 	if opts.WaitTimeout <= 0 {
 		opts.WaitTimeout = 30 * time.Second
@@ -79,8 +83,14 @@ func NewManager(opts Options) *Manager {
 	if opts.MaxBackoff < opts.InitialBackoff {
 		opts.MaxBackoff = opts.InitialBackoff
 	}
+	if opts.WaitTTL <= 0 {
+		opts.WaitTTL = deriveWaitTTL(opts.WaitTimeout, opts.MaxBackoff)
+	}
 	if opts.WaitQueueExtra < 0 {
 		opts.WaitQueueExtra = 0
+	}
+	if opts.Addr == "" {
+		return &Manager{opts: opts}
 	}
 
 	client := redis.NewClient(&redis.Options{
@@ -96,6 +106,13 @@ func NewManager(opts Options) *Manager {
 
 func (m *Manager) Enabled() bool {
 	return m != nil && m.client != nil
+}
+
+func (m *Manager) PingContext(ctx context.Context) error {
+	if m == nil || m.client == nil {
+		return nil
+	}
+	return m.client.Ping(ctx).Err()
 }
 
 func (m *Manager) Close() error {
@@ -323,9 +340,7 @@ if current >= max then
   return 0
 end
 current = redis.call("INCR", key)
-if current == 1 then
-  redis.call("PEXPIRE", key, ttl)
-end
+redis.call("PEXPIRE", key, ttl)
 return 1
 `)
 
