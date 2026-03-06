@@ -41,19 +41,19 @@ func deletePayloadKeys(payload map[string]any, keys ...string) {
 	}
 }
 
-func hasChatMessages(payload map[string]any) bool {
+func hasChatMessages(payload map[string]any) (bool, error) {
 	if payload == nil {
-		return false
+		return false, nil
 	}
 	raw, ok := payload["messages"]
 	if !ok || raw == nil {
-		return false
+		return false, nil
 	}
 	items, ok := raw.([]any)
 	if !ok {
-		return true
+		return false, errInvalidJSON
 	}
-	return len(items) > 0
+	return len(items) > 0, nil
 }
 
 func hasChatPromptBoundary(payload map[string]any) bool {
@@ -78,7 +78,7 @@ func normalizeWebSearchOptions(payload map[string]any) error {
 	}
 	options, ok := raw.(map[string]any)
 	if !ok {
-		return nil
+		return errInvalidJSON
 	}
 	size := strings.TrimSpace(stringFromAny(options["search_context_size"]))
 	switch size {
@@ -89,6 +89,30 @@ func normalizeWebSearchOptions(payload map[string]any) error {
 		return errors.New("search_context_size 非法")
 	}
 	payload["web_search_options"] = options
+	return nil
+}
+
+func normalizeStreamOptions(payload map[string]any, stream bool) error {
+	if payload == nil {
+		return nil
+	}
+	raw, exists := payload["stream_options"]
+	if !exists || raw == nil {
+		if stream {
+			payload["stream_options"] = map[string]any{"include_usage": true}
+		}
+		return nil
+	}
+	if !stream {
+		delete(payload, "stream_options")
+		return nil
+	}
+	options, ok := raw.(map[string]any)
+	if !ok {
+		return errInvalidJSON
+	}
+	options["include_usage"] = true
+	payload["stream_options"] = options
 	return nil
 }
 
@@ -163,7 +187,11 @@ func sanitizeChatCompletionsPayload(body []byte, defaultMaxTokens int) (map[stri
 	if strings.TrimSpace(stringFromAny(out["model"])) == "" {
 		return nil, errors.New("model 不能为空")
 	}
-	if !hasChatMessages(out) && !hasChatPromptBoundary(out) {
+	hasMessages, err := hasChatMessages(out)
+	if err != nil {
+		return nil, err
+	}
+	if !hasMessages && !hasChatPromptBoundary(out) {
 		return nil, errors.New("messages 不能为空")
 	}
 	if err := normalizeWebSearchOptions(out); err != nil {
@@ -184,15 +212,8 @@ func sanitizeChatCompletionsPayload(body []byte, defaultMaxTokens int) (map[stri
 		out["max_tokens"] = int64(defaultMaxTokens)
 	}
 
-	if !boolFromAny(out["stream"]) {
-		delete(out, "stream_options")
-	} else {
-		options, _ := out["stream_options"].(map[string]any)
-		if options == nil {
-			options = make(map[string]any, 1)
-		}
-		options["include_usage"] = true
-		out["stream_options"] = options
+	if err := normalizeStreamOptions(out, boolFromAny(out["stream"])); err != nil {
+		return nil, err
 	}
 
 	return out, nil

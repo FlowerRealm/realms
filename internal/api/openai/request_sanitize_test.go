@@ -1,6 +1,9 @@
 package openai
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestSanitizeMessagesPayload_PreservesUnknownAndAliasesMaxTokensToSample(t *testing.T) {
 	payload, err := sanitizeMessagesPayload([]byte(`{"model":"m1","messages":[{"role":"user","content":"hi"}],"max_tokens_to_sample":12,"unknown":{"keep":true},"mcp_servers":[{"name":"svc"}]}`), 0, true)
@@ -65,5 +68,26 @@ func TestSanitizeChatCompletionsPayload_RejectsInvalidSearchContextSize(t *testi
 	_, err := sanitizeChatCompletionsPayload([]byte(`{"model":"m1","messages":[{"role":"user","content":"hi"}],"web_search_options":{"search_context_size":"huge"}}`), 0)
 	if err == nil || err.Error() != "search_context_size 非法" {
 		t.Fatalf("expected search_context_size error, got=%v", err)
+	}
+}
+
+func TestSanitizeChatCompletionsPayload_RejectsNonArrayMessages(t *testing.T) {
+	_, err := sanitizeChatCompletionsPayload([]byte(`{"model":"m1","messages":"not-an-array"}`), 0)
+	if !errors.Is(err, errInvalidJSON) {
+		t.Fatalf("expected errInvalidJSON, got=%v", err)
+	}
+}
+
+func TestSanitizeChatCompletionsPayload_RejectsNonObjectWebSearchOptions(t *testing.T) {
+	_, err := sanitizeChatCompletionsPayload([]byte(`{"model":"m1","messages":[{"role":"user","content":"hi"}],"web_search_options":"bad"}`), 0)
+	if !errors.Is(err, errInvalidJSON) {
+		t.Fatalf("expected errInvalidJSON, got=%v", err)
+	}
+}
+
+func TestSanitizeChatCompletionsPayload_RejectsNonObjectStreamOptions(t *testing.T) {
+	_, err := sanitizeChatCompletionsPayload([]byte(`{"model":"m1","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":"bad"}`), 0)
+	if !errors.Is(err, errInvalidJSON) {
+		t.Fatalf("expected errInvalidJSON, got=%v", err)
 	}
 }
