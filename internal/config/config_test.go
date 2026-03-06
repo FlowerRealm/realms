@@ -167,3 +167,27 @@ func TestLoad_GatewayAndRedisEnvOverrides(t *testing.T) {
 		t.Fatalf("unexpected gateway config: %+v", cfg.Gateway)
 	}
 }
+
+func TestLoad_GatewayZeroEnvOverridesPreserved(t *testing.T) {
+	t.Setenv("REALMS_DB_DRIVER", "")
+	t.Setenv("REALMS_DB_DSN", "")
+	t.Setenv("REALMS_SQLITE_PATH", "")
+
+	t.Setenv("REALMS_GATEWAY_MAX_RETRY_ATTEMPTS", "0")
+	t.Setenv("REALMS_GATEWAY_RETRY_BASE_DELAY_MS", "0")
+	t.Setenv("REALMS_GATEWAY_RETRY_MAX_DELAY_MS", "0")
+	t.Setenv("REALMS_GATEWAY_MAX_RETRY_ELAPSED_MS", "0")
+	t.Setenv("REALMS_GATEWAY_MAX_FAILOVER_SWITCHES", "0")
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	if cfg.Gateway.MaxRetryAttempts != 0 ||
+		cfg.Gateway.RetryBaseDelayMS != 0 ||
+		cfg.Gateway.RetryMaxDelayMS != 0 ||
+		cfg.Gateway.MaxRetryElapsedMS != 0 ||
+		cfg.Gateway.MaxFailoverSwitches != 0 {
+		t.Fatalf("expected explicit gateway zeros to be preserved, got %+v", cfg.Gateway)
+	}
+}

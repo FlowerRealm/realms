@@ -45,9 +45,10 @@ type Handler struct {
 	features FeatureResolver
 	selfMode bool
 
-	gateway          gatewayOptions
-	concurrency      concurrencyManager
-	errorPassthrough errorPassthroughMatcher
+	gateway           gatewayOptions
+	gatewayConfigured bool
+	concurrency       concurrencyManager
+	errorPassthrough  errorPassthroughMatcher
 
 	quota quota.Provider
 	audit AuditSink

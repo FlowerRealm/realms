@@ -71,6 +71,7 @@ func (h *Handler) SetGatewayPolicy(policy GatewayPolicy) {
 	if h == nil {
 		return
 	}
+	h.gatewayConfigured = true
 	opts := gatewayOptions{
 		maxRetryAttempts:         policy.MaxRetryAttempts,
 		retryBaseDelay:           policy.RetryBaseDelay,
@@ -128,17 +129,20 @@ func (h *Handler) sameSelectionRetries(defaultRetries int) int {
 	if defaultRetries <= 0 {
 		defaultRetries = 1
 	}
-	if h == nil || h.gateway.maxRetryAttempts <= 0 {
+	if h == nil || !h.gatewayConfigured {
 		return defaultRetries
 	}
-	return h.gateway.maxRetryAttempts
+	if h.gateway.maxRetryAttempts <= 0 {
+		return 1
+	}
+	return h.gateway.maxRetryAttempts + 1
 }
 
 func (h *Handler) failoverExhausted(start time.Time, switches int) bool {
 	if h == nil {
 		return false
 	}
-	if h.gateway.maxFailoverSwitches > 0 && switches >= h.gateway.maxFailoverSwitches {
+	if h.gatewayConfigured && switches > h.gateway.maxFailoverSwitches {
 		return true
 	}
 	if h.gateway.maxRetryElapsed > 0 && !start.IsZero() && time.Since(start) >= h.gateway.maxRetryElapsed {

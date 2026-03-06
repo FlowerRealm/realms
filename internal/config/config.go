@@ -254,26 +254,26 @@ func normalizeAndValidate(cfg Config) (Config, error) {
 		return Config{}, errors.New("redis.db 不能为负数")
 	}
 
-	if cfg.Gateway.MaxRetryAttempts <= 0 {
-		cfg.Gateway.MaxRetryAttempts = 5
+	if cfg.Gateway.MaxRetryAttempts < 0 {
+		cfg.Gateway.MaxRetryAttempts = 0
 	}
 	if cfg.Gateway.MaxRetryAttempts > 20 {
 		cfg.Gateway.MaxRetryAttempts = 20
 	}
-	if cfg.Gateway.RetryBaseDelayMS <= 0 {
-		cfg.Gateway.RetryBaseDelayMS = 300
+	if cfg.Gateway.RetryBaseDelayMS < 0 {
+		cfg.Gateway.RetryBaseDelayMS = 0
 	}
-	if cfg.Gateway.RetryMaxDelayMS <= 0 {
-		cfg.Gateway.RetryMaxDelayMS = 3000
+	if cfg.Gateway.RetryMaxDelayMS < 0 {
+		cfg.Gateway.RetryMaxDelayMS = 0
 	}
 	if cfg.Gateway.RetryMaxDelayMS < cfg.Gateway.RetryBaseDelayMS {
 		cfg.Gateway.RetryMaxDelayMS = cfg.Gateway.RetryBaseDelayMS
 	}
-	if cfg.Gateway.MaxRetryElapsedMS <= 0 {
-		cfg.Gateway.MaxRetryElapsedMS = 10000
+	if cfg.Gateway.MaxRetryElapsedMS < 0 {
+		cfg.Gateway.MaxRetryElapsedMS = 0
 	}
-	if cfg.Gateway.MaxFailoverSwitches <= 0 {
-		cfg.Gateway.MaxFailoverSwitches = 8
+	if cfg.Gateway.MaxFailoverSwitches < 0 {
+		cfg.Gateway.MaxFailoverSwitches = 0
 	}
 	if cfg.Gateway.WaitTimeoutMS <= 0 {
 		cfg.Gateway.WaitTimeoutMS = 30000
