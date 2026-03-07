@@ -435,7 +435,7 @@ func TestBusinessMode_AdminAPIKey_AllowsAdminRoutesWithoutSession(t *testing.T) 
 	})
 }
 
-func TestBusinessMode_AdminAPIKey_InvalidKeyDoesNotFallbackToSession(t *testing.T) {
+func TestBusinessMode_AdminAPIKey_InvalidKeyFallsBackToSession(t *testing.T) {
 	cfg := config.Config{
 		Mode: config.ModeBusiness,
 		Security: config.SecurityConfig{
@@ -472,11 +472,28 @@ func TestBusinessMode_AdminAPIKey_InvalidKeyDoesNotFallbackToSession(t *testing.
 		t.Fatalf("expected session cookie")
 	}
 
-	t.Run("invalid key rejects even with valid session", func(t *testing.T) {
+	t.Run("invalid key still allows valid session", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage", nil)
 		req.Header.Set("Authorization", "Bearer wrong_key")
 		req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
 		req.Header.Set("Cookie", sessionCookie)
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("unmarshal json: %v", err)
+		}
+		if ok, _ := payload["success"].(bool); !ok {
+			t.Fatalf("expected success=true, got %v", payload["success"])
+		}
+	})
+
+	t.Run("invalid key without session is rejected", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage", nil)
+		req.Header.Set("Authorization", "Bearer wrong_key")
 		rr := httptest.NewRecorder()
 		app.Handler().ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {

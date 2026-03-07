@@ -115,19 +115,21 @@ func requireRoot(opts Options) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rawKey, hasKey := extractPresentedAPIKey(c)
 		if hasKey {
-			if len(opts.AdminAPIKeyHash) == 0 || subtle.ConstantTimeCompare(rlmcrypto.TokenHash(rawKey), opts.AdminAPIKeyHash) != 1 {
+			if len(opts.AdminAPIKeyHash) > 0 && subtle.ConstantTimeCompare(rlmcrypto.TokenHash(rawKey), opts.AdminAPIKeyHash) == 1 {
+				p := auth.Principal{
+					ActorType: auth.ActorTypeToken,
+					UserID:    systemAdminUserID,
+					Role:      store.UserRoleRoot,
+				}
+				applyPrincipalContext(c, p)
+				c.Next()
+				return
+			}
+			if _, ok := sessionUserID(c); !ok {
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "Key 无效"})
 				c.Abort()
 				return
 			}
-			p := auth.Principal{
-				ActorType: auth.ActorTypeToken,
-				UserID:    systemAdminUserID,
-				Role:      store.UserRoleRoot,
-			}
-			applyPrincipalContext(c, p)
-			c.Next()
-			return
 		}
 		sessionAuth(c)
 	}
