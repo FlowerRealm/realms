@@ -139,11 +139,22 @@ VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		}
 
 		allowServiceTier := 0
-		if ch.AllowServiceTier {
+		allowServiceTierEnabled := ch.AllowServiceTier
+		fastModeEnabled := true
+		if ch.FastMode != nil && !*ch.FastMode {
+			fastModeEnabled = false
+		}
+		if fastModeEnabled {
+			allowServiceTierEnabled = true
+		}
+		if err := store.ValidateRebuildUpstreamChannelRequestPolicy(allowServiceTierEnabled, fastModeEnabled); err != nil {
+			return err
+		}
+		if allowServiceTierEnabled {
 			allowServiceTier = 1
 		}
 		fastMode := 1
-		if ch.FastMode != nil && !*ch.FastMode {
+		if !fastModeEnabled {
 			fastMode = 0
 		}
 		disableStore := 0

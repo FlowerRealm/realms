@@ -492,13 +492,20 @@ ON CONFLICT(name) DO UPDATE SET
 		if ch.Promotion {
 			p = 1
 		}
-		allowServiceTier := 0
-		if ch.AllowServiceTier {
-			allowServiceTier = 1
-		}
 		fastMode := true
 		if in.Version >= 8 && ch.FastMode != nil {
 			fastMode = *ch.FastMode
+		}
+		allowServiceTier := 0
+		allowServiceTierEnabled := ch.AllowServiceTier
+		if fastMode {
+			allowServiceTierEnabled = true
+		}
+		if allowServiceTierEnabled {
+			allowServiceTier = 1
+		}
+		if err := validateUpstreamChannelRequestPolicy(allowServiceTierEnabled, fastMode); err != nil {
+			return 0, err
 		}
 		fastModeInt := 1
 		if !fastMode {

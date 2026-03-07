@@ -140,10 +140,13 @@ func (s *Store) CountUpstreamChannels(ctx context.Context) (int64, error) {
 }
 
 func (s *Store) CreateUpstreamChannel(ctx context.Context, typ, name, groups string, priority int, promotion bool, allowServiceTier bool, disableStore bool, allowSafetyIdentifier bool) (int64, error) {
-	return s.CreateUpstreamChannelWithRequestPolicy(ctx, typ, name, groups, priority, promotion, allowServiceTier, disableStore, allowSafetyIdentifier, true)
+	return s.CreateUpstreamChannelWithRequestPolicy(ctx, typ, name, groups, priority, promotion, true, disableStore, allowSafetyIdentifier, true)
 }
 
 func (s *Store) CreateUpstreamChannelWithRequestPolicy(ctx context.Context, typ, name, groups string, priority int, promotion bool, allowServiceTier bool, disableStore bool, allowSafetyIdentifier bool, fastMode bool) (int64, error) {
+	if err := validateUpstreamChannelRequestPolicy(allowServiceTier, fastMode); err != nil {
+		return 0, err
+	}
 	p := 0
 	if promotion {
 		p = 1
@@ -250,6 +253,9 @@ VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 func (s *Store) UpdateUpstreamChannelBasics(ctx context.Context, channelID int64, name string, status int, priority int, promotion bool, allowServiceTier bool, disableStore bool, allowSafetyIdentifier bool, fastMode bool) error {
 	if channelID == 0 {
 		return errors.New("channelID 不能为空")
+	}
+	if err := validateUpstreamChannelRequestPolicy(allowServiceTier, fastMode); err != nil {
+		return err
 	}
 
 	name = strings.TrimSpace(name)
@@ -468,6 +474,9 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 func (s *Store) UpdateUpstreamChannelRequestPolicy(ctx context.Context, channelID int64, allowServiceTier bool, disableStore bool, allowSafetyIdentifier bool, fastMode bool) error {
 	if channelID == 0 {
 		return errors.New("channelID 不能为空")
+	}
+	if err := validateUpstreamChannelRequestPolicy(allowServiceTier, fastMode); err != nil {
+		return err
 	}
 	allowServiceTierInt := 0
 	if allowServiceTier {

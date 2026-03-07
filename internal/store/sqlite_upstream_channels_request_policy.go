@@ -51,7 +51,7 @@ func ensureSQLiteUpstreamChannelRequestPolicyColumns(db *sql.DB) error {
 		ddl  string
 	}
 	need := []addCol{
-		{name: "allow_service_tier", ddl: "ALTER TABLE upstream_channels ADD COLUMN allow_service_tier INTEGER NOT NULL DEFAULT 0"},
+		{name: "allow_service_tier", ddl: "ALTER TABLE upstream_channels ADD COLUMN allow_service_tier INTEGER NOT NULL DEFAULT 1"},
 		{name: "fast_mode", ddl: "ALTER TABLE upstream_channels ADD COLUMN fast_mode INTEGER NOT NULL DEFAULT 1"},
 		{name: "disable_store", ddl: "ALTER TABLE upstream_channels ADD COLUMN disable_store INTEGER NOT NULL DEFAULT 0"},
 		{name: "allow_safety_identifier", ddl: "ALTER TABLE upstream_channels ADD COLUMN allow_safety_identifier INTEGER NOT NULL DEFAULT 0"},
@@ -64,6 +64,10 @@ func ensureSQLiteUpstreamChannelRequestPolicyColumns(db *sql.DB) error {
 		if _, err := tx.ExecContext(ctx, c.ddl); err != nil {
 			return fmt.Errorf("添加 upstream_channels 列 %s 失败: %w", c.name, err)
 		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `UPDATE upstream_channels SET allow_service_tier=1 WHERE fast_mode=1 AND allow_service_tier=0`); err != nil {
+		return fmt.Errorf("回填 upstream_channels.allow_service_tier 失败: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {

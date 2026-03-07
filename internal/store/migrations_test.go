@@ -50,3 +50,26 @@ func TestMigration0064_UsageSearchIndexes(t *testing.T) {
 		t.Fatalf("unexpected stmt count: %d", len(stmts))
 	}
 }
+
+func TestMigration0069_UpstreamChannelsAllowServiceTierDefault(t *testing.T) {
+	b, err := migrationsFS.ReadFile("migrations/0069_upstream_channels_allow_service_tier_default.sql")
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+
+	text := string(b)
+	for _, needle := range []string{
+		"MODIFY COLUMN `allow_service_tier` TINYINT NOT NULL DEFAULT 1",
+		"UPDATE `upstream_channels`",
+		"WHERE `fast_mode` = 1 AND `allow_service_tier` = 0",
+	} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("migration missing %q", needle)
+		}
+	}
+
+	stmts := splitSQLStatements(text)
+	if len(stmts) != 6 {
+		t.Fatalf("unexpected stmt count: %d", len(stmts))
+	}
+}
