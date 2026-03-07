@@ -19,6 +19,7 @@ const sessionUserUpdatedAtKey = "user_updated_at_unix"
 const (
 	personalModeVirtualUserID  int64 = 1
 	personalModeVirtualTokenID int64 = 1
+	systemAdminUserID          int64 = 0
 )
 
 func extractBearer(v string) string {
@@ -33,6 +34,30 @@ func extractBearer(v string) string {
 		return ""
 	}
 	return strings.TrimSpace(parts[1])
+}
+
+func extractPresentedAPIKey(c *gin.Context) (string, bool) {
+	if c == nil {
+		return "", false
+	}
+	raw := extractBearer(c.GetHeader("Authorization"))
+	if raw != "" {
+		return raw, true
+	}
+	raw = strings.TrimSpace(c.GetHeader("x-api-key"))
+	if raw != "" {
+		return raw, true
+	}
+	return "", false
+}
+
+func applyPrincipalContext(c *gin.Context, p auth.Principal) {
+	if c == nil {
+		return
+	}
+	c.Request = c.Request.WithContext(auth.WithPrincipal(c.Request.Context(), p))
+	c.Set("rlm_user_id", p.UserID)
+	c.Set("rlm_user_role", p.Role)
 }
 
 func requirePersonalModeKey(opts Options) gin.HandlerFunc {
@@ -77,10 +102,7 @@ func requirePersonalModeKey(opts Options) gin.HandlerFunc {
 			TokenID:   &tokenID,
 			Role:      role,
 		}
-		c.Request = c.Request.WithContext(auth.WithPrincipal(c.Request.Context(), p))
-
-		c.Set("rlm_user_id", personalModeVirtualUserID)
-		c.Set("rlm_user_role", role)
+		applyPrincipalContext(c, p)
 		c.Next()
 	}
 }
@@ -89,7 +111,26 @@ func requireRoot(opts Options) gin.HandlerFunc {
 	if opts.PersonalMode {
 		return requirePersonalModeKey(opts)
 	}
-	return requireRootSession(opts)
+	sessionAuth := requireRootSession(opts)
+	return func(c *gin.Context) {
+		rawKey, hasKey := extractPresentedAPIKey(c)
+		if hasKey {
+			if len(opts.AdminAPIKeyHash) == 0 || subtle.ConstantTimeCompare(rlmcrypto.TokenHash(rawKey), opts.AdminAPIKeyHash) != 1 {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "Key 无效"})
+				c.Abort()
+				return
+			}
+			p := auth.Principal{
+				ActorType: auth.ActorTypeToken,
+				UserID:    systemAdminUserID,
+				Role:      store.UserRoleRoot,
+			}
+			applyPrincipalContext(c, p)
+			c.Next()
+			return
+		}
+		sessionAuth(c)
+	}
 }
 
 func requireUserSession(opts Options) gin.HandlerFunc {
@@ -140,10 +181,7 @@ func requireUserSession(opts Options) gin.HandlerFunc {
 			UserID:    userID,
 			Role:      role,
 		}
-		c.Request = c.Request.WithContext(auth.WithPrincipal(c.Request.Context(), p))
-
-		c.Set("rlm_user_id", userID)
-		c.Set("rlm_user_role", role)
+		applyPrincipalContext(c, p)
 		c.Next()
 	}
 }
@@ -198,12 +236,36 @@ func requireRootSession(opts Options) gin.HandlerFunc {
 			UserID:    userID,
 			Role:      role,
 		}
-		c.Request = c.Request.WithContext(auth.WithPrincipal(c.Request.Context(), p))
-
-		c.Set("rlm_user_id", userID)
-		c.Set("rlm_user_role", role)
+		applyPrincipalContext(c, p)
 		c.Next()
 	}
+}
+
+func actorIDFromContext(c *gin.Context) (int64, bool) {
+	if c == nil {
+		return 0, false
+	}
+	v, ok := c.Get("rlm_user_id")
+	if !ok {
+		return 0, false
+	}
+	switch x := v.(type) {
+	case int64:
+		return x, true
+	case int:
+		return int64(x), true
+	default:
+		return 0, false
+	}
+}
+
+func adminActorIDFromContext(c *gin.Context) (int64, bool) {
+	return actorIDFromContext(c)
+}
+
+func isSystemAdminContext(c *gin.Context) bool {
+	actorID, ok := actorIDFromContext(c)
+	return ok && actorID == systemAdminUserID
 }
 
 func staleSession(c *gin.Context, u store.User) bool {
@@ -241,19 +303,6 @@ func clearSession(c *gin.Context) {
 }
 
 func userIDFromContext(c *gin.Context) (int64, bool) {
-	if c == nil {
-		return 0, false
-	}
-	v, ok := c.Get("rlm_user_id")
-	if !ok {
-		return 0, false
-	}
-	switch x := v.(type) {
-	case int64:
-		return x, x > 0
-	case int:
-		return int64(x), x > 0
-	default:
-		return 0, false
-	}
+	userID, ok := actorIDFromContext(c)
+	return userID, ok && userID > 0
 }

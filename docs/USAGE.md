@@ -186,6 +186,51 @@ docker compose down
 docker compose up -d
 ```
 
+## business 模式：管理员 Key + curl
+
+如果你希望管理员不经过浏览器登录，直接用 `curl` 调管理面，可在 `business` 模式配置：
+
+```bash
+export REALMS_MODE=business
+export REALMS_ADMIN_API_KEY="<your-admin-key>"
+```
+
+约定：
+- 管理面：`/api/admin/*` 与 `/api/channel*`
+- 数据面：`/v1/*`
+- `REALMS_ADMIN_API_KEY` **只能**访问管理面，不能访问数据面
+
+最小验证：
+
+```bash
+curl -fsS "$REALMS_BASE_URL/api/admin/usage"   -H "Authorization: Bearer $REALMS_ADMIN_API_KEY"
+```
+
+创建一个 OpenAI 兼容上游：
+
+```bash
+curl -fsS "$REALMS_BASE_URL/api/channel"   -H "Authorization: Bearer $REALMS_ADMIN_API_KEY"   -H 'Content-Type: application/json'   -d '{
+    "type": "openai_compatible",
+    "name": "openai-main",
+    "groups": "",
+    "base_url": "https://api.openai.com/v1"
+  }'
+```
+
+发起 Codex OAuth：
+
+```bash
+curl -fsS "$REALMS_BASE_URL/api/channel/<channel_id>/codex-oauth/start"   -H "Authorization: Bearer $REALMS_ADMIN_API_KEY"   -H 'Content-Type: application/json'   -d '{}'
+```
+
+如果走浏览器授权回跳到 Realms 的 `/auth/callback?...`，服务端会自动完成账号保存；若你需要手工回贴，也可调用：
+
+```bash
+curl -fsS "$REALMS_BASE_URL/api/channel/<channel_id>/codex-oauth/complete"   -H "Authorization: Bearer $REALMS_ADMIN_API_KEY"   -H 'Content-Type: application/json'   -d '{"callback_url":"http://localhost:1455/auth/callback?code=...&state=..."}'
+```
+
+更多字段约定见：[API 手册](api.md)。
+
 ## 日常维护（Docker Compose）
 
 ### 更新/升级到最新版

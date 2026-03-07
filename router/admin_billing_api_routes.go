@@ -512,8 +512,8 @@ func adminApproveSubscriptionOrderHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "order_id 不合法"})
 			return
 		}
-		userID, ok := userIDFromContext(c)
-		if !ok {
+		userID, ok := adminActorIDFromContext(c)
+		if !ok || userID < 0 {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "未登录"})
 			return
 		}
@@ -540,8 +540,8 @@ func adminRejectSubscriptionOrderHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "order_id 不合法"})
 			return
 		}
-		userID, ok := userIDFromContext(c)
-		if !ok {
+		userID, ok := adminActorIDFromContext(c)
+		if !ok || userID < 0 {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "未登录"})
 			return
 		}

@@ -149,31 +149,36 @@ func (f *Flow) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if f.cookieStore == nil {
-		writeCallbackHTML(w, http.StatusUnauthorized, "Codex OAuth 失败", UserMessage(Wrap(ErrCallbackMissingSessionCookie, fmt.Errorf("missing cookie store"))), f.callbackReturnURL(r.Context(), pending.EndpointID, "error"))
-		return
-	}
-	cookieSession, err := f.cookieStore.Get(r, f.cookieName)
-	if err != nil || cookieSession == nil {
-		writeCallbackHTML(w, http.StatusUnauthorized, "Codex OAuth 失败", UserMessage(Wrap(ErrCallbackMissingSessionCookie, fmt.Errorf("missing session cookie"))), f.callbackReturnURL(r.Context(), pending.EndpointID, "error"))
-		return
-	}
-	userID, ok := int64FromSessionValue(cookieSession.Values["id"])
-	if !ok || userID <= 0 {
-		writeCallbackHTML(w, http.StatusUnauthorized, "Codex OAuth 失败", UserMessage(Wrap(ErrCallbackInvalidSession, fmt.Errorf("missing id"))), f.callbackReturnURL(r.Context(), pending.EndpointID, "error"))
-		return
-	}
-	if pending.ActorUserID > 0 && userID != pending.ActorUserID {
-		writeCallbackHTML(w, http.StatusForbidden, "Codex OAuth 失败", UserMessage(Wrap(ErrCallbackActorMismatch, fmt.Errorf("actor mismatch"))), f.callbackReturnURL(r.Context(), pending.EndpointID, "error"))
-		return
-	}
-	user, err := f.st.GetUserByID(r.Context(), userID)
-	if err != nil {
-		writeCallbackHTML(w, http.StatusUnauthorized, "Codex OAuth 失败", UserMessage(Wrap(ErrCallbackUserNotFound, err)), f.callbackReturnURL(r.Context(), pending.EndpointID, "error"))
-		return
-	}
-	if user.Role != store.UserRoleRoot {
-		writeCallbackHTML(w, http.StatusForbidden, "Codex OAuth 失败", UserMessage(Wrap(ErrCallbackForbidden, fmt.Errorf("insufficient role"))), f.callbackReturnURL(r.Context(), pending.EndpointID, "error"))
+	if pending.ActorUserID > 0 {
+		if f.cookieStore == nil {
+			writeCallbackHTML(w, http.StatusUnauthorized, "Codex OAuth 失败", UserMessage(Wrap(ErrCallbackMissingSessionCookie, fmt.Errorf("missing cookie store"))), f.callbackReturnURL(r.Context(), pending.EndpointID, "error"))
+			return
+		}
+		cookieSession, err := f.cookieStore.Get(r, f.cookieName)
+		if err != nil || cookieSession == nil {
+			writeCallbackHTML(w, http.StatusUnauthorized, "Codex OAuth 失败", UserMessage(Wrap(ErrCallbackMissingSessionCookie, fmt.Errorf("missing session cookie"))), f.callbackReturnURL(r.Context(), pending.EndpointID, "error"))
+			return
+		}
+		userID, ok := int64FromSessionValue(cookieSession.Values["id"])
+		if !ok || userID <= 0 {
+			writeCallbackHTML(w, http.StatusUnauthorized, "Codex OAuth 失败", UserMessage(Wrap(ErrCallbackInvalidSession, fmt.Errorf("missing id"))), f.callbackReturnURL(r.Context(), pending.EndpointID, "error"))
+			return
+		}
+		if userID != pending.ActorUserID {
+			writeCallbackHTML(w, http.StatusForbidden, "Codex OAuth 失败", UserMessage(Wrap(ErrCallbackActorMismatch, fmt.Errorf("actor mismatch"))), f.callbackReturnURL(r.Context(), pending.EndpointID, "error"))
+			return
+		}
+		user, err := f.st.GetUserByID(r.Context(), userID)
+		if err != nil {
+			writeCallbackHTML(w, http.StatusUnauthorized, "Codex OAuth 失败", UserMessage(Wrap(ErrCallbackUserNotFound, err)), f.callbackReturnURL(r.Context(), pending.EndpointID, "error"))
+			return
+		}
+		if user.Role != store.UserRoleRoot {
+			writeCallbackHTML(w, http.StatusForbidden, "Codex OAuth 失败", UserMessage(Wrap(ErrCallbackForbidden, fmt.Errorf("insufficient role"))), f.callbackReturnURL(r.Context(), pending.EndpointID, "error"))
+			return
+		}
+	} else if pending.ActorUserID < 0 {
+		writeCallbackHTML(w, http.StatusForbidden, "Codex OAuth 失败", UserMessage(Wrap(ErrCallbackActorMismatch, fmt.Errorf("invalid actor"))), f.callbackReturnURL(r.Context(), pending.EndpointID, "error"))
 		return
 	}
 

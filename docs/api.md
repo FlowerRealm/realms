@@ -12,6 +12,13 @@ Realms 提供 OpenAI 兼容（Responses）与 Anthropic 兼容（Messages）的 
   - `user_api_key` 可在 Web 控制台 `/tokens` 创建与管理（示例：`sk_...`）
 - **上游访问（本服务调用上游）:** 由管理后台配置并注入（OpenAI 兼容 API Key / Anthropic API Key / Codex OAuth 凭据）
 
+### business 模式补充（REALMS_MODE=business，可选）
+
+- **管理员 Key（可选）**：设置环境变量 `REALMS_ADMIN_API_KEY` 后，可直接调用管理面 `/api/admin/*` 与 `/api/channel*`
+  - 认证：`Authorization: Bearer <admin_key>`（或 `x-api-key`）
+  - 限制：该 Key **不具备**数据面权限，不能调用 `/v1/*`
+  - Codex OAuth：管理员可先调用 `POST /api/channel/{id}/codex-oauth/start` 获取 `auth_url`，完成浏览器授权后由服务端 `/auth/callback` 自动保存账号；仍可保留 `POST /api/channel/{id}/codex-oauth/complete` 作为手工回贴 fallback
+
 ### personal 模式补充（REALMS_MODE=personal）
 
 - **管理 Key（必需）**：首次打开 `/login` 设置（对应 `POST /api/personal/bootstrap`），用于解锁管理面（`/api/admin/*`、`/api/channel*` 等）。
@@ -23,6 +30,89 @@ Realms 提供 OpenAI 兼容（Responses）与 Anthropic 兼容（Messages）的 
 ### [GET] /healthz
 
 健康检查（公开），包含 DB 状态与构建信息（版本/构建时间）。
+
+### business 模式：管理员 curl 示例
+
+> 认证：`Authorization: Bearer <REALMS_ADMIN_API_KEY>`（或 `x-api-key`）。
+
+先约定环境变量：
+
+```bash
+export REALMS_BASE_URL="http://127.0.0.1:8080"
+export REALMS_ADMIN_API_KEY="<your-admin-key>"
+```
+
+#### [POST] /api/channel
+
+创建一个 OpenAI 兼容上游：
+
+```bash
+curl -fsS "$REALMS_BASE_URL/api/channel"   -H "Authorization: Bearer $REALMS_ADMIN_API_KEY"   -H 'Content-Type: application/json'   -d '{
+    "type": "openai_compatible",
+    "name": "openai-main",
+    "groups": "",
+    "base_url": "https://api.openai.com/v1",
+    "priority": 0,
+    "promotion": false,
+    "allow_service_tier": false,
+    "disable_store": false,
+    "allow_safety_identifier": false
+  }'
+```
+
+成功后返回 `data.id`，后续可作为 `channel_id` 使用。
+
+#### [POST] /api/channel/{channel_id}/credentials
+
+为一个非 `codex_oauth` 渠道添加 API Key 凭据：
+
+```bash
+curl -fsS "$REALMS_BASE_URL/api/channel/<channel_id>/credentials"   -H "Authorization: Bearer $REALMS_ADMIN_API_KEY"   -H 'Content-Type: application/json'   -d '{
+    "name": "primary",
+    "api_key": "sk-xxxx"
+  }'
+```
+
+#### [POST] /api/channel/{channel_id}/codex-oauth/start
+
+发起 Codex OAuth，返回 `auth_url`：
+
+```bash
+curl -fsS "$REALMS_BASE_URL/api/channel/<channel_id>/codex-oauth/start"   -H "Authorization: Bearer $REALMS_ADMIN_API_KEY"   -H 'Content-Type: application/json'   -d '{}'
+```
+
+典型流程：
+1. 从响应里复制 `data.auth_url`
+2. 在浏览器打开该 URL 完成授权
+3. 上游跳回 Realms 的 `/auth/callback?...` 后，服务端会自动把账号保存到该 `codex_oauth` 渠道
+4. 可再调用 `GET /api/channel/{channel_id}/codex-accounts` 验证账号已入库
+
+> 说明：自动回调依赖 `state` 对应的 pending 记录；普通 session 发起的授权仍要求回调阶段带原登录 session。
+
+#### [POST] /api/channel/{channel_id}/codex-oauth/complete
+
+如果你不走自动回调，也可以手工把完整回调 URL 回贴给服务端：
+
+```bash
+curl -fsS "$REALMS_BASE_URL/api/channel/<channel_id>/codex-oauth/complete"   -H "Authorization: Bearer $REALMS_ADMIN_API_KEY"   -H 'Content-Type: application/json'   -d '{
+    "callback_url": "http://localhost:1455/auth/callback?code=...&state=..."
+  }'
+```
+
+#### [POST] /api/channel/{channel_id}/codex-accounts
+
+手工导入 Codex OAuth 账号（直接提交 `access_token` / `refresh_token` / `id_token`）：
+
+```bash
+curl -fsS "$REALMS_BASE_URL/api/channel/<channel_id>/codex-accounts"   -H "Authorization: Bearer $REALMS_ADMIN_API_KEY"   -H 'Content-Type: application/json'   -d '{
+    "account_id": "acc_xxx",
+    "email": "admin@example.com",
+    "access_token": "at_xxx",
+    "refresh_token": "rt_xxx",
+    "id_token": "eyJ...",
+    "expires_at": "2026-03-07T12:00:00Z"
+  }'
+```
 
 ### personal 模式：Key 管理（需要管理 Key）
 

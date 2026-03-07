@@ -1,14 +1,18 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-contrib/sessions"
@@ -17,10 +21,13 @@ import (
 	"github.com/shopspring/decimal"
 
 	openaiapi "realms/internal/api/openai"
+	"realms/internal/auth"
 	"realms/internal/codexoauth"
 	"realms/internal/config"
+	rlmcrypto "realms/internal/crypto"
 	"realms/internal/quota"
 	"realms/internal/store"
+	"realms/internal/tickets"
 	"realms/internal/upstream"
 	"realms/router"
 )
@@ -44,13 +51,20 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 	st := store.New(db)
 	st.SetDialect(store.DialectSQLite)
 	st.SetAppSettingsDefaults(cfg.AppSettingsDefaults)
+	ticketStorage := tickets.NewStorage(filepath.Join(dir, "tickets"))
 
 	openaiHandler := openaiapi.NewHandler(nil, nil, nil, nil, nil, nil, personalMode, nil, nil, nil, nil, upstream.SSEPumpOptions{}, nil)
 
 	app := &App{
-		cfg:    cfg,
-		store:  st,
-		openai: openaiHandler,
+		cfg:           cfg,
+		store:         st,
+		ticketStorage: ticketStorage,
+		openai:        openaiHandler,
+	}
+
+	var adminAPIKeyHash []byte
+	if raw := strings.TrimSpace(cfg.Security.AdminAPIKey); raw != "" {
+		adminAPIKeyHash = rlmcrypto.TokenHash(raw)
 	}
 
 	gin.SetMode(gin.TestMode)
@@ -69,10 +83,12 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 	router.SetRouter(engine, router.Options{
 		Store:                           st,
 		PersonalMode:                    personalMode,
+		AdminAPIKeyHash:                 adminAPIKeyHash,
 		AllowOpenRegistration:           cfg.Security.AllowOpenRegistration,
 		EmailVerificationEnabledDefault: cfg.EmailVerif.Enable,
 		BillingDefault:                  cfg.Billing,
 		SMTPDefault:                     cfg.SMTP,
+		TicketStorage:                   ticketStorage,
 		OpenAI:                          openaiHandler,
 		FrontendIndexPage:               []byte("<!doctype html><html><body>INDEX</body></html>"),
 
@@ -353,6 +369,240 @@ func TestSelfMode_KeyAuth_DataPlaneUsageEventsRequiresKey(t *testing.T) {
 		}
 		if ok, _ := payload["success"].(bool); ok {
 			t.Fatalf("expected success=false for admin, got %v", payload["success"])
+		}
+	})
+}
+
+func TestBusinessMode_AdminAPIKey_AllowsAdminRoutesWithoutSession(t *testing.T) {
+	cfg := config.Config{
+		Mode: config.ModeBusiness,
+		Security: config.SecurityConfig{
+			AdminAPIKey:                    "adm_test_123",
+			SubscriptionOrderWebhookSecret: "secret",
+		},
+	}
+	app := newTestApp(t, cfg)
+
+	t.Run("admin usage accepts key", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage", nil)
+		req.Header.Set("Authorization", "Bearer adm_test_123")
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("unmarshal json: %v", err)
+		}
+		if ok, _ := payload["success"].(bool); !ok {
+			t.Fatalf("expected success=true, got %v", payload["success"])
+		}
+	})
+
+	t.Run("channel create accepts key", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"type":     store.UpstreamTypeOpenAICompatible,
+			"name":     "curl-admin-channel",
+			"groups":   "",
+			"base_url": "https://api.openai.com/v1",
+		})
+		req := httptest.NewRequest(http.MethodPost, "http://example.com/api/channel", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("x-api-key", "adm_test_123")
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d body=%s", http.StatusOK, rr.Code, rr.Body.String())
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("unmarshal json: %v", err)
+		}
+		if ok, _ := payload["success"].(bool); !ok {
+			t.Fatalf("expected success=true, got %v body=%s", payload["success"], rr.Body.String())
+		}
+	})
+
+	t.Run("data plane rejects admin key", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://example.com/v1/usage/events", nil)
+		req.Header.Set("Authorization", "Bearer adm_test_123")
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, rr.Code)
+		}
+	})
+}
+
+func TestBusinessMode_AdminAPIKey_InvalidKeyDoesNotFallbackToSession(t *testing.T) {
+	cfg := config.Config{
+		Mode: config.ModeBusiness,
+		Security: config.SecurityConfig{
+			AdminAPIKey:                    "adm_test_456",
+			SubscriptionOrderWebhookSecret: "secret",
+		},
+	}
+	app := newTestApp(t, cfg)
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	userID, err := app.store.CreateUser(ctx, "root@example.com", "root", pwHash, store.UserRoleRoot)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	loginReq := httptest.NewRequest(http.MethodPost, "http://example.com/api/user/login", strings.NewReader(`{"login":"root@example.com","password":"password123"}`))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginRR := httptest.NewRecorder()
+	app.Handler().ServeHTTP(loginRR, loginReq)
+	if loginRR.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", loginRR.Code, loginRR.Body.String())
+	}
+	var sessionCookie string
+	for _, c := range loginRR.Result().Cookies() {
+		if c.Name == SessionCookieNameForPersonalMode(false) {
+			sessionCookie = c.String()
+			break
+		}
+	}
+	if sessionCookie == "" {
+		t.Fatalf("expected session cookie")
+	}
+
+	t.Run("invalid key rejects even with valid session", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage", nil)
+		req.Header.Set("Authorization", "Bearer wrong_key")
+		req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+		req.Header.Set("Cookie", sessionCookie)
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("unmarshal json: %v", err)
+		}
+		if ok, _ := payload["success"].(bool); ok {
+			t.Fatalf("expected success=false, got %v", payload["success"])
+		}
+	})
+
+	t.Run("session still works when no key header is present", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage", nil)
+		req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+		req.Header.Set("Cookie", sessionCookie)
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("unmarshal json: %v", err)
+		}
+		if ok, _ := payload["success"].(bool); !ok {
+			t.Fatalf("expected success=true, got %v", payload["success"])
+		}
+	})
+}
+
+func TestBusinessMode_AdminAPIKey_SystemAuditPaths(t *testing.T) {
+	cfg := config.Config{
+		Mode: config.ModeBusiness,
+		Security: config.SecurityConfig{
+			AdminAPIKey:                    "adm_audit_123",
+			SubscriptionOrderWebhookSecret: "secret",
+		},
+	}
+	app := newTestApp(t, cfg)
+	ctx := context.Background()
+
+	userID, err := app.store.CreateUser(ctx, "user@example.com", "user1", []byte("pw"), store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	planID, err := app.store.CreateSubscriptionPlan(ctx, store.SubscriptionPlanCreate{
+		Code:            "plan_sys",
+		Name:            "System Plan",
+		PriceMultiplier: store.DefaultGroupPriceMultiplier,
+		PriceCNY:        decimal.RequireFromString("10"),
+		DurationDays:    30,
+		Status:          1,
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscriptionPlan: %v", err)
+	}
+	order, _, err := app.store.CreateSubscriptionOrderByPlanID(ctx, userID, planID, time.Now())
+	if err != nil {
+		t.Fatalf("CreateSubscriptionOrderByPlanID: %v", err)
+	}
+	ticketID, _, err := app.store.CreateTicketWithMessageAndAttachments(ctx, userID, "Need help", "first message", nil)
+	if err != nil {
+		t.Fatalf("CreateTicketWithMessageAndAttachments: %v", err)
+	}
+
+	t.Run("approve order stores approved_by=0", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "http://example.com/api/admin/orders/"+strconv.FormatInt(order.ID, 10)+"/approve", nil)
+		req.Header.Set("Authorization", "Bearer adm_audit_123")
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d body=%s", http.StatusOK, rr.Code, rr.Body.String())
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("unmarshal json: %v", err)
+		}
+		if ok, _ := payload["success"].(bool); !ok {
+			t.Fatalf("expected success=true, got %v", payload["success"])
+		}
+		gotOrder, err := app.store.GetSubscriptionOrderByID(ctx, order.ID)
+		if err != nil {
+			t.Fatalf("GetSubscriptionOrderByID: %v", err)
+		}
+		if gotOrder.ApprovedBy == nil || *gotOrder.ApprovedBy != 0 {
+			t.Fatalf("ApprovedBy = %#v, want pointer to 0", gotOrder.ApprovedBy)
+		}
+	})
+
+	t.Run("ticket reply uses system actor", func(t *testing.T) {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		if err := writer.WriteField("body", "system reply"); err != nil {
+			t.Fatalf("WriteField: %v", err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatalf("writer.Close: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "http://example.com/api/admin/tickets/"+strconv.FormatInt(ticketID, 10)+"/reply", &body)
+		req.Header.Set("Authorization", "Bearer adm_audit_123")
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d body=%s", http.StatusOK, rr.Code, rr.Body.String())
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("unmarshal json: %v", err)
+		}
+		if ok, _ := payload["success"].(bool); !ok {
+			t.Fatalf("expected success=true, got %v", payload["success"])
+		}
+		msgs, err := app.store.ListTicketMessagesWithActors(ctx, ticketID)
+		if err != nil {
+			t.Fatalf("ListTicketMessagesWithActors: %v", err)
+		}
+		last := msgs[len(msgs)-1]
+		if last.ActorType != store.TicketActorTypeSystem {
+			t.Fatalf("ActorType = %q, want %q", last.ActorType, store.TicketActorTypeSystem)
+		}
+		if last.ActorUserID == nil || *last.ActorUserID != 0 {
+			t.Fatalf("ActorUserID = %#v, want pointer to 0", last.ActorUserID)
 		}
 	})
 }
