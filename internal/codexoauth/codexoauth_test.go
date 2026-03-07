@@ -10,9 +10,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"realms/internal/store"
 )
 
 type roundTripperFunc func(r *http.Request) (*http.Response, error)
@@ -193,6 +196,112 @@ func TestFlowPendingCleanupAndOneTimeState(t *testing.T) {
 		t.Fatalf("expected second getAndDeletePending to succeed without error: %v", err)
 	} else if ok {
 		t.Fatalf("expected second getAndDeletePending to fail")
+	}
+}
+
+func TestFlowHandleCallback_SystemAdminPendingWithoutSession(t *testing.T) {
+	db, err := store.OpenSQLite(filepath.Join(t.TempDir(), "realms.db") + "?_busy_timeout=1000")
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+	ctx := context.Background()
+
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeCodexOAuth, "codex", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel: %v", err)
+	}
+	ep, err := st.SetUpstreamEndpointBaseURL(ctx, channelID, "https://chatgpt.com/backend-api/codex")
+	if err != nil {
+		t.Fatalf("SetUpstreamEndpointBaseURL: %v", err)
+	}
+	if err := st.CreateCodexOAuthPending(ctx, "state_sys", ep.ID, 0, "verifier_sys", time.Now()); err != nil {
+		t.Fatalf("CreateCodexOAuthPending: %v", err)
+	}
+
+	idTokenPayload := `{"email":"system@example.com","account_id":"acc_system"}`
+	idToken := "e30." + base64.RawURLEncoding.EncodeToString([]byte(idTokenPayload)) + ".sig"
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			t.Fatalf("ParseQuery: %v", err)
+		}
+		if values.Get("code") != "code_sys" {
+			t.Fatalf("code = %q, want %q", values.Get("code"), "code_sys")
+		}
+		if values.Get("code_verifier") != "verifier_sys" {
+			t.Fatalf("code_verifier = %q, want %q", values.Get("code_verifier"), "verifier_sys")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"at_sys","refresh_token":"rt_sys","id_token":"` + idToken + `","expires_in":60}`))
+	}))
+	defer tokenSrv.Close()
+
+	f := NewFlow(st, "sid", "", "http://localhost:8080", "http://localhost:8080/auth/callback")
+	f.client = NewClient(Config{TokenURL: tokenSrv.URL, ClientID: "app_test", RedirectURI: "http://localhost:8080/auth/callback"})
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/auth/callback?code=code_sys&state=state_sys", nil)
+	rr := httptest.NewRecorder()
+	f.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+	accs, err := st.ListCodexOAuthAccountsByEndpoint(ctx, ep.ID)
+	if err != nil {
+		t.Fatalf("ListCodexOAuthAccountsByEndpoint: %v", err)
+	}
+	if len(accs) != 1 {
+		t.Fatalf("expected 1 account, got %d", len(accs))
+	}
+	if accs[0].AccountID != "acc_system" {
+		t.Fatalf("AccountID = %q, want %q", accs[0].AccountID, "acc_system")
+	}
+}
+
+func TestFlowHandleCallback_UserPendingStillRequiresSession(t *testing.T) {
+	db, err := store.OpenSQLite(filepath.Join(t.TempDir(), "realms.db") + "?_busy_timeout=1000")
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+	ctx := context.Background()
+
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeCodexOAuth, "codex", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel: %v", err)
+	}
+	ep, err := st.SetUpstreamEndpointBaseURL(ctx, channelID, "https://chatgpt.com/backend-api/codex")
+	if err != nil {
+		t.Fatalf("SetUpstreamEndpointBaseURL: %v", err)
+	}
+	if err := st.CreateCodexOAuthPending(ctx, "state_user", ep.ID, 42, "verifier_user", time.Now()); err != nil {
+		t.Fatalf("CreateCodexOAuthPending: %v", err)
+	}
+
+	f := NewFlow(st, "sid", "", "http://localhost:8080", "http://localhost:8080/auth/callback")
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/auth/callback?code=code_user&state=state_user", nil)
+	rr := httptest.NewRecorder()
+	f.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusUnauthorized, rr.Code, rr.Body.String())
+	}
+	accs, err := st.ListCodexOAuthAccountsByEndpoint(ctx, ep.ID)
+	if err != nil {
+		t.Fatalf("ListCodexOAuthAccountsByEndpoint: %v", err)
+	}
+	if len(accs) != 0 {
+		t.Fatalf("expected no accounts, got %d", len(accs))
 	}
 }
 

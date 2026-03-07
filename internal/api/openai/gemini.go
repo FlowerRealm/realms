@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -247,6 +248,20 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 	routeKeyHash := h.sched.RouteKeyHash(routeKey)
 
 	usageID := int64(0)
+	userRelease, userSlotErr := h.acquireUserSlot(r.Context(), p.UserID)
+	if userSlotErr != nil {
+		fail := classifyConcurrencyAcquireFailure(userSlotErr)
+		resp := h.buildFailoverExhaustedResponse("gemini", fail)
+		cw := &countingResponseWriter{ResponseWriter: w}
+		writeGeminiErrorWithRetryAfter(cw, resp.Status, resp.Message, resp.RetryAfterSeconds)
+		if !resp.SkipMonitoring {
+			h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), resp.Status, resp.ErrorClass, resp.Message, time.Since(reqStart), wantStream)
+		}
+		return
+	}
+	if userRelease != nil {
+		defer userRelease()
+	}
 	if h.quota != nil {
 		res, err := h.quota.Reserve(r.Context(), quota.ReserveInput{
 			RequestID:       middleware.GetRequestID(r.Context()),
@@ -282,18 +297,32 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 			_ = h.quota.Void(bookCtx, usageID)
 			cancel()
 		}
-		h.auditUpstreamError(r.Context(), r.URL.Path, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", 0)
+		resp := h.buildFailoverExhaustedResponse("gemini", proxyFailureInfo{})
+		if !resp.SkipMonitoring {
+			h.auditUpstreamError(r.Context(), r.URL.Path, p, nil, optionalString(publicModel), resp.Status, resp.ErrorClass, 0)
+		}
 		cw := &countingResponseWriter{ResponseWriter: w}
-		http.Error(cw, "上游不可用", http.StatusBadGateway)
-		h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), wantStream)
-		h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), 0, wantStream, reqBytes, cw.bytes)
+		writeGeminiErrorWithRetryAfter(cw, resp.Status, resp.Message, resp.RetryAfterSeconds)
+		if !resp.SkipMonitoring {
+			h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), resp.Status, resp.ErrorClass, resp.Message, time.Since(reqStart), wantStream)
+		}
+		finalClass := resp.ErrorClass
+		if resp.SkipMonitoring {
+			finalClass = ""
+		}
+		h.finalizeUsageEvent(r, usageID, nil, resp.Status, finalClass, resp.UsageMessage, time.Since(reqStart), 0, wantStream, reqBytes, cw.bytes)
 		return
 	}
 
 	router := scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, routeKeyHash, cons)
 	bestFailure := proxyFailureInfo{}
-	const absoluteMaxAttempts = 1000
-	for i := 0; i < absoluteMaxAttempts; i++ {
+	loopStart := time.Now()
+	switches := 0
+	backoff := h.initialBackoff()
+	for {
+		if h.failoverExhausted(loopStart, switches) {
+			break
+		}
 		sel, err := router.Next(r.Context())
 		if err != nil {
 			if h.finalizeIfCanceled(r, usageID, nil, reqStart, wantStream, reqBytes) {
@@ -338,9 +367,20 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if h.tryWithSelection(w, req2, p, sel, rewritten, wantStream, optionalString(publicModel), usageID, reqStart, reqBytes, 2, &bestFailure) {
+		if h.tryWithSelection(w, req2, p, sel, rewritten, wantStream, optionalString(publicModel), usageID, reqStart, reqBytes, loopStart, 2, &bestFailure) {
 			return
 		}
+		switches++
+		if h.failoverExhausted(loopStart, switches) {
+			break
+		}
+		if !h.waitBackoffWithinRetryElapsed(r.Context(), loopStart, backoff) {
+			if h.finalizeIfCanceled(r, usageID, nil, reqStart, wantStream, reqBytes) {
+				return
+			}
+			break
+		}
+		backoff = h.nextBackoff(backoff)
 	}
 
 	if usageID != 0 && h.quota != nil {
@@ -348,11 +388,20 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 		_ = h.quota.Void(bookCtx, usageID)
 		cancel()
 	}
-	h.auditUpstreamError(r.Context(), r.URL.Path, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", 0)
+	resp := h.buildFailoverExhaustedResponse("gemini", bestFailure)
+	if !resp.SkipMonitoring {
+		h.auditUpstreamError(r.Context(), r.URL.Path, p, nil, optionalString(publicModel), resp.Status, resp.ErrorClass, 0)
+	}
 	cw := &countingResponseWriter{ResponseWriter: w}
-	http.Error(cw, "上游不可用", http.StatusBadGateway)
-	h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), http.StatusBadGateway, "upstream_unavailable", "上游不可用", time.Since(reqStart), wantStream)
-	h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_unavailable", upstreamUnavailableUsageMessage(bestFailure), time.Since(reqStart), 0, wantStream, reqBytes, cw.bytes)
+	writeGeminiErrorWithRetryAfter(cw, resp.Status, resp.Message, resp.RetryAfterSeconds)
+	if !resp.SkipMonitoring {
+		h.maybeLogProxyFailure(r.Context(), r, p, nil, optionalString(publicModel), resp.Status, resp.ErrorClass, resp.Message, time.Since(reqStart), wantStream)
+	}
+	finalClass := resp.ErrorClass
+	if resp.SkipMonitoring {
+		finalClass = ""
+	}
+	h.finalizeUsageEvent(r, usageID, nil, resp.Status, finalClass, resp.UsageMessage, time.Since(reqStart), 0, wantStream, reqBytes, cw.bytes)
 }
 
 func extractGeminiMaxOutputTokens(body []byte) *int64 {
@@ -373,4 +422,53 @@ func extractGeminiMaxOutputTokens(body []byte) *int64 {
 		}
 	}
 	return nil
+}
+
+func writeGeminiErrorWithRetryAfter(w http.ResponseWriter, status int, message string, retryAfterSeconds int) {
+	if w == nil {
+		return
+	}
+	if status <= 0 {
+		status = http.StatusInternalServerError
+	}
+	if retryAfterSeconds > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error": map[string]any{
+			"code":    status,
+			"message": strings.TrimSpace(message),
+			"status":  geminiErrorStatus(status),
+		},
+	})
+}
+
+func geminiErrorStatus(status int) string {
+	switch status {
+	case http.StatusBadRequest:
+		return "INVALID_ARGUMENT"
+	case http.StatusUnauthorized:
+		return "UNAUTHENTICATED"
+	case http.StatusForbidden:
+		return "PERMISSION_DENIED"
+	case http.StatusNotFound:
+		return "NOT_FOUND"
+	case http.StatusConflict:
+		return "ABORTED"
+	case http.StatusTooManyRequests:
+		return "RESOURCE_EXHAUSTED"
+	case http.StatusRequestTimeout, http.StatusGatewayTimeout:
+		return "DEADLINE_EXCEEDED"
+	case http.StatusNotImplemented:
+		return "UNIMPLEMENTED"
+	case http.StatusServiceUnavailable, http.StatusBadGateway:
+		return "UNAVAILABLE"
+	default:
+		if status >= 500 {
+			return "INTERNAL"
+		}
+		return "UNKNOWN"
+	}
 }

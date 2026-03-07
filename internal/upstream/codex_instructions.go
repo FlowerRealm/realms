@@ -81,14 +81,64 @@ func getCodexCLIInstructions() string {
 	return codexCLIInstructions
 }
 
+func normalizeInstructionText(v any) string {
+	return strings.TrimSpace(stringFromAny(v))
+}
+
+func canonicalizeInstructions(reqBody map[string]any) bool {
+	if reqBody == nil {
+		return false
+	}
+
+	existing := normalizeInstructionText(reqBody["instructions"])
+	alias := normalizeInstructionText(reqBody["instruction"])
+	changed := false
+
+	switch {
+	case existing != "":
+		if raw, ok := reqBody["instructions"].(string); !ok || strings.TrimSpace(raw) != existing {
+			reqBody["instructions"] = existing
+			changed = true
+		}
+	case alias != "":
+		reqBody["instructions"] = alias
+		changed = true
+	}
+
+	if _, ok := reqBody["instruction"]; ok {
+		delete(reqBody, "instruction")
+		changed = true
+	}
+
+	return changed
+}
+
+func mergeInstructionsPrefix(prefix, existing string) string {
+	prefix = strings.TrimSpace(prefix)
+	existing = strings.TrimSpace(existing)
+	switch {
+	case prefix == "":
+		return existing
+	case existing == "":
+		return prefix
+	case existing == prefix:
+		return existing
+	case strings.HasPrefix(existing, prefix+"\n"):
+		return existing
+	default:
+		return prefix + "\n\n" + existing
+	}
+}
+
 // applyInstructions 处理 instructions 字段
 // isCodexCLI=true: 仅补充缺失的 instructions（使用 opencode 指令）
-// isCodexCLI=false: 优先使用 opencode 指令覆盖
+// isCodexCLI=false: 使用 opencode 指令作为前缀，并保留用户 instructions
 func applyInstructions(reqBody map[string]any, isCodexCLI bool) bool {
+	changed := canonicalizeInstructions(reqBody)
 	if isCodexCLI {
-		return applyCodexCLIInstructions(reqBody)
+		return applyCodexCLIInstructions(reqBody) || changed
 	}
-	return applyOpenCodeInstructions(reqBody)
+	return applyOpenCodeInstructions(reqBody) || changed
 }
 
 // applyCodexCLIInstructions 为 Codex CLI 请求补充缺失的 instructions
@@ -107,16 +157,16 @@ func applyCodexCLIInstructions(reqBody map[string]any) bool {
 	return false
 }
 
-// applyOpenCodeInstructions 为非 Codex CLI 请求应用 opencode 指令
-// 优先使用 opencode 指令覆盖
+// applyOpenCodeInstructions 为非 Codex CLI 请求应用 opencode 指令前缀
 func applyOpenCodeInstructions(reqBody map[string]any) bool {
 	instructions := strings.TrimSpace(getOpenCodeCodexHeader())
 	existingInstructions, _ := reqBody["instructions"].(string)
 	existingInstructions = strings.TrimSpace(existingInstructions)
 
 	if instructions != "" {
-		if existingInstructions != instructions {
-			reqBody["instructions"] = instructions
+		merged := mergeInstructionsPrefix(instructions, existingInstructions)
+		if existingInstructions != merged {
+			reqBody["instructions"] = merged
 			return true
 		}
 	} else if existingInstructions == "" {
@@ -228,4 +278,3 @@ func fetchWithETag(url, etag string) (string, string, int, error) {
 	}
 	return string(body), resp.Header.Get("etag"), resp.StatusCode, nil
 }
-

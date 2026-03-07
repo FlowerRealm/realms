@@ -71,3 +71,138 @@ func TestLoad_Mode_Personal(t *testing.T) {
 		t.Fatalf("expected IsPersonalMode=true")
 	}
 }
+
+func TestLoad_AdminAPIKeyEnvOverride(t *testing.T) {
+	t.Setenv("REALMS_DB_DRIVER", "")
+	t.Setenv("REALMS_DB_DSN", "")
+	t.Setenv("REALMS_SQLITE_PATH", "")
+	t.Setenv("REALMS_ADMIN_API_KEY", "  adm_from_env  ")
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	if cfg.Security.AdminAPIKey != "adm_from_env" {
+		t.Fatalf("expected security.admin_api_key trimmed, got %q", cfg.Security.AdminAPIKey)
+	}
+}
+
+func TestLoad_GatewayAndRedisDefaults(t *testing.T) {
+	t.Setenv("REALMS_DB_DRIVER", "")
+	t.Setenv("REALMS_DB_DSN", "")
+	t.Setenv("REALMS_SQLITE_PATH", "")
+
+	t.Setenv("REALMS_REDIS_ADDR", "")
+	t.Setenv("REALMS_REDIS_PASSWORD", "")
+	t.Setenv("REALMS_REDIS_DB", "")
+	t.Setenv("REALMS_REDIS_KEY_PREFIX", "")
+
+	t.Setenv("REALMS_GATEWAY_MAX_RETRY_ATTEMPTS", "")
+	t.Setenv("REALMS_GATEWAY_RETRY_BASE_DELAY_MS", "")
+	t.Setenv("REALMS_GATEWAY_RETRY_MAX_DELAY_MS", "")
+	t.Setenv("REALMS_GATEWAY_MAX_RETRY_ELAPSED_MS", "")
+	t.Setenv("REALMS_GATEWAY_MAX_FAILOVER_SWITCHES", "")
+	t.Setenv("REALMS_GATEWAY_USER_MAX_CONCURRENCY", "")
+	t.Setenv("REALMS_GATEWAY_CREDENTIAL_MAX_CONCURRENCY", "")
+	t.Setenv("REALMS_GATEWAY_WAIT_TIMEOUT_MS", "")
+	t.Setenv("REALMS_GATEWAY_WAIT_QUEUE_EXTRA_SLOTS", "")
+	t.Setenv("REALMS_GATEWAY_ENABLE_ERROR_PASSTHROUGH", "")
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	if cfg.Redis.KeyPrefix != "realms" {
+		t.Fatalf("expected redis.key_prefix=realms, got=%q", cfg.Redis.KeyPrefix)
+	}
+	if cfg.Gateway.MaxRetryAttempts != 5 {
+		t.Fatalf("expected gateway.max_retry_attempts=5, got=%d", cfg.Gateway.MaxRetryAttempts)
+	}
+	if cfg.Gateway.RetryBaseDelayMS != 300 {
+		t.Fatalf("expected gateway.retry_base_delay_ms=300, got=%d", cfg.Gateway.RetryBaseDelayMS)
+	}
+	if cfg.Gateway.RetryMaxDelayMS != 3000 {
+		t.Fatalf("expected gateway.retry_max_delay_ms=3000, got=%d", cfg.Gateway.RetryMaxDelayMS)
+	}
+	if cfg.Gateway.MaxRetryElapsedMS != 10000 {
+		t.Fatalf("expected gateway.max_retry_elapsed_ms=10000, got=%d", cfg.Gateway.MaxRetryElapsedMS)
+	}
+	if cfg.Gateway.MaxFailoverSwitches != 8 {
+		t.Fatalf("expected gateway.max_failover_switches=8, got=%d", cfg.Gateway.MaxFailoverSwitches)
+	}
+	if cfg.Gateway.WaitTimeoutMS != 30000 {
+		t.Fatalf("expected gateway.wait_timeout_ms=30000, got=%d", cfg.Gateway.WaitTimeoutMS)
+	}
+	if cfg.Gateway.WaitQueueExtraSlots != 20 {
+		t.Fatalf("expected gateway.wait_queue_extra_slots=20, got=%d", cfg.Gateway.WaitQueueExtraSlots)
+	}
+	if !cfg.Gateway.EnableErrorPassthrough {
+		t.Fatalf("expected gateway.enable_error_passthrough=true by default")
+	}
+}
+
+func TestLoad_GatewayAndRedisEnvOverrides(t *testing.T) {
+	t.Setenv("REALMS_DB_DRIVER", "")
+	t.Setenv("REALMS_DB_DSN", "")
+	t.Setenv("REALMS_SQLITE_PATH", "")
+
+	t.Setenv("REALMS_REDIS_ADDR", "127.0.0.1:6380")
+	t.Setenv("REALMS_REDIS_PASSWORD", "secret")
+	t.Setenv("REALMS_REDIS_DB", "2")
+	t.Setenv("REALMS_REDIS_KEY_PREFIX", "rt")
+
+	t.Setenv("REALMS_GATEWAY_MAX_RETRY_ATTEMPTS", "9")
+	t.Setenv("REALMS_GATEWAY_RETRY_BASE_DELAY_MS", "120")
+	t.Setenv("REALMS_GATEWAY_RETRY_MAX_DELAY_MS", "980")
+	t.Setenv("REALMS_GATEWAY_MAX_RETRY_ELAPSED_MS", "12000")
+	t.Setenv("REALMS_GATEWAY_MAX_FAILOVER_SWITCHES", "11")
+	t.Setenv("REALMS_GATEWAY_USER_MAX_CONCURRENCY", "3")
+	t.Setenv("REALMS_GATEWAY_CREDENTIAL_MAX_CONCURRENCY", "7")
+	t.Setenv("REALMS_GATEWAY_WAIT_TIMEOUT_MS", "1500")
+	t.Setenv("REALMS_GATEWAY_WAIT_QUEUE_EXTRA_SLOTS", "13")
+	t.Setenv("REALMS_GATEWAY_ENABLE_ERROR_PASSTHROUGH", "false")
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	if cfg.Redis.Addr != "127.0.0.1:6380" || cfg.Redis.Password != "secret" || cfg.Redis.DB != 2 || cfg.Redis.KeyPrefix != "rt" {
+		t.Fatalf("unexpected redis config: %+v", cfg.Redis)
+	}
+	if cfg.Gateway.MaxRetryAttempts != 9 ||
+		cfg.Gateway.RetryBaseDelayMS != 120 ||
+		cfg.Gateway.RetryMaxDelayMS != 980 ||
+		cfg.Gateway.MaxRetryElapsedMS != 12000 ||
+		cfg.Gateway.MaxFailoverSwitches != 11 ||
+		cfg.Gateway.UserMaxConcurrency != 3 ||
+		cfg.Gateway.CredentialMaxConcurrency != 7 ||
+		cfg.Gateway.WaitTimeoutMS != 1500 ||
+		cfg.Gateway.WaitQueueExtraSlots != 13 ||
+		cfg.Gateway.EnableErrorPassthrough {
+		t.Fatalf("unexpected gateway config: %+v", cfg.Gateway)
+	}
+}
+
+func TestLoad_GatewayZeroEnvOverridesPreserved(t *testing.T) {
+	t.Setenv("REALMS_DB_DRIVER", "")
+	t.Setenv("REALMS_DB_DSN", "")
+	t.Setenv("REALMS_SQLITE_PATH", "")
+
+	t.Setenv("REALMS_GATEWAY_MAX_RETRY_ATTEMPTS", "0")
+	t.Setenv("REALMS_GATEWAY_RETRY_BASE_DELAY_MS", "0")
+	t.Setenv("REALMS_GATEWAY_RETRY_MAX_DELAY_MS", "0")
+	t.Setenv("REALMS_GATEWAY_MAX_RETRY_ELAPSED_MS", "0")
+	t.Setenv("REALMS_GATEWAY_MAX_FAILOVER_SWITCHES", "0")
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	if cfg.Gateway.MaxRetryAttempts != 0 ||
+		cfg.Gateway.RetryBaseDelayMS != 0 ||
+		cfg.Gateway.RetryMaxDelayMS != 0 ||
+		cfg.Gateway.MaxRetryElapsedMS != 0 ||
+		cfg.Gateway.MaxFailoverSwitches != 0 {
+		t.Fatalf("expected explicit gateway zeros to be preserved, got %+v", cfg.Gateway)
+	}
+}

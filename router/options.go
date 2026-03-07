@@ -14,10 +14,11 @@ import (
 )
 
 type Options struct {
-	Store    *store.Store
-	Sched    *scheduler.Scheduler
-	PersonalMode bool
-	PersonalConfig *personalconfig.Syncer
+	Store           *store.Store
+	Sched           *scheduler.Scheduler
+	AdminAPIKeyHash []byte
+	PersonalMode    bool
+	PersonalConfig  *personalconfig.Syncer
 
 	AllowOpenRegistration           bool
 	EmailVerificationEnabledDefault bool

@@ -371,7 +371,7 @@ func TestMessages_MaxOutputTokensAlias_NormalizesToMaxTokens(t *testing.T) {
 	sched := scheduler.New(fs)
 	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
 
-	reqBody := `{"model":"m1","messages":[{"role":"user","content":"hi"}],"max_output_tokens":123}`
+	reqBody := `{"model":"m1","messages":[{"role":"user","content":"hi"}],"max_output_tokens":123,"extra":"keep-me"}`
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", bytes.NewReader([]byte(reqBody)))
 	req.Header.Set("Content-Type", "application/json")
 
@@ -398,6 +398,9 @@ func TestMessages_MaxOutputTokensAlias_NormalizesToMaxTokens(t *testing.T) {
 	}
 	if _, ok := forwarded["max_completion_tokens"]; ok {
 		t.Fatalf("expected max_completion_tokens to be removed, got=%v", forwarded["max_completion_tokens"])
+	}
+	if got := strings.TrimSpace(stringFromAny(forwarded["extra"])); got != "keep-me" {
+		t.Fatalf("expected extra to be preserved, got=%v", forwarded["extra"])
 	}
 }
 

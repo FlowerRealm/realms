@@ -348,7 +348,7 @@ func (s *Store) ApproveSubscriptionOrderAndDelete(ctx context.Context, orderID i
 	if orderID <= 0 {
 		return 0, errors.New("order_id 不能为空")
 	}
-	if approverUserID <= 0 {
+	if approverUserID < 0 {
 		return 0, errors.New("approver_user_id 不能为空")
 	}
 	if approvedAt.IsZero() {
@@ -448,7 +448,7 @@ func (s *Store) RejectSubscriptionOrderAndDelete(ctx context.Context, orderID in
 	if orderID <= 0 {
 		return errors.New("order_id 不能为空")
 	}
-	if rejecterUserID <= 0 {
+	if rejecterUserID < 0 {
 		return errors.New("rejecter_user_id 不能为空")
 	}
 

@@ -308,7 +308,15 @@ func adminTicketReplyHandler(opts Options) gin.HandlerFunc {
 		now := time.Now()
 		files := c.Request.MultipartForm.File["attachments"]
 
-		actorID, _ := userIDFromContext(c)
+		actorID, ok := adminActorIDFromContext(c)
+		if !ok || actorID < 0 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "未登录"})
+			return
+		}
+		actorType := store.TicketActorTypeAdmin
+		if isSystemAdminContext(c) {
+			actorType = store.TicketActorTypeSystem
+		}
 		attInputs, saved, errMsg := saveTicketAttachments(opts.TicketStorage, now, &actorID, files)
 		if errMsg != "" {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": errMsg})
@@ -321,7 +329,7 @@ func adminTicketReplyHandler(opts Options) gin.HandlerFunc {
 			}
 		}()
 
-		if _, err := opts.Store.AddTicketMessageWithAttachments(c.Request.Context(), ticketID, store.TicketActorTypeAdmin, &actorID, body, attInputs); err != nil {
+		if _, err := opts.Store.AddTicketMessageWithAttachments(c.Request.Context(), ticketID, actorType, &actorID, body, attInputs); err != nil {
 			cleanupOK = false
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "回复失败"})
 			return

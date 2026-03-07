@@ -26,7 +26,10 @@ import (
 	openaiapi "realms/internal/api/openai"
 	"realms/internal/assets"
 	"realms/internal/codexoauth"
+	"realms/internal/concurrency"
 	"realms/internal/config"
+	rlmcrypto "realms/internal/crypto"
+	"realms/internal/errorpassthrough"
 	"realms/internal/personalconfig"
 	"realms/internal/proxylog"
 	"realms/internal/quota"
@@ -50,12 +53,41 @@ type App struct {
 	store         *store.Store
 	personalCfg   *personalconfig.Syncer
 	codexOAuth    *codexoauth.Flow
+	concurrency   *concurrency.Manager
 	exec          *upstream.Executor
 	openai        *openaiapi.Handler
 	sched         *scheduler.Scheduler
 	version       version.BuildInfo
 	ticketStorage *tickets.Storage
 	engine        *gin.Engine
+}
+
+func newConcurrencyManager(cfg config.Config) (*concurrency.Manager, error) {
+	addr := strings.TrimSpace(cfg.Redis.Addr)
+	if addr == "" {
+		return nil, nil
+	}
+	if cfg.Gateway.UserMaxConcurrency <= 0 && cfg.Gateway.CredentialMaxConcurrency <= 0 {
+		return nil, nil
+	}
+	mgr := concurrency.NewManager(concurrency.Options{
+		Addr:           addr,
+		Password:       cfg.Redis.Password,
+		DB:             cfg.Redis.DB,
+		KeyPrefix:      cfg.Redis.KeyPrefix,
+		WaitTTL:        time.Duration(cfg.Gateway.WaitTimeoutMS+cfg.Gateway.RetryMaxDelayMS)*time.Millisecond + time.Second,
+		WaitTimeout:    time.Duration(cfg.Gateway.WaitTimeoutMS) * time.Millisecond,
+		WaitQueueExtra: cfg.Gateway.WaitQueueExtraSlots,
+		InitialBackoff: time.Duration(cfg.Gateway.RetryBaseDelayMS) * time.Millisecond,
+		MaxBackoff:     time.Duration(cfg.Gateway.RetryMaxDelayMS) * time.Millisecond,
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := mgr.PingContext(ctx); err != nil {
+		_ = mgr.Close()
+		return nil, fmt.Errorf("ping redis: %w", err)
+	}
+	return mgr, nil
 }
 
 func NewApp(opts AppOptions) (*App, error) {
@@ -100,12 +132,33 @@ func NewApp(opts AppOptions) (*App, error) {
 	openaiHandler := openaiapi.NewHandler(st, st, sched, exec, proxyLog, st, personalMode, qp, st, st, st, upstream.SSEPumpOptions{
 		InitialLineBytes: 64 << 10,
 	}, sub2api)
+	openaiHandler.SetGatewayPolicy(openaiapi.GatewayPolicy{
+		MaxRetryAttempts:         opts.Config.Gateway.MaxRetryAttempts,
+		RetryBaseDelay:           time.Duration(opts.Config.Gateway.RetryBaseDelayMS) * time.Millisecond,
+		RetryMaxDelay:            time.Duration(opts.Config.Gateway.RetryMaxDelayMS) * time.Millisecond,
+		MaxRetryElapsed:          time.Duration(opts.Config.Gateway.MaxRetryElapsedMS) * time.Millisecond,
+		MaxFailoverSwitches:      opts.Config.Gateway.MaxFailoverSwitches,
+		UserMaxConcurrency:       opts.Config.Gateway.UserMaxConcurrency,
+		CredentialMaxConcurrency: opts.Config.Gateway.CredentialMaxConcurrency,
+	})
+
+	concMgr, err := newConcurrencyManager(opts.Config)
+	if err != nil {
+		return nil, err
+	}
+	if concMgr != nil {
+		openaiHandler.SetConcurrencyManager(concMgr)
+	}
+	if opts.Config.Gateway.EnableErrorPassthrough {
+		openaiHandler.SetErrorPassthroughMatcher(errorpassthrough.NewService(st, 10*time.Second))
+	}
 
 	app := &App{
 		cfg:           opts.Config,
 		db:            opts.DB,
 		store:         st,
 		codexOAuth:    oauthFlow,
+		concurrency:   concMgr,
 		exec:          exec,
 		openai:        openaiHandler,
 		sched:         sched,
@@ -143,6 +196,11 @@ func NewApp(opts AppOptions) (*App, error) {
 	}
 	frontendFS, frontendIndexPage := loadEmbeddedFrontend(personalMode)
 
+	var adminAPIKeyHash []byte
+	if raw := strings.TrimSpace(opts.Config.Security.AdminAPIKey); raw != "" {
+		adminAPIKeyHash = rlmcrypto.TokenHash(raw)
+	}
+
 	// personal-config: optional authoritative local config file for personal mode.
 	pcfg, err := setupPersonalConfig(opts.Config, opts.DB, st, personalMode)
 	if err != nil {
@@ -153,6 +211,7 @@ func NewApp(opts AppOptions) (*App, error) {
 	router.SetRouter(engine, router.Options{
 		Store:                           st,
 		PersonalMode:                    personalMode,
+		AdminAPIKeyHash:                 adminAPIKeyHash,
 		PersonalConfig:                  pcfg,
 		AllowOpenRegistration:           opts.Config.Security.AllowOpenRegistration,
 		EmailVerificationEnabledDefault: opts.Config.EmailVerif.Enable,
@@ -317,6 +376,19 @@ func quotaProvider(st *store.Store, cfg config.Config) quota.Provider {
 
 func (a *App) Handler() http.Handler {
 	return a.engine
+}
+
+func (a *App) Close() error {
+	if a == nil {
+		return nil
+	}
+	if a.personalCfg != nil {
+		a.personalCfg.StopWatcher()
+	}
+	if a.concurrency != nil {
+		return a.concurrency.Close()
+	}
+	return nil
 }
 
 func localBaseURL(cfg config.Config) string {

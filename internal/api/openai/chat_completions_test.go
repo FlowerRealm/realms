@@ -17,7 +17,7 @@ import (
 	"realms/internal/upstream"
 )
 
-func TestChatCompletions_DropsUnknownAndAppliesOModelRules(t *testing.T) {
+func TestChatCompletions_PreservesUnknownAndAppliesOModelRules(t *testing.T) {
 	const groupName = "g1"
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
@@ -96,8 +96,8 @@ func TestChatCompletions_DropsUnknownAndAppliesOModelRules(t *testing.T) {
 	if _, ok := forwarded["temperature"]; ok {
 		t.Fatalf("expected temperature to be removed, got=%#v", forwarded["temperature"])
 	}
-	if _, ok := forwarded["unknown"]; ok {
-		t.Fatalf("expected unknown to be dropped, got=%#v", forwarded["unknown"])
+	if v, ok := forwarded["unknown"].(float64); !ok || int64(v) != 123 {
+		t.Fatalf("expected unknown to be preserved, got=%#v", forwarded["unknown"])
 	}
 	if _, ok := forwarded["stream_options"]; ok {
 		t.Fatalf("expected stream_options to be absent for non-stream request, got=%#v", forwarded["stream_options"])
@@ -180,8 +180,8 @@ func TestChatCompletions_AliasesMaxOutputTokens(t *testing.T) {
 	if v, ok := forwarded["max_completion_tokens"].(float64); !ok || int64(v) != 10 {
 		t.Fatalf("expected max_completion_tokens=10, got=%#v", forwarded["max_completion_tokens"])
 	}
-	if _, ok := forwarded["unknown"]; ok {
-		t.Fatalf("expected unknown to be dropped, got=%#v", forwarded["unknown"])
+	if v, ok := forwarded["unknown"].(float64); !ok || int64(v) != 123 {
+		t.Fatalf("expected unknown to be preserved, got=%#v", forwarded["unknown"])
 	}
 }
 
