@@ -294,6 +294,12 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	rawBody, serviceTier, err := normalizeRequestServiceTier(rawBody, payload)
+	if err != nil {
+		http.Error(w, "service_tier 非法", http.StatusBadRequest)
+		return
+	}
+
 	stream := boolFromAny(payload["stream"])
 	publicModel := stringFromAny(payload["model"])
 	maxOut := intFromAny(payload["max_output_tokens"])
@@ -348,7 +354,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 
 	if modelPassthrough {
 		// 非 free_mode 下仍要求模型定价存在（用于配额预留与计费口径），但不要求“启用”。
-		if !freeMode {
+		if !freeMode || isPriorityServiceTier(serviceTier) {
 			mm, err := h.models.GetManagedModelByPublicID(r.Context(), publicModel)
 			if err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
@@ -364,6 +370,10 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 					http.Error(w, "无权限使用该模型", http.StatusBadRequest)
 					return
 				}
+			}
+			if err := validateManagedModelServiceTier(mm, serviceTier); err != nil {
+				http.Error(w, serviceTierBadRequestMessage(err), http.StatusBadRequest)
+				return
 			}
 		}
 		// passthrough 模式下仍尝试使用“渠道绑定模型”做 model 转发（best-effort）；
@@ -441,6 +451,10 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if err := validateManagedModelServiceTier(mm, serviceTier); err != nil {
+			http.Error(w, serviceTierBadRequestMessage(err), http.StatusBadRequest)
+			return
+		}
 		bindings, err = h.models.ListEnabledChannelModelBindingsByPublicID(r.Context(), publicModel)
 		if err != nil {
 			http.Error(w, "查询模型绑定失败", http.StatusBadGateway)
@@ -501,6 +515,8 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			return raw, nil
 		}
 	}
+
+	applyServiceTierConstraints(&cons, serviceTier)
 
 	routeKey := extractRouteKeyFromPayload(payload)
 	routeKeySource := "payload"
@@ -576,9 +592,14 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			UserID:          p.UserID,
 			TokenID:         *p.TokenID,
 			Model:           optionalString(publicModel),
+			ServiceTier:     serviceTier,
 			MaxOutputTokens: maxOut,
 		})
 		if err != nil {
+			if msg := reserveBadRequestMessage(err); msg != "" {
+				http.Error(w, msg, http.StatusBadRequest)
+				return
+			}
 			if errors.Is(err, quota.ErrSubscriptionRequired) || errors.Is(err, quota.ErrQuotaExceeded) {
 				http.Error(w, err.Error(), http.StatusTooManyRequests)
 				return
@@ -628,6 +649,12 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			if h.finalizeIfCanceled(r, usageID, nil, reqStart, stream, reqBytes) {
 				return
 			}
+			if msg := serviceTierSelectionBadRequestMessage(err); msg != "" {
+				h.voidQuotaBestEffort(usageID)
+				http.Error(w, msg, http.StatusBadRequest)
+				h.finalizeUsageEvent(r, usageID, nil, http.StatusBadRequest, "service_tier", msg, time.Since(reqStart), 0, stream, reqBytes, 0)
+				return
+			}
 			if bindingActive && !bindingCleared {
 				h.clearCodexStickyBindingBestEffort(r.Context(), p.UserID, stickyRouteKeyHash)
 				bindingCleared = true
@@ -647,6 +674,12 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		rewritten, err := rewriteBody(sel)
 		if err != nil {
 			h.voidQuotaBestEffort(usageID)
+			if msg := serviceTierSelectionBadRequestMessage(err); msg != "" {
+				cw := &countingResponseWriter{ResponseWriter: w}
+				http.Error(cw, msg, http.StatusBadRequest)
+				h.finalizeUsageEvent(r, usageID, &sel, http.StatusBadRequest, "service_tier", msg, time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
+				return
+			}
 			cw := &countingResponseWriter{ResponseWriter: w}
 			http.Error(cw, "请求体处理失败", http.StatusInternalServerError)
 			h.finalizeUsageEvent(r, usageID, &sel, http.StatusInternalServerError, "rewrite_body", "请求体处理失败", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
@@ -819,6 +852,7 @@ func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p aut
 
 func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel scheduler.Selection, body []byte, wantStream bool, model *string, p auth.Principal, usageID int64, reqStart time.Time, reqBytes int64) (proxyAttemptDecision, proxyFailureInfo) {
 	attemptStart := time.Now()
+	serviceTier := requestedServiceTierFromJSONBytes(body)
 	var resp *http.Response
 	for attempt := 0; attempt < 2; attempt++ {
 		var err error
@@ -1052,6 +1086,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			_ = h.quota.Commit(bookCtx, quota.CommitInput{
 				UsageEventID:       usageID,
 				Model:              model,
+				ServiceTier:        serviceTier,
 				UpstreamChannelID:  &sel.ChannelID,
 				RouteGroup:         optionalString(sel.RouteGroup),
 				InputTokens:        acc.in,
@@ -1148,6 +1183,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		_ = h.quota.Commit(bookCtx, quota.CommitInput{
 			UsageEventID:       usageID,
 			Model:              model,
+			ServiceTier:        serviceTier,
 			UpstreamChannelID:  &sel.ChannelID,
 			RouteGroup:         optionalString(sel.RouteGroup),
 			InputTokens:        inTok,

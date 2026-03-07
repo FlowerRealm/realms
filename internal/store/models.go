@@ -266,17 +266,21 @@ type OAuthAppToken struct {
 }
 
 type ManagedModel struct {
-	ID                  int64
-	PublicID            string
-	GroupName           string
-	UpstreamModel       *string
-	OwnedBy             *string
-	InputUSDPer1M       decimal.Decimal
-	OutputUSDPer1M      decimal.Decimal
-	CacheInputUSDPer1M  decimal.Decimal
-	CacheOutputUSDPer1M decimal.Decimal
-	Status              int
-	CreatedAt           time.Time
+	ID                         int64
+	PublicID                   string
+	GroupName                  string
+	UpstreamModel              *string
+	OwnedBy                    *string
+	InputUSDPer1M              decimal.Decimal
+	OutputUSDPer1M             decimal.Decimal
+	CacheInputUSDPer1M         decimal.Decimal
+	CacheOutputUSDPer1M        decimal.Decimal
+	PriorityPricingEnabled     bool
+	PriorityInputUSDPer1M      *decimal.Decimal
+	PriorityOutputUSDPer1M     *decimal.Decimal
+	PriorityCacheInputUSDPer1M *decimal.Decimal
+	Status                     int
+	CreatedAt                  time.Time
 }
 
 type ChannelModel struct {
@@ -315,6 +319,7 @@ type UsageEvent struct {
 	UpstreamCredID           *int64
 	State                    string
 	Model                    *string
+	ServiceTier              *string
 	InputTokens              *int64
 	CachedInputTokens        *int64
 	OutputTokens             *int64

@@ -10,6 +10,10 @@ export type ManagedModel = {
   output_usd_per_1m: string;
   cache_input_usd_per_1m: string;
   cache_output_usd_per_1m: string;
+  priority_pricing_enabled: boolean;
+  priority_input_usd_per_1m?: string | null;
+  priority_output_usd_per_1m?: string | null;
+  priority_cache_input_usd_per_1m?: string | null;
   status: number;
   icon_url?: string | null;
 };
@@ -23,6 +27,10 @@ export type UserManagedModel = {
   output_usd_per_1m: string;
   cache_input_usd_per_1m: string;
   cache_output_usd_per_1m: string;
+  priority_pricing_enabled: boolean;
+  priority_input_usd_per_1m?: string | null;
+  priority_output_usd_per_1m?: string | null;
+  priority_cache_input_usd_per_1m?: string | null;
   status: number;
   icon_url?: string | null;
 };

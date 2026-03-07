@@ -8,10 +8,33 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/shopspring/decimal"
+
 	"realms/internal/mcp"
 	"realms/internal/skills"
 	"realms/internal/store"
 )
+
+func normalizeOptionalManagedModelPriceLocal(v *decimal.Decimal) (*decimal.Decimal, error) {
+	if v == nil {
+		return nil, nil
+	}
+	n := v.Truncate(store.USDScale)
+	if n.IsNegative() {
+		return nil, errors.New("pricing invalid")
+	}
+	return &n, nil
+}
+
+func validateManagedModelPriorityPricingLocal(enabled bool, inUSD, outUSD *decimal.Decimal) error {
+	if !enabled {
+		return nil
+	}
+	if inUSD == nil || outUSD == nil {
+		return errors.New("fast mode pricing invalid")
+	}
+	return nil
+}
 
 // RebuildRuntimeFromBundle makes DB config tables exactly match the bundle (including deletions).
 // It intentionally does NOT touch runtime-only tables (usage/events/sessions/etc.).
@@ -264,11 +287,30 @@ VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		if inUSD.IsNegative() || outUSD.IsNegative() || cacheInUSD.IsNegative() || cacheOutUSD.IsNegative() {
 			return fmt.Errorf("managed_models[%s] pricing invalid", publicID)
 		}
+		priorityInUSD, err := normalizeOptionalManagedModelPriceLocal(m.PriorityInputUSDPer1M)
+		if err != nil {
+			return fmt.Errorf("managed_models[%s] fast input pricing invalid", publicID)
+		}
+		priorityOutUSD, err := normalizeOptionalManagedModelPriceLocal(m.PriorityOutputUSDPer1M)
+		if err != nil {
+			return fmt.Errorf("managed_models[%s] fast output pricing invalid", publicID)
+		}
+		priorityCacheInUSD, err := normalizeOptionalManagedModelPriceLocal(m.PriorityCacheInputUSDPer1M)
+		if err != nil {
+			return fmt.Errorf("managed_models[%s] fast cache input pricing invalid", publicID)
+		}
+		if err := validateManagedModelPriorityPricingLocal(m.PriorityPricingEnabled, priorityInUSD, priorityOutUSD); err != nil {
+			return fmt.Errorf("managed_models[%s] %w", publicID, err)
+		}
+		priorityEnabled := 0
+		if m.PriorityPricingEnabled {
+			priorityEnabled = 1
+		}
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO managed_models(public_id, group_name, upstream_model, owned_by, input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m, status, created_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+INSERT INTO managed_models(public_id, group_name, upstream_model, owned_by, input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m, priority_pricing_enabled, priority_input_usd_per_1m, priority_output_usd_per_1m, priority_cache_input_usd_per_1m, status, created_at)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 `, publicID, groupName, nullableTrimmedString(m.UpstreamModel), nullableTrimmedString(m.OwnedBy),
-			inUSD, outUSD, cacheInUSD, cacheOutUSD, status); err != nil {
+			inUSD, outUSD, cacheInUSD, cacheOutUSD, priorityEnabled, priorityInUSD, priorityOutUSD, priorityCacheInUSD, status); err != nil {
 			return fmt.Errorf("insert managed_models: %w", err)
 		}
 	}

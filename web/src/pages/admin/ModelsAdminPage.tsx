@@ -31,6 +31,10 @@ type ModelForm = {
   output_usd_per_1m: string;
   cache_input_usd_per_1m: string;
   cache_output_usd_per_1m: string;
+  priority_pricing_enabled: boolean;
+  priority_input_usd_per_1m: string;
+  priority_output_usd_per_1m: string;
+  priority_cache_input_usd_per_1m: string;
   status: number;
 };
 
@@ -44,8 +48,17 @@ function modelToForm(m: ManagedModel, fallbackGroupName: string): ModelForm {
     output_usd_per_1m: m.output_usd_per_1m || '0',
     cache_input_usd_per_1m: m.cache_input_usd_per_1m || '0',
     cache_output_usd_per_1m: m.cache_output_usd_per_1m || '0',
+    priority_pricing_enabled: !!m.priority_pricing_enabled,
+    priority_input_usd_per_1m: m.priority_input_usd_per_1m || '',
+    priority_output_usd_per_1m: m.priority_output_usd_per_1m || '',
+    priority_cache_input_usd_per_1m: m.priority_cache_input_usd_per_1m || '',
     status: m.status || 0,
   };
+}
+
+function optionalPriceValue(v: string): string | null {
+  const s = (v || '').trim();
+  return s ? s : null;
 }
 
 export function ModelsAdminPage() {
@@ -75,6 +88,10 @@ export function ModelsAdminPage() {
     output_usd_per_1m: '15',
     cache_input_usd_per_1m: '0',
     cache_output_usd_per_1m: '0',
+    priority_pricing_enabled: false,
+    priority_input_usd_per_1m: '',
+    priority_output_usd_per_1m: '',
+    priority_cache_input_usd_per_1m: '',
     status: 1,
   });
 
@@ -87,6 +104,10 @@ export function ModelsAdminPage() {
     output_usd_per_1m: '0',
     cache_input_usd_per_1m: '0',
     cache_output_usd_per_1m: '0',
+    priority_pricing_enabled: false,
+    priority_input_usd_per_1m: '',
+    priority_output_usd_per_1m: '',
+    priority_cache_input_usd_per_1m: '',
     status: 1,
   });
 
@@ -175,6 +196,10 @@ export function ModelsAdminPage() {
           output_usd_per_1m: v.output_usd_per_1m,
           cache_input_usd_per_1m: v.cache_input_usd_per_1m,
           cache_output_usd_per_1m: v.cache_output_usd_per_1m,
+          priority_pricing_enabled: v.priority_pricing_enabled,
+          priority_input_usd_per_1m: optionalPriceValue(v.priority_input_usd_per_1m),
+          priority_output_usd_per_1m: optionalPriceValue(v.priority_output_usd_per_1m),
+          priority_cache_input_usd_per_1m: optionalPriceValue(v.priority_cache_input_usd_per_1m),
           status: v.status,
         };
         const res = await updateManagedModelAdmin(nextModel);
@@ -320,6 +345,15 @@ export function ModelsAdminPage() {
                                   <span className="fw-bold text-dark">${m.cache_output_usd_per_1m}</span>
                                 </div>
                               </div>
+                              <div className="mt-1 text-muted smaller">
+                                {m.priority_pricing_enabled ? (
+                                  <span>
+                                    Fast：输入 ${m.priority_input_usd_per_1m || '-'} · 输出 ${m.priority_output_usd_per_1m || '-'} · 缓存输入 ${m.priority_cache_input_usd_per_1m || '-'}
+                                  </span>
+                                ) : (
+                                  <span>Fast 未启用</span>
+                                )}
+                              </div>
                           </td>
                           <td>
                             <span className={st.cls}>{st.label}</span>
@@ -408,6 +442,10 @@ export function ModelsAdminPage() {
             output_usd_per_1m: '15',
             cache_input_usd_per_1m: '0',
             cache_output_usd_per_1m: '0',
+            priority_pricing_enabled: false,
+            priority_input_usd_per_1m: '',
+            priority_output_usd_per_1m: '',
+            priority_cache_input_usd_per_1m: '',
             status: 1,
           });
           setCreateLookupErr('');
@@ -431,6 +469,10 @@ export function ModelsAdminPage() {
                 output_usd_per_1m: createForm.output_usd_per_1m,
                 cache_input_usd_per_1m: createForm.cache_input_usd_per_1m,
                 cache_output_usd_per_1m: createForm.cache_output_usd_per_1m,
+                priority_pricing_enabled: createForm.priority_pricing_enabled,
+                priority_input_usd_per_1m: optionalPriceValue(createForm.priority_input_usd_per_1m),
+                priority_output_usd_per_1m: optionalPriceValue(createForm.priority_output_usd_per_1m),
+                priority_cache_input_usd_per_1m: optionalPriceValue(createForm.priority_cache_input_usd_per_1m),
                 status: createForm.status,
               });
               if (!res.success) throw new Error(res.message || '创建失败');
@@ -581,6 +623,38 @@ export function ModelsAdminPage() {
             </div>
           </div>
 
+          <div className="col-12">
+            <div className="form-check form-switch mt-1">
+              <input className="form-check-input" type="checkbox" checked={createForm.priority_pricing_enabled} onChange={(e) => setCreateForm((p) => ({ ...p, priority_pricing_enabled: e.target.checked }))} />
+              <label className="form-check-label">启用 Fast mode 专属定价</label>
+            </div>
+            <div className="form-text">打开后，Fast mode 会按下列价格计费；关闭后即使填了价格也不会生效。</div>
+          </div>
+          <div className="col-md-4">
+            <label className="form-label">Fast 输入单价</label>
+            <div className="input-group">
+              <span className="input-group-text">$</span>
+              <input className="form-control" value={createForm.priority_input_usd_per_1m} onChange={(e) => setCreateForm((p) => ({ ...p, priority_input_usd_per_1m: e.target.value }))} inputMode="decimal" placeholder="可选" />
+              <span className="input-group-text">/ 1M Token</span>
+            </div>
+          </div>
+          <div className="col-md-4">
+            <label className="form-label">Fast 输出单价</label>
+            <div className="input-group">
+              <span className="input-group-text">$</span>
+              <input className="form-control" value={createForm.priority_output_usd_per_1m} onChange={(e) => setCreateForm((p) => ({ ...p, priority_output_usd_per_1m: e.target.value }))} inputMode="decimal" placeholder="可选" />
+              <span className="input-group-text">/ 1M Token</span>
+            </div>
+          </div>
+          <div className="col-md-4">
+            <label className="form-label">Fast 缓存输入单价</label>
+            <div className="input-group">
+              <span className="input-group-text">$</span>
+              <input className="form-control" value={createForm.priority_cache_input_usd_per_1m} onChange={(e) => setCreateForm((p) => ({ ...p, priority_cache_input_usd_per_1m: e.target.value }))} inputMode="decimal" placeholder="留空则沿用基础缓存输入价格" />
+              <span className="input-group-text">/ 1M Token</span>
+            </div>
+          </div>
+
           <div className="alert alert-light border small mb-0 d-flex align-items-start">
             <span className="material-symbols-rounded text-primary me-2 mt-1">info</span>
             <div>单位说明：USD / 1M Token（支持最多 6 位小数）。</div>
@@ -670,7 +744,7 @@ export function ModelsAdminPage() {
               rows={10}
               value={importPricingJSON}
               onChange={(e) => setImportPricingJSON(e.target.value)}
-              placeholder='{"gpt-5.2":{"input_usd_per_1m":0.15,"output_usd_per_1m":0.60,"cache_input_usd_per_1m":0.00,"cache_output_usd_per_1m":0.00}}'
+              placeholder='{"gpt-5.2":{"input_usd_per_1m":0.15,"output_usd_per_1m":0.60,"cache_input_usd_per_1m":0.00,"cache_output_usd_per_1m":0.00,"priority_pricing_enabled":true,"priority_input_usd_per_1m":0.30,"priority_output_usd_per_1m":1.20,"priority_cache_input_usd_per_1m":0.00}}'
               required
             />
             <div className="form-text small text-muted">顶层支持对象或数组；支持 usd_per_1m 或 cost_per_token 格式。</div>
@@ -850,6 +924,37 @@ export function ModelsAdminPage() {
               <div className="input-group">
                 <span className="input-group-text">$</span>
                 <input className="form-control" value={editForm.cache_output_usd_per_1m} onChange={(e) => setEditForm((p) => ({ ...p, cache_output_usd_per_1m: e.target.value }))} inputMode="decimal" />
+                <span className="input-group-text">/ 1M Token</span>
+              </div>
+            </div>
+            <div className="col-12">
+              <div className="form-check form-switch mt-1">
+                <input className="form-check-input" type="checkbox" checked={editForm.priority_pricing_enabled} onChange={(e) => setEditForm((p) => ({ ...p, priority_pricing_enabled: e.target.checked }))} />
+                <label className="form-check-label">启用 Fast mode 专属定价</label>
+              </div>
+              <div className="form-text">Fast 请求仅在开关打开时按专属价格计费。</div>
+            </div>
+            <div className="col-md-4">
+              <label className="form-label">Fast 输入单价</label>
+              <div className="input-group">
+                <span className="input-group-text">$</span>
+                <input className="form-control" value={editForm.priority_input_usd_per_1m} onChange={(e) => setEditForm((p) => ({ ...p, priority_input_usd_per_1m: e.target.value }))} inputMode="decimal" placeholder="可选" />
+                <span className="input-group-text">/ 1M Token</span>
+              </div>
+            </div>
+            <div className="col-md-4">
+              <label className="form-label">Fast 输出单价</label>
+              <div className="input-group">
+                <span className="input-group-text">$</span>
+                <input className="form-control" value={editForm.priority_output_usd_per_1m} onChange={(e) => setEditForm((p) => ({ ...p, priority_output_usd_per_1m: e.target.value }))} inputMode="decimal" placeholder="可选" />
+                <span className="input-group-text">/ 1M Token</span>
+              </div>
+            </div>
+            <div className="col-md-4">
+              <label className="form-label">Fast 缓存输入单价</label>
+              <div className="input-group">
+                <span className="input-group-text">$</span>
+                <input className="form-control" value={editForm.priority_cache_input_usd_per_1m} onChange={(e) => setEditForm((p) => ({ ...p, priority_cache_input_usd_per_1m: e.target.value }))} inputMode="decimal" placeholder="留空则沿用基础缓存输入价格" />
                 <span className="input-group-text">/ 1M Token</span>
               </div>
             </div>

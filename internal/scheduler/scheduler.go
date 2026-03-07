@@ -20,6 +20,8 @@ import (
 
 type CredentialType string
 
+var ErrFastModeUnsupported = errors.New("当前无支持 Fast mode 的可用上游")
+
 const (
 	CredentialTypeOpenAI    CredentialType = "openai_compatible"
 	CredentialTypeCodex     CredentialType = "codex_oauth"
@@ -95,6 +97,7 @@ type Constraints struct {
 	RequireChannelType   string
 	RequireChannelID     int64
 	RequireCredentialKey string
+	RequireFastMode      bool
 	AllowGroups          map[string]struct{}
 	AllowGroupOrder      []string
 	AllowChannelIDs      map[int64]struct{}
@@ -328,6 +331,9 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 		if cons.AllowGroups != nil && !channelInAnyGroup(ch.Groups, cons.AllowGroups) {
 			continue
 		}
+		if cons.RequireFastMode && (!ch.AllowServiceTier || !ch.FastMode) {
+			continue
+		}
 		if cons.AllowChannelIDs != nil {
 			if _, ok := cons.AllowChannelIDs[ch.ID]; !ok {
 				continue
@@ -339,6 +345,9 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 		candidates = append(candidates, ch)
 	}
 	if len(candidates) == 0 {
+		if cons.RequireFastMode {
+			return Selection{}, ErrFastModeUnsupported
+		}
 		return Selection{}, errors.New("未配置可用上游 channel")
 	}
 
@@ -426,6 +435,9 @@ func selectionMatchesConstraints(sel Selection, c Constraints) bool {
 		return false
 	}
 	if c.AllowGroups != nil && !channelInAnyGroup(sel.ChannelGroups, c.AllowGroups) {
+		return false
+	}
+	if c.RequireFastMode && (!sel.AllowServiceTier || !sel.FastMode) {
 		return false
 	}
 	if c.AllowChannelIDs != nil {

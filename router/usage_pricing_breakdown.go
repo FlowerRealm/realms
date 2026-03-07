@@ -17,6 +17,7 @@ type usageEventPricingBreakdownAPI struct {
 
 	ModelPublicID string `json:"model_public_id,omitempty"`
 	ModelFound    bool   `json:"model_found"`
+	ServiceTier   string `json:"service_tier,omitempty"`
 
 	InputTokensTotal    int64 `json:"input_tokens_total"`
 	InputTokensCached   int64 `json:"input_tokens_cached"`
@@ -56,6 +57,9 @@ func buildUsageEventPricingBreakdown(ctx context.Context, st *store.Store, ev st
 		GroupMultiplier:     store.DefaultGroupPriceMultiplier,
 		EffectiveMultiplier: store.DefaultGroupPriceMultiplier,
 	}
+	if ev.ServiceTier != nil {
+		out.ServiceTier = store.NormalizeServiceTier(*ev.ServiceTier)
+	}
 	if ev.Model != nil {
 		modelPublicID := strings.TrimSpace(*ev.Model)
 		if modelPublicID != "" {
@@ -67,10 +71,14 @@ func buildUsageEventPricingBreakdown(ctx context.Context, st *store.Store, ev st
 				}
 			} else {
 				out.ModelFound = true
-				out.InputUSDPer1M = mm.InputUSDPer1M.Truncate(store.USDScale)
-				out.OutputUSDPer1M = mm.OutputUSDPer1M.Truncate(store.USDScale)
-				out.CacheInputUSDPer1M = mm.CacheInputUSDPer1M.Truncate(store.USDScale)
-				out.CacheOutputUSDPer1M = mm.CacheOutputUSDPer1M.Truncate(store.USDScale)
+				pricing, err := store.ResolveManagedModelPricing(mm, out.ServiceTier)
+				if err != nil {
+					return usageEventPricingBreakdownAPI{}, err
+				}
+				out.InputUSDPer1M = pricing.InputUSDPer1M.Truncate(store.USDScale)
+				out.OutputUSDPer1M = pricing.OutputUSDPer1M.Truncate(store.USDScale)
+				out.CacheInputUSDPer1M = pricing.CacheInputUSDPer1M.Truncate(store.USDScale)
+				out.CacheOutputUSDPer1M = pricing.CacheOutputUSDPer1M.Truncate(store.USDScale)
 			}
 		}
 	}

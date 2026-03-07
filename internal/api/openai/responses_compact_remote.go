@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -59,6 +60,12 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	body, serviceTier, err := normalizeRequestServiceTier(body, payload)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", "service_tier is invalid")
+		return
+	}
+
 	reqModel := ""
 	if v, ok := payload["model"].(string); ok {
 		reqModel = strings.TrimSpace(v)
@@ -66,6 +73,21 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 	if reqModel == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
+	}
+	if h.models != nil && isPriorityServiceTier(serviceTier) {
+		mm, err := h.models.GetManagedModelByPublicID(r.Context(), reqModel)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", serviceTierBadRequestMessage(err))
+			} else {
+				writeOpenAIError(w, http.StatusBadGateway, "api_error", "failed to query model")
+			}
+			return
+		}
+		if err := validateManagedModelServiceTier(mm, serviceTier); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", serviceTierBadRequestMessage(err))
+			return
+		}
 	}
 
 	if sessionID := extractSessionIDForCompact(r.Header, payload); sessionID == "" {
@@ -100,9 +122,14 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 			UserID:          p.UserID,
 			TokenID:         *p.TokenID,
 			Model:           modelPtr,
+			ServiceTier:     serviceTier,
 			MaxOutputTokens: maxOut,
 		})
 		if err != nil {
+			if msg := reserveBadRequestMessage(err); msg != "" {
+				writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", msg)
+				return
+			}
 			if errors.Is(err, quota.ErrSubscriptionRequired) || errors.Is(err, quota.ErrQuotaExceeded) {
 				writeOpenAIError(w, http.StatusTooManyRequests, "rate_limit_error", err.Error())
 				return
@@ -197,6 +224,7 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 		_ = h.quota.Commit(bookCtx, quota.CommitInput{
 			UsageEventID:       usageID,
 			Model:              modelPtr,
+			ServiceTier:        serviceTier,
 			InputTokens:        inTok,
 			CachedInputTokens:  cachedInTok,
 			OutputTokens:       outTok,

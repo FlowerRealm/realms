@@ -40,6 +40,7 @@ func (p *FreeProvider) Reserve(ctx context.Context, in ReserveInput) (ReserveRes
 		SubscriptionID:   nil,
 		TokenID:          in.TokenID,
 		Model:            in.Model,
+		ServiceTier:      in.ServiceTier,
 		ReservedUSD:      decimal.Zero,
 		ReserveExpiresAt: time.Now().Add(p.reserveTTL),
 	})
@@ -56,8 +57,19 @@ func (p *FreeProvider) Commit(ctx context.Context, in CommitInput) error {
 	if p.st == nil {
 		return errors.New("store 为空")
 	}
-
-	usd, err := estimateCostUSD(ctx, p.st, in.Model, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens)
+	ev, err := p.st.GetUsageEvent(ctx, in.UsageEventID)
+	if err != nil {
+		return err
+	}
+	model := in.Model
+	if model == nil {
+		model = ev.Model
+	}
+	serviceTier := in.ServiceTier
+	if serviceTier == nil {
+		serviceTier = ev.ServiceTier
+	}
+	usd, err := estimateCostUSD(ctx, p.st, model, serviceTier, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens)
 	if err != nil {
 		if errors.Is(err, ErrModelPricingMissing) {
 			usd = decimal.Zero
@@ -69,6 +81,7 @@ func (p *FreeProvider) Commit(ctx context.Context, in CommitInput) error {
 	return p.st.CommitUsage(ctx, store.CommitUsageInput{
 		UsageEventID:       in.UsageEventID,
 		UpstreamChannelID:  in.UpstreamChannelID,
+		ServiceTier:        serviceTier,
 		InputTokens:        in.InputTokens,
 		CachedInputTokens:  in.CachedInputTokens,
 		OutputTokens:       in.OutputTokens,

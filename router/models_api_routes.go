@@ -16,16 +16,20 @@ import (
 )
 
 type managedModelView struct {
-	ID                  int64           `json:"id"`
-	PublicID            string          `json:"public_id"`
-	GroupName           string          `json:"group_name"`
-	OwnedBy             *string         `json:"owned_by,omitempty"`
-	InputUSDPer1M       decimal.Decimal `json:"input_usd_per_1m"`
-	OutputUSDPer1M      decimal.Decimal `json:"output_usd_per_1m"`
-	CacheInputUSDPer1M  decimal.Decimal `json:"cache_input_usd_per_1m"`
-	CacheOutputUSDPer1M decimal.Decimal `json:"cache_output_usd_per_1m"`
-	Status              int             `json:"status"`
-	IconURL             *string         `json:"icon_url,omitempty"`
+	ID                         int64            `json:"id"`
+	PublicID                   string           `json:"public_id"`
+	GroupName                  string           `json:"group_name"`
+	OwnedBy                    *string          `json:"owned_by,omitempty"`
+	InputUSDPer1M              decimal.Decimal  `json:"input_usd_per_1m"`
+	OutputUSDPer1M             decimal.Decimal  `json:"output_usd_per_1m"`
+	CacheInputUSDPer1M         decimal.Decimal  `json:"cache_input_usd_per_1m"`
+	CacheOutputUSDPer1M        decimal.Decimal  `json:"cache_output_usd_per_1m"`
+	PriorityPricingEnabled     bool             `json:"priority_pricing_enabled"`
+	PriorityInputUSDPer1M      *decimal.Decimal `json:"priority_input_usd_per_1m,omitempty"`
+	PriorityOutputUSDPer1M     *decimal.Decimal `json:"priority_output_usd_per_1m,omitempty"`
+	PriorityCacheInputUSDPer1M *decimal.Decimal `json:"priority_cache_input_usd_per_1m,omitempty"`
+	Status                     int              `json:"status"`
+	IconURL                    *string          `json:"icon_url,omitempty"`
 }
 
 type pageInfo[T any] struct {
@@ -72,16 +76,20 @@ func setModelAPIRoutes(r gin.IRoutes, opts Options) {
 }
 
 type userManagedModelView struct {
-	ID                  int64           `json:"id"`
-	PublicID            string          `json:"public_id"`
-	GroupName           string          `json:"group_name"`
-	OwnedBy             *string         `json:"owned_by,omitempty"`
-	InputUSDPer1M       decimal.Decimal `json:"input_usd_per_1m"`
-	OutputUSDPer1M      decimal.Decimal `json:"output_usd_per_1m"`
-	CacheInputUSDPer1M  decimal.Decimal `json:"cache_input_usd_per_1m"`
-	CacheOutputUSDPer1M decimal.Decimal `json:"cache_output_usd_per_1m"`
-	Status              int             `json:"status"`
-	IconURL             *string         `json:"icon_url,omitempty"`
+	ID                         int64            `json:"id"`
+	PublicID                   string           `json:"public_id"`
+	GroupName                  string           `json:"group_name"`
+	OwnedBy                    *string          `json:"owned_by,omitempty"`
+	InputUSDPer1M              decimal.Decimal  `json:"input_usd_per_1m"`
+	OutputUSDPer1M             decimal.Decimal  `json:"output_usd_per_1m"`
+	CacheInputUSDPer1M         decimal.Decimal  `json:"cache_input_usd_per_1m"`
+	CacheOutputUSDPer1M        decimal.Decimal  `json:"cache_output_usd_per_1m"`
+	PriorityPricingEnabled     bool             `json:"priority_pricing_enabled"`
+	PriorityInputUSDPer1M      *decimal.Decimal `json:"priority_input_usd_per_1m,omitempty"`
+	PriorityOutputUSDPer1M     *decimal.Decimal `json:"priority_output_usd_per_1m,omitempty"`
+	PriorityCacheInputUSDPer1M *decimal.Decimal `json:"priority_cache_input_usd_per_1m,omitempty"`
+	Status                     int              `json:"status"`
+	IconURL                    *string          `json:"icon_url,omitempty"`
 }
 
 func dashboardModelsHandler(opts Options) gin.HandlerFunc {
@@ -206,16 +214,20 @@ func userModelsDetailHandler(opts Options) gin.HandlerFunc {
 				iconPtr = &icon
 			}
 			out = append(out, userManagedModelView{
-				ID:                  m.ID,
-				PublicID:            m.PublicID,
-				GroupName:           m.GroupName,
-				OwnedBy:             m.OwnedBy,
-				InputUSDPer1M:       m.InputUSDPer1M.Truncate(store.USDScale),
-				OutputUSDPer1M:      m.OutputUSDPer1M.Truncate(store.USDScale),
-				CacheInputUSDPer1M:  m.CacheInputUSDPer1M.Truncate(store.USDScale),
-				CacheOutputUSDPer1M: m.CacheOutputUSDPer1M.Truncate(store.USDScale),
-				Status:              m.Status,
-				IconURL:             iconPtr,
+				ID:                         m.ID,
+				PublicID:                   m.PublicID,
+				GroupName:                  m.GroupName,
+				OwnedBy:                    m.OwnedBy,
+				InputUSDPer1M:              m.InputUSDPer1M.Truncate(store.USDScale),
+				OutputUSDPer1M:             m.OutputUSDPer1M.Truncate(store.USDScale),
+				CacheInputUSDPer1M:         m.CacheInputUSDPer1M.Truncate(store.USDScale),
+				CacheOutputUSDPer1M:        m.CacheOutputUSDPer1M.Truncate(store.USDScale),
+				PriorityPricingEnabled:     m.PriorityPricingEnabled,
+				PriorityInputUSDPer1M:      m.PriorityInputUSDPer1M,
+				PriorityOutputUSDPer1M:     m.PriorityOutputUSDPer1M,
+				PriorityCacheInputUSDPer1M: m.PriorityCacheInputUSDPer1M,
+				Status:                     m.Status,
+				IconURL:                    iconPtr,
 			})
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": out})
@@ -290,16 +302,20 @@ func adminListManagedModelsHandler(opts Options) gin.HandlerFunc {
 				iconPtr = &icon
 			}
 			items = append(items, managedModelView{
-				ID:                  m.ID,
-				PublicID:            m.PublicID,
-				GroupName:           m.GroupName,
-				OwnedBy:             m.OwnedBy,
-				InputUSDPer1M:       m.InputUSDPer1M,
-				OutputUSDPer1M:      m.OutputUSDPer1M,
-				CacheInputUSDPer1M:  m.CacheInputUSDPer1M,
-				CacheOutputUSDPer1M: m.CacheOutputUSDPer1M,
-				Status:              m.Status,
-				IconURL:             iconPtr,
+				ID:                         m.ID,
+				PublicID:                   m.PublicID,
+				GroupName:                  m.GroupName,
+				OwnedBy:                    m.OwnedBy,
+				InputUSDPer1M:              m.InputUSDPer1M,
+				OutputUSDPer1M:             m.OutputUSDPer1M,
+				CacheInputUSDPer1M:         m.CacheInputUSDPer1M,
+				CacheOutputUSDPer1M:        m.CacheOutputUSDPer1M,
+				PriorityPricingEnabled:     m.PriorityPricingEnabled,
+				PriorityInputUSDPer1M:      m.PriorityInputUSDPer1M,
+				PriorityOutputUSDPer1M:     m.PriorityOutputUSDPer1M,
+				PriorityCacheInputUSDPer1M: m.PriorityCacheInputUSDPer1M,
+				Status:                     m.Status,
+				IconURL:                    iconPtr,
 			})
 		}
 
@@ -337,15 +353,19 @@ func adminGetManagedModelHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": managedModelView{
-			ID:                  m.ID,
-			PublicID:            m.PublicID,
-			GroupName:           m.GroupName,
-			OwnedBy:             m.OwnedBy,
-			InputUSDPer1M:       m.InputUSDPer1M,
-			OutputUSDPer1M:      m.OutputUSDPer1M,
-			CacheInputUSDPer1M:  m.CacheInputUSDPer1M,
-			CacheOutputUSDPer1M: m.CacheOutputUSDPer1M,
-			Status:              m.Status,
+			ID:                         m.ID,
+			PublicID:                   m.PublicID,
+			GroupName:                  m.GroupName,
+			OwnedBy:                    m.OwnedBy,
+			InputUSDPer1M:              m.InputUSDPer1M,
+			OutputUSDPer1M:             m.OutputUSDPer1M,
+			CacheInputUSDPer1M:         m.CacheInputUSDPer1M,
+			CacheOutputUSDPer1M:        m.CacheOutputUSDPer1M,
+			PriorityPricingEnabled:     m.PriorityPricingEnabled,
+			PriorityInputUSDPer1M:      m.PriorityInputUSDPer1M,
+			PriorityOutputUSDPer1M:     m.PriorityOutputUSDPer1M,
+			PriorityCacheInputUSDPer1M: m.PriorityCacheInputUSDPer1M,
+			Status:                     m.Status,
 			IconURL: func() *string {
 				icon := strings.TrimSpace(icons.ModelIconURL(m.PublicID, derefString(m.OwnedBy)))
 				if icon == "" {
@@ -359,14 +379,18 @@ func adminGetManagedModelHandler(opts Options) gin.HandlerFunc {
 
 func adminCreateManagedModelHandler(opts Options) gin.HandlerFunc {
 	type reqBody struct {
-		PublicID            string          `json:"public_id"`
-		GroupName           *string         `json:"group_name"`
-		OwnedBy             *string         `json:"owned_by"`
-		InputUSDPer1M       decimal.Decimal `json:"input_usd_per_1m"`
-		OutputUSDPer1M      decimal.Decimal `json:"output_usd_per_1m"`
-		CacheInputUSDPer1M  decimal.Decimal `json:"cache_input_usd_per_1m"`
-		CacheOutputUSDPer1M decimal.Decimal `json:"cache_output_usd_per_1m"`
-		Status              int             `json:"status"`
+		PublicID                   string           `json:"public_id"`
+		GroupName                  *string          `json:"group_name"`
+		OwnedBy                    *string          `json:"owned_by"`
+		InputUSDPer1M              decimal.Decimal  `json:"input_usd_per_1m"`
+		OutputUSDPer1M             decimal.Decimal  `json:"output_usd_per_1m"`
+		CacheInputUSDPer1M         decimal.Decimal  `json:"cache_input_usd_per_1m"`
+		CacheOutputUSDPer1M        decimal.Decimal  `json:"cache_output_usd_per_1m"`
+		PriorityPricingEnabled     bool             `json:"priority_pricing_enabled"`
+		PriorityInputUSDPer1M      *decimal.Decimal `json:"priority_input_usd_per_1m"`
+		PriorityOutputUSDPer1M     *decimal.Decimal `json:"priority_output_usd_per_1m"`
+		PriorityCacheInputUSDPer1M *decimal.Decimal `json:"priority_cache_input_usd_per_1m"`
+		Status                     int              `json:"status"`
 	}
 
 	return func(c *gin.Context) {
@@ -399,14 +423,18 @@ func adminCreateManagedModelHandler(opts Options) gin.HandlerFunc {
 		}
 
 		id, err := opts.Store.CreateManagedModel(c.Request.Context(), store.ManagedModelCreate{
-			PublicID:            publicID,
-			GroupName:           normalizeManagedModelGroupNameInput(req.GroupName),
-			OwnedBy:             req.OwnedBy,
-			InputUSDPer1M:       req.InputUSDPer1M,
-			OutputUSDPer1M:      req.OutputUSDPer1M,
-			CacheInputUSDPer1M:  req.CacheInputUSDPer1M,
-			CacheOutputUSDPer1M: req.CacheOutputUSDPer1M,
-			Status:              req.Status,
+			PublicID:                   publicID,
+			GroupName:                  normalizeManagedModelGroupNameInput(req.GroupName),
+			OwnedBy:                    req.OwnedBy,
+			InputUSDPer1M:              req.InputUSDPer1M,
+			OutputUSDPer1M:             req.OutputUSDPer1M,
+			CacheInputUSDPer1M:         req.CacheInputUSDPer1M,
+			CacheOutputUSDPer1M:        req.CacheOutputUSDPer1M,
+			PriorityPricingEnabled:     req.PriorityPricingEnabled,
+			PriorityInputUSDPer1M:      req.PriorityInputUSDPer1M,
+			PriorityOutputUSDPer1M:     req.PriorityOutputUSDPer1M,
+			PriorityCacheInputUSDPer1M: req.PriorityCacheInputUSDPer1M,
+			Status:                     req.Status,
 		})
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建失败"})
@@ -426,15 +454,19 @@ func adminCreateManagedModelHandler(opts Options) gin.HandlerFunc {
 
 func adminUpdateManagedModelHandler(opts Options) gin.HandlerFunc {
 	type reqBody struct {
-		ID                  int64           `json:"id"`
-		PublicID            string          `json:"public_id"`
-		GroupName           *string         `json:"group_name"`
-		OwnedBy             *string         `json:"owned_by"`
-		InputUSDPer1M       decimal.Decimal `json:"input_usd_per_1m"`
-		OutputUSDPer1M      decimal.Decimal `json:"output_usd_per_1m"`
-		CacheInputUSDPer1M  decimal.Decimal `json:"cache_input_usd_per_1m"`
-		CacheOutputUSDPer1M decimal.Decimal `json:"cache_output_usd_per_1m"`
-		Status              int             `json:"status"`
+		ID                         int64            `json:"id"`
+		PublicID                   string           `json:"public_id"`
+		GroupName                  *string          `json:"group_name"`
+		OwnedBy                    *string          `json:"owned_by"`
+		InputUSDPer1M              decimal.Decimal  `json:"input_usd_per_1m"`
+		OutputUSDPer1M             decimal.Decimal  `json:"output_usd_per_1m"`
+		CacheInputUSDPer1M         decimal.Decimal  `json:"cache_input_usd_per_1m"`
+		CacheOutputUSDPer1M        decimal.Decimal  `json:"cache_output_usd_per_1m"`
+		PriorityPricingEnabled     bool             `json:"priority_pricing_enabled"`
+		PriorityInputUSDPer1M      *decimal.Decimal `json:"priority_input_usd_per_1m"`
+		PriorityOutputUSDPer1M     *decimal.Decimal `json:"priority_output_usd_per_1m"`
+		PriorityCacheInputUSDPer1M *decimal.Decimal `json:"priority_cache_input_usd_per_1m"`
+		Status                     int              `json:"status"`
 	}
 
 	return func(c *gin.Context) {
@@ -481,15 +513,19 @@ func adminUpdateManagedModelHandler(opts Options) gin.HandlerFunc {
 		}
 
 		up := store.ManagedModelUpdate{
-			ID:                  req.ID,
-			PublicID:            strings.TrimSpace(req.PublicID),
-			GroupName:           groupName,
-			OwnedBy:             req.OwnedBy,
-			InputUSDPer1M:       req.InputUSDPer1M,
-			OutputUSDPer1M:      req.OutputUSDPer1M,
-			CacheInputUSDPer1M:  req.CacheInputUSDPer1M,
-			CacheOutputUSDPer1M: req.CacheOutputUSDPer1M,
-			Status:              req.Status,
+			ID:                         req.ID,
+			PublicID:                   strings.TrimSpace(req.PublicID),
+			GroupName:                  groupName,
+			OwnedBy:                    req.OwnedBy,
+			InputUSDPer1M:              req.InputUSDPer1M,
+			OutputUSDPer1M:             req.OutputUSDPer1M,
+			CacheInputUSDPer1M:         req.CacheInputUSDPer1M,
+			CacheOutputUSDPer1M:        req.CacheOutputUSDPer1M,
+			PriorityPricingEnabled:     req.PriorityPricingEnabled,
+			PriorityInputUSDPer1M:      req.PriorityInputUSDPer1M,
+			PriorityOutputUSDPer1M:     req.PriorityOutputUSDPer1M,
+			PriorityCacheInputUSDPer1M: req.PriorityCacheInputUSDPer1M,
+			Status:                     req.Status,
 		}
 		if statusOnly {
 			up.PublicID = current.PublicID
@@ -499,6 +535,14 @@ func adminUpdateManagedModelHandler(opts Options) gin.HandlerFunc {
 			up.OutputUSDPer1M = current.OutputUSDPer1M
 			up.CacheInputUSDPer1M = current.CacheInputUSDPer1M
 			up.CacheOutputUSDPer1M = current.CacheOutputUSDPer1M
+			up.PriorityPricingEnabled = current.PriorityPricingEnabled
+			up.PriorityInputUSDPer1M = current.PriorityInputUSDPer1M
+			up.PriorityOutputUSDPer1M = current.PriorityOutputUSDPer1M
+			up.PriorityCacheInputUSDPer1M = current.PriorityCacheInputUSDPer1M
+			up.PriorityPricingEnabled = current.PriorityPricingEnabled
+			up.PriorityInputUSDPer1M = current.PriorityInputUSDPer1M
+			up.PriorityOutputUSDPer1M = current.PriorityOutputUSDPer1M
+			up.PriorityCacheInputUSDPer1M = current.PriorityCacheInputUSDPer1M
 		}
 		if up.PublicID == "" {
 			up.PublicID = current.PublicID

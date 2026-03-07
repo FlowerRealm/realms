@@ -50,6 +50,7 @@ export type AdminUsageEvent = {
   cost_usd: string;
   state_label: string;
   state_badge_class: string;
+  service_tier?: string;
   is_stream: boolean;
   upstream_channel_id: string;
   upstream_channel_name: string;
@@ -102,6 +103,7 @@ export type UsageEventPricingBreakdown = {
 
   model_public_id?: string;
   model_found: boolean;
+  service_tier?: string;
 
   input_tokens_total: number;
   input_tokens_cached: number;

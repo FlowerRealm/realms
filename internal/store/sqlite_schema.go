@@ -62,6 +62,12 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 		if err := ensureSQLiteManagedModelGroupNameColumn(db); err != nil {
 			return err
 		}
+		if err := ensureSQLiteManagedModelPriorityPricingColumns(db); err != nil {
+			return err
+		}
+		if err := ensureSQLiteUsageEventsServiceTierColumn(db); err != nil {
+			return err
+		}
 		if err := ensureSQLiteSessionBindingsTable(db); err != nil {
 			return err
 		}
@@ -124,7 +130,13 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 	if err := ensureSQLiteManagedModelGroupNameColumn(db); err != nil {
 		return err
 	}
+	if err := ensureSQLiteManagedModelPriorityPricingColumns(db); err != nil {
+		return err
+	}
 	if err := ensureSQLiteUsageEventsPriceMultiplierColumns(db); err != nil {
+		return err
+	}
+	if err := ensureSQLiteUsageEventsServiceTierColumn(db); err != nil {
 		return err
 	}
 	if err := ensureSQLiteSubscriptionPlansPriceMultiplierColumn(db); err != nil {

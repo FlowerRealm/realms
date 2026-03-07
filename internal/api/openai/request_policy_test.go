@@ -3,9 +3,9 @@ package openai
 import (
 	"testing"
 
-	"realms/internal/scheduler"
-
 	"github.com/tidwall/gjson"
+
+	"realms/internal/scheduler"
 )
 
 func TestApplyChannelRequestPolicy_FastMode(t *testing.T) {
@@ -15,18 +15,19 @@ func TestApplyChannelRequestPolicy_FastMode(t *testing.T) {
 		body      string
 		wantExist bool
 		wantValue string
+		wantErr   bool
 	}{
 		{
-			name:      "service_tier removed when channel disallows service_tier",
-			sel:       scheduler.Selection{AllowServiceTier: false, FastMode: true},
-			body:      `{"service_tier":"priority","store":true}`,
-			wantExist: false,
+			name:    "priority rejected when channel disallows service_tier",
+			sel:     scheduler.Selection{AllowServiceTier: false, FastMode: true},
+			body:    `{"service_tier":"priority","store":true}`,
+			wantErr: true,
 		},
 		{
-			name:      "priority removed when fast mode disabled",
-			sel:       scheduler.Selection{AllowServiceTier: true, FastMode: false},
-			body:      `{"service_tier":"priority","store":true}`,
-			wantExist: false,
+			name:    "priority rejected when fast mode disabled",
+			sel:     scheduler.Selection{AllowServiceTier: true, FastMode: false},
+			body:    `{"service_tier":"priority","store":true}`,
+			wantErr: true,
 		},
 		{
 			name:      "flex preserved when fast mode disabled",
@@ -34,6 +35,13 @@ func TestApplyChannelRequestPolicy_FastMode(t *testing.T) {
 			body:      `{"service_tier":"flex","store":true}`,
 			wantExist: true,
 			wantValue: "flex",
+		},
+		{
+			name:      "fast normalized to priority when fast mode enabled",
+			sel:       scheduler.Selection{AllowServiceTier: true, FastMode: true},
+			body:      `{"service_tier":"fast","store":true}`,
+			wantExist: true,
+			wantValue: "priority",
 		},
 		{
 			name:      "priority preserved when fast mode enabled",
@@ -47,6 +55,12 @@ func TestApplyChannelRequestPolicy_FastMode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			out, err := applyChannelRequestPolicy([]byte(tt.body), tt.sel)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("applyChannelRequestPolicy: %v", err)
 			}

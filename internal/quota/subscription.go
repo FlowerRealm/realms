@@ -43,7 +43,7 @@ func (p *SubscriptionProvider) Reserve(ctx context.Context, in ReserveInput) (Re
 
 	var baseReservedUSD decimal.Decimal
 	if in.Model != nil && ((in.InputTokens != nil && *in.InputTokens > 0) || (in.MaxOutputTokens != nil && *in.MaxOutputTokens > 0)) {
-		c, err := estimateCostUSD(ctx, p.st, in.Model, in.InputTokens, nil, in.MaxOutputTokens, nil)
+		c, err := estimateCostUSD(ctx, p.st, in.Model, in.ServiceTier, in.InputTokens, nil, in.MaxOutputTokens, nil)
 		if err != nil {
 			return ReserveResult{}, err
 		}
@@ -125,6 +125,7 @@ func (p *SubscriptionProvider) Reserve(ctx context.Context, in ReserveInput) (Re
 		SubscriptionID:   &chosen.Subscription.ID,
 		TokenID:          in.TokenID,
 		Model:            in.Model,
+		ServiceTier:      in.ServiceTier,
 		ReservedUSD:      chosenReservedUSD,
 		ReserveExpiresAt: now.Add(p.reserveTTL),
 	})
@@ -147,6 +148,10 @@ func (p *SubscriptionProvider) Commit(ctx context.Context, in CommitInput) error
 	if model == nil {
 		model = ev.Model
 	}
+	serviceTier := in.ServiceTier
+	if serviceTier == nil {
+		serviceTier = ev.ServiceTier
+	}
 
 	paymentMult := store.DefaultGroupPriceMultiplier
 	if ev.SubscriptionID != nil && *ev.SubscriptionID > 0 {
@@ -160,7 +165,7 @@ func (p *SubscriptionProvider) Commit(ctx context.Context, in CommitInput) error
 	groupMult, groupName := groupMultiplierForRouteGroup(ctx, p.st, in.RouteGroup)
 	totalMult := normalizeMultiplier(paymentMult.Mul(groupMult))
 
-	usd, err := estimateCostUSD(ctx, p.st, model, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens)
+	usd, err := estimateCostUSD(ctx, p.st, model, serviceTier, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens)
 	if err != nil {
 		return err
 	}
@@ -175,6 +180,7 @@ func (p *SubscriptionProvider) Commit(ctx context.Context, in CommitInput) error
 	return p.st.CommitUsage(ctx, store.CommitUsageInput{
 		UsageEventID:             in.UsageEventID,
 		UpstreamChannelID:        in.UpstreamChannelID,
+		ServiceTier:              serviceTier,
 		InputTokens:              in.InputTokens,
 		CachedInputTokens:        in.CachedInputTokens,
 		OutputTokens:             in.OutputTokens,

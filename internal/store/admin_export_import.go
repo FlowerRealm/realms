@@ -86,15 +86,19 @@ type AdminConfigUpstreamEndpoint struct {
 }
 
 type AdminConfigManagedModel struct {
-	PublicID            string          `json:"public_id"`
-	GroupName           string          `json:"group_name,omitempty"`
-	UpstreamModel       *string         `json:"upstream_model,omitempty"`
-	OwnedBy             *string         `json:"owned_by,omitempty"`
-	InputUSDPer1M       decimal.Decimal `json:"input_usd_per_1m"`
-	OutputUSDPer1M      decimal.Decimal `json:"output_usd_per_1m"`
-	CacheInputUSDPer1M  decimal.Decimal `json:"cache_input_usd_per_1m"`
-	CacheOutputUSDPer1M decimal.Decimal `json:"cache_output_usd_per_1m"`
-	Status              int             `json:"status"`
+	PublicID                   string           `json:"public_id"`
+	GroupName                  string           `json:"group_name,omitempty"`
+	UpstreamModel              *string          `json:"upstream_model,omitempty"`
+	OwnedBy                    *string          `json:"owned_by,omitempty"`
+	InputUSDPer1M              decimal.Decimal  `json:"input_usd_per_1m"`
+	OutputUSDPer1M             decimal.Decimal  `json:"output_usd_per_1m"`
+	CacheInputUSDPer1M         decimal.Decimal  `json:"cache_input_usd_per_1m"`
+	CacheOutputUSDPer1M        decimal.Decimal  `json:"cache_output_usd_per_1m"`
+	PriorityPricingEnabled     bool             `json:"priority_pricing_enabled,omitempty"`
+	PriorityInputUSDPer1M      *decimal.Decimal `json:"priority_input_usd_per_1m,omitempty"`
+	PriorityOutputUSDPer1M     *decimal.Decimal `json:"priority_output_usd_per_1m,omitempty"`
+	PriorityCacheInputUSDPer1M *decimal.Decimal `json:"priority_cache_input_usd_per_1m,omitempty"`
+	Status                     int              `json:"status"`
 }
 
 type AdminConfigChannelModel struct {
@@ -284,15 +288,19 @@ func (s *Store) ExportAdminConfig(ctx context.Context) (AdminConfigExport, error
 	out.ManagedModels = make([]AdminConfigManagedModel, 0, len(managed))
 	for _, m := range managed {
 		out.ManagedModels = append(out.ManagedModels, AdminConfigManagedModel{
-			PublicID:            strings.TrimSpace(m.PublicID),
-			GroupName:           normalizeManagedModelGroupName(m.GroupName),
-			UpstreamModel:       m.UpstreamModel,
-			OwnedBy:             m.OwnedBy,
-			InputUSDPer1M:       m.InputUSDPer1M,
-			OutputUSDPer1M:      m.OutputUSDPer1M,
-			CacheInputUSDPer1M:  m.CacheInputUSDPer1M,
-			CacheOutputUSDPer1M: m.CacheOutputUSDPer1M,
-			Status:              m.Status,
+			PublicID:                   strings.TrimSpace(m.PublicID),
+			GroupName:                  normalizeManagedModelGroupName(m.GroupName),
+			UpstreamModel:              m.UpstreamModel,
+			OwnedBy:                    m.OwnedBy,
+			InputUSDPer1M:              m.InputUSDPer1M,
+			OutputUSDPer1M:             m.OutputUSDPer1M,
+			CacheInputUSDPer1M:         m.CacheInputUSDPer1M,
+			CacheOutputUSDPer1M:        m.CacheOutputUSDPer1M,
+			PriorityPricingEnabled:     m.PriorityPricingEnabled,
+			PriorityInputUSDPer1M:      m.PriorityInputUSDPer1M,
+			PriorityOutputUSDPer1M:     m.PriorityOutputUSDPer1M,
+			PriorityCacheInputUSDPer1M: m.PriorityCacheInputUSDPer1M,
+			Status:                     m.Status,
 		})
 	}
 
@@ -824,8 +832,8 @@ ON CONFLICT(channel_id) DO UPDATE SET
 	}
 
 	stmtUpsertManagedModel := `
-INSERT INTO managed_models(public_id, group_name, upstream_model, owned_by, input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m, status, created_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+INSERT INTO managed_models(public_id, group_name, upstream_model, owned_by, input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m, priority_pricing_enabled, priority_input_usd_per_1m, priority_output_usd_per_1m, priority_cache_input_usd_per_1m, status, created_at)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 ON DUPLICATE KEY UPDATE
   group_name=VALUES(group_name),
   upstream_model=VALUES(upstream_model),
@@ -834,12 +842,16 @@ ON DUPLICATE KEY UPDATE
   output_usd_per_1m=VALUES(output_usd_per_1m),
   cache_input_usd_per_1m=VALUES(cache_input_usd_per_1m),
   cache_output_usd_per_1m=VALUES(cache_output_usd_per_1m),
+  priority_pricing_enabled=VALUES(priority_pricing_enabled),
+  priority_input_usd_per_1m=VALUES(priority_input_usd_per_1m),
+  priority_output_usd_per_1m=VALUES(priority_output_usd_per_1m),
+  priority_cache_input_usd_per_1m=VALUES(priority_cache_input_usd_per_1m),
   status=VALUES(status)
 `
 	if s.dialect == DialectSQLite {
 		stmtUpsertManagedModel = `
-INSERT INTO managed_models(public_id, group_name, upstream_model, owned_by, input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m, status, created_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+INSERT INTO managed_models(public_id, group_name, upstream_model, owned_by, input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m, priority_pricing_enabled, priority_input_usd_per_1m, priority_output_usd_per_1m, priority_cache_input_usd_per_1m, status, created_at)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 ON CONFLICT(public_id) DO UPDATE SET
   group_name=excluded.group_name,
   upstream_model=excluded.upstream_model,
@@ -848,6 +860,10 @@ ON CONFLICT(public_id) DO UPDATE SET
   output_usd_per_1m=excluded.output_usd_per_1m,
   cache_input_usd_per_1m=excluded.cache_input_usd_per_1m,
   cache_output_usd_per_1m=excluded.cache_output_usd_per_1m,
+  priority_pricing_enabled=excluded.priority_pricing_enabled,
+  priority_input_usd_per_1m=excluded.priority_input_usd_per_1m,
+  priority_output_usd_per_1m=excluded.priority_output_usd_per_1m,
+  priority_cache_input_usd_per_1m=excluded.priority_cache_input_usd_per_1m,
   status=excluded.status
 `
 	}
@@ -864,12 +880,31 @@ ON CONFLICT(public_id) DO UPDATE SET
 		if inUSD.IsNegative() || outUSD.IsNegative() || cacheInUSD.IsNegative() || cacheOutUSD.IsNegative() {
 			return AdminConfigImportReport{}, fmt.Errorf("managed_models[%s] 定价不合法", publicID)
 		}
+		priorityInUSD, err := normalizeOptionalManagedModelPrice(m.PriorityInputUSDPer1M)
+		if err != nil {
+			return AdminConfigImportReport{}, fmt.Errorf("managed_models[%s] fast input 定价不合法", publicID)
+		}
+		priorityOutUSD, err := normalizeOptionalManagedModelPrice(m.PriorityOutputUSDPer1M)
+		if err != nil {
+			return AdminConfigImportReport{}, fmt.Errorf("managed_models[%s] fast output 定价不合法", publicID)
+		}
+		priorityCacheInUSD, err := normalizeOptionalManagedModelPrice(m.PriorityCacheInputUSDPer1M)
+		if err != nil {
+			return AdminConfigImportReport{}, fmt.Errorf("managed_models[%s] fast cache input 定价不合法", publicID)
+		}
+		if err := validateManagedModelPriorityPricing(m.PriorityPricingEnabled, priorityInUSD, priorityOutUSD); err != nil {
+			return AdminConfigImportReport{}, fmt.Errorf("managed_models[%s] %w", publicID, err)
+		}
 		status := m.Status
 		if status != 0 && status != 1 {
 			status = 1
 		}
+		priorityEnabled := 0
+		if m.PriorityPricingEnabled {
+			priorityEnabled = 1
+		}
 		groupName := normalizeManagedModelGroupName(m.GroupName)
-		if _, err := tx.ExecContext(ctx, stmtUpsertManagedModel, publicID, groupName, m.UpstreamModel, m.OwnedBy, inUSD, outUSD, cacheInUSD, cacheOutUSD, status); err != nil {
+		if _, err := tx.ExecContext(ctx, stmtUpsertManagedModel, publicID, groupName, m.UpstreamModel, m.OwnedBy, inUSD, outUSD, cacheInUSD, cacheOutUSD, priorityEnabled, priorityInUSD, priorityOutUSD, priorityCacheInUSD, status); err != nil {
 			return AdminConfigImportReport{}, fmt.Errorf("导入 managed_models 失败: %w", err)
 		}
 	}

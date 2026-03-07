@@ -252,3 +252,48 @@ func TestChatCompletions_Stream_ForcesStreamOptionsIncludeUsage(t *testing.T) {
 		t.Fatalf("expected stream_options.include_usage=true, got=%#v", so["include_usage"])
 	}
 }
+
+func TestChatCompletions_InvalidServiceTierReturnsBadRequest(t *testing.T) {
+	const groupName = "g1"
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Groups: groupName}},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {{ID: 11, ChannelID: 1, BaseURL: "https://openai.example", Status: 1}},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {{ID: 1, EndpointID: 11, Status: 1}},
+		},
+		models: map[string]store.ManagedModel{
+			"m1": {ID: 1, PublicID: "m1", GroupName: groupName, Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"m1": {{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "gpt-5.2", Status: 1}},
+		},
+	}
+
+	doer := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		t.Fatal("unexpected upstream call")
+		return nil, nil
+	})
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+
+	reqBody := `{"model":"m1","messages":[{"role":"user","content":"hi"}],"service_tier":"turbo"}`
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/chat/completions", bytes.NewReader([]byte(reqBody)))
+	req.Header.Set("Content-Type", "application/json")
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{groupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.ChatCompletions), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "service_tier 非法") {
+		t.Fatalf("unexpected body: %s", rr.Body.String())
+	}
+}

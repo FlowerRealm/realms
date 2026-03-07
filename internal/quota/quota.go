@@ -11,7 +11,11 @@ import (
 	"realms/internal/store"
 )
 
-var ErrModelPricingMissing = errors.New("模型不存在，无法计费")
+var (
+	ErrModelPricingMissing    = errors.New("模型不存在，无法计费")
+	ErrServiceTierUnsupported = errors.New("模型不支持 fast mode")
+	ErrPriorityPricingMissing = errors.New("模型 fast mode 定价缺失")
+)
 
 type Provider interface {
 	Reserve(ctx context.Context, in ReserveInput) (ReserveResult, error)
@@ -24,6 +28,7 @@ type ReserveInput struct {
 	UserID          int64
 	TokenID         int64
 	Model           *string
+	ServiceTier     *string
 	InputTokens     *int64
 	MaxOutputTokens *int64
 }
@@ -35,6 +40,7 @@ type ReserveResult struct {
 type CommitInput struct {
 	UsageEventID       int64
 	Model              *string
+	ServiceTier        *string
 	UpstreamChannelID  *int64
 	RouteGroup         *string
 	InputTokens        *int64
@@ -62,7 +68,7 @@ func applyPriceMultiplierUSD(baseUSD decimal.Decimal, multiplier decimal.Decimal
 	return baseUSD.Mul(multiplier).Truncate(6), nil
 }
 
-func estimateCostUSD(ctx context.Context, st *store.Store, model *string, inputTokens, cachedInputTokens, outputTokens, cachedOutputTokens *int64) (decimal.Decimal, error) {
+func estimateCostUSD(ctx context.Context, st *store.Store, model, serviceTier *string, inputTokens, cachedInputTokens, outputTokens, cachedOutputTokens *int64) (decimal.Decimal, error) {
 	if model == nil || *model == "" {
 		return decimal.Zero, nil
 	}
@@ -77,7 +83,21 @@ func estimateCostUSD(ctx context.Context, st *store.Store, model *string, inputT
 		}
 		return decimal.Zero, err
 	}
-	return estimateCostUSDWithPricing(mm.InputUSDPer1M, mm.OutputUSDPer1M, mm.CacheInputUSDPer1M, mm.CacheOutputUSDPer1M, inputTokens, cachedInputTokens, outputTokens, cachedOutputTokens)
+	tier := ""
+	if serviceTier != nil {
+		tier = *serviceTier
+	}
+	pricing, err := store.ResolveManagedModelPricing(mm, tier)
+	if err != nil {
+		if errors.Is(err, store.ErrManagedModelServiceTierUnsupported) {
+			return decimal.Zero, ErrServiceTierUnsupported
+		}
+		if errors.Is(err, store.ErrManagedModelPriorityPricingMissing) {
+			return decimal.Zero, ErrPriorityPricingMissing
+		}
+		return decimal.Zero, err
+	}
+	return estimateCostUSDWithPricing(pricing.InputUSDPer1M, pricing.OutputUSDPer1M, pricing.CacheInputUSDPer1M, pricing.CacheOutputUSDPer1M, inputTokens, cachedInputTokens, outputTokens, cachedOutputTokens)
 }
 
 func estimateCostUSDWithPricing(inUSDPer1M, outUSDPer1M, cacheInUSDPer1M, cacheOutUSDPer1M decimal.Decimal, inputTokens, cachedInputTokens, outputTokens, cachedOutputTokens *int64) (decimal.Decimal, error) {

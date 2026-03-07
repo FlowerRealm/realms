@@ -258,6 +258,7 @@ func v1UsageEventsHTTPHandler(opts Options) http.HandlerFunc {
 				TokenID:            e.TokenID,
 				State:              e.State,
 				Model:              e.Model,
+				ServiceTier:        normalizeUsageServiceTierPtr(e.ServiceTier),
 				InputTokens:        e.InputTokens,
 				CachedInputTokens:  e.CachedInputTokens,
 				OutputTokens:       e.OutputTokens,

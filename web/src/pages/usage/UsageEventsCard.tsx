@@ -15,6 +15,22 @@ import {
   tokensPerSecond,
 } from './usageUtils';
 
+function normalizeServiceTier(raw?: string | null): string {
+  const tier = (raw || '').trim().toLowerCase();
+  if (tier === 'fast' || tier === 'priority') return 'priority';
+  return tier;
+}
+
+function serviceTierBadgeLabel(raw?: string | null): string {
+  const tier = normalizeServiceTier(raw);
+  return tier ? tier.toUpperCase() : '';
+}
+
+function serviceTierText(raw?: string | null): string {
+  const tier = normalizeServiceTier(raw);
+  return tier || '-';
+}
+
 export function UsageEventsCard({
   events,
   tokenByID,
@@ -109,6 +125,7 @@ export function UsageEventsCard({
                 const cost = costLabel(e);
                 const state = stateLabel(e.state);
                 const errText = errorText(e.error_class, e.error_message);
+                const serviceTier = serviceTierBadgeLabel(e.service_tier);
 
                 return (
                   <>
@@ -162,6 +179,9 @@ export function UsageEventsCard({
                         {e.is_stream ? (
                           <div className="badge bg-info-subtle text-info border border-info-subtle rounded-pill px-2 scale-90 mt-1">STREAM</div>
                         ) : null}
+                        {serviceTier ? (
+                          <div className="badge bg-warning-subtle text-warning border border-warning-subtle rounded-pill px-2 scale-90 mt-1">{serviceTier}</div>
+                        ) : null}
                         {errText ? (
                           <div className="text-danger smaller mt-1" title={errText}>
                             <span className="material-symbols-rounded">error</span> 错误
@@ -197,6 +217,10 @@ export function UsageEventsCard({
                                 <div className="col-12 col-lg-4">
                                   <div className="text-muted smaller">Error Message</div>
                                   <div className="font-monospace">{e.error_message || '-'}</div>
+                                </div>
+                                <div className="col-12 col-lg-4">
+                                  <div className="text-muted smaller">Service Tier</div>
+                                  <div className="font-monospace">{serviceTierText(detailByEventID[e.id]?.pricing_breakdown?.service_tier || e.service_tier)}</div>
                                 </div>
 
                                 {detailByEventID[e.id]?.pricing_breakdown ? (

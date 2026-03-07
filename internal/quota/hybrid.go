@@ -70,7 +70,7 @@ func (p *HybridProvider) Reserve(ctx context.Context, in ReserveInput) (ReserveR
 
 	reservedUSD := decimal.Zero
 	if in.Model != nil && ((in.InputTokens != nil && *in.InputTokens > 0) || (in.MaxOutputTokens != nil && *in.MaxOutputTokens > 0)) {
-		c, err := estimateCostUSD(ctx, p.st, in.Model, in.InputTokens, nil, in.MaxOutputTokens, nil)
+		c, err := estimateCostUSD(ctx, p.st, in.Model, in.ServiceTier, in.InputTokens, nil, in.MaxOutputTokens, nil)
 		if err != nil {
 			return ReserveResult{}, err
 		}
@@ -97,6 +97,7 @@ func (p *HybridProvider) Reserve(ctx context.Context, in ReserveInput) (ReserveR
 		SubscriptionID:   nil,
 		TokenID:          in.TokenID,
 		Model:            in.Model,
+		ServiceTier:      in.ServiceTier,
 		ReservedUSD:      reservedUSD,
 		ReserveExpiresAt: now.Add(p.reserveTTL),
 	})
@@ -129,7 +130,11 @@ func (p *HybridProvider) Commit(ctx context.Context, in CommitInput) error {
 	if model == nil {
 		model = ev.Model
 	}
-	usd, err := estimateCostUSD(ctx, p.st, model, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens)
+	serviceTier := in.ServiceTier
+	if serviceTier == nil {
+		serviceTier = ev.ServiceTier
+	}
+	usd, err := estimateCostUSD(ctx, p.st, model, serviceTier, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens)
 	if err != nil {
 		return err
 	}
@@ -150,6 +155,7 @@ func (p *HybridProvider) Commit(ctx context.Context, in CommitInput) error {
 		return p.st.CommitUsageAndRefundBalance(ctx, store.CommitUsageInput{
 			UsageEventID:             in.UsageEventID,
 			UpstreamChannelID:        in.UpstreamChannelID,
+			ServiceTier:              serviceTier,
 			InputTokens:              in.InputTokens,
 			CachedInputTokens:        in.CachedInputTokens,
 			OutputTokens:             in.OutputTokens,
@@ -165,6 +171,7 @@ func (p *HybridProvider) Commit(ctx context.Context, in CommitInput) error {
 	return p.st.CommitUsage(ctx, store.CommitUsageInput{
 		UsageEventID:             in.UsageEventID,
 		UpstreamChannelID:        in.UpstreamChannelID,
+		ServiceTier:              serviceTier,
 		InputTokens:              in.InputTokens,
 		CachedInputTokens:        in.CachedInputTokens,
 		OutputTokens:             in.OutputTokens,

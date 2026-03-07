@@ -88,6 +88,7 @@ type usageEventAPI struct {
 	TokenID            int64           `json:"token_id"`
 	State              string          `json:"state"`
 	Model              *string         `json:"model,omitempty"`
+	ServiceTier        *string         `json:"service_tier,omitempty"`
 	InputTokens        *int64          `json:"input_tokens,omitempty"`
 	CachedInputTokens  *int64          `json:"cached_input_tokens,omitempty"`
 	OutputTokens       *int64          `json:"output_tokens,omitempty"`
@@ -104,6 +105,17 @@ type usageEventAPI struct {
 	ResponseBytes      int64           `json:"response_bytes"`
 	CreatedAt          time.Time       `json:"created_at"`
 	UpdatedAt          time.Time       `json:"updated_at"`
+}
+
+func normalizeUsageServiceTierPtr(raw *string) *string {
+	if raw == nil {
+		return nil
+	}
+	tier := strings.TrimSpace(store.NormalizeServiceTier(*raw))
+	if tier == "" {
+		return nil
+	}
+	return &tier
 }
 
 func usageWindowsHandler(opts Options) gin.HandlerFunc {
@@ -380,6 +392,7 @@ func usageEventsHandler(opts Options) gin.HandlerFunc {
 				TokenID:            e.TokenID,
 				State:              e.State,
 				Model:              e.Model,
+				ServiceTier:        normalizeUsageServiceTierPtr(e.ServiceTier),
 				InputTokens:        e.InputTokens,
 				CachedInputTokens:  e.CachedInputTokens,
 				OutputTokens:       e.OutputTokens,

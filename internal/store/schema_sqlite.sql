@@ -280,6 +280,7 @@ CREATE TABLE IF NOT EXISTS `usage_events` (
   `upstream_credential_id` INTEGER NULL,
   `state` TEXT NOT NULL,
   `model` TEXT NULL,
+  `service_tier` TEXT NULL,
   `input_tokens` INTEGER NULL,
   `cached_input_tokens` INTEGER NULL,
   `output_tokens` INTEGER NULL,
@@ -519,6 +520,10 @@ CREATE TABLE IF NOT EXISTS `managed_models` (
   `output_usd_per_1m` DECIMAL(20,6) NOT NULL DEFAULT 15.000000,
   `cache_input_usd_per_1m` DECIMAL(20,6) NOT NULL DEFAULT 5.000000,
   `cache_output_usd_per_1m` DECIMAL(20,6) NOT NULL DEFAULT 5.000000,
+  `priority_pricing_enabled` INTEGER NOT NULL DEFAULT 0,
+  `priority_input_usd_per_1m` DECIMAL(20,6) NULL,
+  `priority_output_usd_per_1m` DECIMAL(20,6) NULL,
+  `priority_cache_input_usd_per_1m` DECIMAL(20,6) NULL,
   `status` INTEGER NOT NULL DEFAULT 1,
   `created_at` DATETIME NOT NULL
 );
