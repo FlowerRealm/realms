@@ -20,7 +20,10 @@ func clonePayload(base map[string]any) map[string]any {
 func applyChannelRequestPolicy(body []byte, sel scheduler.Selection) ([]byte, error) {
 	out := body
 	var err error
-	serviceTier := requestedServiceTierFromJSONBytes(out)
+	serviceTier, _, err := requestedServiceTierFromJSONBytesStrict(out)
+	if err != nil {
+		return nil, err
+	}
 	if !sel.AllowServiceTier {
 		if serviceTier != nil && *serviceTier == "priority" {
 			return nil, errSelectedChannelFastModeUnsupported

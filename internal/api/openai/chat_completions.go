@@ -218,10 +218,6 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 			}
 		}
 		if err := validateManagedModelServiceTier(mm, serviceTier); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if err := validateManagedModelServiceTier(mm, serviceTier); err != nil {
 			http.Error(w, serviceTierBadRequestMessage(err), http.StatusBadRequest)
 			return
 		}

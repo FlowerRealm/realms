@@ -15,44 +15,102 @@ import (
 
 var errSelectedChannelFastModeUnsupported = errors.New("所选渠道不支持 fast mode")
 
-func normalizeServiceTierInPayload(payload map[string]any) *string {
+func parseServiceTier(raw string) (*string, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return nil, false
+	case "fast", "priority":
+		tier := "priority"
+		return &tier, false
+	case "auto", "default", "flex":
+		tier := strings.ToLower(strings.TrimSpace(raw))
+		return &tier, false
+	default:
+		return nil, true
+	}
+}
+
+func normalizeServiceTierInPayload(payload map[string]any) (*string, bool, error) {
 	if payload == nil {
-		return nil
+		return nil, false, nil
 	}
-	tier := store.NormalizeServiceTier(stringFromAny(payload["service_tier"]))
-	if tier == "" {
+	v, ok := payload["service_tier"]
+	if !ok {
+		return nil, false, nil
+	}
+	tierRaw, ok := v.(string)
+	if !ok {
+		return nil, true, errors.New("service_tier invalid")
+	}
+	tier, invalid := parseServiceTier(tierRaw)
+	if invalid {
+		return nil, true, errors.New("service_tier invalid")
+	}
+	if tier == nil {
 		delete(payload, "service_tier")
-		return nil
+		return nil, true, nil
 	}
-	payload["service_tier"] = tier
-	return &tier
+	payload["service_tier"] = *tier
+	return tier, true, nil
 }
 
 func requestedServiceTierFromPayload(payload map[string]any) *string {
-	return normalizeServiceTierInPayload(payload)
+	tier, _, err := normalizeServiceTierInPayload(payload)
+	if err != nil {
+		return nil
+	}
+	return tier
 }
 
 func requestedServiceTierFromJSONBytes(body []byte) *string {
+	tier, _, err := requestedServiceTierFromJSONBytesStrict(body)
+	if err != nil {
+		return nil
+	}
+	return tier
+}
+
+func requestedServiceTierFromJSONBytesStrict(body []byte) (*string, bool, error) {
 	if len(body) == 0 {
-		return nil
+		return nil, false, nil
 	}
-	tier := store.NormalizeServiceTier(gjson.GetBytes(body, "service_tier").String())
-	if tier == "" {
-		return nil
+	res := gjson.GetBytes(body, "service_tier")
+	if !res.Exists() {
+		return nil, false, nil
 	}
-	return &tier
+	if res.Type != gjson.String {
+		return nil, true, errors.New("service_tier invalid")
+	}
+	tier, invalid := parseServiceTier(res.String())
+	if invalid {
+		return nil, true, errors.New("service_tier invalid")
+	}
+	return tier, true, nil
 }
 
 func normalizeRequestServiceTier(rawBody []byte, payload map[string]any) ([]byte, *string, error) {
-	serviceTier := normalizeServiceTierInPayload(payload)
+	serviceTier, payloadPresent, err := normalizeServiceTierInPayload(payload)
+	if err != nil {
+		return nil, nil, err
+	}
 	if len(rawBody) == 0 {
 		return rawBody, serviceTier, nil
 	}
-	fromBody := requestedServiceTierFromJSONBytes(rawBody)
+	fromBody, bodyPresent, err := requestedServiceTierFromJSONBytesStrict(rawBody)
+	if err != nil {
+		return nil, nil, err
+	}
 	if serviceTier == nil {
 		serviceTier = fromBody
 	}
 	if serviceTier == nil {
+		if payloadPresent || bodyPresent {
+			out, err := sjson.DeleteBytes(rawBody, "service_tier")
+			if err != nil {
+				return nil, nil, err
+			}
+			rawBody = out
+		}
 		return rawBody, nil, nil
 	}
 	if cur := strings.TrimSpace(gjson.GetBytes(rawBody, "service_tier").String()); cur != *serviceTier {
