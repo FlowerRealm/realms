@@ -54,7 +54,7 @@ curl -fsS "$REALMS_BASE_URL/api/channel"   -H "Authorization: Bearer $REALMS_ADM
     "base_url": "https://api.openai.com/v1",
     "priority": 0,
     "promotion": false,
-    "allow_service_tier": false,
+    "allow_service_tier": true,
     "disable_store": false,
     "allow_safety_identifier": false
   }'

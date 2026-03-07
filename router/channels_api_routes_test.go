@@ -692,12 +692,13 @@ func TestChannels_SettingsAndCredentials_RootFlow(t *testing.T) {
 		Success bool   `json:"success"`
 		Message string `json:"message"`
 		Data    struct {
-			ID        int64   `json:"id"`
-			Status    int     `json:"status"`
-			FastMode  bool    `json:"fast_mode"`
-			TestModel *string `json:"test_model"`
-			Weight    int     `json:"weight"`
-			AutoBan   bool    `json:"auto_ban"`
+			ID               int64   `json:"id"`
+			Status           int     `json:"status"`
+			AllowServiceTier bool    `json:"allow_service_tier"`
+			FastMode         bool    `json:"fast_mode"`
+			TestModel        *string `json:"test_model"`
+			Weight           int     `json:"weight"`
+			AutoBan          bool    `json:"auto_ban"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &detailResp); err != nil {
@@ -714,6 +715,9 @@ func TestChannels_SettingsAndCredentials_RootFlow(t *testing.T) {
 	}
 	if detailResp.Data.AutoBan {
 		t.Fatalf("expected auto_ban=false, got true")
+	}
+	if !detailResp.Data.AllowServiceTier {
+		t.Fatalf("expected allow_service_tier=true by default, got false")
 	}
 	if !detailResp.Data.FastMode {
 		t.Fatalf("expected fast_mode=true by default, got false")
@@ -762,6 +766,163 @@ func TestChannels_SettingsAndCredentials_RootFlow(t *testing.T) {
 	}
 	if detailResp.Data.FastMode {
 		t.Fatalf("expected channel fast_mode=false after update, got true")
+	}
+}
+
+func TestChannels_CreateDefaultsAllowServiceTierAndRejectsInvalidFastMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	userID, err := st.CreateUser(ctx, "root@example.com", "root", pwHash, store.UserRoleRoot)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+
+	cookieName := "realms_session"
+	sessionStore := cookie.NewStore([]byte("test-secret"))
+	sessionStore.Options(sessions.Options{Path: "/", MaxAge: 2592000, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	engine.Use(sessions.Sessions(cookieName, sessionStore))
+
+	SetRouter(engine, Options{Store: st, PersonalMode: false, FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>")})
+
+	loginBody, _ := json.Marshal(map[string]any{"login": "root@example.com", "password": "password123"})
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/user/login", bytes.NewReader(loginBody))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	sessionCookie := ""
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == cookieName {
+			sessionCookie = c.String()
+			break
+		}
+	}
+	if sessionCookie == "" {
+		t.Fatalf("expected session cookie %q", cookieName)
+	}
+
+	createBody, _ := json.Marshal(map[string]any{
+		"type":     store.UpstreamTypeOpenAICompatible,
+		"name":     "created-default",
+		"base_url": "https://api.openai.com",
+	})
+	req = httptest.NewRequest(http.MethodPost, "http://example.com/api/channel", bytes.NewReader(createBody))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("create channel status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var createResp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("json.Unmarshal create channel: %v", err)
+	}
+	if !createResp.Success || createResp.Data.ID <= 0 {
+		t.Fatalf("unexpected create response: %#v", createResp)
+	}
+	created, err := st.GetUpstreamChannelByID(ctx, createResp.Data.ID)
+	if err != nil {
+		t.Fatalf("GetUpstreamChannelByID: %v", err)
+	}
+	if !created.AllowServiceTier {
+		t.Fatalf("expected allow_service_tier=true by default, got false")
+	}
+	if !created.FastMode {
+		t.Fatalf("expected fast_mode=true by default, got false")
+	}
+
+	badCreateBody, _ := json.Marshal(map[string]any{
+		"type":               store.UpstreamTypeOpenAICompatible,
+		"name":               "created-bad",
+		"base_url":           "https://api.openai.com",
+		"allow_service_tier": false,
+		"fast_mode":          true,
+	})
+	req = httptest.NewRequest(http.MethodPost, "http://example.com/api/channel", bytes.NewReader(badCreateBody))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("bad create status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("json.Unmarshal bad create: %v", err)
+	}
+	if createResp.Success {
+		t.Fatalf("expected bad create to fail, got success")
+	}
+	if createResp.Message != store.ErrUpstreamChannelFastModeRequiresServiceTier.Error() {
+		t.Fatalf("unexpected bad create message: %q", createResp.Message)
+	}
+
+	channelID, err := st.CreateUpstreamChannelWithRequestPolicy(ctx, store.UpstreamTypeOpenAICompatible, "update-target", "", 0, false, true, false, false, true)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannelWithRequestPolicy: %v", err)
+	}
+	if _, err := st.SetUpstreamEndpointBaseURL(ctx, channelID, "https://api.openai.com"); err != nil {
+		t.Fatalf("SetUpstreamEndpointBaseURL: %v", err)
+	}
+
+	badUpdateBody, _ := json.Marshal(map[string]any{
+		"id":                 channelID,
+		"allow_service_tier": false,
+		"fast_mode":          true,
+	})
+	req = httptest.NewRequest(http.MethodPut, "http://example.com/api/channel", bytes.NewReader(badUpdateBody))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("bad update status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var updateResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &updateResp); err != nil {
+		t.Fatalf("json.Unmarshal bad update: %v", err)
+	}
+	if updateResp.Success {
+		t.Fatalf("expected bad update to fail, got success")
+	}
+	if updateResp.Message != store.ErrUpstreamChannelFastModeRequiresServiceTier.Error() {
+		t.Fatalf("unexpected bad update message: %q", updateResp.Message)
 	}
 }
 

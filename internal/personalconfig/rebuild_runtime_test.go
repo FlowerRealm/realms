@@ -232,3 +232,57 @@ func TestRebuildRuntimeFromBundle_AppliesSkillsStoreV1(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+func TestRebuildRuntimeFromBundle_NormalizesLegacyFastModeServiceTierConflict(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "dst.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	fastMode := true
+	bundle := Bundle{
+		Version: BundleVersion,
+		Admin: store.AdminConfigExport{
+			Version: 8,
+			UpstreamChannels: []store.AdminConfigUpstreamChannel{{
+				Type:             store.UpstreamTypeOpenAICompatible,
+				Name:             "legacy-fast",
+				Status:           1,
+				Priority:         0,
+				AllowServiceTier: false,
+				FastMode:         &fastMode,
+			}},
+			UpstreamEndpoints: []store.AdminConfigUpstreamEndpoint{{
+				ChannelType: store.UpstreamTypeOpenAICompatible,
+				ChannelName: "legacy-fast",
+				BaseURL:     "https://api.openai.com",
+			}},
+		},
+	}
+
+	if err := RebuildRuntimeFromBundle(ctx, db, store.DialectSQLite, bundle); err != nil {
+		t.Fatalf("RebuildRuntimeFromBundle: %v", err)
+	}
+	chs, err := st.ListUpstreamChannels(ctx)
+	if err != nil {
+		t.Fatalf("ListUpstreamChannels: %v", err)
+	}
+	if len(chs) != 1 {
+		t.Fatalf("expected 1 channel, got %d", len(chs))
+	}
+	if !chs[0].FastMode {
+		t.Fatalf("expected fast_mode=true after rebuild, got false")
+	}
+	if !chs[0].AllowServiceTier {
+		t.Fatalf("expected allow_service_tier normalized to true after rebuild, got false")
+	}
+}

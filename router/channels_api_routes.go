@@ -605,7 +605,7 @@ type createChannelRequest struct {
 	Key                   *string `json:"key,omitempty"`
 	Priority              int     `json:"priority"`
 	Promotion             bool    `json:"promotion"`
-	AllowServiceTier      bool    `json:"allow_service_tier"`
+	AllowServiceTier      *bool   `json:"allow_service_tier,omitempty"`
 	FastMode              *bool   `json:"fast_mode,omitempty"`
 	DisableStore          bool    `json:"disable_store"`
 	AllowSafetyIdentifier bool    `json:"allow_safety_identifier"`
@@ -672,10 +672,14 @@ func createChannelHandler(opts Options) gin.HandlerFunc {
 		if req.FastMode != nil {
 			fastMode = *req.FastMode
 		}
+		allowServiceTier := true
+		if req.AllowServiceTier != nil {
+			allowServiceTier = *req.AllowServiceTier
+		}
 
-		id, err := opts.Store.CreateUpstreamChannelWithRequestPolicy(c.Request.Context(), req.Type, req.Name, req.Groups, req.Priority, req.Promotion, req.AllowServiceTier, req.DisableStore, req.AllowSafetyIdentifier, fastMode)
+		id, err := opts.Store.CreateUpstreamChannelWithRequestPolicy(c.Request.Context(), req.Type, req.Name, req.Groups, req.Priority, req.Promotion, allowServiceTier, req.DisableStore, req.AllowSafetyIdentifier, fastMode)
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建失败"})
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 			return
 		}
 		ep, err := opts.Store.SetUpstreamEndpointBaseURL(c.Request.Context(), id, req.BaseURL)
@@ -862,7 +866,7 @@ func updateChannelHandler(opts Options) gin.HandlerFunc {
 		}
 
 		if err := opts.Store.UpdateUpstreamChannelBasics(c.Request.Context(), ch.ID, name, status, priority, promotion, allowServiceTier, disableStore, allowSafetyIdentifier, fastMode); err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "更新失败"})
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 			return
 		}
 
