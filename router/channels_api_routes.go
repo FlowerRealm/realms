@@ -1097,8 +1097,8 @@ func startChannelCodexOAuthHandler(opts Options) gin.HandlerFunc {
 		if !ok {
 			return
 		}
-		actorUserID, ok := userIDFromContext(c)
-		if !ok || actorUserID <= 0 {
+		actorUserID, ok := adminActorIDFromContext(c)
+		if !ok || actorUserID < 0 {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "未登录"})
 			return
 		}
@@ -1137,8 +1137,8 @@ func completeChannelCodexOAuthHandler(opts Options) gin.HandlerFunc {
 		if !ok {
 			return
 		}
-		actorUserID, ok := userIDFromContext(c)
-		if !ok || actorUserID <= 0 {
+		actorUserID, ok := adminActorIDFromContext(c)
+		if !ok || actorUserID < 0 {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "未登录"})
 			return
 		}

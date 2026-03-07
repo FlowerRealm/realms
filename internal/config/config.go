@@ -128,8 +128,9 @@ type Sub2APIConfig struct {
 }
 
 type SecurityConfig struct {
-	AllowOpenRegistration bool `yaml:"allow_open_registration"`
-	DisableSecureCookies  bool `yaml:"disable_secure_cookies"`
+	AllowOpenRegistration bool   `yaml:"allow_open_registration"`
+	DisableSecureCookies  bool   `yaml:"disable_secure_cookies"`
+	AdminAPIKey           string `yaml:"admin_api_key"`
 
 	TrustProxyHeaders bool     `yaml:"trust_proxy_headers"`
 	TrustedProxyCIDRs []string `yaml:"trusted_proxy_cidrs"`
@@ -293,6 +294,8 @@ func normalizeAndValidate(cfg Config) (Config, error) {
 	if cfg.ChannelTestCLIConcurrency > 16 {
 		cfg.ChannelTestCLIConcurrency = 16
 	}
+
+	cfg.Security.AdminAPIKey = strings.TrimSpace(cfg.Security.AdminAPIKey)
 
 	cfg.AppSettingsDefaults.SiteBaseURL = strings.TrimSpace(cfg.AppSettingsDefaults.SiteBaseURL)
 	siteBaseURL, err := NormalizeHTTPBaseURL(cfg.AppSettingsDefaults.SiteBaseURL, "app_settings_defaults.site_base_url")
@@ -558,6 +561,9 @@ func applyEnvOverrides(cfg *Config) {
 		if b, err := strconv.ParseBool(v); err == nil {
 			cfg.Security.DisableSecureCookies = b
 		}
+	}
+	if v := os.Getenv("REALMS_ADMIN_API_KEY"); v != "" {
+		cfg.Security.AdminAPIKey = v
 	}
 	if v := os.Getenv("REALMS_TRUST_PROXY_HEADERS"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {

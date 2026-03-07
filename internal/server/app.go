@@ -28,6 +28,7 @@ import (
 	"realms/internal/codexoauth"
 	"realms/internal/concurrency"
 	"realms/internal/config"
+	rlmcrypto "realms/internal/crypto"
 	"realms/internal/errorpassthrough"
 	"realms/internal/personalconfig"
 	"realms/internal/proxylog"
@@ -195,6 +196,11 @@ func NewApp(opts AppOptions) (*App, error) {
 	}
 	frontendFS, frontendIndexPage := loadEmbeddedFrontend(personalMode)
 
+	var adminAPIKeyHash []byte
+	if raw := strings.TrimSpace(opts.Config.Security.AdminAPIKey); raw != "" {
+		adminAPIKeyHash = rlmcrypto.TokenHash(raw)
+	}
+
 	// personal-config: optional authoritative local config file for personal mode.
 	pcfg, err := setupPersonalConfig(opts.Config, opts.DB, st, personalMode)
 	if err != nil {
@@ -205,6 +211,7 @@ func NewApp(opts AppOptions) (*App, error) {
 	router.SetRouter(engine, router.Options{
 		Store:                           st,
 		PersonalMode:                    personalMode,
+		AdminAPIKeyHash:                 adminAPIKeyHash,
 		PersonalConfig:                  pcfg,
 		AllowOpenRegistration:           opts.Config.Security.AllowOpenRegistration,
 		EmailVerificationEnabledDefault: opts.Config.EmailVerif.Enable,

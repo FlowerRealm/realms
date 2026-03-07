@@ -72,6 +72,21 @@ func TestLoad_Mode_Personal(t *testing.T) {
 	}
 }
 
+func TestLoad_AdminAPIKeyEnvOverride(t *testing.T) {
+	t.Setenv("REALMS_DB_DRIVER", "")
+	t.Setenv("REALMS_DB_DSN", "")
+	t.Setenv("REALMS_SQLITE_PATH", "")
+	t.Setenv("REALMS_ADMIN_API_KEY", "  adm_from_env  ")
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	if cfg.Security.AdminAPIKey != "adm_from_env" {
+		t.Fatalf("expected security.admin_api_key trimmed, got %q", cfg.Security.AdminAPIKey)
+	}
+}
+
 func TestLoad_GatewayAndRedisDefaults(t *testing.T) {
 	t.Setenv("REALMS_DB_DRIVER", "")
 	t.Setenv("REALMS_DB_DSN", "")
