@@ -29,6 +29,7 @@ func (s *Store) ReserveUsageAndDebitBalance(ctx context.Context, in ReserveUsage
 	}
 
 	reservedUSD := in.ReservedUSD.Truncate(USDScale)
+	serviceTier := NormalizeOptionalServiceTier(in.ServiceTier)
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -58,13 +59,13 @@ VALUES(?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 
 	res, err := tx.ExecContext(ctx, `
 INSERT INTO usage_events(
-  time, request_id, user_id, subscription_id, token_id, state, model,
+  time, request_id, user_id, subscription_id, token_id, state, model, service_tier,
   reserved_usd, committed_usd, reserve_expires_at, created_at, updated_at
 ) VALUES(
-  CURRENT_TIMESTAMP, ?, ?, NULL, ?, ?, ?,
+  CURRENT_TIMESTAMP, ?, ?, NULL, ?, ?, ?, ?,
   ?, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 )
-`, in.RequestID, in.UserID, in.TokenID, UsageStateReserved, in.Model, reservedUSD, in.ReserveExpiresAt)
+`, in.RequestID, in.UserID, in.TokenID, UsageStateReserved, in.Model, serviceTier, reservedUSD, in.ReserveExpiresAt)
 	if err != nil {
 		return 0, fmt.Errorf("写入 usage_events(reserved) 失败: %w", err)
 	}
@@ -173,13 +174,14 @@ VALUES(?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	}
 	priceMultiplierPayment = priceMultiplierPayment.Truncate(PriceMultiplierScale)
 
+	serviceTier := NormalizeOptionalServiceTier(in.ServiceTier)
 	if _, err := tx.ExecContext(ctx, `
 UPDATE usage_events
-SET state=?, upstream_channel_id=?, input_tokens=?, cached_input_tokens=?, output_tokens=?, cached_output_tokens=?, committed_usd=?,
+SET state=?, upstream_channel_id=?, service_tier=COALESCE(?, service_tier), input_tokens=?, cached_input_tokens=?, output_tokens=?, cached_output_tokens=?, committed_usd=?,
     price_multiplier=?, price_multiplier_group=?, price_multiplier_payment=?, price_multiplier_group_name=?,
     updated_at=CURRENT_TIMESTAMP
 WHERE id=? AND state=?
-`, UsageStateCommitted, in.UpstreamChannelID, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens, committedEffective,
+`, UsageStateCommitted, in.UpstreamChannelID, serviceTier, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens, committedEffective,
 		priceMultiplier, priceMultiplierGroup, priceMultiplierPayment, in.PriceMultiplierGroupName,
 		in.UsageEventID, UsageStateReserved); err != nil {
 		return fmt.Errorf("结算 usage_event 失败: %w", err)

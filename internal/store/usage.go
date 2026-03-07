@@ -26,6 +26,7 @@ type ReserveUsageInput struct {
 	SubscriptionID   *int64
 	TokenID          int64
 	Model            *string
+	ServiceTier      *string
 	ReservedUSD      decimal.Decimal
 	ReserveExpiresAt time.Time
 }
@@ -44,15 +45,16 @@ func (s *Store) ReserveUsage(ctx context.Context, in ReserveUsageInput) (int64, 
 		return 0, errors.New("reserved_usd 不合法")
 	}
 	reservedUSD := in.ReservedUSD.Truncate(USDScale)
+	serviceTier := NormalizeOptionalServiceTier(in.ServiceTier)
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO usage_events(
-  time, request_id, user_id, subscription_id, token_id, state, model,
+  time, request_id, user_id, subscription_id, token_id, state, model, service_tier,
   reserved_usd, committed_usd, reserve_expires_at, created_at, updated_at
 ) VALUES(
-  CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?,
+  CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?,
   ?, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 )
-`, in.RequestID, in.UserID, in.SubscriptionID, in.TokenID, UsageStateReserved, in.Model, reservedUSD, in.ReserveExpiresAt)
+`, in.RequestID, in.UserID, in.SubscriptionID, in.TokenID, UsageStateReserved, in.Model, serviceTier, reservedUSD, in.ReserveExpiresAt)
 	if err != nil {
 		return 0, fmt.Errorf("写入 usage_events(reserved) 失败: %w", err)
 	}
@@ -66,6 +68,7 @@ INSERT INTO usage_events(
 type CommitUsageInput struct {
 	UsageEventID             int64
 	UpstreamChannelID        *int64
+	ServiceTier              *string
 	InputTokens              *int64
 	CachedInputTokens        *int64
 	OutputTokens             *int64
@@ -100,13 +103,14 @@ func (s *Store) CommitUsage(ctx context.Context, in CommitUsageInput) error {
 		priceMultiplierPayment = DefaultGroupPriceMultiplier
 	}
 	priceMultiplierPayment = priceMultiplierPayment.Truncate(PriceMultiplierScale)
+	serviceTier := NormalizeOptionalServiceTier(in.ServiceTier)
 	res, err := s.db.ExecContext(ctx, `
 UPDATE usage_events
-SET state=?, upstream_channel_id=?, input_tokens=?, cached_input_tokens=?, output_tokens=?, cached_output_tokens=?, committed_usd=?,
+SET state=?, upstream_channel_id=?, service_tier=COALESCE(?, service_tier), input_tokens=?, cached_input_tokens=?, output_tokens=?, cached_output_tokens=?, committed_usd=?,
     price_multiplier=?, price_multiplier_group=?, price_multiplier_payment=?, price_multiplier_group_name=?,
     updated_at=CURRENT_TIMESTAMP
 WHERE id=? AND state=?
-`, UsageStateCommitted, in.UpstreamChannelID, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens, committedUSD,
+`, UsageStateCommitted, in.UpstreamChannelID, serviceTier, in.InputTokens, in.CachedInputTokens, in.OutputTokens, in.CachedOutputTokens, committedUSD,
 		priceMultiplier, priceMultiplierGroup, priceMultiplierPayment, in.PriceMultiplierGroupName,
 		in.UsageEventID, UsageStateReserved)
 	if err != nil {
@@ -473,6 +477,7 @@ func (s *Store) GetFirstUsageEventTimeByChannel(ctx context.Context, channelID i
 func (s *Store) GetUsageEvent(ctx context.Context, id int64) (UsageEvent, error) {
 	var e UsageEvent
 	var model sql.NullString
+	var serviceTier sql.NullString
 	var endpoint sql.NullString
 	var method sql.NullString
 	var subscriptionID sql.NullInt64
@@ -491,7 +496,7 @@ func (s *Store) GetUsageEvent(ctx context.Context, id int64) (UsageEvent, error)
 SELECT id, time, request_id, endpoint, method,
        user_id, subscription_id, token_id,
        upstream_channel_id, upstream_endpoint_id, upstream_credential_id,
-       state, model,
+       state, model, service_tier,
        input_tokens, cached_input_tokens, output_tokens, cached_output_tokens,
        reserved_usd, committed_usd, price_multiplier, price_multiplier_group, price_multiplier_payment, price_multiplier_group_name, reserve_expires_at,
        status_code, latency_ms, first_token_latency_ms, error_class, error_message,
@@ -502,7 +507,7 @@ WHERE id=?
 	`, id).Scan(&e.ID, &e.Time, &e.RequestID, &endpoint, &method,
 		&e.UserID, &subscriptionID, &e.TokenID,
 		&upstreamChannelID, &upstreamEndpointID, &upstreamCredID,
-		&e.State, &model,
+		&e.State, &model, &serviceTier,
 		&inputTokens, &cachedInputTokens, &outputTokens, &cachedOutputTokens,
 		&e.ReservedUSD, &e.CommittedUSD, &e.PriceMultiplier, &e.PriceMultiplierGroup, &e.PriceMultiplierPayment, &multGroupName, &e.ReserveExpiresAt,
 		&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &errClass, &errMsg,
@@ -533,6 +538,12 @@ WHERE id=?
 	}
 	if model.Valid {
 		e.Model = &model.String
+	}
+	if serviceTier.Valid {
+		v := NormalizeServiceTier(serviceTier.String)
+		if v != "" {
+			e.ServiceTier = &v
+		}
 	}
 	if subscriptionID.Valid {
 		e.SubscriptionID = &subscriptionID.Int64
@@ -577,7 +588,7 @@ func (s *Store) ListUsageEventsByUser(ctx context.Context, userID int64, limit i
 SELECT id, time, request_id, endpoint, method,
        user_id, subscription_id, token_id,
        upstream_channel_id, upstream_endpoint_id, upstream_credential_id,
-       state, model,
+       state, model, service_tier,
        input_tokens, cached_input_tokens, output_tokens, cached_output_tokens,
        reserved_usd, committed_usd, price_multiplier, price_multiplier_group, price_multiplier_payment, price_multiplier_group_name, reserve_expires_at,
        status_code, latency_ms, first_token_latency_ms, error_class, error_message,
@@ -625,7 +636,7 @@ func (s *Store) ListUsageEventsByUserRange(ctx context.Context, userID int64, si
 SELECT id, time, request_id, endpoint, method,
        user_id, subscription_id, token_id,
        upstream_channel_id, upstream_endpoint_id, upstream_credential_id,
-       state, model,
+       state, model, service_tier,
        input_tokens, cached_input_tokens, output_tokens, cached_output_tokens,
        reserved_usd, committed_usd, price_multiplier, price_multiplier_group, price_multiplier_payment, price_multiplier_group_name, reserve_expires_at,
        status_code, latency_ms, first_token_latency_ms, error_class, error_message,
@@ -655,84 +666,10 @@ WHERE user_id=? AND time >= ? AND time < ? AND state<>?
 
 	var out []UsageEvent
 	for rows.Next() {
-		var e UsageEvent
-		var endpoint sql.NullString
-		var method sql.NullString
-		var model sql.NullString
-		var subscriptionID sql.NullInt64
-		var inputTokens sql.NullInt64
-		var cachedInputTokens sql.NullInt64
-		var outputTokens sql.NullInt64
-		var cachedOutputTokens sql.NullInt64
-		var upstreamChannelID sql.NullInt64
-		var upstreamEndpointID sql.NullInt64
-		var upstreamCredID sql.NullInt64
-		var errClass sql.NullString
-		var errMsg sql.NullString
-		var multGroupName sql.NullString
-		var isStream int
-		if err := rows.Scan(&e.ID, &e.Time, &e.RequestID, &endpoint, &method,
-			&e.UserID, &subscriptionID, &e.TokenID,
-			&upstreamChannelID, &upstreamEndpointID, &upstreamCredID,
-			&e.State, &model,
-			&inputTokens, &cachedInputTokens, &outputTokens, &cachedOutputTokens,
-			&e.ReservedUSD, &e.CommittedUSD, &e.PriceMultiplier, &e.PriceMultiplierGroup, &e.PriceMultiplierPayment, &multGroupName, &e.ReserveExpiresAt,
-			&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &errClass, &errMsg,
-			&isStream, &e.RequestBytes, &e.ResponseBytes,
-			&e.CreatedAt, &e.UpdatedAt); err != nil {
+		e, err := scanUsageEventRowWithMultipliers(rows)
+		if err != nil {
 			return nil, fmt.Errorf("扫描 usage_events 失败: %w", err)
 		}
-		e.ReservedUSD = e.ReservedUSD.Truncate(USDScale)
-		e.CommittedUSD = e.CommittedUSD.Truncate(USDScale)
-		e.PriceMultiplier = e.PriceMultiplier.Truncate(PriceMultiplierScale)
-		e.PriceMultiplierGroup = e.PriceMultiplierGroup.Truncate(PriceMultiplierScale)
-		e.PriceMultiplierPayment = e.PriceMultiplierPayment.Truncate(PriceMultiplierScale)
-		if multGroupName.Valid {
-			v := strings.TrimSpace(multGroupName.String)
-			if v != "" {
-				e.PriceMultiplierGroupName = &v
-			}
-		}
-		if endpoint.Valid {
-			e.Endpoint = &endpoint.String
-		}
-		if method.Valid {
-			e.Method = &method.String
-		}
-		if model.Valid {
-			e.Model = &model.String
-		}
-		if subscriptionID.Valid {
-			e.SubscriptionID = &subscriptionID.Int64
-		}
-		if inputTokens.Valid {
-			e.InputTokens = &inputTokens.Int64
-		}
-		if cachedInputTokens.Valid {
-			e.CachedInputTokens = &cachedInputTokens.Int64
-		}
-		if outputTokens.Valid {
-			e.OutputTokens = &outputTokens.Int64
-		}
-		if cachedOutputTokens.Valid {
-			e.CachedOutputTokens = &cachedOutputTokens.Int64
-		}
-		if upstreamChannelID.Valid {
-			e.UpstreamChannelID = &upstreamChannelID.Int64
-		}
-		if upstreamEndpointID.Valid {
-			e.UpstreamEndpointID = &upstreamEndpointID.Int64
-		}
-		if upstreamCredID.Valid {
-			e.UpstreamCredID = &upstreamCredID.Int64
-		}
-		if errClass.Valid {
-			e.ErrorClass = &errClass.String
-		}
-		if errMsg.Valid {
-			e.ErrorMessage = &errMsg.String
-		}
-		e.IsStream = isStream != 0
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
@@ -755,7 +692,7 @@ func (s *Store) ListUsageEventsByToken(ctx context.Context, tokenID int64, limit
 SELECT id, time, request_id, endpoint, method,
        user_id, subscription_id, token_id,
        upstream_channel_id, upstream_endpoint_id, upstream_credential_id,
-       state, model,
+       state, model, service_tier,
        input_tokens, cached_input_tokens, output_tokens, cached_output_tokens,
        reserved_usd, committed_usd, price_multiplier, price_multiplier_group, price_multiplier_payment, price_multiplier_group_name, reserve_expires_at,
        status_code, latency_ms, first_token_latency_ms, error_class, error_message,
@@ -779,84 +716,10 @@ WHERE token_id=? AND state<>?
 
 	var out []UsageEvent
 	for rows.Next() {
-		var e UsageEvent
-		var model sql.NullString
-		var endpoint sql.NullString
-		var method sql.NullString
-		var subscriptionID sql.NullInt64
-		var inputTokens sql.NullInt64
-		var cachedInputTokens sql.NullInt64
-		var outputTokens sql.NullInt64
-		var cachedOutputTokens sql.NullInt64
-		var upstreamChannelID sql.NullInt64
-		var upstreamEndpointID sql.NullInt64
-		var upstreamCredID sql.NullInt64
-		var errClass sql.NullString
-		var errMsg sql.NullString
-		var multGroupName sql.NullString
-		var isStream int
-		if err := rows.Scan(&e.ID, &e.Time, &e.RequestID, &endpoint, &method,
-			&e.UserID, &subscriptionID, &e.TokenID,
-			&upstreamChannelID, &upstreamEndpointID, &upstreamCredID,
-			&e.State, &model,
-			&inputTokens, &cachedInputTokens, &outputTokens, &cachedOutputTokens,
-			&e.ReservedUSD, &e.CommittedUSD, &e.PriceMultiplier, &e.PriceMultiplierGroup, &e.PriceMultiplierPayment, &multGroupName, &e.ReserveExpiresAt,
-			&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &errClass, &errMsg,
-			&isStream, &e.RequestBytes, &e.ResponseBytes,
-			&e.CreatedAt, &e.UpdatedAt); err != nil {
+		e, err := scanUsageEventRowWithMultipliers(rows)
+		if err != nil {
 			return nil, fmt.Errorf("扫描 usage_events 失败: %w", err)
 		}
-		e.ReservedUSD = e.ReservedUSD.Truncate(USDScale)
-		e.CommittedUSD = e.CommittedUSD.Truncate(USDScale)
-		e.PriceMultiplier = e.PriceMultiplier.Truncate(PriceMultiplierScale)
-		e.PriceMultiplierGroup = e.PriceMultiplierGroup.Truncate(PriceMultiplierScale)
-		e.PriceMultiplierPayment = e.PriceMultiplierPayment.Truncate(PriceMultiplierScale)
-		if multGroupName.Valid {
-			v := strings.TrimSpace(multGroupName.String)
-			if v != "" {
-				e.PriceMultiplierGroupName = &v
-			}
-		}
-		if endpoint.Valid {
-			e.Endpoint = &endpoint.String
-		}
-		if method.Valid {
-			e.Method = &method.String
-		}
-		if model.Valid {
-			e.Model = &model.String
-		}
-		if subscriptionID.Valid {
-			e.SubscriptionID = &subscriptionID.Int64
-		}
-		if inputTokens.Valid {
-			e.InputTokens = &inputTokens.Int64
-		}
-		if cachedInputTokens.Valid {
-			e.CachedInputTokens = &cachedInputTokens.Int64
-		}
-		if outputTokens.Valid {
-			e.OutputTokens = &outputTokens.Int64
-		}
-		if cachedOutputTokens.Valid {
-			e.CachedOutputTokens = &cachedOutputTokens.Int64
-		}
-		if upstreamChannelID.Valid {
-			e.UpstreamChannelID = &upstreamChannelID.Int64
-		}
-		if upstreamEndpointID.Valid {
-			e.UpstreamEndpointID = &upstreamEndpointID.Int64
-		}
-		if upstreamCredID.Valid {
-			e.UpstreamCredID = &upstreamCredID.Int64
-		}
-		if errClass.Valid {
-			e.ErrorClass = &errClass.String
-		}
-		if errMsg.Valid {
-			e.ErrorMessage = &errMsg.String
-		}
-		e.IsStream = isStream != 0
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
@@ -877,7 +740,7 @@ func (s *Store) ListUsageEventsByTokenRange(ctx context.Context, tokenID int64, 
 SELECT id, time, request_id, endpoint, method,
        user_id, subscription_id, token_id,
        upstream_channel_id, upstream_endpoint_id, upstream_credential_id,
-       state, model,
+       state, model, service_tier,
        input_tokens, cached_input_tokens, output_tokens, cached_output_tokens,
        reserved_usd, committed_usd, price_multiplier, price_multiplier_group, price_multiplier_payment, price_multiplier_group_name, reserve_expires_at,
        status_code, latency_ms, first_token_latency_ms, error_class, error_message,
@@ -907,84 +770,10 @@ WHERE token_id=? AND time >= ? AND time < ? AND state<>?
 
 	var out []UsageEvent
 	for rows.Next() {
-		var e UsageEvent
-		var endpoint sql.NullString
-		var method sql.NullString
-		var model sql.NullString
-		var subscriptionID sql.NullInt64
-		var inputTokens sql.NullInt64
-		var cachedInputTokens sql.NullInt64
-		var outputTokens sql.NullInt64
-		var cachedOutputTokens sql.NullInt64
-		var upstreamChannelID sql.NullInt64
-		var upstreamEndpointID sql.NullInt64
-		var upstreamCredID sql.NullInt64
-		var errClass sql.NullString
-		var errMsg sql.NullString
-		var multGroupName sql.NullString
-		var isStream int
-		if err := rows.Scan(&e.ID, &e.Time, &e.RequestID, &endpoint, &method,
-			&e.UserID, &subscriptionID, &e.TokenID,
-			&upstreamChannelID, &upstreamEndpointID, &upstreamCredID,
-			&e.State, &model,
-			&inputTokens, &cachedInputTokens, &outputTokens, &cachedOutputTokens,
-			&e.ReservedUSD, &e.CommittedUSD, &e.PriceMultiplier, &e.PriceMultiplierGroup, &e.PriceMultiplierPayment, &multGroupName, &e.ReserveExpiresAt,
-			&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &errClass, &errMsg,
-			&isStream, &e.RequestBytes, &e.ResponseBytes,
-			&e.CreatedAt, &e.UpdatedAt); err != nil {
+		e, err := scanUsageEventRowWithMultipliers(rows)
+		if err != nil {
 			return nil, fmt.Errorf("扫描 usage_events 失败: %w", err)
 		}
-		e.ReservedUSD = e.ReservedUSD.Truncate(USDScale)
-		e.CommittedUSD = e.CommittedUSD.Truncate(USDScale)
-		e.PriceMultiplier = e.PriceMultiplier.Truncate(PriceMultiplierScale)
-		e.PriceMultiplierGroup = e.PriceMultiplierGroup.Truncate(PriceMultiplierScale)
-		e.PriceMultiplierPayment = e.PriceMultiplierPayment.Truncate(PriceMultiplierScale)
-		if multGroupName.Valid {
-			v := strings.TrimSpace(multGroupName.String)
-			if v != "" {
-				e.PriceMultiplierGroupName = &v
-			}
-		}
-		if endpoint.Valid {
-			e.Endpoint = &endpoint.String
-		}
-		if method.Valid {
-			e.Method = &method.String
-		}
-		if model.Valid {
-			e.Model = &model.String
-		}
-		if subscriptionID.Valid {
-			e.SubscriptionID = &subscriptionID.Int64
-		}
-		if inputTokens.Valid {
-			e.InputTokens = &inputTokens.Int64
-		}
-		if cachedInputTokens.Valid {
-			e.CachedInputTokens = &cachedInputTokens.Int64
-		}
-		if outputTokens.Valid {
-			e.OutputTokens = &outputTokens.Int64
-		}
-		if cachedOutputTokens.Valid {
-			e.CachedOutputTokens = &cachedOutputTokens.Int64
-		}
-		if upstreamChannelID.Valid {
-			e.UpstreamChannelID = &upstreamChannelID.Int64
-		}
-		if upstreamEndpointID.Valid {
-			e.UpstreamEndpointID = &upstreamEndpointID.Int64
-		}
-		if upstreamCredID.Valid {
-			e.UpstreamCredID = &upstreamCredID.Int64
-		}
-		if errClass.Valid {
-			e.ErrorClass = &errClass.String
-		}
-		if errMsg.Valid {
-			e.ErrorMessage = &errMsg.String
-		}
-		e.IsStream = isStream != 0
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
@@ -1053,7 +842,7 @@ func (s *Store) ListUsageEventsWithUserRange(ctx context.Context, since, until t
 SELECT ue.id, ue.time, ue.request_id, ue.endpoint, ue.method,
        ue.user_id, ue.subscription_id, ue.token_id,
        ue.upstream_channel_id, ue.upstream_endpoint_id, ue.upstream_credential_id,
-       ue.state, ue.model,
+       ue.state, ue.model, ue.service_tier,
        ue.input_tokens, ue.cached_input_tokens, ue.output_tokens, ue.cached_output_tokens,
        ue.reserved_usd, ue.committed_usd, ue.price_multiplier, ue.price_multiplier_group, ue.price_multiplier_payment, ue.price_multiplier_group_name, ue.reserve_expires_at,
        ue.status_code, ue.latency_ms, ue.first_token_latency_ms, ue.error_class, ue.error_message,
@@ -1166,7 +955,7 @@ func (s *Store) ListUsageEventsWithUserRangeFiltered(ctx context.Context, since,
 SELECT ue.id, ue.time, ue.request_id, ue.endpoint, ue.method,
        ue.user_id, ue.subscription_id, ue.token_id,
        ue.upstream_channel_id, ue.upstream_endpoint_id, ue.upstream_credential_id,
-       ue.state, ue.model,
+       ue.state, ue.model, ue.service_tier,
        ue.input_tokens, ue.cached_input_tokens, ue.output_tokens, ue.cached_output_tokens,
        ue.reserved_usd, ue.committed_usd, ue.price_multiplier, ue.price_multiplier_group, ue.price_multiplier_payment, ue.price_multiplier_group_name, ue.reserve_expires_at,
        ue.status_code, ue.latency_ms, ue.first_token_latency_ms, ue.error_class, ue.error_message,
@@ -1253,7 +1042,7 @@ func (s *Store) listUsageEventsByUserFiltered(ctx context.Context, userID int64,
 SELECT ue.id, ue.time, ue.request_id, ue.endpoint, ue.method,
        ue.user_id, ue.subscription_id, ue.token_id,
        ue.upstream_channel_id, ue.upstream_endpoint_id, ue.upstream_credential_id,
-       ue.state, ue.model,
+       ue.state, ue.model, ue.service_tier,
        ue.input_tokens, ue.cached_input_tokens, ue.output_tokens, ue.cached_output_tokens,
        ue.reserved_usd, ue.committed_usd, ue.price_multiplier, ue.price_multiplier_group, ue.price_multiplier_payment, ue.price_multiplier_group_name, ue.reserve_expires_at,
        ue.status_code, ue.latency_ms, ue.first_token_latency_ms, ue.error_class, ue.error_message,
@@ -1309,6 +1098,7 @@ FROM usage_events ue
 
 type scannedUsageEventNulls struct {
 	Model              sql.NullString
+	ServiceTier        sql.NullString
 	Endpoint           sql.NullString
 	Method             sql.NullString
 	SubscriptionID     sql.NullInt64
@@ -1345,6 +1135,12 @@ func normalizeScannedUsageEvent(e *UsageEvent, n scannedUsageEventNulls) {
 	}
 	if n.Model.Valid {
 		e.Model = &n.Model.String
+	}
+	if n.ServiceTier.Valid {
+		v := NormalizeServiceTier(n.ServiceTier.String)
+		if v != "" {
+			e.ServiceTier = &v
+		}
 	}
 	if n.SubscriptionID.Valid {
 		e.SubscriptionID = &n.SubscriptionID.Int64
@@ -1385,7 +1181,7 @@ func scanUsageEventRowWithMultipliers(rows *sql.Rows) (UsageEvent, error) {
 	if err := rows.Scan(&e.ID, &e.Time, &e.RequestID, &n.Endpoint, &n.Method,
 		&e.UserID, &n.SubscriptionID, &e.TokenID,
 		&n.UpstreamChannelID, &n.UpstreamEndpointID, &n.UpstreamCredID,
-		&e.State, &n.Model,
+		&e.State, &n.Model, &n.ServiceTier,
 		&n.InputTokens, &n.CachedInputTokens, &n.OutputTokens, &n.CachedOutputTokens,
 		&e.ReservedUSD, &e.CommittedUSD, &e.PriceMultiplier, &e.PriceMultiplierGroup, &e.PriceMultiplierPayment, &n.MultGroupName, &e.ReserveExpiresAt,
 		&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &n.ErrClass, &n.ErrMsg,
@@ -1404,7 +1200,7 @@ func scanUsageEventWithUserRowWithMultipliers(rows *sql.Rows) (UsageEventWithUse
 	if err := rows.Scan(&e.ID, &e.Time, &e.RequestID, &n.Endpoint, &n.Method,
 		&e.UserID, &n.SubscriptionID, &e.TokenID,
 		&n.UpstreamChannelID, &n.UpstreamEndpointID, &n.UpstreamCredID,
-		&e.State, &n.Model,
+		&e.State, &n.Model, &n.ServiceTier,
 		&n.InputTokens, &n.CachedInputTokens, &n.OutputTokens, &n.CachedOutputTokens,
 		&e.ReservedUSD, &e.CommittedUSD, &e.PriceMultiplier, &e.PriceMultiplierGroup, &e.PriceMultiplierPayment, &n.MultGroupName, &e.ReserveExpiresAt,
 		&e.StatusCode, &e.LatencyMS, &e.FirstTokenLatencyMS, &n.ErrClass, &n.ErrMsg,

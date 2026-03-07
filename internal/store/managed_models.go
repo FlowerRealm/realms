@@ -13,26 +13,137 @@ import (
 )
 
 type ManagedModelCreate struct {
-	PublicID            string
-	GroupName           string
-	OwnedBy             *string
-	InputUSDPer1M       decimal.Decimal
-	OutputUSDPer1M      decimal.Decimal
-	CacheInputUSDPer1M  decimal.Decimal
-	CacheOutputUSDPer1M decimal.Decimal
-	Status              int
+	PublicID                   string
+	GroupName                  string
+	OwnedBy                    *string
+	InputUSDPer1M              decimal.Decimal
+	OutputUSDPer1M             decimal.Decimal
+	CacheInputUSDPer1M         decimal.Decimal
+	CacheOutputUSDPer1M        decimal.Decimal
+	PriorityPricingEnabled     bool
+	PriorityInputUSDPer1M      *decimal.Decimal
+	PriorityOutputUSDPer1M     *decimal.Decimal
+	PriorityCacheInputUSDPer1M *decimal.Decimal
+	Status                     int
 }
 
 type ManagedModelUpdate struct {
-	ID                  int64
-	PublicID            string
-	GroupName           string
-	OwnedBy             *string
-	InputUSDPer1M       decimal.Decimal
-	OutputUSDPer1M      decimal.Decimal
-	CacheInputUSDPer1M  decimal.Decimal
-	CacheOutputUSDPer1M decimal.Decimal
-	Status              int
+	ID                         int64
+	PublicID                   string
+	GroupName                  string
+	OwnedBy                    *string
+	InputUSDPer1M              decimal.Decimal
+	OutputUSDPer1M             decimal.Decimal
+	CacheInputUSDPer1M         decimal.Decimal
+	CacheOutputUSDPer1M        decimal.Decimal
+	PriorityPricingEnabled     bool
+	PriorityInputUSDPer1M      *decimal.Decimal
+	PriorityOutputUSDPer1M     *decimal.Decimal
+	PriorityCacheInputUSDPer1M *decimal.Decimal
+	Status                     int
+}
+
+const managedModelSelectColumns = `id, public_id, group_name, upstream_model, owned_by,
+       input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m,
+       priority_pricing_enabled, priority_input_usd_per_1m, priority_output_usd_per_1m, priority_cache_input_usd_per_1m,
+       status, created_at`
+
+const managedModelSelectColumnsWithAliasM = `m.id, m.public_id, m.group_name, m.upstream_model, m.owned_by,
+       m.input_usd_per_1m, m.output_usd_per_1m, m.cache_input_usd_per_1m, m.cache_output_usd_per_1m,
+       m.priority_pricing_enabled, m.priority_input_usd_per_1m, m.priority_output_usd_per_1m, m.priority_cache_input_usd_per_1m,
+       m.status, m.created_at`
+
+type managedModelScanner interface {
+	Scan(dest ...any) error
+}
+
+func normalizeOptionalManagedModelPrice(v *decimal.Decimal) (*decimal.Decimal, error) {
+	if v == nil {
+		return nil, nil
+	}
+	n := v.Truncate(USDScale)
+	if n.IsNegative() {
+		return nil, errors.New("模型定价不合法")
+	}
+	return &n, nil
+}
+
+func parseOptionalManagedModelPrice(v sql.NullString) (*decimal.Decimal, error) {
+	if !v.Valid {
+		return nil, nil
+	}
+	s := strings.TrimSpace(v.String)
+	if s == "" {
+		return nil, nil
+	}
+	d, err := decimal.NewFromString(s)
+	if err != nil {
+		return nil, errors.New("模型定价不合法")
+	}
+	d = d.Truncate(USDScale)
+	if d.IsNegative() {
+		return nil, errors.New("模型定价不合法")
+	}
+	return &d, nil
+}
+
+func validateManagedModelPriorityPricing(enabled bool, inUSD, outUSD *decimal.Decimal) error {
+	if !enabled {
+		return nil
+	}
+	if inUSD == nil || outUSD == nil {
+		return errors.New("fast mode 定价不合法")
+	}
+	return nil
+}
+
+func scanManagedModelRow(scanner managedModelScanner) (ManagedModel, error) {
+	var m ManagedModel
+	var groupName sql.NullString
+	var upstreamModel sql.NullString
+	var ownedBy sql.NullString
+	var priorityPricingEnabled int
+	var priorityInputUSD sql.NullString
+	var priorityOutputUSD sql.NullString
+	var priorityCacheInputUSD sql.NullString
+	if err := scanner.Scan(
+		&m.ID, &m.PublicID, &groupName, &upstreamModel, &ownedBy,
+		&m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M,
+		&priorityPricingEnabled, &priorityInputUSD, &priorityOutputUSD, &priorityCacheInputUSD,
+		&m.Status, &m.CreatedAt,
+	); err != nil {
+		return ManagedModel{}, err
+	}
+	if err := normalizeManagedModelPricing(&m); err != nil {
+		return ManagedModel{}, err
+	}
+	m.PriorityPricingEnabled = priorityPricingEnabled != 0
+	var err error
+	m.PriorityInputUSDPer1M, err = parseOptionalManagedModelPrice(priorityInputUSD)
+	if err != nil {
+		return ManagedModel{}, err
+	}
+	m.PriorityOutputUSDPer1M, err = parseOptionalManagedModelPrice(priorityOutputUSD)
+	if err != nil {
+		return ManagedModel{}, err
+	}
+	m.PriorityCacheInputUSDPer1M, err = parseOptionalManagedModelPrice(priorityCacheInputUSD)
+	if err != nil {
+		return ManagedModel{}, err
+	}
+	if err := validateManagedModelPriorityPricing(m.PriorityPricingEnabled, m.PriorityInputUSDPer1M, m.PriorityOutputUSDPer1M); err != nil {
+		return ManagedModel{}, err
+	}
+	m.GroupName = normalizeManagedModelGroupName(groupName.String)
+	if upstreamModel.Valid {
+		v := upstreamModel.String
+		m.UpstreamModel = &v
+	}
+	if ownedBy.Valid {
+		v := ownedBy.String
+		m.OwnedBy = &v
+	}
+	return m, nil
 }
 
 func normalizeManagedModelPricing(m *ManagedModel) error {
@@ -43,6 +154,19 @@ func normalizeManagedModelPricing(m *ManagedModel) error {
 	if m.InputUSDPer1M.IsNegative() || m.OutputUSDPer1M.IsNegative() || m.CacheInputUSDPer1M.IsNegative() || m.CacheOutputUSDPer1M.IsNegative() {
 		return errors.New("模型定价不合法")
 	}
+	var err error
+	m.PriorityInputUSDPer1M, err = normalizeOptionalManagedModelPrice(m.PriorityInputUSDPer1M)
+	if err != nil {
+		return err
+	}
+	m.PriorityOutputUSDPer1M, err = normalizeOptionalManagedModelPrice(m.PriorityOutputUSDPer1M)
+	if err != nil {
+		return err
+	}
+	m.PriorityCacheInputUSDPer1M, err = normalizeOptionalManagedModelPrice(m.PriorityCacheInputUSDPer1M)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -52,9 +176,7 @@ func normalizeManagedModelGroupName(groupName string) string {
 
 func (s *Store) ListManagedModels(ctx context.Context) ([]ManagedModel, error) {
 	rows, err := s.db.QueryContext(ctx, `
-	SELECT id, public_id, group_name, upstream_model, owned_by,
-	       input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m,
-	       status, created_at
+	SELECT `+managedModelSelectColumns+`
 	FROM managed_models
 	ORDER BY status DESC, id DESC
 	`)
@@ -65,24 +187,9 @@ func (s *Store) ListManagedModels(ctx context.Context) ([]ManagedModel, error) {
 
 	var out []ManagedModel
 	for rows.Next() {
-		var m ManagedModel
-		var groupName sql.NullString
-		var upstreamModel sql.NullString
-		var ownedBy sql.NullString
-		if err := rows.Scan(&m.ID, &m.PublicID, &groupName, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt); err != nil {
+		m, err := scanManagedModelRow(rows)
+		if err != nil {
 			return nil, fmt.Errorf("扫描 managed_models 失败: %w", err)
-		}
-		if err := normalizeManagedModelPricing(&m); err != nil {
-			return nil, err
-		}
-		m.GroupName = normalizeManagedModelGroupName(groupName.String)
-		if upstreamModel.Valid {
-			v := upstreamModel.String
-			m.UpstreamModel = &v
-		}
-		if ownedBy.Valid {
-			v := ownedBy.String
-			m.OwnedBy = &v
 		}
 		out = append(out, m)
 	}
@@ -94,9 +201,7 @@ func (s *Store) ListManagedModels(ctx context.Context) ([]ManagedModel, error) {
 
 func (s *Store) ListEnabledManagedModels(ctx context.Context) ([]ManagedModel, error) {
 	rows, err := s.db.QueryContext(ctx, `
-	SELECT id, public_id, group_name, upstream_model, owned_by,
-	       input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m,
-	       status, created_at
+	SELECT `+managedModelSelectColumns+`
 	FROM managed_models
 	WHERE status=1
 	ORDER BY id DESC
@@ -108,24 +213,9 @@ func (s *Store) ListEnabledManagedModels(ctx context.Context) ([]ManagedModel, e
 
 	var out []ManagedModel
 	for rows.Next() {
-		var m ManagedModel
-		var groupName sql.NullString
-		var upstreamModel sql.NullString
-		var ownedBy sql.NullString
-		if err := rows.Scan(&m.ID, &m.PublicID, &groupName, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt); err != nil {
+		m, err := scanManagedModelRow(rows)
+		if err != nil {
 			return nil, fmt.Errorf("扫描 managed_models 失败: %w", err)
-		}
-		if err := normalizeManagedModelPricing(&m); err != nil {
-			return nil, err
-		}
-		m.GroupName = normalizeManagedModelGroupName(groupName.String)
-		if upstreamModel.Valid {
-			v := upstreamModel.String
-			m.UpstreamModel = &v
-		}
-		if ownedBy.Valid {
-			v := ownedBy.String
-			m.OwnedBy = &v
 		}
 		out = append(out, m)
 	}
@@ -137,9 +227,7 @@ func (s *Store) ListEnabledManagedModels(ctx context.Context) ([]ManagedModel, e
 
 func (s *Store) ListEnabledManagedModelsWithBindings(ctx context.Context) ([]ManagedModel, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT DISTINCT m.id, m.public_id, m.group_name, m.upstream_model, m.owned_by,
-       m.input_usd_per_1m, m.output_usd_per_1m, m.cache_input_usd_per_1m, m.cache_output_usd_per_1m,
-       m.status, m.created_at
+SELECT DISTINCT `+managedModelSelectColumnsWithAliasM+`
 FROM managed_models m
 JOIN channel_models cm ON cm.public_id=m.public_id AND cm.status=1
 JOIN upstream_channels ch ON ch.id=cm.channel_id AND ch.status=1
@@ -153,24 +241,9 @@ ORDER BY m.id DESC
 
 	var out []ManagedModel
 	for rows.Next() {
-		var m ManagedModel
-		var groupName sql.NullString
-		var upstreamModel sql.NullString
-		var ownedBy sql.NullString
-		if err := rows.Scan(&m.ID, &m.PublicID, &groupName, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt); err != nil {
+		m, err := scanManagedModelRow(rows)
+		if err != nil {
 			return nil, fmt.Errorf("扫描可用 managed_models 失败: %w", err)
-		}
-		if err := normalizeManagedModelPricing(&m); err != nil {
-			return nil, err
-		}
-		m.GroupName = normalizeManagedModelGroupName(groupName.String)
-		if upstreamModel.Valid {
-			v := upstreamModel.String
-			m.UpstreamModel = &v
-		}
-		if ownedBy.Valid {
-			v := ownedBy.String
-			m.OwnedBy = &v
 		}
 		out = append(out, m)
 	}
@@ -185,9 +258,7 @@ func (s *Store) ListEnabledManagedModelsWithBindingsForChannel(ctx context.Conte
 		return nil, errors.New("channel_id 不能为空")
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT DISTINCT m.id, m.public_id, m.group_name, m.upstream_model, m.owned_by,
-       m.input_usd_per_1m, m.output_usd_per_1m, m.cache_input_usd_per_1m, m.cache_output_usd_per_1m,
-       m.status, m.created_at
+SELECT DISTINCT `+managedModelSelectColumnsWithAliasM+`
 FROM managed_models m
 JOIN channel_models cm ON cm.public_id=m.public_id AND cm.status=1 AND cm.channel_id=?
 JOIN upstream_channels ch ON ch.id=cm.channel_id AND ch.status=1
@@ -201,24 +272,9 @@ ORDER BY m.id DESC
 
 	var out []ManagedModel
 	for rows.Next() {
-		var m ManagedModel
-		var groupName sql.NullString
-		var upstreamModel sql.NullString
-		var ownedBy sql.NullString
-		if err := rows.Scan(&m.ID, &m.PublicID, &groupName, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt); err != nil {
+		m, err := scanManagedModelRow(rows)
+		if err != nil {
 			return nil, fmt.Errorf("扫描可用 managed_models 失败: %w", err)
-		}
-		if err := normalizeManagedModelPricing(&m); err != nil {
-			return nil, err
-		}
-		m.GroupName = normalizeManagedModelGroupName(groupName.String)
-		if upstreamModel.Valid {
-			v := upstreamModel.String
-			m.UpstreamModel = &v
-		}
-		if ownedBy.Valid {
-			v := ownedBy.String
-			m.OwnedBy = &v
 		}
 		out = append(out, m)
 	}
@@ -235,9 +291,7 @@ func (s *Store) ListEnabledManagedModelsWithBindingsForGroup(ctx context.Context
 	}
 	groupsCol := "`groups`"
 	query := fmt.Sprintf(`
-	SELECT DISTINCT m.id, m.public_id, m.group_name, m.upstream_model, m.owned_by,
-	       m.input_usd_per_1m, m.output_usd_per_1m, m.cache_input_usd_per_1m, m.cache_output_usd_per_1m,
-	       m.status, m.created_at
+	SELECT DISTINCT `+managedModelSelectColumnsWithAliasM+`
 	FROM managed_models m
 	JOIN channel_models cm ON cm.public_id=m.public_id AND cm.status=1
 	JOIN upstream_channels ch ON ch.id=cm.channel_id AND ch.status=1
@@ -248,9 +302,7 @@ func (s *Store) ListEnabledManagedModelsWithBindingsForGroup(ctx context.Context
 	`, groupsCol)
 	if s.dialect == DialectSQLite {
 		query = fmt.Sprintf(`
-	SELECT DISTINCT m.id, m.public_id, m.group_name, m.upstream_model, m.owned_by,
-	       m.input_usd_per_1m, m.output_usd_per_1m, m.cache_input_usd_per_1m, m.cache_output_usd_per_1m,
-	       m.status, m.created_at
+	SELECT DISTINCT `+managedModelSelectColumnsWithAliasM+`
 	FROM managed_models m
 	JOIN channel_models cm ON cm.public_id=m.public_id AND cm.status=1
 	JOIN upstream_channels ch ON ch.id=cm.channel_id AND ch.status=1
@@ -269,24 +321,9 @@ func (s *Store) ListEnabledManagedModelsWithBindingsForGroup(ctx context.Context
 
 	var out []ManagedModel
 	for rows.Next() {
-		var m ManagedModel
-		var dbGroupName sql.NullString
-		var upstreamModel sql.NullString
-		var ownedBy sql.NullString
-		if err := rows.Scan(&m.ID, &m.PublicID, &dbGroupName, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt); err != nil {
+		m, err := scanManagedModelRow(rows)
+		if err != nil {
 			return nil, fmt.Errorf("扫描可用 managed_models 失败: %w", err)
-		}
-		if err := normalizeManagedModelPricing(&m); err != nil {
-			return nil, err
-		}
-		m.GroupName = normalizeManagedModelGroupName(dbGroupName.String)
-		if upstreamModel.Valid {
-			v := upstreamModel.String
-			m.UpstreamModel = &v
-		}
-		if ownedBy.Valid {
-			v := ownedBy.String
-			m.OwnedBy = &v
 		}
 		out = append(out, m)
 	}
@@ -319,14 +356,12 @@ func (s *Store) ListEnabledManagedModelsWithBindingsForGroups(ctx context.Contex
 
 	var b strings.Builder
 	b.WriteString(`
-	SELECT DISTINCT m.id, m.public_id, m.group_name, m.upstream_model, m.owned_by,
-	       m.input_usd_per_1m, m.output_usd_per_1m, m.cache_input_usd_per_1m, m.cache_output_usd_per_1m,
-	       m.status, m.created_at
-	FROM managed_models m
-	JOIN channel_models cm ON cm.public_id=m.public_id AND cm.status=1
-	JOIN upstream_channels ch ON ch.id=cm.channel_id AND ch.status=1
-	WHERE m.status=1
-	  AND TRIM(m.group_name) IN (`)
+SELECT DISTINCT ` + managedModelSelectColumnsWithAliasM + `
+FROM managed_models m
+JOIN channel_models cm ON cm.public_id=m.public_id AND cm.status=1
+JOIN upstream_channels ch ON ch.id=cm.channel_id AND ch.status=1
+WHERE m.status=1
+  AND TRIM(m.group_name) IN (`)
 
 	args := make([]any, 0, len(groupNames)*2)
 	for i, g := range groupNames {
@@ -336,7 +371,8 @@ func (s *Store) ListEnabledManagedModelsWithBindingsForGroups(ctx context.Contex
 		b.WriteString("?")
 		args = append(args, g)
 	}
-	b.WriteString(")\n  AND (")
+	b.WriteString(`)
+  AND (`)
 
 	for i, g := range groupNames {
 		if i > 0 {
@@ -349,7 +385,9 @@ func (s *Store) ListEnabledManagedModelsWithBindingsForGroups(ctx context.Contex
 		}
 		args = append(args, g)
 	}
-	b.WriteString(")\nORDER BY m.id DESC\n")
+	b.WriteString(`)
+ORDER BY m.id DESC
+`)
 
 	rows, err := s.db.QueryContext(ctx, b.String(), args...)
 	if err != nil {
@@ -359,24 +397,9 @@ func (s *Store) ListEnabledManagedModelsWithBindingsForGroups(ctx context.Contex
 
 	var out []ManagedModel
 	for rows.Next() {
-		var m ManagedModel
-		var dbGroupName sql.NullString
-		var upstreamModel sql.NullString
-		var ownedBy sql.NullString
-		if err := rows.Scan(&m.ID, &m.PublicID, &dbGroupName, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt); err != nil {
+		m, err := scanManagedModelRow(rows)
+		if err != nil {
 			return nil, fmt.Errorf("扫描可用 managed_models 失败: %w", err)
-		}
-		if err := normalizeManagedModelPricing(&m); err != nil {
-			return nil, err
-		}
-		m.GroupName = normalizeManagedModelGroupName(dbGroupName.String)
-		if upstreamModel.Valid {
-			v := upstreamModel.String
-			m.UpstreamModel = &v
-		}
-		if ownedBy.Valid {
-			v := ownedBy.String
-			m.OwnedBy = &v
 		}
 		out = append(out, m)
 	}
@@ -387,102 +410,48 @@ func (s *Store) ListEnabledManagedModelsWithBindingsForGroups(ctx context.Contex
 }
 
 func (s *Store) GetManagedModelByID(ctx context.Context, id int64) (ManagedModel, error) {
-	var m ManagedModel
-	var groupName sql.NullString
-	var upstreamModel sql.NullString
-	var ownedBy sql.NullString
-	err := s.db.QueryRowContext(ctx, `
-SELECT id, public_id, group_name, upstream_model, owned_by,
-       input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m,
-       status, created_at
+	m, err := scanManagedModelRow(s.db.QueryRowContext(ctx, `
+SELECT `+managedModelSelectColumns+`
 FROM managed_models
 WHERE id=?
-`, id).Scan(&m.ID, &m.PublicID, &groupName, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt)
+`, id))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ManagedModel{}, sql.ErrNoRows
 		}
 		return ManagedModel{}, fmt.Errorf("查询 managed_model 失败: %w", err)
-	}
-	if err := normalizeManagedModelPricing(&m); err != nil {
-		return ManagedModel{}, err
-	}
-	m.GroupName = normalizeManagedModelGroupName(groupName.String)
-	if upstreamModel.Valid {
-		v := upstreamModel.String
-		m.UpstreamModel = &v
-	}
-	if ownedBy.Valid {
-		v := ownedBy.String
-		m.OwnedBy = &v
 	}
 	return m, nil
 }
 
 func (s *Store) GetManagedModelByPublicID(ctx context.Context, publicID string) (ManagedModel, error) {
-	var m ManagedModel
-	var groupName sql.NullString
-	var upstreamModel sql.NullString
-	var ownedBy sql.NullString
-	err := s.db.QueryRowContext(ctx, `
-SELECT id, public_id, group_name, upstream_model, owned_by,
-       input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m,
-       status, created_at
+	m, err := scanManagedModelRow(s.db.QueryRowContext(ctx, `
+SELECT `+managedModelSelectColumns+`
 FROM managed_models
 WHERE public_id=?
 LIMIT 1
-`, publicID).Scan(&m.ID, &m.PublicID, &groupName, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt)
+`, publicID))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ManagedModel{}, sql.ErrNoRows
 		}
 		return ManagedModel{}, fmt.Errorf("查询 managed_model 失败: %w", err)
-	}
-	if err := normalizeManagedModelPricing(&m); err != nil {
-		return ManagedModel{}, err
-	}
-	m.GroupName = normalizeManagedModelGroupName(groupName.String)
-	if upstreamModel.Valid {
-		v := upstreamModel.String
-		m.UpstreamModel = &v
-	}
-	if ownedBy.Valid {
-		v := ownedBy.String
-		m.OwnedBy = &v
 	}
 	return m, nil
 }
 
 func (s *Store) GetEnabledManagedModelByPublicID(ctx context.Context, publicID string) (ManagedModel, error) {
-	var m ManagedModel
-	var groupName sql.NullString
-	var upstreamModel sql.NullString
-	var ownedBy sql.NullString
-	err := s.db.QueryRowContext(ctx, `
-SELECT id, public_id, group_name, upstream_model, owned_by,
-       input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m,
-       status, created_at
+	m, err := scanManagedModelRow(s.db.QueryRowContext(ctx, `
+SELECT `+managedModelSelectColumns+`
 FROM managed_models
 WHERE public_id=? AND status=1
 LIMIT 1
-`, publicID).Scan(&m.ID, &m.PublicID, &groupName, &upstreamModel, &ownedBy, &m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M, &m.Status, &m.CreatedAt)
+`, publicID))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ManagedModel{}, sql.ErrNoRows
 		}
 		return ManagedModel{}, fmt.Errorf("查询 managed_model 失败: %w", err)
-	}
-	if err := normalizeManagedModelPricing(&m); err != nil {
-		return ManagedModel{}, err
-	}
-	m.GroupName = normalizeManagedModelGroupName(groupName.String)
-	if upstreamModel.Valid {
-		v := upstreamModel.String
-		m.UpstreamModel = &v
-	}
-	if ownedBy.Valid {
-		v := ownedBy.String
-		m.OwnedBy = &v
 	}
 	return m, nil
 }
@@ -493,20 +462,43 @@ func (s *Store) CreateManagedModel(ctx context.Context, in ManagedModelCreate) (
 	outUSD := in.OutputUSDPer1M.Truncate(USDScale)
 	cacheInUSD := in.CacheInputUSDPer1M.Truncate(USDScale)
 	cacheOutUSD := in.CacheOutputUSDPer1M.Truncate(USDScale)
+	priorityInUSD, err := normalizeOptionalManagedModelPrice(in.PriorityInputUSDPer1M)
+	if err != nil {
+		return 0, err
+	}
+	priorityOutUSD, err := normalizeOptionalManagedModelPrice(in.PriorityOutputUSDPer1M)
+	if err != nil {
+		return 0, err
+	}
+	priorityCacheInUSD, err := normalizeOptionalManagedModelPrice(in.PriorityCacheInputUSDPer1M)
+	if err != nil {
+		return 0, err
+	}
 	if inUSD.IsNegative() || outUSD.IsNegative() || cacheInUSD.IsNegative() || cacheOutUSD.IsNegative() {
 		return 0, errors.New("模型定价不合法")
+	}
+	if err := validateManagedModelPriorityPricing(in.PriorityPricingEnabled, priorityInUSD, priorityOutUSD); err != nil {
+		return 0, err
+	}
+	priorityEnabled := 0
+	if in.PriorityPricingEnabled {
+		priorityEnabled = 1
 	}
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO managed_models(
   public_id, group_name, owned_by,
   input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m,
+  priority_pricing_enabled, priority_input_usd_per_1m, priority_output_usd_per_1m, priority_cache_input_usd_per_1m,
   status, created_at
 ) VALUES(
   ?, ?, ?,
   ?, ?, ?, ?,
+  ?, ?, ?, ?,
   ?, CURRENT_TIMESTAMP
 )
-`, in.PublicID, in.GroupName, in.OwnedBy, inUSD, outUSD, cacheInUSD, cacheOutUSD, in.Status)
+`, in.PublicID, in.GroupName, in.OwnedBy, inUSD, outUSD, cacheInUSD, cacheOutUSD,
+		priorityEnabled, priorityInUSD, priorityOutUSD, priorityCacheInUSD,
+		in.Status)
 	if err != nil {
 		return 0, fmt.Errorf("创建 managed_model 失败: %w", err)
 	}
@@ -526,8 +518,27 @@ func (s *Store) UpdateManagedModel(ctx context.Context, in ManagedModelUpdate) e
 	outUSD := in.OutputUSDPer1M.Truncate(USDScale)
 	cacheInUSD := in.CacheInputUSDPer1M.Truncate(USDScale)
 	cacheOutUSD := in.CacheOutputUSDPer1M.Truncate(USDScale)
+	priorityInUSD, err := normalizeOptionalManagedModelPrice(in.PriorityInputUSDPer1M)
+	if err != nil {
+		return err
+	}
+	priorityOutUSD, err := normalizeOptionalManagedModelPrice(in.PriorityOutputUSDPer1M)
+	if err != nil {
+		return err
+	}
+	priorityCacheInUSD, err := normalizeOptionalManagedModelPrice(in.PriorityCacheInputUSDPer1M)
+	if err != nil {
+		return err
+	}
 	if inUSD.IsNegative() || outUSD.IsNegative() || cacheInUSD.IsNegative() || cacheOutUSD.IsNegative() {
 		return errors.New("模型定价不合法")
+	}
+	if err := validateManagedModelPriorityPricing(in.PriorityPricingEnabled, priorityInUSD, priorityOutUSD); err != nil {
+		return err
+	}
+	priorityEnabled := 0
+	if in.PriorityPricingEnabled {
+		priorityEnabled = 1
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -548,9 +559,12 @@ func (s *Store) UpdateManagedModel(ctx context.Context, in ManagedModelUpdate) e
 UPDATE managed_models
 SET public_id=?, group_name=?, owned_by=?,
     input_usd_per_1m=?, output_usd_per_1m=?, cache_input_usd_per_1m=?, cache_output_usd_per_1m=?,
+    priority_pricing_enabled=?, priority_input_usd_per_1m=?, priority_output_usd_per_1m=?, priority_cache_input_usd_per_1m=?,
     status=?
 WHERE id=?
-`, in.PublicID, in.GroupName, in.OwnedBy, inUSD, outUSD, cacheInUSD, cacheOutUSD, in.Status, in.ID); err != nil {
+`, in.PublicID, in.GroupName, in.OwnedBy, inUSD, outUSD, cacheInUSD, cacheOutUSD,
+		priorityEnabled, priorityInUSD, priorityOutUSD, priorityCacheInUSD,
+		in.Status, in.ID); err != nil {
 		return fmt.Errorf("更新 managed_model 失败: %w", err)
 	}
 
@@ -604,11 +618,16 @@ func (s *Store) DeleteManagedModel(ctx context.Context, id int64) error {
 }
 
 type ManagedModelPricingUpsert struct {
-	PublicID            string
-	InputUSDPer1M       decimal.Decimal
-	OutputUSDPer1M      decimal.Decimal
-	CacheInputUSDPer1M  decimal.Decimal
-	CacheOutputUSDPer1M decimal.Decimal
+	PublicID                   string
+	BasePricingSpecified       bool
+	InputUSDPer1M              decimal.Decimal
+	OutputUSDPer1M             decimal.Decimal
+	CacheInputUSDPer1M         decimal.Decimal
+	CacheOutputUSDPer1M        decimal.Decimal
+	PriorityPricingEnabled     *bool
+	PriorityInputUSDPer1M      *decimal.Decimal
+	PriorityOutputUSDPer1M     *decimal.Decimal
+	PriorityCacheInputUSDPer1M *decimal.Decimal
 }
 
 type UpsertManagedModelPricingResult struct {
@@ -623,21 +642,56 @@ func (s *Store) UpsertManagedModelPricing(ctx context.Context, items []ManagedMo
 		return res, nil
 	}
 
-	byPublicID := make(map[string]ManagedModelPricingUpsert, len(items))
+	type normalizedPricingUpsert struct {
+		PublicID                   string
+		BasePricingSpecified       bool
+		InputUSDPer1M              decimal.Decimal
+		OutputUSDPer1M             decimal.Decimal
+		CacheInputUSDPer1M         decimal.Decimal
+		CacheOutputUSDPer1M        decimal.Decimal
+		PriorityPricingEnabled     *bool
+		PriorityInputUSDPer1M      *decimal.Decimal
+		PriorityOutputUSDPer1M     *decimal.Decimal
+		PriorityCacheInputUSDPer1M *decimal.Decimal
+	}
+
+	byPublicID := make(map[string]normalizedPricingUpsert, len(items))
 	for _, it := range items {
 		id := strings.TrimSpace(it.PublicID)
 		if id == "" {
 			return UpsertManagedModelPricingResult{}, errors.New("public_id 不能为空")
 		}
-		it.PublicID = id
-		it.InputUSDPer1M = it.InputUSDPer1M.Truncate(USDScale)
-		it.OutputUSDPer1M = it.OutputUSDPer1M.Truncate(USDScale)
-		it.CacheInputUSDPer1M = it.CacheInputUSDPer1M.Truncate(USDScale)
-		it.CacheOutputUSDPer1M = it.CacheOutputUSDPer1M.Truncate(USDScale)
-		if it.InputUSDPer1M.IsNegative() || it.OutputUSDPer1M.IsNegative() || it.CacheInputUSDPer1M.IsNegative() || it.CacheOutputUSDPer1M.IsNegative() {
+		inUSD := it.InputUSDPer1M.Truncate(USDScale)
+		outUSD := it.OutputUSDPer1M.Truncate(USDScale)
+		cacheInUSD := it.CacheInputUSDPer1M.Truncate(USDScale)
+		cacheOutUSD := it.CacheOutputUSDPer1M.Truncate(USDScale)
+		if inUSD.IsNegative() || outUSD.IsNegative() || cacheInUSD.IsNegative() || cacheOutUSD.IsNegative() {
 			return UpsertManagedModelPricingResult{}, errors.New("模型定价不合法")
 		}
-		byPublicID[id] = it
+		priorityInUSD, err := normalizeOptionalManagedModelPrice(it.PriorityInputUSDPer1M)
+		if err != nil {
+			return UpsertManagedModelPricingResult{}, err
+		}
+		priorityOutUSD, err := normalizeOptionalManagedModelPrice(it.PriorityOutputUSDPer1M)
+		if err != nil {
+			return UpsertManagedModelPricingResult{}, err
+		}
+		priorityCacheInUSD, err := normalizeOptionalManagedModelPrice(it.PriorityCacheInputUSDPer1M)
+		if err != nil {
+			return UpsertManagedModelPricingResult{}, err
+		}
+		byPublicID[id] = normalizedPricingUpsert{
+			PublicID:                   id,
+			BasePricingSpecified:       it.BasePricingSpecified,
+			InputUSDPer1M:              inUSD,
+			OutputUSDPer1M:             outUSD,
+			CacheInputUSDPer1M:         cacheInUSD,
+			CacheOutputUSDPer1M:        cacheOutUSD,
+			PriorityPricingEnabled:     it.PriorityPricingEnabled,
+			PriorityInputUSDPer1M:      priorityInUSD,
+			PriorityOutputUSDPer1M:     priorityOutUSD,
+			PriorityCacheInputUSDPer1M: priorityCacheInUSD,
+		}
 	}
 
 	publicIDs := make([]string, 0, len(byPublicID))
@@ -647,7 +701,9 @@ func (s *Store) UpsertManagedModelPricing(ctx context.Context, items []ManagedMo
 	sort.Strings(publicIDs)
 
 	var b strings.Builder
-	b.WriteString("SELECT id, public_id, input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m\n")
+	b.WriteString("SELECT ")
+	b.WriteString(managedModelSelectColumns)
+	b.WriteString("\n")
 	b.WriteString("FROM managed_models\n")
 	b.WriteString("WHERE public_id IN (")
 	args := make([]any, 0, len(publicIDs))
@@ -660,30 +716,22 @@ func (s *Store) UpsertManagedModelPricing(ctx context.Context, items []ManagedMo
 	}
 	b.WriteString(")")
 
-	type existing struct {
-		ID                  int64
-		InputUSDPer1M       decimal.Decimal
-		OutputUSDPer1M      decimal.Decimal
-		CacheInputUSDPer1M  decimal.Decimal
-		CacheOutputUSDPer1M decimal.Decimal
-	}
-	existingByPublicID := make(map[string]existing, len(publicIDs))
+	existingByPublicID := make(map[string]ManagedModel, len(publicIDs))
 	rows, err := s.db.QueryContext(ctx, b.String(), args...)
 	if err != nil {
 		return UpsertManagedModelPricingResult{}, fmt.Errorf("查询 managed_models 失败: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var e existing
-		var pid string
-		if err := rows.Scan(&e.ID, &pid, &e.InputUSDPer1M, &e.OutputUSDPer1M, &e.CacheInputUSDPer1M, &e.CacheOutputUSDPer1M); err != nil {
+		m, err := scanManagedModelRow(rows)
+		if err != nil {
 			return UpsertManagedModelPricingResult{}, fmt.Errorf("扫描 managed_models 失败: %w", err)
 		}
-		pid = strings.TrimSpace(pid)
-		if pid == "" || e.ID == 0 {
+		pid := strings.TrimSpace(m.PublicID)
+		if pid == "" || m.ID == 0 {
 			continue
 		}
-		existingByPublicID[pid] = e
+		existingByPublicID[pid] = m
 	}
 	if err := rows.Err(); err != nil {
 		return UpsertManagedModelPricingResult{}, fmt.Errorf("遍历 managed_models 失败: %w", err)
@@ -697,7 +745,8 @@ func (s *Store) UpsertManagedModelPricing(ctx context.Context, items []ManagedMo
 
 	updateStmt, err := tx.PrepareContext(ctx, `
 UPDATE managed_models
-SET input_usd_per_1m=?, output_usd_per_1m=?, cache_input_usd_per_1m=?, cache_output_usd_per_1m=?
+SET input_usd_per_1m=?, output_usd_per_1m=?, cache_input_usd_per_1m=?, cache_output_usd_per_1m=?,
+    priority_pricing_enabled=?, priority_input_usd_per_1m=?, priority_output_usd_per_1m=?, priority_cache_input_usd_per_1m=?
 WHERE id=?
 `)
 	if err != nil {
@@ -709,9 +758,11 @@ WHERE id=?
 INSERT INTO managed_models(
   public_id, group_name, owned_by,
   input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m,
+  priority_pricing_enabled, priority_input_usd_per_1m, priority_output_usd_per_1m, priority_cache_input_usd_per_1m,
   status, created_at
 ) VALUES(
   ?, ?, NULL,
+  ?, ?, ?, ?,
   ?, ?, ?, ?,
   0, CURRENT_TIMESTAMP
 )
@@ -721,25 +772,86 @@ INSERT INTO managed_models(
 	}
 	defer insertStmt.Close()
 
+	equalOptionalDecimal := func(a, b *decimal.Decimal) bool {
+		if a == nil || b == nil {
+			return a == nil && b == nil
+		}
+		return a.Truncate(USDScale).Equal(b.Truncate(USDScale))
+	}
+
 	for _, publicID := range publicIDs {
 		it := byPublicID[publicID]
 		if e, ok := existingByPublicID[publicID]; ok {
-			inUSD := it.InputUSDPer1M.Truncate(USDScale)
-			outUSD := it.OutputUSDPer1M.Truncate(USDScale)
-			if e.InputUSDPer1M.Truncate(USDScale).Equal(inUSD) &&
-				e.OutputUSDPer1M.Truncate(USDScale).Equal(outUSD) &&
-				e.CacheInputUSDPer1M.Truncate(USDScale).Equal(it.CacheInputUSDPer1M.Truncate(USDScale)) &&
-				e.CacheOutputUSDPer1M.Truncate(USDScale).Equal(it.CacheOutputUSDPer1M.Truncate(USDScale)) {
+			if !it.BasePricingSpecified {
+				it.InputUSDPer1M = e.InputUSDPer1M.Truncate(USDScale)
+				it.OutputUSDPer1M = e.OutputUSDPer1M.Truncate(USDScale)
+				it.CacheInputUSDPer1M = e.CacheInputUSDPer1M.Truncate(USDScale)
+				it.CacheOutputUSDPer1M = e.CacheOutputUSDPer1M.Truncate(USDScale)
+			}
+			priorityEnabled := e.PriorityPricingEnabled
+			if it.PriorityPricingEnabled != nil {
+				priorityEnabled = *it.PriorityPricingEnabled
+			}
+			priorityInUSD := e.PriorityInputUSDPer1M
+			if it.PriorityInputUSDPer1M != nil {
+				priorityInUSD = it.PriorityInputUSDPer1M
+			}
+			priorityOutUSD := e.PriorityOutputUSDPer1M
+			if it.PriorityOutputUSDPer1M != nil {
+				priorityOutUSD = it.PriorityOutputUSDPer1M
+			}
+			priorityCacheInUSD := e.PriorityCacheInputUSDPer1M
+			if it.PriorityCacheInputUSDPer1M != nil {
+				priorityCacheInUSD = it.PriorityCacheInputUSDPer1M
+			}
+			if err := validateManagedModelPriorityPricing(priorityEnabled, priorityInUSD, priorityOutUSD); err != nil {
+				return UpsertManagedModelPricingResult{}, err
+			}
+			if e.InputUSDPer1M.Truncate(USDScale).Equal(it.InputUSDPer1M) &&
+				e.OutputUSDPer1M.Truncate(USDScale).Equal(it.OutputUSDPer1M) &&
+				e.CacheInputUSDPer1M.Truncate(USDScale).Equal(it.CacheInputUSDPer1M) &&
+				e.CacheOutputUSDPer1M.Truncate(USDScale).Equal(it.CacheOutputUSDPer1M) &&
+				e.PriorityPricingEnabled == priorityEnabled &&
+				equalOptionalDecimal(e.PriorityInputUSDPer1M, priorityInUSD) &&
+				equalOptionalDecimal(e.PriorityOutputUSDPer1M, priorityOutUSD) &&
+				equalOptionalDecimal(e.PriorityCacheInputUSDPer1M, priorityCacheInUSD) {
 				res.Unchanged = append(res.Unchanged, publicID)
 				continue
 			}
-			if _, err := updateStmt.ExecContext(ctx, inUSD, outUSD, it.CacheInputUSDPer1M.Truncate(USDScale), it.CacheOutputUSDPer1M.Truncate(USDScale), e.ID); err != nil {
+			priorityFlag := 0
+			if priorityEnabled {
+				priorityFlag = 1
+			}
+			if _, err := updateStmt.ExecContext(ctx,
+				it.InputUSDPer1M, it.OutputUSDPer1M, it.CacheInputUSDPer1M, it.CacheOutputUSDPer1M,
+				priorityFlag, priorityInUSD, priorityOutUSD, priorityCacheInUSD,
+				e.ID,
+			); err != nil {
 				return UpsertManagedModelPricingResult{}, fmt.Errorf("更新 managed_model(%s) 失败: %w", publicID, err)
 			}
 			res.Updated = append(res.Updated, publicID)
 			continue
 		}
-		if _, err := insertStmt.ExecContext(ctx, publicID, "", it.InputUSDPer1M, it.OutputUSDPer1M, it.CacheInputUSDPer1M, it.CacheOutputUSDPer1M); err != nil {
+
+		if !it.BasePricingSpecified {
+			return UpsertManagedModelPricingResult{}, errors.New("模型基础定价不合法")
+		}
+		priorityEnabled := false
+		if it.PriorityPricingEnabled != nil {
+			priorityEnabled = *it.PriorityPricingEnabled
+		}
+		if err := validateManagedModelPriorityPricing(priorityEnabled, it.PriorityInputUSDPer1M, it.PriorityOutputUSDPer1M); err != nil {
+			return UpsertManagedModelPricingResult{}, err
+		}
+		priorityFlag := 0
+		if priorityEnabled {
+			priorityFlag = 1
+		}
+		if _, err := insertStmt.ExecContext(ctx,
+			publicID, "",
+			it.InputUSDPer1M, it.OutputUSDPer1M, it.CacheInputUSDPer1M, it.CacheOutputUSDPer1M,
+			priorityFlag, it.PriorityInputUSDPer1M, it.PriorityOutputUSDPer1M, it.PriorityCacheInputUSDPer1M,
+		); err != nil {
 			return UpsertManagedModelPricingResult{}, fmt.Errorf("创建 managed_model(%s) 失败: %w", publicID, err)
 		}
 		res.Added = append(res.Added, publicID)

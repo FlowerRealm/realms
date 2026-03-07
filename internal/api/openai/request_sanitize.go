@@ -183,6 +183,7 @@ func sanitizeChatCompletionsPayload(body []byte, defaultMaxTokens int) (map[stri
 		Audio      json.RawMessage `json:"audio,omitempty"`
 
 		SafetyIdentifier string          `json:"safety_identifier,omitempty"`
+		ServiceTier      string          `json:"service_tier,omitempty"`
 		Store            json.RawMessage `json:"store,omitempty"`
 
 		PromptCacheKey       string          `json:"prompt_cache_key,omitempty"`

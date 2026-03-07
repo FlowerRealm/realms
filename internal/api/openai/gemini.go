@@ -110,6 +110,11 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sanitizedBody, serviceTier, err := normalizeRequestServiceTier(sanitizedBody, nil)
+	if err != nil {
+		http.Error(w, "service_tier 非法", http.StatusBadRequest)
+		return
+	}
 	wantStream := strings.EqualFold(r.URL.Query().Get("alt"), "sse") || strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/event-stream")
 
 	maxOut := extractGeminiMaxOutputTokens(sanitizedBody)
@@ -162,6 +167,10 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if err := validateManagedModelServiceTier(mm, serviceTier); err != nil {
+			http.Error(w, serviceTierBadRequestMessage(err), http.StatusBadRequest)
+			return
+		}
 		bindings, err := h.models.ListEnabledChannelModelBindingsByPublicID(r.Context(), publicModel)
 		if err != nil {
 			http.Error(w, "查询模型绑定失败", http.StatusBadGateway)
@@ -184,7 +193,7 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		// 非 free_mode 下仍要求模型定价存在（用于配额预留与计费口径），但不要求“启用”。
-		if !freeMode {
+		if !freeMode || isPriorityServiceTier(serviceTier) {
 			mm, err := h.models.GetManagedModelByPublicID(r.Context(), publicModel)
 			if err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
@@ -199,6 +208,10 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 					http.Error(w, "无权限使用该模型", http.StatusBadRequest)
 					return
 				}
+			}
+			if err := validateManagedModelServiceTier(mm, serviceTier); err != nil {
+				http.Error(w, serviceTierBadRequestMessage(err), http.StatusBadRequest)
+				return
 			}
 		}
 		// passthrough 模式下仍尝试使用“渠道绑定模型”做 model 转发（best-effort）；
@@ -225,6 +238,8 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	applyServiceTierConstraints(&cons, serviceTier)
+
 	routeKey := extractRouteKeyFromRawBody(body)
 	if routeKey == "" {
 		routeKey = extractRouteKey(r)
@@ -238,9 +253,14 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 			UserID:          p.UserID,
 			TokenID:         *p.TokenID,
 			Model:           optionalString(publicModel),
+			ServiceTier:     serviceTier,
 			MaxOutputTokens: maxOut,
 		})
 		if err != nil {
+			if msg := reserveBadRequestMessage(err); msg != "" {
+				http.Error(w, msg, http.StatusBadRequest)
+				return
+			}
 			if errors.Is(err, quota.ErrSubscriptionRequired) || errors.Is(err, quota.ErrQuotaExceeded) {
 				http.Error(w, err.Error(), http.StatusTooManyRequests)
 				return
@@ -277,6 +297,16 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 		sel, err := router.Next(r.Context())
 		if err != nil {
 			if h.finalizeIfCanceled(r, usageID, nil, reqStart, wantStream, reqBytes) {
+				return
+			}
+			if msg := serviceTierSelectionBadRequestMessage(err); msg != "" {
+				if usageID != 0 && h.quota != nil {
+					bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					_ = h.quota.Void(bookCtx, usageID)
+					cancel()
+				}
+				http.Error(w, msg, http.StatusBadRequest)
+				h.finalizeUsageEvent(r, usageID, nil, http.StatusBadRequest, "service_tier", msg, time.Since(reqStart), 0, wantStream, reqBytes, 0)
 				return
 			}
 			break

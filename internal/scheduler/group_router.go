@@ -101,6 +101,7 @@ func (r *GroupRouter) nextFromOrderedGroups(ctx context.Context) (Selection, err
 	bestBannedUntil := time.Time{}
 	bestBannedGroupID := int64(0)
 	bestBannedGroupName := ""
+	fastModeUnsupported := false
 	for _, raw := range r.cons.AllowGroupOrder {
 		name := strings.TrimSpace(raw)
 		if name == "" {
@@ -118,6 +119,10 @@ func (r *GroupRouter) nextFromOrderedGroups(ctx context.Context) (Selection, err
 		}
 		sel, err := r.nextFromGroup(ctx, g.ID)
 		if err != nil {
+			if errors.Is(err, ErrFastModeUnsupported) {
+				fastModeUnsupported = true
+				continue
+			}
 			if errors.Is(err, errGroupExhausted) {
 				if r.sched != nil && r.sched.state != nil {
 					if chID, until, ok, e := r.earliestBannedCandidateInGroup(ctx, g.ID, now); e == nil && ok {
@@ -156,6 +161,9 @@ func (r *GroupRouter) nextFromOrderedGroups(ctx context.Context) (Selection, err
 			sel.RouteGroup = bestBannedGroupName
 			return sel, nil
 		}
+	}
+	if fastModeUnsupported {
+		return Selection{}, ErrFastModeUnsupported
 	}
 	return Selection{}, errGroupExhausted
 }
@@ -247,6 +255,8 @@ func (r *GroupRouter) nextFromGroup(ctx context.Context, groupID int64) (Selecti
 	if r.sched != nil && r.sched.state != nil {
 		r.sched.state.SweepExpiredChannelBans(now)
 	}
+	fastModeUnsupported := false
+	hasNonFastModeFailure := false
 
 	// 指针模式（按组）：当该组指针 pinned=true 时，从指针位置开始按 ring 遍历一圈。
 	// 注意：指针不应绕过 AllowGroupOrder，仅在“当前正在尝试的 groupID”作用域内生效。
@@ -304,6 +314,11 @@ func (r *GroupRouter) nextFromGroup(ctx context.Context, groupID int64) (Selecti
 					cons.RequireChannelID = chID
 					sel, err := r.sched.SelectWithConstraints(ctx, r.userID, r.routeKeyHash, cons)
 					if err != nil {
+						if errors.Is(err, ErrFastModeUnsupported) {
+							fastModeUnsupported = true
+						} else {
+							hasNonFastModeFailure = true
+						}
 						r.excludedChannels[chID] = struct{}{}
 						return Selection{}, false
 					}
@@ -334,6 +349,9 @@ func (r *GroupRouter) nextFromGroup(ctx context.Context, groupID int64) (Selecti
 					if sel, ok := try(deferredID); ok {
 						return sel, nil
 					}
+				}
+				if fastModeUnsupported && !hasNonFastModeFailure {
+					return Selection{}, ErrFastModeUnsupported
 				}
 				return Selection{}, errGroupExhausted
 			}
@@ -380,6 +398,11 @@ func (r *GroupRouter) nextFromGroup(ctx context.Context, groupID int64) (Selecti
 		cons.RequireChannelID = cand.ChannelID
 		sel, err := r.sched.SelectWithConstraints(ctx, r.userID, r.routeKeyHash, cons)
 		if err != nil {
+			if errors.Is(err, ErrFastModeUnsupported) {
+				fastModeUnsupported = true
+			} else {
+				hasNonFastModeFailure = true
+			}
 			r.excludedChannels[cand.ChannelID] = struct{}{}
 			continue
 		}
@@ -393,6 +416,9 @@ func (r *GroupRouter) nextFromGroup(ctx context.Context, groupID int64) (Selecti
 			r.sched.touchChannelGroupPointer(ctx, groupID, cand.ChannelID, "route")
 		}
 		return sel, nil
+	}
+	if fastModeUnsupported && !hasNonFastModeFailure {
+		return Selection{}, ErrFastModeUnsupported
 	}
 	return Selection{}, errGroupExhausted
 }

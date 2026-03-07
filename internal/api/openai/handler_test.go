@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/shopspring/decimal"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -3432,5 +3433,79 @@ func TestResponses_ContextCanceledDuringRouterNext_FinalizesAsClientDisconnect(t
 	}
 	if u.calls[0].StatusCode != 0 {
 		t.Fatalf("expected status_code=0, got=%d", u.calls[0].StatusCode)
+	}
+}
+
+func TestResponses_FastModeUnsupportedReturnsBadRequest(t *testing.T) {
+	decimalPtr := func(v string) *decimal.Decimal {
+		d, err := decimal.NewFromString(v)
+		if err != nil {
+			t.Fatalf("decimal parse: %v", err)
+		}
+		return &d
+	}
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, AllowServiceTier: true, FastMode: false},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1}},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {{ID: 1, EndpointID: 11, Status: 1}},
+		},
+		models: map[string]store.ManagedModel{
+			"m1": {
+				ID:                     1,
+				PublicID:               "m1",
+				GroupName:              store.DefaultGroupName,
+				InputUSDPer1M:          decimal.NewFromInt(1),
+				OutputUSDPer1M:         decimal.NewFromInt(1),
+				CacheInputUSDPer1M:     decimal.Zero,
+				CacheOutputUSDPer1M:    decimal.Zero,
+				PriorityPricingEnabled: true,
+				PriorityInputUSDPer1M:  decimalPtr("2"),
+				PriorityOutputUSDPer1M: decimalPtr("3"),
+				Status:                 1,
+			},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"m1": {{ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "m1-up1", Status: 1}},
+		},
+	}
+	doer := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		t.Fatalf("unexpected upstream call")
+		return nil, nil
+	})
+	q := &fakeQuota{}
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, false, q, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi","service_tier":"fast"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(strings.ToLower(rr.Body.String()), "fast mode") && !strings.Contains(rr.Body.String(), "Fast mode") {
+		t.Fatalf("expected fast mode error, got=%s", rr.Body.String())
+	}
+	if len(q.reserveCalls) != 1 {
+		t.Fatalf("expected reserve called once, got=%d", len(q.reserveCalls))
+	}
+	if q.reserveCalls[0].ServiceTier == nil || *q.reserveCalls[0].ServiceTier != "priority" {
+		t.Fatalf("reserve service_tier=%v, want priority", q.reserveCalls[0].ServiceTier)
+	}
+	if len(q.voidCalls) != 1 {
+		t.Fatalf("expected void called once, got=%d", len(q.voidCalls))
+	}
+	if len(q.commitCalls) != 0 {
+		t.Fatalf("expected commit not called, got=%d", len(q.commitCalls))
 	}
 }

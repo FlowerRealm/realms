@@ -254,6 +254,38 @@ func parsePricingFromMap(m map[string]any) (store.ManagedModelPricingUpsert, boo
 		return store.ManagedModelPricingUpsert{}, false, "缺少定价字段（usd_per_1m 或 cost_per_token）"
 	}
 
+	parsePriorityFields := func(item *store.ManagedModelPricingUpsert) (string, bool) {
+		if hasAnyKey(m, "priority_pricing_enabled") {
+			enabled, err := parseBoolFieldOptional(m, "priority_pricing_enabled")
+			if err != nil {
+				return "priority_pricing_enabled 不合法", false
+			}
+			item.PriorityPricingEnabled = enabled
+		}
+		if hasAnyKey(m, "priority_input_usd_per_1m") {
+			v, err := parseDecimalFieldPointer(m, "priority_input_usd_per_1m")
+			if err != nil {
+				return "priority_input_usd_per_1m 不合法", false
+			}
+			item.PriorityInputUSDPer1M = v
+		}
+		if hasAnyKey(m, "priority_output_usd_per_1m") {
+			v, err := parseDecimalFieldPointer(m, "priority_output_usd_per_1m")
+			if err != nil {
+				return "priority_output_usd_per_1m 不合法", false
+			}
+			item.PriorityOutputUSDPer1M = v
+		}
+		if hasAnyKey(m, "priority_cache_input_usd_per_1m") {
+			v, err := parseDecimalFieldPointer(m, "priority_cache_input_usd_per_1m")
+			if err != nil {
+				return "priority_cache_input_usd_per_1m 不合法", false
+			}
+			item.PriorityCacheInputUSDPer1M = v
+		}
+		return "", true
+	}
+
 	if hasUSD {
 		inUSD, err := parseDecimalFieldOptional(m, "input_usd_per_1m")
 		if err != nil {
@@ -274,15 +306,18 @@ func parsePricingFromMap(m map[string]any) (store.ManagedModelPricingUpsert, boo
 		if inUSD.IsNegative() || outUSD.IsNegative() || cacheInUSD.IsNegative() || cacheOutUSD.IsNegative() {
 			return store.ManagedModelPricingUpsert{}, false, "定价不能为负数"
 		}
-		return store.ManagedModelPricingUpsert{
+		item := store.ManagedModelPricingUpsert{
 			InputUSDPer1M:       inUSD,
 			OutputUSDPer1M:      outUSD,
 			CacheInputUSDPer1M:  cacheInUSD,
 			CacheOutputUSDPer1M: cacheOutUSD,
-		}, true, ""
+		}
+		if reason, ok := parsePriorityFields(&item); !ok {
+			return store.ManagedModelPricingUpsert{}, false, reason
+		}
+		return item, true, ""
 	}
 
-	// LiteLLM 常见格式：cost_per_token -> usd_per_1m
 	inTok, err := parseDecimalFieldOptional(m, "input_cost_per_token")
 	if err != nil {
 		return store.ManagedModelPricingUpsert{}, false, "input_cost_per_token 不合法"
@@ -300,8 +335,6 @@ func parsePricingFromMap(m map[string]any) (store.ManagedModelPricingUpsert, boo
 	if err != nil {
 		return store.ManagedModelPricingUpsert{}, false, "cache_read_output_cost_per_token 不合法"
 	}
-
-	// LiteLLM 常见兜底字段：cache_read_cost_per_token（若缺少 input/output 维度，则视为同价）。
 	if cacheInTok.IsZero() || cacheOutTok.IsZero() {
 		cacheTok, err := parseDecimalFieldOptional(m, "cache_read_cost_per_token")
 		if err != nil {
@@ -323,12 +356,16 @@ func parsePricingFromMap(m map[string]any) (store.ManagedModelPricingUpsert, boo
 	if inUSD.IsNegative() || outUSD.IsNegative() || cacheInUSD.IsNegative() || cacheOutUSD.IsNegative() {
 		return store.ManagedModelPricingUpsert{}, false, "定价不能为负数"
 	}
-	return store.ManagedModelPricingUpsert{
+	item := store.ManagedModelPricingUpsert{
 		InputUSDPer1M:       inUSD,
 		OutputUSDPer1M:      outUSD,
 		CacheInputUSDPer1M:  cacheInUSD,
 		CacheOutputUSDPer1M: cacheOutUSD,
-	}, true, ""
+	}
+	if reason, ok := parsePriorityFields(&item); !ok {
+		return store.ManagedModelPricingUpsert{}, false, reason
+	}
+	return item, true, ""
 }
 
 func parseDecimalFieldOptional(m map[string]any, key string) (decimal.Decimal, error) {
@@ -344,6 +381,72 @@ func parseDecimalFieldOptional(m map[string]any, key string) (decimal.Decimal, e
 		return decimal.Zero, fmt.Errorf("invalid")
 	}
 	return d, nil
+}
+
+func parseDecimalFieldPointer(m map[string]any, key string) (*decimal.Decimal, error) {
+	if m == nil {
+		return nil, nil
+	}
+	raw, ok := m[key]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	d, ok := parseDecimalAny(raw)
+	if !ok {
+		return nil, fmt.Errorf("invalid")
+	}
+	return &d, nil
+}
+
+func parseBoolFieldOptional(m map[string]any, key string) (*bool, error) {
+	if m == nil {
+		return nil, nil
+	}
+	raw, ok := m[key]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	switch v := raw.(type) {
+	case bool:
+		return &v, nil
+	case string:
+		s := strings.TrimSpace(strings.ToLower(v))
+		switch s {
+		case "true", "1", "yes", "on":
+			b := true
+			return &b, nil
+		case "false", "0", "no", "off":
+			b := false
+			return &b, nil
+		default:
+			return nil, fmt.Errorf("invalid")
+		}
+	case json.Number:
+		s := strings.TrimSpace(v.String())
+		switch s {
+		case "1":
+			b := true
+			return &b, nil
+		case "0":
+			b := false
+			return &b, nil
+		default:
+			return nil, fmt.Errorf("invalid")
+		}
+	case float64:
+		switch v {
+		case 1:
+			b := true
+			return &b, nil
+		case 0:
+			b := false
+			return &b, nil
+		default:
+			return nil, fmt.Errorf("invalid")
+		}
+	default:
+		return nil, fmt.Errorf("invalid")
+	}
 }
 
 func parseDecimalAny(v any) (decimal.Decimal, bool) {

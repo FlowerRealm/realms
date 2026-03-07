@@ -1,12 +1,9 @@
 package openai
 
 import (
-	"strings"
+	"github.com/tidwall/sjson"
 
 	"realms/internal/scheduler"
-
-	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 func clonePayload(base map[string]any) map[string]any {
@@ -23,13 +20,20 @@ func clonePayload(base map[string]any) map[string]any {
 func applyChannelRequestPolicy(body []byte, sel scheduler.Selection) ([]byte, error) {
 	out := body
 	var err error
+	serviceTier := requestedServiceTierFromJSONBytes(out)
 	if !sel.AllowServiceTier {
+		if serviceTier != nil && *serviceTier == "priority" {
+			return nil, errSelectedChannelFastModeUnsupported
+		}
 		out, err = sjson.DeleteBytes(out, "service_tier")
 		if err != nil {
 			return nil, err
 		}
-	} else if !sel.FastMode && strings.EqualFold(strings.TrimSpace(gjson.GetBytes(out, "service_tier").String()), "priority") {
-		out, err = sjson.DeleteBytes(out, "service_tier")
+	} else if serviceTier != nil {
+		if *serviceTier == "priority" && !sel.FastMode {
+			return nil, errSelectedChannelFastModeUnsupported
+		}
+		out, err = sjson.SetBytes(out, "service_tier", *serviceTier)
 		if err != nil {
 			return nil, err
 		}

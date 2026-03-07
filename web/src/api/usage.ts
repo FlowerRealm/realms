@@ -45,6 +45,7 @@ export type UsageEvent = {
   upstream_credential_id?: number | null;
   state: string;
   model?: string | null;
+  service_tier?: string | null;
   input_tokens?: number | null;
   cached_input_tokens?: number | null;
   output_tokens?: number | null;
@@ -158,6 +159,7 @@ export type UsageEventPricingBreakdown = {
 
   model_public_id?: string;
   model_found: boolean;
+  service_tier?: string;
 
   input_tokens_total: number;
   input_tokens_cached: number;

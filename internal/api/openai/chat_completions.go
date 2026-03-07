@@ -48,6 +48,12 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	rawBody, serviceTier, err := normalizeRequestServiceTier(rawBody, payload)
+	if err != nil {
+		http.Error(w, "service_tier 非法", http.StatusBadRequest)
+		return
+	}
+
 	stream := boolFromAny(payload["stream"])
 	wantStore := boolFromAny(payload["store"])
 	publicModel := strings.TrimSpace(stringFromAny(payload["model"]))
@@ -113,7 +119,7 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 
 	if modelPassthrough {
 		// 非 free_mode 下仍要求模型定价存在（用于配额预留与计费口径），但不要求“启用”。
-		if !freeMode {
+		if !freeMode || isPriorityServiceTier(serviceTier) {
 			mm, err := h.models.GetManagedModelByPublicID(r.Context(), publicModel)
 			if err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
@@ -128,6 +134,10 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 					http.Error(w, "无权限使用该模型", http.StatusBadRequest)
 					return
 				}
+			}
+			if err := validateManagedModelServiceTier(mm, serviceTier); err != nil {
+				http.Error(w, serviceTierBadRequestMessage(err), http.StatusBadRequest)
+				return
 			}
 		}
 		// passthrough 模式下仍尝试使用“渠道绑定模型”做 model 转发（best-effort）；
@@ -207,6 +217,14 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 				return
 			}
 		}
+		if err := validateManagedModelServiceTier(mm, serviceTier); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := validateManagedModelServiceTier(mm, serviceTier); err != nil {
+			http.Error(w, serviceTierBadRequestMessage(err), http.StatusBadRequest)
+			return
+		}
 		bindings, err := h.models.ListEnabledChannelModelBindingsByPublicID(r.Context(), publicModel)
 		if err != nil {
 			http.Error(w, "查询模型绑定失败", http.StatusBadGateway)
@@ -271,6 +289,8 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	applyServiceTierConstraints(&cons, serviceTier)
+
 	routeKey := extractRouteKeyFromPayload(payload)
 	if routeKey == "" {
 		routeKey = extractRouteKeyFromRawBody(rawBody)
@@ -290,9 +310,14 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 			UserID:          p.UserID,
 			TokenID:         *p.TokenID,
 			Model:           optionalString(publicModel),
+			ServiceTier:     serviceTier,
 			MaxOutputTokens: maxOut,
 		})
 		if err != nil {
+			if msg := reserveBadRequestMessage(err); msg != "" {
+				http.Error(w, msg, http.StatusBadRequest)
+				return
+			}
 			if errors.Is(err, quota.ErrSubscriptionRequired) || errors.Is(err, quota.ErrQuotaExceeded) {
 				http.Error(w, err.Error(), http.StatusTooManyRequests)
 				return
@@ -331,6 +356,16 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 			if h.finalizeIfCanceled(r, usageID, nil, reqStart, stream, reqBytes) {
 				return
 			}
+			if msg := serviceTierSelectionBadRequestMessage(err); msg != "" {
+				if usageID != 0 && h.quota != nil {
+					bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					_ = h.quota.Void(bookCtx, usageID)
+					cancel()
+				}
+				http.Error(w, msg, http.StatusBadRequest)
+				h.finalizeUsageEvent(r, usageID, nil, http.StatusBadRequest, "service_tier", msg, time.Since(reqStart), 0, stream, reqBytes, 0)
+				return
+			}
 			break
 		}
 		rewritten, err := rewriteBody(sel)
@@ -339,6 +374,12 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 				bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				_ = h.quota.Void(bookCtx, usageID)
 				cancel()
+			}
+			if msg := serviceTierSelectionBadRequestMessage(err); msg != "" {
+				cw := &countingResponseWriter{ResponseWriter: w}
+				http.Error(cw, msg, http.StatusBadRequest)
+				h.finalizeUsageEvent(r, usageID, &sel, http.StatusBadRequest, "service_tier", msg, time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
+				return
 			}
 			cw := &countingResponseWriter{ResponseWriter: w}
 			http.Error(cw, "请求体处理失败", http.StatusInternalServerError)

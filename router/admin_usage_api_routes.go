@@ -66,6 +66,7 @@ type adminUsageEventView struct {
 	CostUSD             string `json:"cost_usd"`
 	StateLabel          string `json:"state_label"`
 	StateBadgeClass     string `json:"state_badge_class"`
+	ServiceTier         string `json:"service_tier,omitempty"`
 	IsStream            bool   `json:"is_stream"`
 	UpstreamChannelID   string `json:"upstream_channel_id"`
 	UpstreamChannelName string `json:"upstream_channel_name"`
@@ -534,8 +535,8 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 			}
 		}
 		filters := store.UsageEventsFilters{
-			UserID:            userIDFilter,
-			User:              qUser,
+			UserID: userIDFilter,
+			User:   qUser,
 			// /admin/usage 不支持 Key 过滤（且不应触发 user_tokens join）。
 			Key:               "",
 			Channel:           qChannel,
@@ -741,6 +742,7 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 				CostUSD:             cost,
 				StateLabel:          stateLabel,
 				StateBadgeClass:     stateBadge,
+				ServiceTier:         strings.TrimSpace(store.NormalizeServiceTier(derefString(e.ServiceTier))),
 				IsStream:            e.IsStream,
 				UpstreamChannelID:   upstreamChannelID,
 				UpstreamChannelName: upstreamChannelName,

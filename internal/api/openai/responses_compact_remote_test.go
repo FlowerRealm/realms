@@ -3,6 +3,7 @@ package openai
 import (
 	"bytes"
 	"context"
+	"github.com/shopspring/decimal"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -36,7 +37,7 @@ func TestResponsesCompact_Remote_ProxiesHeadersAndCommitsQuota(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	fs := &fakeStore{}
+	fs := &fakeStore{models: map[string]store.ManagedModel{"gpt-5.2": {PublicID: "gpt-5.2", GroupName: store.DefaultGroupName, Status: 1, PriorityPricingEnabled: true, PriorityInputUSDPer1M: decimalPtrForResponsesCompactTest(t, "1"), PriorityOutputUSDPer1M: decimalPtrForResponsesCompactTest(t, "2")}}}
 	sched := scheduler.New(fs)
 	q := &fakeQuota{}
 	features := staticFeatures{fs: store.FeatureState{BillingDisabled: false}}
@@ -145,4 +146,57 @@ func TestResponsesCompact_Remote_Upstream4xxVoidsQuota(t *testing.T) {
 	if len(q.voidCalls) != 1 {
 		t.Fatalf("expected void called once, got=%d", len(q.voidCalls))
 	}
+}
+
+func TestResponsesCompact_Remote_PropagatesPriorityServiceTierToQuota(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_ok","usage":{"input_tokens":10,"output_tokens":20}}`))
+	}))
+	defer ts.Close()
+
+	fs := &fakeStore{models: map[string]store.ManagedModel{"gpt-5.2": {PublicID: "gpt-5.2", GroupName: store.DefaultGroupName, Status: 1, PriorityPricingEnabled: true, PriorityInputUSDPer1M: decimalPtrForResponsesCompactTest(t, "1"), PriorityOutputUSDPer1M: decimalPtrForResponsesCompactTest(t, "2")}}}
+	sched := scheduler.New(fs)
+	q := &fakeQuota{}
+	features := staticFeatures{fs: store.FeatureState{BillingDisabled: false}}
+	sub2api := upstream.NewSub2APIClient(ts.URL, "gwk_test", 5*time.Second)
+	h := NewHandler(fs, fs, sched, DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		t.Fatalf("unexpected scheduler-based upstream call")
+		return nil, nil
+	}), nil, features, false, q, fakeAudit{}, &recordingUsage{}, nil, upstream.SSEPumpOptions{}, sub2api)
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses/compact", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","session_id":"s1","service_tier":"fast"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.ResponsesCompact), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(q.reserveCalls) != 1 {
+		t.Fatalf("expected reserve called once, got=%d", len(q.reserveCalls))
+	}
+	if q.reserveCalls[0].ServiceTier == nil || *q.reserveCalls[0].ServiceTier != "priority" {
+		t.Fatalf("reserve service_tier=%v, want priority", q.reserveCalls[0].ServiceTier)
+	}
+	if len(q.commitCalls) != 1 {
+		t.Fatalf("expected commit called once, got=%d", len(q.commitCalls))
+	}
+	if q.commitCalls[0].ServiceTier == nil || *q.commitCalls[0].ServiceTier != "priority" {
+		t.Fatalf("commit service_tier=%v, want priority", q.commitCalls[0].ServiceTier)
+	}
+}
+
+func decimalPtrForResponsesCompactTest(t *testing.T, v string) *decimal.Decimal {
+	t.Helper()
+	d, err := decimal.NewFromString(v)
+	if err != nil {
+		t.Fatalf("decimal parse: %v", err)
+	}
+	return &d
 }
