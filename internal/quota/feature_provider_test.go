@@ -11,7 +11,7 @@ type fakeFeatures struct {
 	disabled map[string]bool
 }
 
-func (f fakeFeatures) FeatureDisabledEffective(_ context.Context, _ bool, key string) bool {
+func (f fakeFeatures) FeatureDisabledEffective(_ context.Context, key string) bool {
 	return f.disabled[key]
 }
 
@@ -35,7 +35,7 @@ func TestFeatureProvider_SelectsFreeWhenBillingDisabled(t *testing.T) {
 		disabled: map[string]bool{
 			store.SettingFeatureDisableBilling: true,
 		},
-	}, false, normal, free)
+	}, normal, free)
 
 	if _, err := fp.Reserve(context.Background(), ReserveInput{}); err != nil {
 		t.Fatalf("Reserve failed: %v", err)
@@ -49,7 +49,7 @@ func TestFeatureProvider_SelectsNormalWhenBillingEnabled(t *testing.T) {
 	normal := &countingProvider{}
 	free := &countingProvider{}
 
-	fp := NewFeatureProvider(fakeFeatures{disabled: map[string]bool{}}, false, normal, free)
+	fp := NewFeatureProvider(fakeFeatures{disabled: map[string]bool{}}, normal, free)
 
 	if _, err := fp.Reserve(context.Background(), ReserveInput{}); err != nil {
 		t.Fatalf("Reserve failed: %v", err)

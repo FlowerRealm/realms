@@ -18,7 +18,6 @@ export type FeatureBanGroup = {
 };
 
 export type AdminSettings = {
-  personal_mode: boolean;
   features: Record<string, unknown>;
   feature_ban_groups: FeatureBanGroup[];
   startup_config_keys: string[];

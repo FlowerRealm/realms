@@ -10,8 +10,6 @@ import (
 )
 
 func setAuthAndPublicRoutes(r *gin.Engine, opts Options) {
-	personalMode := opts.PersonalMode
-
 	publicChain := func(h http.Handler) gin.HandlerFunc {
 		return wrapHTTP(middleware.Chain(h,
 			middleware.RequestID,
@@ -24,30 +22,25 @@ func setAuthAndPublicRoutes(r *gin.Engine, opts Options) {
 		return wrapHTTP(middleware.Chain(h,
 			middleware.RequestID,
 			middleware.AccessLog,
-			middleware.FeatureGateEffective(opts.Store, personalMode, featureKey),
+			middleware.FeatureGateEffective(opts.Store, featureKey),
 			middleware.BodyCache(0),
 		))
 	}
 
-	if !personalMode {
-		r.POST("/oauth/token", publicChain(http.HandlerFunc(oauthTokenHandler(opts))))
-		r.POST("/api/email/verification/send", publicChain(http.HandlerFunc(emailVerificationSendHandler(opts))))
+	r.POST("/oauth/token", publicChain(http.HandlerFunc(oauthTokenHandler(opts))))
+	r.POST("/api/email/verification/send", publicChain(http.HandlerFunc(emailVerificationSendHandler(opts))))
 
-		if opts.CodexOAuthHandler != nil {
-			r.GET("/auth/callback", publicChain(opts.CodexOAuthHandler))
-		}
+	if opts.CodexOAuthHandler != nil {
+		r.GET("/auth/callback", publicChain(opts.CodexOAuthHandler))
 	}
 
-	// webhooks & notify
-	if !personalMode {
-		if opts.SubscriptionOrderPaidWebhook != nil {
-			r.POST("/api/webhooks/subscription-orders/:order_id/paid", publicFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(opts.SubscriptionOrderPaidWebhook)))
-		}
-		if opts.StripeWebhookByPaymentChannel != nil {
-			r.POST("/api/pay/stripe/webhook/:payment_channel_id", publicFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(opts.StripeWebhookByPaymentChannel)))
-		}
-		if opts.EPayNotifyByPaymentChannel != nil {
-			r.GET("/api/pay/epay/notify/:payment_channel_id", publicFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(opts.EPayNotifyByPaymentChannel)))
-		}
+	if opts.SubscriptionOrderPaidWebhook != nil {
+		r.POST("/api/webhooks/subscription-orders/:order_id/paid", publicFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(opts.SubscriptionOrderPaidWebhook)))
+	}
+	if opts.StripeWebhookByPaymentChannel != nil {
+		r.POST("/api/pay/stripe/webhook/:payment_channel_id", publicFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(opts.StripeWebhookByPaymentChannel)))
+	}
+	if opts.EPayNotifyByPaymentChannel != nil {
+		r.GET("/api/pay/epay/notify/:payment_channel_id", publicFeatureChain(store.SettingFeatureDisableBilling, http.HandlerFunc(opts.EPayNotifyByPaymentChannel)))
 	}
 }

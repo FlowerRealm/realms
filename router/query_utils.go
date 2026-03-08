@@ -13,4 +13,3 @@ func queryBool(raw string) bool {
 	b, err := strconv.ParseBool(v)
 	return err == nil && b
 }
-

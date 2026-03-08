@@ -140,7 +140,6 @@ async function main() {
 
   const problems = [];
   problems.push(...(await updateHTMLFile('index.html', resources)));
-  problems.push(...(await updateHTMLFile('index.personal.html', resources)));
 
   if (problems.length > 0) {
     const header =

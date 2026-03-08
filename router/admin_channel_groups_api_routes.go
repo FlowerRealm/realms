@@ -362,9 +362,9 @@ type adminChannelGroupMemberView struct {
 	MemberID      int64 `json:"member_id"`
 	ParentGroupID int64 `json:"parent_group_id"`
 
-	MemberGroupID          *int64  `json:"member_group_id,omitempty"`
-	MemberGroupName        *string `json:"member_group_name,omitempty"`
-	MemberGroupStatus      *int    `json:"member_group_status,omitempty"`
+	MemberGroupID     *int64  `json:"member_group_id,omitempty"`
+	MemberGroupName   *string `json:"member_group_name,omitempty"`
+	MemberGroupStatus *int    `json:"member_group_status,omitempty"`
 
 	MemberChannelID     *int64  `json:"member_channel_id,omitempty"`
 	MemberChannelName   *string `json:"member_channel_name,omitempty"`
@@ -450,9 +450,9 @@ func adminGetChannelGroupDetailHandler(opts Options) gin.HandlerFunc {
 				MemberID:      m.MemberID,
 				ParentGroupID: m.ParentGroupID,
 
-				MemberGroupID:          m.MemberGroupID,
-				MemberGroupName:        m.MemberGroupName,
-				MemberGroupStatus:      m.MemberGroupStatus,
+				MemberGroupID:     m.MemberGroupID,
+				MemberGroupName:   m.MemberGroupName,
+				MemberGroupStatus: m.MemberGroupStatus,
 
 				MemberChannelID:     m.MemberChannelID,
 				MemberChannelName:   m.MemberChannelName,

@@ -83,4 +83,3 @@ func TestDeleteManagedModel_CascadesChannelModelBindings(t *testing.T) {
 		t.Fatalf("expected 0 bindings for c2, got %d", len(got2))
 	}
 }
-

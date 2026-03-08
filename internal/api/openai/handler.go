@@ -31,7 +31,7 @@ type ModelCatalog interface {
 }
 
 type FeatureResolver interface {
-	FeatureStateEffective(ctx context.Context, selfMode bool) store.FeatureState
+	FeatureStateEffective(ctx context.Context) store.FeatureState
 }
 
 type Handler struct {
@@ -43,7 +43,6 @@ type Handler struct {
 	proxyLog *proxylog.Writer
 
 	features FeatureResolver
-	selfMode bool
 
 	gateway           gatewayOptions
 	gatewayConfigured bool
@@ -105,7 +104,7 @@ type OpenAIObjectRefStore interface {
 	DeleteOpenAIObjectRef(ctx context.Context, objectType string, objectID string) error
 }
 
-func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *scheduler.Scheduler, exec Doer, proxyLog *proxylog.Writer, features FeatureResolver, selfMode bool, qp quota.Provider, audit AuditSink, usage UsageEventSink, refs OpenAIObjectRefStore, sseOpts upstream.SSEPumpOptions, sub2api *upstream.Sub2APIClient) *Handler {
+func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *scheduler.Scheduler, exec Doer, proxyLog *proxylog.Writer, features FeatureResolver, qp quota.Provider, audit AuditSink, usage UsageEventSink, refs OpenAIObjectRefStore, sseOpts upstream.SSEPumpOptions, sub2api *upstream.Sub2APIClient) *Handler {
 	var sessionBindings SessionBindingStore
 	for _, candidate := range []any{models, groups, features, audit, usage, refs} {
 		if candidate == nil {
@@ -123,7 +122,6 @@ func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *
 		exec:            exec,
 		proxyLog:        proxyLog,
 		features:        features,
-		selfMode:        selfMode,
 		gateway:         defaultGatewayOptions(),
 		quota:           qp,
 		audit:           audit,
@@ -182,11 +180,8 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 	ags := allowGroupsFromPrincipal(p)
 	allowSet := ags.Set
 	if len(ags.Order) == 0 {
-		if !h.selfMode {
-			http.Error(w, "Token 未配置渠道组", http.StatusBadRequest)
-			return
-		}
-		allowSet = nil
+		http.Error(w, "Token 未配置渠道组", http.StatusBadRequest)
+		return
 	}
 
 	type item struct {
@@ -310,14 +305,13 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		maxOut = intFromAny(payload["max_completion_tokens"])
 	}
 
-	freeMode := h.selfMode
+	freeMode := false
 	modelPassthrough := false
 	if h.features != nil {
-		fs := h.features.FeatureStateEffective(r.Context(), h.selfMode)
+		fs := h.features.FeatureStateEffective(r.Context())
 		freeMode = fs.BillingDisabled
 		modelPassthrough = fs.ModelsDisabled
 	}
-	modelPassthrough = modelPassthrough || h.selfMode
 
 	if strings.TrimSpace(publicModel) == "" {
 		http.Error(w, "model 不能为空", http.StatusBadRequest)
@@ -334,18 +328,12 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 
 	ags := allowGroupsFromPrincipal(p)
 	allowSet := ags.Set
-	if h.selfMode {
-		allowSet = nil
-		cons.AllowGroups = nil
-		cons.AllowGroupOrder = nil
-	} else {
-		if len(ags.Order) == 0 {
-			http.Error(w, "Token 未配置渠道组", http.StatusBadRequest)
-			return
-		}
-		cons.AllowGroups = allowSet
-		cons.AllowGroupOrder = ags.Order
+	if len(ags.Order) == 0 {
+		http.Error(w, "Token 未配置渠道组", http.StatusBadRequest)
+		return
 	}
+	cons.AllowGroups = allowSet
+	cons.AllowGroupOrder = ags.Order
 
 	var rewriteBody func(sel scheduler.Selection) ([]byte, error)
 
@@ -615,7 +603,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	reqBytes := int64(len(body))
 
-	if h.groups == nil && !h.selfMode {
+	if h.groups == nil {
 		h.voidQuotaBestEffort(usageID)
 		resp := h.buildFailoverExhaustedResponse("openai", proxyFailureInfo{})
 		if !resp.SkipMonitoring {

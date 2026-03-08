@@ -33,4 +33,3 @@ func isCodexCLIUserAgent(userAgent string) bool {
 	userAgent = strings.ToLower(strings.TrimSpace(userAgent))
 	return strings.Contains(userAgent, "codex_cli_rs") || strings.Contains(userAgent, "codex_vscode")
 }
-

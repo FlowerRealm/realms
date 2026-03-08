@@ -35,7 +35,7 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	rawBody := body
 
-	payload, err := sanitizeMessagesPayload(body, 0, h.selfMode)
+	payload, err := sanitizeMessagesPayload(body, 0)
 	if err != nil {
 		if errors.Is(err, errInvalidJSON) {
 			writeAnthropicError(w, http.StatusBadRequest, "请求体不是有效 JSON")
@@ -56,14 +56,13 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 
 	maxOut := intFromAny(payload["max_tokens"])
 
-	freeMode := h.selfMode
+	freeMode := false
 	modelPassthrough := false
 	if h.features != nil {
-		fs := h.features.FeatureStateEffective(r.Context(), h.selfMode)
+		fs := h.features.FeatureStateEffective(r.Context())
 		freeMode = fs.BillingDisabled
 		modelPassthrough = fs.ModelsDisabled
 	}
-	modelPassthrough = modelPassthrough || h.selfMode
 
 	if publicModel == "" {
 		writeAnthropicError(w, http.StatusBadRequest, "model 不能为空")
@@ -78,18 +77,12 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 	cons.RequireChannelType = store.UpstreamTypeAnthropic
 	ags := allowGroupsFromPrincipal(p)
 	allowSet := ags.Set
-	if h.selfMode {
-		allowSet = nil
-		cons.AllowGroups = nil
-		cons.AllowGroupOrder = nil
-	} else {
-		if len(ags.Order) == 0 {
-			writeAnthropicError(w, http.StatusBadRequest, "Token 未配置渠道组")
-			return
-		}
-		cons.AllowGroups = allowSet
-		cons.AllowGroupOrder = ags.Order
+	if len(ags.Order) == 0 {
+		writeAnthropicError(w, http.StatusBadRequest, "Token 未配置渠道组")
+		return
 	}
+	cons.AllowGroups = allowSet
+	cons.AllowGroupOrder = ags.Order
 
 	var rewriteBody func(sel scheduler.Selection) ([]byte, error)
 	var upstreamByChannel map[int64]string
@@ -310,7 +303,7 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	reqBytes := int64(len(body))
 
-	if h.groups == nil && !h.selfMode {
+	if h.groups == nil {
 		if usageID != 0 && h.quota != nil {
 			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_ = h.quota.Void(bookCtx, usageID)

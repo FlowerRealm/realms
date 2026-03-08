@@ -5,30 +5,30 @@ import (
 	"testing"
 )
 
-func TestFeatureStateEffective_SelfModeForcesBillingAndTickets(t *testing.T) {
+func TestFeatureStateEffective_DoesNotForceLegacyPersonalDefaults(t *testing.T) {
 	t.Parallel()
 
 	st := New(nil)
 
-	got := st.FeatureStateEffective(context.Background(), true)
-	if !got.BillingDisabled {
-		t.Fatalf("FeatureStateEffective(selfMode=true).BillingDisabled = false, want true")
-	}
-	if !got.TicketsDisabled {
-		t.Fatalf("FeatureStateEffective(selfMode=true).TicketsDisabled = false, want true")
-	}
-	if !got.AdminUsersDisabled {
-		t.Fatalf("FeatureStateEffective(selfMode=true).AdminUsersDisabled = false, want true")
-	}
-
-	got = st.FeatureStateEffective(context.Background(), false)
+	got := st.FeatureStateEffective(context.Background())
 	if got.BillingDisabled {
-		t.Fatalf("FeatureStateEffective(selfMode=false).BillingDisabled = true, want false")
+		t.Fatalf("FeatureStateEffective().BillingDisabled = true, want false")
 	}
 	if got.TicketsDisabled {
-		t.Fatalf("FeatureStateEffective(selfMode=false).TicketsDisabled = true, want false")
+		t.Fatalf("FeatureStateEffective().TicketsDisabled = true, want false")
 	}
 	if got.AdminUsersDisabled {
-		t.Fatalf("FeatureStateEffective(selfMode=false).AdminUsersDisabled = true, want false")
+		t.Fatalf("FeatureStateEffective().AdminUsersDisabled = true, want false")
+	}
+
+	got = st.FeatureStateEffective(context.Background())
+	if got.BillingDisabled {
+		t.Fatalf("FeatureStateEffective().BillingDisabled = true, want false")
+	}
+	if got.TicketsDisabled {
+		t.Fatalf("FeatureStateEffective().TicketsDisabled = true, want false")
+	}
+	if got.AdminUsersDisabled {
+		t.Fatalf("FeatureStateEffective().AdminUsersDisabled = true, want false")
 	}
 }

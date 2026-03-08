@@ -53,22 +53,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS `uk_user_tokens_hash` ON `user_tokens` (`token
 CREATE INDEX IF NOT EXISTS `idx_user_tokens_user_id` ON `user_tokens` (`user_id`);
 CREATE INDEX IF NOT EXISTS `idx_user_tokens_user_id_name` ON `user_tokens` (`user_id`, `name`);
 
--- personal_api_keys: personal 模式可创建多个“数据面 API Key”（用于 /v1/*）。
--- 说明：
--- - 与 personal_mode_key_hash（管理 Key）不同：该表的 key 仅用于数据面请求。
--- - 仅存 sha256 hash，不保存明文（创建时只返回一次）。
-CREATE TABLE IF NOT EXISTS `personal_api_keys` (
-  `id` INTEGER PRIMARY KEY AUTOINCREMENT,
-  `name` TEXT NULL,
-  `key_hash` BLOB NOT NULL,
-  `key_hint` TEXT NULL,
-  `status` INTEGER NOT NULL DEFAULT 1,
-  `created_at` DATETIME NOT NULL,
-  `revoked_at` DATETIME NULL,
-  `last_used_at` DATETIME NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS `uk_personal_api_keys_hash` ON `personal_api_keys` (`key_hash`);
-CREATE INDEX IF NOT EXISTS `idx_personal_api_keys_status` ON `personal_api_keys` (`status`);
 
 CREATE TABLE IF NOT EXISTS `token_channel_groups` (
   `token_id` INTEGER NOT NULL,

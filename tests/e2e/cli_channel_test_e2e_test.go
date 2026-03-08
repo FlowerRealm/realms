@@ -103,12 +103,12 @@ func TestCLIChannelTest_E2E(t *testing.T) {
 	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
 		PublicID:            model,
 		GroupName:           routeGroup,
-		OwnedBy:            strPtr("upstream"),
-		InputUSDPer1M:      decimal.Zero,
-		OutputUSDPer1M:     decimal.Zero,
-		CacheInputUSDPer1M: decimal.Zero,
+		OwnedBy:             strPtr("upstream"),
+		InputUSDPer1M:       decimal.Zero,
+		OutputUSDPer1M:      decimal.Zero,
+		CacheInputUSDPer1M:  decimal.Zero,
 		CacheOutputUSDPer1M: decimal.Zero,
-		Status:             1,
+		Status:              1,
 	}); err != nil {
 		t.Fatalf("CreateManagedModel: %v", err)
 	}
@@ -337,12 +337,12 @@ func TestCLIChannelTest_RealUpstream_E2E(t *testing.T) {
 	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
 		PublicID:            model,
 		GroupName:           routeGroup,
-		OwnedBy:            strPtr("upstream"),
-		InputUSDPer1M:      decimal.Zero,
-		OutputUSDPer1M:     decimal.Zero,
-		CacheInputUSDPer1M: decimal.Zero,
+		OwnedBy:             strPtr("upstream"),
+		InputUSDPer1M:       decimal.Zero,
+		OutputUSDPer1M:      decimal.Zero,
+		CacheInputUSDPer1M:  decimal.Zero,
 		CacheOutputUSDPer1M: decimal.Zero,
-		Status:             1,
+		Status:              1,
 	}); err != nil {
 		t.Fatalf("CreateManagedModel: %v", err)
 	}

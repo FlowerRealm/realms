@@ -131,4 +131,3 @@ func TestTouchChannelGroupPointer_PreservesPinned(t *testing.T) {
 		t.Fatalf("expected pinned to be preserved, got false")
 	}
 }
-

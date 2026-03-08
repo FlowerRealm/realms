@@ -1,243 +1,26 @@
-# API 手册
+# API 使用说明
 
-> 本页基于 `helloagents/wiki/api.md` 摘要整理。若你发现描述与代码行为不一致，请以代码为准并提 Issue/PR 修正文档。
+## 认证
 
-## 概述
+### Web / 管理面
 
-Realms 提供 OpenAI 兼容（Responses）与 Anthropic 兼容（Messages）的 API 入口，用于将客户端请求转发到上游，并在中转层提供最小可用的调度与 SSE 透传能力。
+- 浏览器通过会话 Cookie 访问管理后台
+- 可选使用 `REALMS_ADMIN_API_KEY` 调用 `/api/admin/*` 与 `/api/channel*`
+- 管理员 Key 只用于管理面，不用于 `/v1/*`
 
-## 认证方式
+### 数据面 `/v1/*`
 
-- **下游访问（调用本服务，多用户）:** `Authorization: Bearer <user_api_key>`（可选兼容 `x-api-key`）
-  - `user_api_key` 可在 Web 控制台 `/tokens` 创建与管理（示例：`sk_...`）
-- **上游访问（本服务调用上游）:** 由管理后台配置并注入（OpenAI 兼容 API Key / Anthropic API Key / Codex OAuth 凭据）
+- 使用用户 Token（在 `/tokens` 创建）
+- 支持 `Authorization: Bearer <token>` 或 `x-api-key`
 
-### business 模式补充（REALMS_MODE=business，可选）
+## 已移除能力
 
-- **管理员 Key（可选）**：设置环境变量 `REALMS_ADMIN_API_KEY` 后，可直接调用管理面 `/api/admin/*` 与 `/api/channel*`
-  - 认证：`Authorization: Bearer <admin_key>`（或 `x-api-key`）
-  - 限制：该 Key **不具备**数据面权限，不能调用 `/v1/*`
-  - Codex OAuth：管理员可先调用 `POST /api/channel/{id}/codex-oauth/start` 获取 `auth_url`，完成浏览器授权后由服务端 `/auth/callback` 自动保存账号；仍可保留 `POST /api/channel/{id}/codex-oauth/complete` 作为手工回贴 fallback
+以下 personal 专属接口已删除：
 
-### personal 模式补充（REALMS_MODE=personal）
-
-- **管理 Key（必需）**：首次打开 `/login` 设置（对应 `POST /api/personal/bootstrap`），用于解锁管理面（`/api/admin/*`、`/api/channel*` 等）。
-- **数据面 API Key（建议，可创建多个）**：通过 `POST /api/personal/keys` 创建，生成后仅返回一次明文；之后用这些 Key 调用数据面 `/v1/*`（`Authorization: Bearer ...` 或 `x-api-key`）。
-  - 说明：数据面 API Key **不具备**管理权限（不能访问 `/api/admin/*`），且默认不使用“管理 Key”调用 `/v1/*`（避免把管理权限的 Key 分发给下游客户端）。
-
-## 常用端点
-
-### [GET] /healthz
-
-健康检查（公开），包含 DB 状态与构建信息（版本/构建时间）。
-
-### business 模式：管理员 curl 示例
-
-> 认证：`Authorization: Bearer <REALMS_ADMIN_API_KEY>`（或 `x-api-key`）。
-
-先约定环境变量：
-
-```bash
-export REALMS_BASE_URL="http://127.0.0.1:8080"
-export REALMS_ADMIN_API_KEY="<your-admin-key>"
-```
-
-#### [POST] /api/channel
-
-创建一个 OpenAI 兼容上游：
-
-```bash
-curl -fsS "$REALMS_BASE_URL/api/channel"   -H "Authorization: Bearer $REALMS_ADMIN_API_KEY"   -H 'Content-Type: application/json'   -d '{
-    "type": "openai_compatible",
-    "name": "openai-main",
-    "groups": "",
-    "base_url": "https://api.openai.com/v1",
-    "priority": 0,
-    "promotion": false,
-    "allow_service_tier": false,
-    "disable_store": false,
-    "allow_safety_identifier": false
-  }'
-```
-
-成功后返回 `data.id`，后续可作为 `channel_id` 使用。
-
-#### [POST] /api/channel/{channel_id}/credentials
-
-为一个非 `codex_oauth` 渠道添加 API Key 凭据：
-
-```bash
-curl -fsS "$REALMS_BASE_URL/api/channel/<channel_id>/credentials"   -H "Authorization: Bearer $REALMS_ADMIN_API_KEY"   -H 'Content-Type: application/json'   -d '{
-    "name": "primary",
-    "api_key": "sk-xxxx"
-  }'
-```
-
-#### [POST] /api/channel/{channel_id}/codex-oauth/start
-
-发起 Codex OAuth，返回 `auth_url`：
-
-```bash
-curl -fsS "$REALMS_BASE_URL/api/channel/<channel_id>/codex-oauth/start"   -H "Authorization: Bearer $REALMS_ADMIN_API_KEY"   -H 'Content-Type: application/json'   -d '{}'
-```
-
-典型流程：
-1. 从响应里复制 `data.auth_url`
-2. 在浏览器打开该 URL 完成授权
-3. 上游跳回 Realms 的 `/auth/callback?...` 后，服务端会自动把账号保存到该 `codex_oauth` 渠道
-4. 可再调用 `GET /api/channel/{channel_id}/codex-accounts` 验证账号已入库
-
-> 说明：自动回调依赖 `state` 对应的 pending 记录；普通 session 发起的授权仍要求回调阶段带原登录 session。
-
-#### [POST] /api/channel/{channel_id}/codex-oauth/complete
-
-如果你不走自动回调，也可以手工把完整回调 URL 回贴给服务端：
-
-```bash
-curl -fsS "$REALMS_BASE_URL/api/channel/<channel_id>/codex-oauth/complete"   -H "Authorization: Bearer $REALMS_ADMIN_API_KEY"   -H 'Content-Type: application/json'   -d '{
-    "callback_url": "http://localhost:1455/auth/callback?code=...&state=..."
-  }'
-```
-
-#### [POST] /api/channel/{channel_id}/codex-accounts
-
-手工导入 Codex OAuth 账号（直接提交 `access_token` / `refresh_token` / `id_token`）：
-
-```bash
-curl -fsS "$REALMS_BASE_URL/api/channel/<channel_id>/codex-accounts"   -H "Authorization: Bearer $REALMS_ADMIN_API_KEY"   -H 'Content-Type: application/json'   -d '{
-    "account_id": "acc_xxx",
-    "email": "admin@example.com",
-    "access_token": "at_xxx",
-    "refresh_token": "rt_xxx",
-    "id_token": "eyJ...",
-    "expires_at": "2026-03-07T12:00:00Z"
-  }'
-```
-
-### personal 模式：Key 管理（需要管理 Key）
-
-> 说明：以下端点仅在 `REALMS_MODE=personal` 下挂载。  
-> 认证：`Authorization: Bearer <管理 Key>`（或 `x-api-key`）。
-
-#### [POST] /api/personal/keys
-
-创建一个“数据面 API Key”（用于调用 `/v1/*`）。创建成功后 Key 明文只返回一次。
-
-#### [GET] /api/personal/keys
-
-列出已创建的“数据面 API Key”（仅返回 hint，不返回明文）。
-
-#### [POST] /api/personal/keys/{key_id}/revoke
-
-撤销一个“数据面 API Key”。
-
-### Realms 扩展：Usage（按当前 API key）
-
-> 说明：以下为 Realms 扩展端点（非 OpenAI 标准）。  
-> 认证：同数据面一致（`Authorization: Bearer <user_api_key>` 或 `x-api-key`）。  
-> 约束：仅允许查询**当前 key** 的用量，不支持 `token_id` / `token_ids` 参数。
-
-#### [GET] /v1/usage/windows
-
-按时间范围返回窗口汇总（请求数、Token、RPM/TPM、费用等）。
-
-Query（可选）：
-- `start` / `end`：`YYYY-MM-DD`（默认当天）
-- `tz`：IANA 时区名（默认 `UTC`）
-
-#### [GET] /v1/usage/events
-
-列出用量事件（分页）。
-
-Query（可选）：
-- `limit`：1-500（默认 100）
-- `before_id`：向前翻页游标
-- `start` / `end` / `tz`：同上
-
-#### [GET] /v1/usage/events/{event_id}/detail
-
-获取用量事件详情（含 pricing breakdown）。
-
-#### [GET] /v1/usage/timeseries
-
-按小时/天聚合的时间序列。
-
-Query（可选）：
-- `start` / `end` / `tz`
-- `granularity`：`hour|day`（默认 `hour`）
-
-### OpenAI Responses
-
-#### [POST] /v1/responses
-
-OpenAI Responses create（支持 `stream=true` SSE 逐事件透传）。
-
-#### [GET] /v1/responses/{response_id}
-
-Retrieve stored Response（支持 query `stream=true` SSE 透传）。
-
-#### [DELETE] /v1/responses/{response_id}
-
-Delete stored Response。
-
-#### [POST] /v1/responses/{response_id}/cancel
-
-Cancel（仅对已登记对象生效）。
-
-#### [GET] /v1/responses/{response_id}/input_items
-
-List input items（仅对已登记对象生效）。
-
-#### [POST] /v1/responses/compact
-
-Compact（用于压缩输入上下文，行为由上游决定）。
-
-注意：
-
-- 该端点对齐远程 Sub2API 的 compact 网关：请求必须携带 `session_id`（header 或 body），否则返回 400。
-- 需要配置 `REALMS_SUB2API_BASE_URL` 与 `REALMS_SUB2API_GATEWAY_KEY`；未配置时返回 500。
-
-#### [POST] /v1/responses/input_tokens
-
-Input tokens（仅计算输入 tokens 的工具端点，行为由上游决定）。
-
-> 安全/隔离：所有带 `{response_id}` 的拓展操作会先做本地“对象归属”校验：未登记或不属于当前用户时返回 404。  
-> 限制：若该 Response 是通过 `codex_oauth` 上游创建的，上游当前不支持 `/v1/responses/{id}` 等拓展端点，Realms 会返回 501。
-
-### OpenAI Chat Completions（stored）
-
-#### [POST] /v1/chat/completions
-
-Chat Completions create。若请求携带 `store=true`，Realms 会自动注入归属标记 `metadata.realms_owner`，用于后续 list/校验。
-
-#### [GET] /v1/chat/completions
-
-List stored chat completions。Realms 会强制按当前用户过滤（忽略用户自带的 metadata 过滤条件），并用本地登记做二次过滤兜底。
-
-#### [GET] /v1/chat/completions/{completion_id}
-
-Retrieve stored chat completion（仅对已登记对象生效）。
-
-#### [POST] /v1/chat/completions/{completion_id}
-
-Update metadata（仅对已登记对象生效；并强制保留归属 metadata）。
-
-#### [DELETE] /v1/chat/completions/{completion_id}
-
-Delete stored chat completion（仅对已登记对象生效）。
-
-#### [GET] /v1/chat/completions/{completion_id}/messages
-
-List messages for a stored chat completion（仅对已登记对象生效）。
-
-### Models
-
-#### [GET] /v1/models
-
-列出已启用且有可用绑定的模型（Realms 托管模型目录）。
-
-#### [GET] /v1/models/{model}
-
-获取单个模型对象（与 `/v1/models` 输出口径一致）。
-
-> 详细语义、failover 与字段策略请见项目源代码；若文档与代码不一致，以代码为准。
+- `POST /api/personal/bootstrap`
+- `GET /api/personal/keys`
+- `POST /api/personal/keys`
+- `POST /api/personal/keys/{key_id}/revoke`
+- `/api/admin/mcp*`
+- `/api/admin/skills*`
+- `/api/admin/personal-config*`

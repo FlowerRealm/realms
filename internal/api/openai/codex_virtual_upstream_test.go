@@ -140,7 +140,7 @@ func TestCodexVirtualUpstream_NonStream_PatchesQuotaAndForwardsXCodexHeaders(t *
 	}
 
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, exec, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+	h := NewHandler(fs, fs, sched, exec, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -240,7 +240,7 @@ func TestCodexVirtualUpstream_Stream_PatchesQuota(t *testing.T) {
 	}
 
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, exec, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10}, nil)
+	h := NewHandler(fs, fs, sched, exec, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":true}`)))
 	req.Header.Set("Content-Type", "application/json")

@@ -30,9 +30,9 @@ func getCodexStickyRouteKeyHash(ctx context.Context) string {
 }
 
 type codexLastSuccessRoute struct {
-	channelID      int64
-	credentialKey  string
-	expiresAt      time.Time
+	channelID     int64
+	credentialKey string
+	expiresAt     time.Time
 }
 
 func (r codexLastSuccessRoute) differs(sel scheduler.Selection) bool {

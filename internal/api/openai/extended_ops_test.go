@@ -122,7 +122,7 @@ func TestResponses_NonStream_StoresObjectRefAndTouchesBinding(t *testing.T) {
 		}, nil
 	})
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi"}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -178,7 +178,7 @@ func TestResponses_Stream_StoresObjectRefFromSSE(t *testing.T) {
 		}, nil
 	})
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10}, nil)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":true}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -233,7 +233,7 @@ func TestChatCompletions_StoreTrue_InsertsOwnerMetadataAndStoresObjectRef(t *tes
 		}, nil
 	})
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
 
 	reqBody := `{"model":"m1","messages":[{"role":"user","content":"hi"}],"store":true}`
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/chat/completions", bytes.NewReader([]byte(reqBody)))
@@ -306,7 +306,7 @@ func TestResponsesCompact_RemoteRequiresSessionIDAndDoesNotTouchScheduler(t *tes
 	h := NewHandler(fs, fs, sched, DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
 		t.Fatalf("unexpected scheduler-based upstream call")
 		return nil, nil
-	}), nil, nil, false, q, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+	}), nil, nil, q, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
 
 	tokenID := int64(123)
 	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{testGroupName}}
@@ -356,7 +356,7 @@ func TestChatCompletionRetrieve_OwnershipRequired(t *testing.T) {
 		}, nil
 	})
 	sched := scheduler.New(fs)
-	h := NewHandler(fs, fs, sched, doer, nil, nil, false, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
 
 	makeReq := func(userID int64) *http.Request {
 		req := httptest.NewRequest(http.MethodGet, "http://example.com/v1/chat/completions/chatcmpl-999", nil)
@@ -417,7 +417,7 @@ func TestResponses_ExtendedOps_OwnershipAndDeleteCleanup(t *testing.T) {
 			Body:       io.NopCloser(bytes.NewReader([]byte(`{"ok":true}`))),
 		}, nil
 	})
-	h := NewHandler(nil, nil, scheduler.New(&fakeStore{}), doer, nil, nil, false, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
+	h := NewHandler(nil, nil, scheduler.New(&fakeStore{}), doer, nil, nil, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
 
 	makeReq := func(method, path string, userID int64, body string) *http.Request {
 		var rdr io.Reader
@@ -519,7 +519,7 @@ func TestChatCompletionsList_FiltersByLocalRefsAndForcesOwnerMetadataQuery(t *te
 		}, nil
 	})
 
-	h := NewHandler(nil, nil, scheduler.New(&fakeStore{}), doer, nil, nil, false, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
+	h := NewHandler(nil, nil, scheduler.New(&fakeStore{}), doer, nil, nil, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/v1/chat/completions?metadata[foo]=bar&limit=2", nil)
 	tokenID := int64(123)
 	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
@@ -585,7 +585,7 @@ func TestChatCompletionUpdate_ForcesOwnerMetadata(t *testing.T) {
 			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"chatcmpl-777"}`))),
 		}, nil
 	})
-	h := NewHandler(nil, nil, scheduler.New(&fakeStore{}), doer, nil, nil, false, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
+	h := NewHandler(nil, nil, scheduler.New(&fakeStore{}), doer, nil, nil, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/chat/completions/chatcmpl-777", bytes.NewReader([]byte(`{"metadata":{"realms_owner":"evil","x":"y"}}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -624,7 +624,7 @@ func TestModelRetrieve_ExistsAndMissing(t *testing.T) {
 			},
 		},
 	}
-	h := NewHandler(fs, fs, scheduler.New(fs), nil, nil, nil, false, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+	h := NewHandler(fs, fs, scheduler.New(fs), nil, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
 
 	makeReq := func(path string) *http.Request {
 		req := httptest.NewRequest(http.MethodGet, "http://example.com"+path, nil)

@@ -151,7 +151,7 @@ func sanitizeResponsesPayload(body []byte) (map[string]any, error) {
 }
 
 // sanitizeMessagesPayload 仅做最小结构校验与必要字段改写；未知字段默认透传。
-func sanitizeMessagesPayload(body []byte, defaultMaxTokens int, allowMCPServers bool) (map[string]any, error) {
+func sanitizeMessagesPayload(body []byte, defaultMaxTokens int) (map[string]any, error) {
 	out, err := unmarshalRequestPayload(body)
 	if err != nil {
 		return nil, err
@@ -207,9 +207,7 @@ func sanitizeMessagesPayload(body []byte, defaultMaxTokens int, allowMCPServers 
 		return nil, errors.New("max_tokens 不能为空")
 	}
 
-	if !allowMCPServers {
-		delete(out, "mcp_servers")
-	}
+	delete(out, "mcp_servers")
 
 	return out, nil
 }

@@ -13,14 +13,13 @@ import (
 )
 
 type featureBanItemView struct {
-	Key              string `json:"key"`
-	Label            string `json:"label"`
-	Hint             string `json:"hint"`
-	Disabled         bool   `json:"disabled"`
-	Override         bool   `json:"override"`
-	Editable         bool   `json:"editable"`
-	ForcedByPersonalMode bool `json:"forced_by_personal_mode"`
-	ForcedByBuild    bool   `json:"forced_by_build"`
+	Key           string `json:"key"`
+	Label         string `json:"label"`
+	Hint          string `json:"hint"`
+	Disabled      bool   `json:"disabled"`
+	Override      bool   `json:"override"`
+	Editable      bool   `json:"editable"`
+	ForcedByBuild bool   `json:"forced_by_build"`
 }
 
 type featureBanGroupView struct {
@@ -42,18 +41,17 @@ var featureBanKeys = []string{
 	store.SettingFeatureDisableAdminAnnouncements,
 }
 
-func featureBanGroups(personalMode bool, fs store.FeatureState) []featureBanGroupView {
-	b := func(key, label, hint string, disabled, forcedByPersonalMode, forcedByBuild bool) featureBanItemView {
-		forced := forcedByPersonalMode || forcedByBuild
+func featureBanGroups(fs store.FeatureState) []featureBanGroupView {
+	b := func(key, label, hint string, disabled, forcedByBuild bool) featureBanItemView {
+		forced := forcedByBuild
 		return featureBanItemView{
-			Key:                 key,
-			Label:               label,
-			Hint:                hint,
-			Disabled:            disabled,
-			Override:            disabled && !forced,
-			Editable:            !forced,
-			ForcedByPersonalMode: forcedByPersonalMode,
-			ForcedByBuild:       forcedByBuild,
+			Key:           key,
+			Label:         label,
+			Hint:          hint,
+			Disabled:      disabled,
+			Override:      disabled && !forced,
+			Editable:      !forced,
+			ForcedByBuild: forcedByBuild,
 		}
 	}
 
@@ -61,32 +59,32 @@ func featureBanGroups(personalMode bool, fs store.FeatureState) []featureBanGrou
 		{
 			Title: "用户界面",
 			Items: []featureBanItemView{
-				b(store.SettingFeatureDisableWebAnnouncements, "公告（Web）", "隐藏侧边栏入口，并对 /announcements* 返回 404。", fs.WebAnnouncementsDisabled, false, false),
-				b(store.SettingFeatureDisableWebTokens, "API 令牌（Web）", "隐藏侧边栏入口，并对 /tokens* 返回 404。", fs.WebTokensDisabled, false, false),
-				b(store.SettingFeatureDisableWebUsage, "用量统计（Web）", "隐藏侧边栏入口，并对 /usage、/api/usage/* 返回 404。", fs.WebUsageDisabled, false, false),
-				b(store.SettingFeatureDisableModels, "模型（全禁）", "隐藏入口，并对 /models、/admin/models*、/v1/models 返回 404；同时数据面进入模型穿透（model passthrough）：默认透传 model；如配置了“渠道绑定模型”，则仍会按选中渠道改写 model（alias/upstream_model）。", fs.ModelsDisabled, false, false),
+				b(store.SettingFeatureDisableWebAnnouncements, "公告（Web）", "隐藏侧边栏入口，并对 /announcements* 返回 404。", fs.WebAnnouncementsDisabled, false),
+				b(store.SettingFeatureDisableWebTokens, "API 令牌（Web）", "隐藏侧边栏入口，并对 /tokens* 返回 404。", fs.WebTokensDisabled, false),
+				b(store.SettingFeatureDisableWebUsage, "用量统计（Web）", "隐藏侧边栏入口，并对 /usage、/api/usage/* 返回 404。", fs.WebUsageDisabled, false),
+				b(store.SettingFeatureDisableModels, "模型（全禁）", "隐藏入口，并对 /models、/admin/models*、/v1/models 返回 404；同时数据面进入模型穿透（model passthrough）：默认透传 model；如配置了“渠道绑定模型”，则仍会按选中渠道改写 model（alias/upstream_model）。", fs.ModelsDisabled, false),
 			},
 		},
 		{
 			Title: "计费与支付",
 			Items: []featureBanItemView{
-				b(store.SettingFeatureDisableBilling, "订阅/充值/支付", "隐藏入口，并对 /subscription、/topup、/pay、/admin/subscriptions|orders|payment-channels 及支付回调返回 404；同时数据面进入 free mode（不校验订阅/余额）。", fs.BillingDisabled, personalMode, false),
+				b(store.SettingFeatureDisableBilling, "订阅/充值/支付", "隐藏入口，并对 /subscription、/topup、/pay、/admin/subscriptions|orders|payment-channels 及支付回调返回 404；同时数据面进入 free mode（不校验订阅/余额）。", fs.BillingDisabled, false),
 			},
 		},
 		{
 			Title: "工单",
 			Items: []featureBanItemView{
-				b(store.SettingFeatureDisableTickets, "工单", "隐藏入口，并对 /tickets*、/admin/tickets* 返回 404。", fs.TicketsDisabled, personalMode, false),
+				b(store.SettingFeatureDisableTickets, "工单", "隐藏入口，并对 /tickets*、/admin/tickets* 返回 404。", fs.TicketsDisabled, false),
 			},
 		},
 		{
 			Title: "管理后台",
 			Items: []featureBanItemView{
-				b(store.SettingFeatureDisableAdminChannels, "上游渠道", "隐藏入口，并对 /admin/channels* 等返回 404。", fs.AdminChannelsDisabled, false, false),
-				b(store.SettingFeatureDisableAdminChannelGroups, "渠道组", "隐藏入口，并对 /admin/channel-groups* 返回 404。", fs.AdminChannelGroupsDisabled, false, false),
-				b(store.SettingFeatureDisableAdminUsers, "用户管理", "隐藏入口，并对 /admin/users* 返回 404。", fs.AdminUsersDisabled, false, false),
-				b(store.SettingFeatureDisableAdminUsage, "用量统计（管理后台）", "隐藏入口，并对 /admin/usage 返回 404。", fs.AdminUsageDisabled, false, false),
-				b(store.SettingFeatureDisableAdminAnnouncements, "公告（管理后台）", "隐藏入口，并对 /admin/announcements* 返回 404。", fs.AdminAnnouncementsDisabled, false, false),
+				b(store.SettingFeatureDisableAdminChannels, "上游渠道", "隐藏入口，并对 /admin/channels* 等返回 404。", fs.AdminChannelsDisabled, false),
+				b(store.SettingFeatureDisableAdminChannelGroups, "渠道组", "隐藏入口，并对 /admin/channel-groups* 返回 404。", fs.AdminChannelGroupsDisabled, false),
+				b(store.SettingFeatureDisableAdminUsers, "用户管理", "隐藏入口，并对 /admin/users* 返回 404。", fs.AdminUsersDisabled, false),
+				b(store.SettingFeatureDisableAdminUsage, "用量统计（管理后台）", "隐藏入口，并对 /admin/usage 返回 404。", fs.AdminUsageDisabled, false),
+				b(store.SettingFeatureDisableAdminAnnouncements, "公告（管理后台）", "隐藏入口，并对 /admin/announcements* 返回 404。", fs.AdminAnnouncementsDisabled, false),
 			},
 		},
 	}
@@ -94,7 +92,6 @@ func featureBanGroups(personalMode bool, fs store.FeatureState) []featureBanGrou
 
 var startupConfigKeys = []string{
 	"REALMS_ENV",
-	"REALMS_MODE",
 	"REALMS_DB_DSN",
 	"REALMS_DB_DRIVER",
 	"REALMS_SQLITE_PATH",
@@ -216,7 +213,7 @@ func adminSettingsGetHandler(opts Options) gin.HandlerFunc {
 
 		ctx := c.Request.Context()
 
-		fs := opts.Store.FeatureStateEffective(ctx, opts.PersonalMode)
+		fs := opts.Store.FeatureStateEffective(ctx)
 
 		siteBaseURL := strings.TrimSpace(opts.PublicBaseURLDefault)
 		if siteBaseURL == "" {
@@ -381,14 +378,10 @@ func adminSettingsGetHandler(opts Options) gin.HandlerFunc {
 		billingEffective.MinTopupCNY = billingEffective.MinTopupCNY.Truncate(store.CNYScale)
 		billingEffective.CreditUSDPerCNY = billingEffective.CreditUSDPerCNY.Truncate(store.USDScale)
 
-		mode := "business"
-		if opts.PersonalMode {
-			mode = "personal"
-		}
 		resp := adminSettingsResponse{
-			Mode:              mode,
+			Mode:              "business",
 			Features:          fs,
-			FeatureBanGroups:  featureBanGroups(opts.PersonalMode, fs),
+			FeatureBanGroups:  featureBanGroups(fs),
 			StartupConfigKeys: startupConfigKeys,
 
 			SiteBaseURL:          siteBaseURL,
@@ -682,9 +675,6 @@ func adminSettingsUpdateHandler(opts Options) gin.HandlerFunc {
 		}
 
 		for _, key := range featureBanKeys {
-			if opts.PersonalMode && (key == store.SettingFeatureDisableBilling || key == store.SettingFeatureDisableTickets) {
-				continue
-			}
 			enabled := false
 			if req.FeatureEnabled != nil {
 				enabled = req.FeatureEnabled[key]

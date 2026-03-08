@@ -100,9 +100,9 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	freeMode := h.selfMode
+	freeMode := false
 	if h.features != nil {
-		fs := h.features.FeatureStateEffective(r.Context(), h.selfMode)
+		fs := h.features.FeatureStateEffective(r.Context())
 		freeMode = fs.BillingDisabled
 	}
 

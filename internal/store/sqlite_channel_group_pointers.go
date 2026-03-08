@@ -33,4 +33,3 @@ CREATE TABLE IF NOT EXISTS channel_group_pointers (
 	}
 	return nil
 }
-

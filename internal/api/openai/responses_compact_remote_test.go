@@ -46,7 +46,7 @@ func TestResponsesCompact_Remote_ProxiesHeadersAndCommitsQuota(t *testing.T) {
 	h := NewHandler(fs, fs, sched, DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
 		t.Fatalf("unexpected scheduler-based upstream call")
 		return nil, nil
-	}), nil, features, false, q, fakeAudit{}, usage, nil, upstream.SSEPumpOptions{}, sub2api)
+	}), nil, features, q, fakeAudit{}, usage, nil, upstream.SSEPumpOptions{}, sub2api)
 
 	tokenID := int64(123)
 	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
@@ -122,7 +122,7 @@ func TestResponsesCompact_Remote_Upstream4xxVoidsQuota(t *testing.T) {
 	h := NewHandler(fs, fs, sched, DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
 		t.Fatalf("unexpected scheduler-based upstream call")
 		return nil, nil
-	}), nil, features, false, q, fakeAudit{}, &recordingUsage{}, nil, upstream.SSEPumpOptions{}, sub2api)
+	}), nil, features, q, fakeAudit{}, &recordingUsage{}, nil, upstream.SSEPumpOptions{}, sub2api)
 
 	tokenID := int64(123)
 	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
@@ -163,7 +163,7 @@ func TestResponsesCompact_Remote_PropagatesPriorityServiceTierToQuota(t *testing
 	h := NewHandler(fs, fs, sched, DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
 		t.Fatalf("unexpected scheduler-based upstream call")
 		return nil, nil
-	}), nil, features, false, q, fakeAudit{}, &recordingUsage{}, nil, upstream.SSEPumpOptions{}, sub2api)
+	}), nil, features, q, fakeAudit{}, &recordingUsage{}, nil, upstream.SSEPumpOptions{}, sub2api)
 
 	tokenID := int64(123)
 	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}

@@ -6,7 +6,7 @@ import (
 )
 
 func TestSanitizeMessagesPayload_PreservesUnknownAndAliasesMaxTokensToSample(t *testing.T) {
-	payload, err := sanitizeMessagesPayload([]byte(`{"model":"m1","messages":[{"role":"user","content":"hi"}],"max_tokens_to_sample":12,"unknown":{"keep":true},"mcp_servers":[{"name":"svc"}]}`), 0, true)
+	payload, err := sanitizeMessagesPayload([]byte(`{"model":"m1","messages":[{"role":"user","content":"hi"}],"max_tokens_to_sample":12,"unknown":{"keep":true},"mcp_servers":[{"name":"svc"}]}`), 0)
 	if err != nil {
 		t.Fatalf("sanitizeMessagesPayload: %v", err)
 	}
@@ -22,13 +22,13 @@ func TestSanitizeMessagesPayload_PreservesUnknownAndAliasesMaxTokensToSample(t *
 	if _, ok := payload["unknown"].(map[string]any); !ok {
 		t.Fatalf("expected unknown to be preserved, got=%#v", payload["unknown"])
 	}
-	if _, ok := payload["mcp_servers"].([]any); !ok {
-		t.Fatalf("expected mcp_servers to be preserved, got=%#v", payload["mcp_servers"])
+	if _, ok := payload["mcp_servers"]; ok {
+		t.Fatalf("expected mcp_servers to be removed, got=%#v", payload["mcp_servers"])
 	}
 }
 
 func TestSanitizeMessagesPayload_StripsMCPServersWhenDisabled(t *testing.T) {
-	payload, err := sanitizeMessagesPayload([]byte(`{"model":"m1","messages":[{"role":"user","content":"hi"}],"max_tokens":7,"mcp_servers":[{"name":"svc"}]}`), 0, false)
+	payload, err := sanitizeMessagesPayload([]byte(`{"model":"m1","messages":[{"role":"user","content":"hi"}],"max_tokens":7,"mcp_servers":[{"name":"svc"}]}`), 0)
 	if err != nil {
 		t.Fatalf("sanitizeMessagesPayload: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestSanitizeMessagesPayload_StripsMCPServersWhenDisabled(t *testing.T) {
 }
 
 func TestSanitizeMessagesPayload_RejectsInvalidTokenAliasType(t *testing.T) {
-	_, err := sanitizeMessagesPayload([]byte(`{"model":"m1","messages":[{"role":"user","content":"hi"}],"max_tokens_to_sample":"bad"}`), 0, true)
+	_, err := sanitizeMessagesPayload([]byte(`{"model":"m1","messages":[{"role":"user","content":"hi"}],"max_tokens_to_sample":"bad"}`), 0)
 	if !errors.Is(err, errInvalidJSON) {
 		t.Fatalf("expected errInvalidJSON, got=%v", err)
 	}

@@ -8,9 +8,7 @@ import (
 )
 
 // FeatureState 表示“对外可见”的功能开关最终状态。
-// 说明：
-// - *_Disabled=true 表示该功能应隐藏入口并拒绝访问。
-// - personal 模式会对部分功能进行硬禁用（即使数据库/配置文件设置为启用）。
+// 说明：*_Disabled=true 表示该功能应隐藏入口并拒绝访问。
 type FeatureState struct {
 	WebAnnouncementsDisabled bool
 	WebTokensDisabled        bool
@@ -28,7 +26,7 @@ type FeatureState struct {
 	AdminAnnouncementsDisabled bool
 }
 
-func (s *Store) FeatureStateEffective(ctx context.Context, personalMode bool) FeatureState {
+func (s *Store) FeatureStateEffective(ctx context.Context) FeatureState {
 	defaultB := func(key string) bool {
 		if !s.hasAppSettingsDefaults {
 			return false
@@ -69,12 +67,12 @@ func (s *Store) FeatureStateEffective(ctx context.Context, personalMode bool) Fe
 
 		ModelsDisabled: defaultB(SettingFeatureDisableModels),
 
-		BillingDisabled: personalMode || defaultB(SettingFeatureDisableBilling),
-		TicketsDisabled: personalMode || defaultB(SettingFeatureDisableTickets),
+		BillingDisabled: defaultB(SettingFeatureDisableBilling),
+		TicketsDisabled: defaultB(SettingFeatureDisableTickets),
 
 		AdminChannelsDisabled:      defaultB(SettingFeatureDisableAdminChannels),
 		AdminChannelGroupsDisabled: defaultB(SettingFeatureDisableAdminChannelGroups),
-		AdminUsersDisabled:         personalMode || defaultB(SettingFeatureDisableAdminUsers),
+		AdminUsersDisabled:         defaultB(SettingFeatureDisableAdminUsers),
 		AdminUsageDisabled:         defaultB(SettingFeatureDisableAdminUsage),
 		AdminAnnouncementsDisabled: defaultB(SettingFeatureDisableAdminAnnouncements),
 	}
@@ -124,10 +122,10 @@ func (s *Store) FeatureStateEffective(ctx context.Context, personalMode bool) Fe
 	}
 
 	if v, ok := parseBool(SettingFeatureDisableBilling); ok {
-		out.BillingDisabled = personalMode || v
+		out.BillingDisabled = v
 	}
 	if v, ok := parseBool(SettingFeatureDisableTickets); ok {
-		out.TicketsDisabled = personalMode || v
+		out.TicketsDisabled = v
 	}
 
 	if v, ok := parseBool(SettingFeatureDisableAdminChannels); ok {
@@ -137,7 +135,7 @@ func (s *Store) FeatureStateEffective(ctx context.Context, personalMode bool) Fe
 		out.AdminChannelGroupsDisabled = v
 	}
 	if v, ok := parseBool(SettingFeatureDisableAdminUsers); ok {
-		out.AdminUsersDisabled = personalMode || v
+		out.AdminUsersDisabled = v
 	}
 	if v, ok := parseBool(SettingFeatureDisableAdminUsage); ok {
 		out.AdminUsageDisabled = v

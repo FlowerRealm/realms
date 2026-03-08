@@ -101,7 +101,7 @@ func TestBilling_GroupMultiplierStacking_Payg_E2E(t *testing.T) {
 		t.Fatalf("ReplaceTokenChannelGroups: %v", err)
 	}
 
-	ts := newMultiplierAppServer(t, db, dbPath, true, false)
+	ts := newMultiplierAppServer(t, db, dbPath, true)
 
 	callResponsesOnce(t, ts.URL, rawToken, model)
 
@@ -218,7 +218,7 @@ func TestBilling_GroupMultiplierStacking_Subscription_E2E(t *testing.T) {
 		t.Fatalf("ReplaceTokenChannelGroups: %v", err)
 	}
 
-	ts := newMultiplierAppServer(t, db, dbPath, false, false)
+	ts := newMultiplierAppServer(t, db, dbPath, false)
 
 	callResponsesOnce(t, ts.URL, rawToken, model)
 
@@ -290,7 +290,7 @@ func newMultiplierUpstreamServer(t *testing.T, model string) *httptest.Server {
 	return upstream
 }
 
-func newMultiplierAppServer(t *testing.T, db *sql.DB, dbPath string, paygEnabled bool, selfMode bool) *httptest.Server {
+func newMultiplierAppServer(t *testing.T, db *sql.DB, dbPath string, paygEnabled bool) *httptest.Server {
 	t.Helper()
 
 	// e2e 测试应当与外部环境变量解耦：清空可能影响 Load() 的配置项。
@@ -303,11 +303,7 @@ func newMultiplierAppServer(t *testing.T, db *sql.DB, dbPath string, paygEnabled
 		t.Fatalf("LoadFromEnv: %v", err)
 	}
 	appCfg.Env = "dev"
-	if selfMode {
-		appCfg.Mode = config.ModePersonal
-	} else {
-		appCfg.Mode = config.ModeBusiness
-	}
+	appCfg.Mode = config.ModeBusiness
 	appCfg.DB.Driver = "sqlite"
 	appCfg.DB.DSN = ""
 	appCfg.DB.SQLitePath = dbPath
