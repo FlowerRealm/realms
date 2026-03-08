@@ -16,11 +16,7 @@ import (
 
 const sessionUserUpdatedAtKey = "user_updated_at_unix"
 
-const (
-	personalModeVirtualUserID  int64 = 1
-	personalModeVirtualTokenID int64 = 1
-	systemAdminUserID          int64 = 0
-)
+const systemAdminUserID int64 = 0
 
 func extractBearer(v string) string {
 	if v == "" {
@@ -60,57 +56,7 @@ func applyPrincipalContext(c *gin.Context, p auth.Principal) {
 	c.Set("rlm_user_role", p.Role)
 }
 
-func requirePersonalModeKey(opts Options) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		raw := extractBearer(c.GetHeader("Authorization"))
-		if raw == "" {
-			raw = c.GetHeader("x-api-key")
-		}
-		if raw == "" {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "未提供 Key"})
-			c.Abort()
-			return
-		}
-
-		if opts.Store == nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
-			c.Abort()
-			return
-		}
-		expectHash, ok, err := opts.Store.GetPersonalModeKeyHash(c.Request.Context())
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "鉴权失败"})
-			c.Abort()
-			return
-		}
-		if !ok {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "personal 模式尚未设置 Key"})
-			c.Abort()
-			return
-		}
-		if subtle.ConstantTimeCompare(rlmcrypto.TokenHash(raw), expectHash) != 1 {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "Key 无效"})
-			c.Abort()
-			return
-		}
-
-		role := store.UserRoleRoot
-		tokenID := personalModeVirtualTokenID
-		p := auth.Principal{
-			ActorType: auth.ActorTypeToken,
-			UserID:    personalModeVirtualUserID,
-			TokenID:   &tokenID,
-			Role:      role,
-		}
-		applyPrincipalContext(c, p)
-		c.Next()
-	}
-}
-
 func requireRoot(opts Options) gin.HandlerFunc {
-	if opts.PersonalMode {
-		return requirePersonalModeKey(opts)
-	}
 	sessionAuth := requireRootSession(opts)
 	return func(c *gin.Context) {
 		rawKey, hasKey := extractPresentedAPIKey(c)

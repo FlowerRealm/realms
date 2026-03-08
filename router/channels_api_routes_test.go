@@ -3,7 +3,6 @@ package router
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -92,7 +91,6 @@ func TestChannels_PageAndInUse_RootFlow(t *testing.T) {
 
 	SetRouter(engine, Options{
 		Store:                st,
-		PersonalMode:         false,
 		AdminTimeZoneDefault: "UTC",
 		FrontendIndexPage:    []byte("<!doctype html><html><body>INDEX</body></html>"),
 	})
@@ -413,7 +411,7 @@ func TestChannels_PageAndInUse_RootFlow(t *testing.T) {
 	}
 }
 
-func TestChannels_Reorder_PersonalMode(t *testing.T) {
+func TestChannels_Reorder_AdminAPIKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	dir := t.TempDir()
@@ -431,11 +429,7 @@ func TestChannels_Reorder_PersonalMode(t *testing.T) {
 	st.SetDialect(store.DialectSQLite)
 
 	ctx := context.Background()
-	key := "k_personal_mode_test_123"
-	hashHex := hex.EncodeToString(rlmcrypto.TokenHash(key))
-	if _, err := st.InsertAppSettingIfAbsent(ctx, store.SettingPersonalModeKeyHash, hashHex); err != nil {
-		t.Fatalf("InsertAppSettingIfAbsent: %v", err)
-	}
+	key := "adm_reorder_test_123"
 
 	ch1, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "c1", "", 0, false, false, false, false)
 	if err != nil {
@@ -450,7 +444,7 @@ func TestChannels_Reorder_PersonalMode(t *testing.T) {
 	engine.Use(gin.Recovery())
 	SetRouter(engine, Options{
 		Store:                st,
-		PersonalMode:         true,
+		AdminAPIKeyHash:      rlmcrypto.TokenHash(key),
 		AdminTimeZoneDefault: "UTC",
 		FrontendIndexPage:    []byte("<!doctype html><html><body>INDEX</body></html>"),
 	})
@@ -547,7 +541,6 @@ func TestChannels_SettingsAndCredentials_RootFlow(t *testing.T) {
 
 	SetRouter(engine, Options{
 		Store:             st,
-		PersonalMode:      false,
 		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
 	})
 
@@ -804,7 +797,7 @@ func TestChannels_CreateDefaultsAllowServiceTierAndRejectsInvalidFastMode(t *tes
 	sessionStore.Options(sessions.Options{Path: "/", MaxAge: 2592000, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	engine.Use(sessions.Sessions(cookieName, sessionStore))
 
-	SetRouter(engine, Options{Store: st, PersonalMode: false, FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>")})
+	SetRouter(engine, Options{Store: st, FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>")})
 
 	loginBody, _ := json.Marshal(map[string]any{"login": "root@example.com", "password": "password123"})
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/user/login", bytes.NewReader(loginBody))
@@ -994,7 +987,6 @@ func TestChannels_CodexOAuthAccounts_RootFlow(t *testing.T) {
 
 	SetRouter(engine, Options{
 		Store:             st,
-		PersonalMode:      false,
 		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
 		StartCodexOAuth: func(_ context.Context, endpointID int64, actorUserID int64) (string, error) {
 			startEndpointID = endpointID

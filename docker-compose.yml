@@ -27,7 +27,6 @@ services:
       - .env
     environment:
       REALMS_ENV: ${REALMS_ENV:-prod}
-      REALMS_MODE: ${REALMS_MODE:-business}
       REALMS_DB_DSN: ${REALMS_DB_DSN_DOCKER:-root:root@tcp(mysql:3306)/realms?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci&time_zone=%27%2B00%3A00%27}
       REALMS_ALLOW_OPEN_REGISTRATION: ${REALMS_ALLOW_OPEN_REGISTRATION:-true}
       REALMS_DISABLE_SECURE_COOKIES: ${REALMS_DISABLE_SECURE_COOKIES:-true}

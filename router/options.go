@@ -7,7 +7,6 @@ import (
 
 	openaiapi "realms/internal/api/openai"
 	"realms/internal/config"
-	"realms/internal/personalconfig"
 	"realms/internal/scheduler"
 	"realms/internal/store"
 	"realms/internal/tickets"
@@ -17,8 +16,6 @@ type Options struct {
 	Store           *store.Store
 	Sched           *scheduler.Scheduler
 	AdminAPIKeyHash []byte
-	PersonalMode    bool
-	PersonalConfig  *personalconfig.Syncer
 
 	AllowOpenRegistration           bool
 	EmailVerificationEnabledDefault bool
@@ -49,7 +46,7 @@ type Options struct {
 	RealmsIconSVG http.HandlerFunc
 	FaviconICO    http.HandlerFunc
 
-	// payments/webhooks (only mounted when !PersonalMode in current routing)
+	// payments/webhooks
 	SubscriptionOrderPaidWebhook  http.HandlerFunc
 	StripeWebhookByPaymentChannel http.HandlerFunc
 	EPayNotifyByPaymentChannel    http.HandlerFunc

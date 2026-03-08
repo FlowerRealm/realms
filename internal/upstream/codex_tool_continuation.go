@@ -79,4 +79,3 @@ func hasToolChoiceSignal(reqBody map[string]any) bool {
 		return false
 	}
 }
-

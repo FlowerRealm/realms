@@ -30,4 +30,3 @@ CREATE TABLE IF NOT EXISTS anthropic_credentials (
 	}
 	return nil
 }
-

@@ -72,13 +72,13 @@ func TestUsageStatsByToken_SQLite(t *testing.T) {
 			t.Fatalf("CommitUsage(%s): %v", reqID, err)
 		}
 		if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
-			UsageEventID: usageID,
-			Endpoint:     "/v1/responses",
-			Method:       "POST",
-			StatusCode:   200,
-			LatencyMS:    10,
-			IsStream:     false,
-			RequestBytes: 123,
+			UsageEventID:  usageID,
+			Endpoint:      "/v1/responses",
+			Method:        "POST",
+			StatusCode:    200,
+			LatencyMS:     10,
+			IsStream:      false,
+			RequestBytes:  123,
 			ResponseBytes: 456,
 		}); err != nil {
 			t.Fatalf("FinalizeUsageEvent(%s): %v", reqID, err)
@@ -136,4 +136,3 @@ func TestUsageStatsByToken_SQLite(t *testing.T) {
 		t.Fatalf("expected non-empty series")
 	}
 }
-

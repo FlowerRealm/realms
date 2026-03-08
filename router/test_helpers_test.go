@@ -54,7 +54,6 @@ func newTestEngine(t *testing.T, st *store.Store) (*gin.Engine, string) {
 
 	SetRouter(engine, Options{
 		Store:             st,
-		PersonalMode:      false,
 		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
 	})
 

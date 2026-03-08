@@ -77,4 +77,3 @@ func TestChannelGroupPointers_SQLiteRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected pointer after update: %+v", got)
 	}
 }
-

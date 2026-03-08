@@ -126,7 +126,6 @@ func TestUsageEvents_UserResponse_HidesUpstreamChannel(t *testing.T) {
 
 	SetRouter(engine, Options{
 		Store:             st,
-		PersonalMode:      false,
 		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
 	})
 
@@ -484,7 +483,6 @@ func TestUsageTimeSeries_UserResponse_ReturnsPoints(t *testing.T) {
 
 	SetRouter(engine, Options{
 		Store:             st,
-		PersonalMode:      false,
 		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
 	})
 
@@ -670,7 +668,6 @@ func TestUsageEvents_TokenFilter_WorksAndChecksOwnership(t *testing.T) {
 
 	SetRouter(engine, Options{
 		Store:             st,
-		PersonalMode:      false,
 		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
 	})
 
@@ -852,7 +849,6 @@ func TestUsageWindows_TokenFilter_WorksAndChecksOwnership(t *testing.T) {
 
 	SetRouter(engine, Options{
 		Store:             st,
-		PersonalMode:      false,
 		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
 	})
 
@@ -1033,7 +1029,6 @@ func TestV1Usage_TokenAuth_IsSingleKeyAndCannotAccessOtherTokenEvents(t *testing
 	engine.Use(gin.Recovery())
 	SetRouter(engine, Options{
 		Store:             st,
-		PersonalMode:      false,
 		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
 	})
 
@@ -1198,7 +1193,6 @@ func TestUsageEventDetail_UserResponse_IncludesPricingBreakdown(t *testing.T) {
 
 	SetRouter(engine, Options{
 		Store:             st,
-		PersonalMode:      false,
 		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
 	})
 

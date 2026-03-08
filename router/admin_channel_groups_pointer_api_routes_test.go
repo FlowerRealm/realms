@@ -47,7 +47,6 @@ func setupRootSession(t *testing.T, st *store.Store) (*gin.Engine, string, int64
 
 	SetRouter(engine, Options{
 		Store:             st,
-		PersonalMode:      false,
 		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
 	})
 

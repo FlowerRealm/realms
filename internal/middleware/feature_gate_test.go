@@ -11,15 +11,14 @@ type fakeFeatureDisabledGetter struct {
 	disabled bool
 }
 
-func (f fakeFeatureDisabledGetter) FeatureDisabledEffective(ctx context.Context, selfMode bool, key string) bool {
+func (f fakeFeatureDisabledGetter) FeatureDisabledEffective(ctx context.Context, key string) bool {
 	_ = ctx
-	_ = selfMode
 	_ = key
 	return f.disabled
 }
 
 func TestFeatureGateEffective_Disabled_ReturnsNotFound(t *testing.T) {
-	mw := FeatureGateEffective(fakeFeatureDisabledGetter{disabled: true}, false, "feature_disable_x")
+	mw := FeatureGateEffective(fakeFeatureDisabledGetter{disabled: true}, "feature_disable_x")
 
 	nextCalled := 0
 	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +39,7 @@ func TestFeatureGateEffective_Disabled_ReturnsNotFound(t *testing.T) {
 }
 
 func TestFeatureGateEffective_Enabled_PassesThrough(t *testing.T) {
-	mw := FeatureGateEffective(fakeFeatureDisabledGetter{disabled: false}, false, "feature_disable_x")
+	mw := FeatureGateEffective(fakeFeatureDisabledGetter{disabled: false}, "feature_disable_x")
 
 	nextCalled := 0
 	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +60,7 @@ func TestFeatureGateEffective_Enabled_PassesThrough(t *testing.T) {
 }
 
 func TestFeatureGateEffective_EmptyKey_PassesThrough(t *testing.T) {
-	mw := FeatureGateEffective(fakeFeatureDisabledGetter{disabled: true}, false, "   ")
+	mw := FeatureGateEffective(fakeFeatureDisabledGetter{disabled: true}, "   ")
 
 	nextCalled := 0
 	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +81,7 @@ func TestFeatureGateEffective_EmptyKey_PassesThrough(t *testing.T) {
 }
 
 func TestFeatureGateEffective_NilGetter_PassesThrough(t *testing.T) {
-	mw := FeatureGateEffective(nil, false, "feature_disable_x")
+	mw := FeatureGateEffective(nil, "feature_disable_x")
 
 	nextCalled := 0
 	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

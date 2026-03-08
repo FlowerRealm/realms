@@ -62,14 +62,13 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 		maxOut = intFromAny(payload["max_tokens"])
 	}
 
-	freeMode := h.selfMode
+	freeMode := false
 	modelPassthrough := false
 	if h.features != nil {
-		fs := h.features.FeatureStateEffective(r.Context(), h.selfMode)
+		fs := h.features.FeatureStateEffective(r.Context())
 		freeMode = fs.BillingDisabled
 		modelPassthrough = fs.ModelsDisabled
 	}
-	modelPassthrough = modelPassthrough || h.selfMode
 
 	if publicModel == "" {
 		http.Error(w, "model 不能为空", http.StatusBadRequest)
@@ -84,18 +83,12 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 	cons.RequireChannelType = store.UpstreamTypeOpenAICompatible
 	ags := allowGroupsFromPrincipal(p)
 	allowSet := ags.Set
-	if h.selfMode {
-		allowSet = nil
-		cons.AllowGroups = nil
-		cons.AllowGroupOrder = nil
-	} else {
-		if len(ags.Order) == 0 {
-			http.Error(w, "Token 未配置渠道组", http.StatusBadRequest)
-			return
-		}
-		cons.AllowGroups = allowSet
-		cons.AllowGroupOrder = ags.Order
+	if len(ags.Order) == 0 {
+		http.Error(w, "Token 未配置渠道组", http.StatusBadRequest)
+		return
 	}
+	cons.AllowGroups = allowSet
+	cons.AllowGroupOrder = ags.Order
 
 	if wantStore {
 		ownerTag := realmsOwnerTagForUser(p.UserID)
@@ -343,7 +336,7 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 	}
 	reqBytes := int64(len(body))
 
-	if h.groups == nil && !h.selfMode {
+	if h.groups == nil {
 		if usageID != 0 && h.quota != nil {
 			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_ = h.quota.Void(bookCtx, usageID)

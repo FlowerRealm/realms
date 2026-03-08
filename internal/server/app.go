@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -30,7 +29,6 @@ import (
 	"realms/internal/config"
 	rlmcrypto "realms/internal/crypto"
 	"realms/internal/errorpassthrough"
-	"realms/internal/personalconfig"
 	"realms/internal/proxylog"
 	"realms/internal/quota"
 	"realms/internal/scheduler"
@@ -51,7 +49,6 @@ type App struct {
 	cfg           config.Config
 	db            *sql.DB
 	store         *store.Store
-	personalCfg   *personalconfig.Syncer
 	codexOAuth    *codexoauth.Flow
 	concurrency   *concurrency.Manager
 	exec          *upstream.Executor
@@ -91,14 +88,12 @@ func newConcurrencyManager(cfg config.Config) (*concurrency.Manager, error) {
 }
 
 func NewApp(opts AppOptions) (*App, error) {
-	personalMode := opts.Config.IsPersonalMode()
-
 	st := store.New(opts.DB)
 	st.SetDialect(store.Dialect(opts.Config.DB.Driver))
 	st.SetAppSettingsDefaults(opts.Config.AppSettingsDefaults)
 
 	sched := scheduler.NewWithOptions(st, scheduler.Options{
-		DisableCodexOAuth: personalMode,
+		DisableCodexOAuth: false,
 	})
 	sched.SetGroupPointerStore(st)
 	exec := upstream.NewExecutor(st, opts.Config)
@@ -107,16 +102,13 @@ func NewApp(opts AppOptions) (*App, error) {
 	if strings.TrimSpace(opts.Config.AppSettingsDefaults.SiteBaseURL) != "" {
 		publicBaseURL = strings.TrimRight(strings.TrimSpace(opts.Config.AppSettingsDefaults.SiteBaseURL), "/")
 	}
-	sessionCookieName := SessionCookieNameForPersonalMode(personalMode)
+	sessionCookieName := SessionCookieName
 	sessionSecret := strings.TrimSpace(os.Getenv("SESSION_SECRET"))
 	if sessionSecret == "" {
 		sessionSecret = randomSecret(32)
 	}
 
-	var oauthFlow *codexoauth.Flow
-	if !personalMode {
-		oauthFlow = codexoauth.NewFlow(st, sessionCookieName, sessionSecret, localBaseURL(opts.Config), codexOAuthRedirectURI(opts.Config.Server.Addr))
-	}
+	oauthFlow := codexoauth.NewFlow(st, sessionCookieName, sessionSecret, localBaseURL(opts.Config), codexOAuthRedirectURI(opts.Config.Server.Addr))
 
 	ticketStorage := tickets.NewStorage(opts.Config.Tickets.AttachmentsDir)
 	proxyLog := proxylog.New(proxylog.Config{
@@ -129,7 +121,7 @@ func NewApp(opts AppOptions) (*App, error) {
 		opts.Config.Sub2API.GatewayKey,
 		time.Duration(opts.Config.Sub2API.TimeoutMS)*time.Millisecond,
 	)
-	openaiHandler := openaiapi.NewHandler(st, st, sched, exec, proxyLog, st, personalMode, qp, st, st, st, upstream.SSEPumpOptions{
+	openaiHandler := openaiapi.NewHandler(st, st, sched, exec, proxyLog, st, qp, st, st, st, upstream.SSEPumpOptions{
 		InitialLineBytes: 64 << 10,
 	}, sub2api)
 	openaiHandler.SetGatewayPolicy(openaiapi.GatewayPolicy{
@@ -188,31 +180,18 @@ func NewApp(opts AppOptions) (*App, error) {
 	frontendBaseURL := strings.TrimSpace(os.Getenv("FRONTEND_BASE_URL"))
 	frontendDistDir := strings.TrimSpace(os.Getenv("FRONTEND_DIST_DIR"))
 	if frontendDistDir == "" {
-		if personalMode {
-			frontendDistDir = "./web/dist-personal"
-		} else {
-			frontendDistDir = "./web/dist"
-		}
+		frontendDistDir = "./web/dist"
 	}
-	frontendFS, frontendIndexPage := loadEmbeddedFrontend(personalMode)
+	frontendFS, frontendIndexPage := loadEmbeddedFrontend()
 
 	var adminAPIKeyHash []byte
 	if raw := strings.TrimSpace(opts.Config.Security.AdminAPIKey); raw != "" {
 		adminAPIKeyHash = rlmcrypto.TokenHash(raw)
 	}
 
-	// personal-config: optional authoritative local config file for personal mode.
-	pcfg, err := setupPersonalConfig(opts.Config, opts.DB, st, personalMode)
-	if err != nil {
-		return nil, err
-	}
-	app.personalCfg = pcfg
-
 	router.SetRouter(engine, router.Options{
 		Store:                           st,
-		PersonalMode:                    personalMode,
 		AdminAPIKeyHash:                 adminAPIKeyHash,
-		PersonalConfig:                  pcfg,
 		AllowOpenRegistration:           opts.Config.Security.AllowOpenRegistration,
 		EmailVerificationEnabledDefault: opts.Config.EmailVerif.Enable,
 		PublicBaseURLDefault:            publicBaseURL,
@@ -279,54 +258,6 @@ func NewApp(opts AppOptions) (*App, error) {
 	return app, nil
 }
 
-func setupPersonalConfig(cfg config.Config, db *sql.DB, st *store.Store, personalMode bool) (*personalconfig.Syncer, error) {
-	if !personalMode {
-		return nil, nil
-	}
-
-	rawEnable := strings.TrimSpace(os.Getenv("REALMS_PERSONAL_CONFIG_ENABLE"))
-	enabled := false
-	if rawEnable != "" {
-		if b, err := strconv.ParseBool(rawEnable); err == nil {
-			enabled = b
-		}
-	} else {
-		// Default: enabled for realms-app (Env=app), opt-in for server-style personal mode.
-		enabled = strings.EqualFold(strings.TrimSpace(cfg.Env), "app")
-	}
-	if !enabled {
-		return nil, nil
-	}
-
-	path := strings.TrimSpace(os.Getenv("REALMS_PERSONAL_CONFIG_PATH"))
-	if path == "" {
-		cfgDir, err := os.UserConfigDir()
-		if err != nil {
-			return nil, fmt.Errorf("personal config: get user config dir: %w", err)
-		}
-		path = filepath.Join(cfgDir, "Realms", "personal-config.json")
-	}
-
-	s, err := personalconfig.New(personalconfig.Options{
-		Enabled: enabled,
-		Path:    path,
-		DB:      db,
-		Dialect: store.Dialect(cfg.DB.Driver),
-		Store:   st,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := s.Init(ctx); err != nil {
-		return nil, err
-	}
-	_ = s.StartWatcher()
-	return s, nil
-}
-
 func randomSecret(n int) string {
 	if n <= 0 {
 		return ""
@@ -338,13 +269,7 @@ func randomSecret(n int) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-func loadEmbeddedFrontend(personalMode bool) (fs.FS, []byte) {
-	if personalMode {
-		if dist, index := loadEmbeddedDist(root.WebPersonalDistFS, "web/dist-personal"); dist != nil && len(index) > 0 {
-			return dist, index
-		}
-		return nil, nil
-	}
+func loadEmbeddedFrontend() (fs.FS, []byte) {
 	if dist, index := loadEmbeddedDist(root.WebDistFS, "web/dist"); dist != nil && len(index) > 0 {
 		return dist, index
 	}
@@ -371,7 +296,7 @@ func quotaProvider(st *store.Store, cfg config.Config) quota.Provider {
 	reserveTTL := 2*time.Minute + 30*time.Second
 	business := quota.NewHybridProvider(st, reserveTTL, cfg.Billing.EnablePayAsYouGo)
 	free := quota.NewFreeProvider(st, reserveTTL)
-	return quota.NewFeatureProvider(st, cfg.IsPersonalMode(), business, free)
+	return quota.NewFeatureProvider(st, business, free)
 }
 
 func (a *App) Handler() http.Handler {
@@ -381,9 +306,6 @@ func (a *App) Handler() http.Handler {
 func (a *App) Close() error {
 	if a == nil {
 		return nil
-	}
-	if a.personalCfg != nil {
-		a.personalCfg.StopWatcher()
 	}
 	if a.concurrency != nil {
 		return a.concurrency.Close()
@@ -482,9 +404,7 @@ func (a *App) handleFaviconICO(w http.ResponseWriter, r *http.Request) {
 func (a *App) bootstrap() error {
 	go a.usageCleanupLoop()
 	go a.codexBalanceRefreshLoop()
-	if !a.cfg.IsPersonalMode() {
-		go a.ticketAttachmentsCleanupLoop()
-	}
+	go a.ticketAttachmentsCleanupLoop()
 	return nil
 }
 

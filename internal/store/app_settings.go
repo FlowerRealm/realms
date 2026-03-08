@@ -3,45 +3,16 @@ package store
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/shopspring/decimal"
-
-	rlmcrypto "realms/internal/crypto"
 )
 
 const SettingEmailVerificationEnable = "email_verification_enable"
-
-// SettingPersonalModeKeyHash 存储 personal 模式鉴权 Key 的 SHA256（hex 编码）。
-// 注意：仅存 hash，不存明文 Key。
-const SettingPersonalModeKeyHash = "personal_mode_key_hash"
-
-// SettingMCPServersRegistry stores the canonical MCP servers registry JSON (object).
-// It is used by admin UI to manage MCP servers and by personal-config bundle export/import.
-const SettingMCPServersRegistry = "mcp_servers_registry"
-
-// SettingMCPServersStoreV2 stores MCP servers in Realms canonical format (v2).
-// It is the preferred internal source of truth; target config files are adapters/views.
-const SettingMCPServersStoreV2 = "mcp_servers_store_v2"
-
-const (
-	SettingMCPApplyCodexEnabled  = "mcp_apply_codex_enabled"
-	SettingMCPApplyClaudeEnabled = "mcp_apply_claude_enabled"
-	SettingMCPApplyGeminiEnabled = "mcp_apply_gemini_enabled"
-)
-
-// SettingSkillsStoreV1 stores Skills in Realms canonical format (v1).
-// It is the authoritative source of truth for skills manager; target files are adapters/views.
-const SettingSkillsStoreV1 = "skills_store_v1"
-
-// SettingSkillsTargetEnabledV1 stores per-target enablement for skills apply (JSON object).
-const SettingSkillsTargetEnabledV1 = "skills_target_enabled_v1"
 
 const (
 	SettingFeatureDisableWebAnnouncements = "feature_disable_web_announcements"
@@ -88,38 +59,6 @@ const (
 	SettingBillingCreditUSDPerCNY           = "billing_credit_usd_per_cny"
 	SettingBillingPayAsYouGoPriceMultiplier = "billing_paygo_price_multiplier"
 )
-
-func (s *Store) GetPersonalModeKeyHash(ctx context.Context) ([]byte, bool, error) {
-	raw, ok, err := s.GetStringAppSetting(ctx, SettingPersonalModeKeyHash)
-	if err != nil || !ok {
-		return nil, ok, err
-	}
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil, false, nil
-	}
-	b, err := hex.DecodeString(raw)
-	if err != nil {
-		return nil, false, fmt.Errorf("解析 app_settings[%s] 失败: %w", SettingPersonalModeKeyHash, err)
-	}
-	if len(b) != sha256.Size {
-		return nil, false, fmt.Errorf("解析 app_settings[%s] 失败: hash 长度不合法", SettingPersonalModeKeyHash)
-	}
-	return b, true, nil
-}
-
-func (s *Store) SetPersonalModeKey(ctx context.Context, rawKey string) error {
-	key := strings.TrimSpace(rawKey)
-	if key == "" {
-		return errors.New("key 不能为空")
-	}
-	hashHex := hex.EncodeToString(rlmcrypto.TokenHash(key))
-	if err := s.UpsertAppSetting(ctx, SettingPersonalModeKeyHash, hashHex); err != nil {
-		return err
-	}
-	// 清理历史字段，避免 SQLite 启动迁移回填旧值。
-	return s.DeleteAppSetting(ctx, "self_mode_key_hash")
-}
 
 // InsertAppSettingIfAbsent 仅当 key 不存在时写入（不会覆盖已有值）。
 // 返回 inserted=true 表示本次写入成功；inserted=false 表示 key 已存在。

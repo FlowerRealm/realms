@@ -1,207 +1,68 @@
-<p>
-  <a href="https://www.su8.codes/s/106567c37fc0">
-    <img src="https://www.su8.codes/brand/logo-wide.png" alt="SU8 Codes" height="24" />
-  </a>
-  <br />
-  <strong>赞助商</strong>：<a href="https://www.su8.codes/s/106567c37fc0">SU8 Codes</a>
-  <br />
-  感谢 SU8 Codes 对本项目的赞助与支持。SU8 Codes 提供专业、高性价比的大模型 API，兼容主流工具，接入快捷、成本可控。
-</p>
+# Realms
 
-# Realms（OpenAI 兼容 API 中转 + Web 控制台）
+Realms 是一个 Go 单体服务（Gin），对外提供 OpenAI 兼容的 `/v1/*` 数据面，并提供 Web 管理后台用于管理用户、令牌、上游渠道、计费、公告与用量。
 
-Realms 是一个 Go 单体服务（Gin），对外提供 **OpenAI 兼容** 的 `/v1/*`（数据面），并提供一个 Web 控制台（管理面）用于配置上游渠道、路由策略与用量查询等。
+## 当前产品形态
 
-你可以用它做什么：
-- 作为 OpenAI SDK / Codex CLI 的 `base_url` 中转层（支持 `POST /v1/responses` SSE 透传）
-- 在 Web 控制台里管理 Token（business 模式）或管理 Key（personal 模式），并查看用量与请求明细
-- 在管理后台里管理上游渠道（OpenAI 兼容 base_url / Codex OAuth）与路由策略
+- 只保留统一的服务端模式
+- 不再支持 `personal` 模式
+- 不再提供 `realms-app` 启动器、personal 前端、MCP/Skills 管理页或 personal 管理 Key / personal API Key
 
----
+## 快速开始
 
-## 0) 先选一种“运行形态”
-
-- **Server（business 模式，推荐）**：部署/多人使用，默认开启账号/Token/模型目录等完整功能域。
-- **App（personal 模式）**：单二进制可执行程序，双击启动后用浏览器访问（默认监听 `:8080`，启动后打印访问地址，不自动打开页面）。
-
-> 说明：personal 模式也可以以 Server 形态运行（`REALMS_MODE=personal`）。App 是一个 Go 启动器形态（`cmd/realms-app`）：启动本地后端并在日志中提示访问地址（不自动打开浏览器）。
-
-> 迁移/历史说明：`docs/MIGRATION.md`。
-
----
-
-## 1) 最小开始：Server（business 模式，推荐：Docker Compose）
-
-### 1.1 一键启动（可复制运行）
+### Docker Compose
 
 ```bash
 git clone "https://github.com/FlowerRealm/realms.git"
 cd "realms"
-
 cp ".env.example" ".env"
-	docker compose pull realms
-	docker compose up -d
-
-	curl -fsS "http://127.0.0.1:8080/healthz"
-	```
-
-	默认端口是 `127.0.0.1:8080`（可用 `.env` 的 `REALMS_HTTP_PORT` 覆盖；见 `docker-compose.yml`）。
-
----
-
-## 2) 最小开始：App（personal 模式，浏览器 + 端口）
-
-App 用于把 Realms 以“personal 模式”封装成可执行程序（启动本地后端并在日志中提示访问地址；不自动打开浏览器）。
-
-关键约束（App 默认值）：
-- 默认监听：`:8080`（便于多人访问；如需仅本机可访问，可设置 `REALMS_ADDR=127.0.0.1:8080`）
-- 固定 base_url：`http://127.0.0.1:8080/v1`
-- 后端强制启用 personal 模式：`REALMS_MODE=personal`
-- personal 模式鉴权：首次打开 `/login` 设置 **管理 Key**（仅用于解锁管理面）；数据面 `/v1/*` 建议使用“数据面 API Key”（`POST /api/personal/keys` 创建多个），用于下游客户端访问（`Authorization: Bearer <key>` 或 `x-api-key`）
-
-跨域（CORS）：
-- App 默认启用：`REALMS_CORS_ALLOW_ORIGINS=*`
-- Server 默认关闭；如需开启：设置 `REALMS_CORS_ALLOW_ORIGINS`（`*` 或逗号分隔白名单）
-
-business 模式补充：
-- 可设置 `REALMS_ADMIN_API_KEY`，让管理员直接用 `curl` 调用 `/api/admin/*` 与 `/api/channel*`
-- 认证头支持 `Authorization: Bearer <admin_key>` 或 `x-api-key: <admin_key>`
-- 该 Key 仅用于管理面，不用于数据面 `/v1/*`
-
-### 2.1 使用 npm 全局安装（推荐，免手动下载）
-
-```bash
-npm install -g @flowerrealm/realms
-realms
+docker compose pull realms
+docker compose up -d
+curl -fsS "http://127.0.0.1:8080/healthz"
 ```
 
-说明：
-- 安装时会自动下载对应平台的 `realms-app`（来自 GitHub Releases），之后用 `realms` 启动。
-- 卸载：`npm uninstall -g @flowerrealm/realms`
-
-### 2.2 直接使用二进制
-
-从 GitHub Releases 下载对应平台的 `realms-app`（或压缩包），双击运行即可。
-
-### 2.3 从源码开发运行（本机）
-
-前置：Go + Node.js + npm
+### 本地开发
 
 ```bash
-make app-dev
-```
-
-### 2.4 打包当前平台二进制
-
-```bash
-make app-dist
-```
-
-产物默认输出到：`dist/`。
-
-更多细节见：`docs/USAGE.md`；迁移/历史说明见：`docs/MIGRATION.md`。
-
----
-
-## 3) 客户端接入（OpenAI SDK / Codex CLI）
-
-### 3.1 环境变量（最常用）
-
-- Server（business 模式）：`OPENAI_API_KEY` 填你在 `/tokens` 创建的 `sk_...`
-- App（personal 模式）：`OPENAI_API_KEY` 填你在 `/login` 设置的管理 Key
-
-Linux/macOS（bash/zsh）：
-
-	```bash
-	export OPENAI_BASE_URL="http://127.0.0.1:8080/v1"
-	export OPENAI_API_KEY="sk_..."
-	```
-
-Windows（PowerShell）：
-
-	```powershell
-	$env:OPENAI_BASE_URL = "http://127.0.0.1:8080/v1"
-	$env:OPENAI_API_KEY = "sk_..."
-	```
-
-### 3.2 （可选）Codex 配置文件示例
-
-Linux/macOS：`~/.codex/config.toml`；Windows：`%USERPROFILE%\\.codex\\config.toml`
-
-	```toml
-	disable_response_storage = true
-	model_provider = "realms"
-	model = "gpt-5.2"
-
-	[model_providers.realms]
-	name = "Realms"
-	base_url = "http://127.0.0.1:8080/v1"
-	wire_api = "responses"
-	requires_openai_auth = true
-	```
-
-### 3.3 Codex 远程压缩（compaction）常见坑
-
-Codex CLI（`wire_api = "responses"`）可能会启用“远程压缩/上下文压缩”（`compaction`）。这类请求是**有状态的**：同一会话中返回的 `compaction.encrypted_content` 必须在后续请求里原样回传，并且最好落到同一上游账号/渠道，否则可能出现类似：
-
-`invalid compaction encrypted_content: illegal base64 data at input byte ...`
-
-建议：
-
-- 调大 Codex 自动会话的 TTL（避免长对话中 route key 频繁变化）：
-  - `REALMS_CODEX_SESSION_TTL_SECONDS=604800`（7 天）
-- 若你有多个 OpenAI-compatible key/账号，建议开启渠道设置 `pass_through_body_enabled`（减少中转层重写请求体带来的风险）。
-
----
-
-## 4) 本地开发（贡献者）
-
-开发热重载（business 模式，固定 `127.0.0.1:8080`）：
-
-```bash
+make tools
 make dev
 ```
 
-运行测试：
+前端默认构建到 `web/dist`，后端默认监听 `127.0.0.1:8080`。
+
+## 认证模型
+
+### Web 管理面
+
+- 使用账号注册 / 登录
+- 第一个注册用户会自动成为 `root`
+- 管理类 API 也可使用 `REALMS_ADMIN_API_KEY` 直接访问 `/api/admin/*` 与 `/api/channel*`
+
+### 数据面 `/v1/*`
+
+- 使用 `/tokens` 创建的用户 Token
+- 常见环境变量：
 
 ```bash
-go test ./...
+export OPENAI_BASE_URL="http://127.0.0.1:8080/v1"
+export OPENAI_API_KEY="sk_..."
 ```
 
-更多内容见：`CONTRIBUTING.md`。
+## 关键环境变量
 
----
+- `REALMS_ENV`
+- `REALMS_ADDR`
+- `REALMS_DB_DRIVER`
+- `REALMS_DB_DSN`
+- `REALMS_SQLITE_PATH`
+- `REALMS_PUBLIC_BASE_URL`
+- `REALMS_CORS_ALLOW_ORIGINS`
+- `REALMS_ADMIN_API_KEY`
+- `FRONTEND_DIST_DIR`
+- `FRONTEND_BASE_URL`
 
-## 5) 文档与配置索引
+## 重要变更
 
-- 环境变量示例：`.env.example`
-- 可直接复制运行的部署命令：`docs/USAGE.md`
-- 前后端分离说明：`docs/frontend.md`
-- App 说明：`docs/USAGE.md`
-- 迁移/历史说明：`docs/MIGRATION.md`
-- 贡献指南：`CONTRIBUTING.md`
-- 安全政策：`SECURITY.md`
-- 行为准则：`CODE_OF_CONDUCT.md`
-- 许可证：`LICENSE`
-
----
-
-<details>
-<summary>深入：运行模式（business vs personal）</summary>
-
-- business 模式：`REALMS_MODE=business`（默认）  
-  面向完整功能（订阅/余额/支付/工单等），需要账号系统与更多配置项。
-
-- personal 模式：`REALMS_MODE=personal`  
-  适合个人/小团队自用：不提供账号/Token/系统设置/OAuth 等功能域；管理后台通过 `/login` 的管理 Key 解锁；数据面与管理面 API 均要求携带该 Key；MCP 管理仅 personal 模式提供。
-
-</details>
-
-<details>
-<summary>深入：安全说明（重要）</summary>
-
-- 上游 API 密钥 / OAuth 令牌 **明文入库**（BLOB）。
-- 用户数据面令牌 / Web 会话 **仅存 hash**（SHA256）。
-- `base_url` 会做最小校验（协议/Host/DNS）。
-
-</details>
+- `REALMS_MODE` 已移除；设置该变量会直接报错
+- `cmd/realms-app`、`make app-dev`、`make app-dist`、`make app-set-key` 已删除
+- `web/dist-personal`、`npm --prefix web run build:personal` 与 personal embed 产物已删除

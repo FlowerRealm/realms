@@ -57,18 +57,11 @@ func TestLoad_EnvOverridesDBDriver(t *testing.T) {
 	}
 }
 
-func TestLoad_Mode_Personal(t *testing.T) {
+func TestLoad_Mode_Removed(t *testing.T) {
 	t.Setenv("REALMS_MODE", "personal")
 
-	cfg, err := config.LoadFromEnv()
-	if err != nil {
-		t.Fatalf("LoadFromEnv: %v", err)
-	}
-	if cfg.Mode != config.ModePersonal {
-		t.Fatalf("expected mode=personal, got %q", cfg.Mode)
-	}
-	if !cfg.IsPersonalMode() {
-		t.Fatalf("expected IsPersonalMode=true")
+	if _, err := config.LoadFromEnv(); err == nil {
+		t.Fatalf("expected REALMS_MODE to be rejected")
 	}
 }
 

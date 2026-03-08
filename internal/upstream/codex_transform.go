@@ -197,4 +197,3 @@ func getNormalizedCodexModel(modelID string) string {
 	}
 	return ""
 }
-

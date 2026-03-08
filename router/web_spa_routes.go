@@ -34,11 +34,7 @@ func setWebSPARoutes(r *gin.Engine, opts Options) {
 
 	r.NoRoute(func(c *gin.Context) {
 		p := strings.TrimSpace(c.Request.URL.Path)
-		if p == "/admin/mcp" || strings.HasPrefix(p, "/admin/mcp/") {
-			c.Data(http.StatusNotFound, "text/plain; charset=utf-8", []byte("Not Found"))
-			return
-		}
-		if opts.PersonalMode && strings.HasPrefix(p, "/oauth") {
+		if p == "/mcp" || strings.HasPrefix(p, "/mcp/") || p == "/skills" || strings.HasPrefix(p, "/skills/") || p == "/admin/mcp" || strings.HasPrefix(p, "/admin/mcp/") {
 			c.Data(http.StatusNotFound, "text/plain; charset=utf-8", []byte("Not Found"))
 			return
 		}
@@ -46,31 +42,9 @@ func setWebSPARoutes(r *gin.Engine, opts Options) {
 			c.Data(http.StatusNotFound, "text/plain; charset=utf-8", []byte("Not Found"))
 			return
 		}
-		if opts.PersonalMode && !isPersonalModeAllowedWebPath(p) {
-			c.Data(http.StatusNotFound, "text/plain; charset=utf-8", []byte("Not Found"))
-			return
-		}
 		c.Header("Cache-Control", "no-cache")
 		c.Data(http.StatusOK, "text/html; charset=utf-8", resolveSPAIndexPage(opts, fallbackIndexPage))
 	})
-}
-
-func isPersonalModeAllowedWebPath(p string) bool {
-	p = strings.TrimSpace(p)
-	switch {
-	case p == "/":
-		return true
-	case p == "/login":
-		return true
-	case p == "/mcp" || strings.HasPrefix(p, "/mcp/"):
-		return true
-	case p == "/skills" || strings.HasPrefix(p, "/skills/"):
-		return true
-	case strings.HasPrefix(p, "/admin"):
-		return true
-	default:
-		return false
-	}
 }
 
 func resolveSPAIndexPage(opts Options, fallback []byte) []byte {

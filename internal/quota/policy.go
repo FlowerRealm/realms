@@ -8,28 +8,26 @@ import (
 )
 
 type FeatureGetter interface {
-	FeatureDisabledEffective(ctx context.Context, personalMode bool, key string) bool
+	FeatureDisabledEffective(ctx context.Context, key string) bool
 }
 
 // FeatureProvider 根据功能开关在不同 QuotaProvider 之间切换。
 //
 // 目前仅实现：
-// - feature_disable_billing=true 或 personal 模式：使用 free provider（无限用量）
+// - feature_disable_billing=true：使用 free provider（无限用量）
 // - 否则：使用 normal provider（订阅优先 + 余额兜底）
 type FeatureProvider struct {
-	features     FeatureGetter
-	personalMode bool
+	features FeatureGetter
 
 	normal Provider
 	free   Provider
 }
 
-func NewFeatureProvider(features FeatureGetter, personalMode bool, normal Provider, free Provider) *FeatureProvider {
+func NewFeatureProvider(features FeatureGetter, normal Provider, free Provider) *FeatureProvider {
 	return &FeatureProvider{
-		features:     features,
-		personalMode: personalMode,
-		normal:       normal,
-		free:         free,
+		features: features,
+		normal:   normal,
+		free:     free,
 	}
 }
 
@@ -38,12 +36,9 @@ func (p *FeatureProvider) selectProvider(ctx context.Context) (Provider, error) 
 		return nil, errors.New("feature provider 为空")
 	}
 	if p.features == nil {
-		if p.personalMode {
-			return p.free, nil
-		}
 		return p.normal, nil
 	}
-	if p.features.FeatureDisabledEffective(ctx, p.personalMode, store.SettingFeatureDisableBilling) {
+	if p.features.FeatureDisabledEffective(ctx, store.SettingFeatureDisableBilling) {
 		return p.free, nil
 	}
 	return p.normal, nil

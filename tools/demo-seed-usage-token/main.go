@@ -100,12 +100,12 @@ func main() {
 			os.Exit(1)
 		}
 		if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
-			UsageEventID: usageID,
-			Endpoint:     endpoint,
-			Method:       "POST",
-			StatusCode:   200,
-			LatencyMS:    120,
-			IsStream:     false,
+			UsageEventID:  usageID,
+			Endpoint:      endpoint,
+			Method:        "POST",
+			StatusCode:    200,
+			LatencyMS:     120,
+			IsStream:      false,
 			RequestBytes:  1234,
 			ResponseBytes: 5678,
 		}); err != nil {
@@ -120,4 +120,3 @@ func main() {
 
 	fmt.Printf("seeded sqlite=%s user_id=%d token_id=%d token=%s\n", sqlitePath, userID, tokenID, rawToken)
 }
-

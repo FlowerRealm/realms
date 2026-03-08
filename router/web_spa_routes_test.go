@@ -82,11 +82,15 @@ func TestWebSPARoutes_SPAFallbackLoadsLatestDistIndex(t *testing.T) {
 
 	assertIndex("/login", "INDEX-A")
 	assertIndex("/admin/models", "INDEX-A")
-	assertIndex("/skills", "INDEX-A")
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/skills", nil)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("path=/skills status=%d body=%q", rr.Code, rr.Body.String())
+	}
 
 	writeIndex("B")
 
 	assertIndex("/login", "INDEX-B")
 	assertIndex("/admin/models", "INDEX-B")
-	assertIndex("/skills", "INDEX-B")
 }

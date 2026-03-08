@@ -48,8 +48,6 @@ const (
 	ModePersonal Mode = "personal"
 )
 
-func (c Config) IsPersonalMode() bool { return c.Mode == ModePersonal }
-
 type AppSettingsDefaultsConfig struct {
 	SiteBaseURL   string `yaml:"site_base_url"`
 	AdminTimeZone string `yaml:"admin_time_zone"`
@@ -174,6 +172,9 @@ type TicketsConfig struct {
 
 // LoadFromEnv 仅从环境变量加载配置（不读取任何配置文件）。
 func LoadFromEnv() (Config, error) {
+	if v := strings.TrimSpace(os.Getenv("REALMS_MODE")); v != "" {
+		return Config{}, fmt.Errorf("REALMS_MODE 已移除（检测到 %q）；请删除该配置并使用统一模式启动", v)
+	}
 	cfg := defaultConfig()
 	applyEnvOverrides(&cfg)
 	return normalizeAndValidate(cfg)
@@ -322,14 +323,12 @@ func normalizeAndValidate(cfg Config) (Config, error) {
 func canonicalizeMode(mode Mode) (Mode, error) {
 	raw := strings.ToLower(strings.TrimSpace(string(mode)))
 	switch raw {
-	case "":
-		return ModeBusiness, nil
-	case string(ModeBusiness):
+	case "", string(ModeBusiness):
 		return ModeBusiness, nil
 	case string(ModePersonal):
-		return ModePersonal, nil
+		return "", fmt.Errorf("mode=%q 已移除；请删除该配置并使用统一模式启动", raw)
 	default:
-		return "", fmt.Errorf("mode 不支持：%s（仅支持 business/personal）", raw)
+		return "", fmt.Errorf("mode 不支持：%s（统一模式下仅支持 business）", raw)
 	}
 }
 
@@ -445,9 +444,6 @@ func defaultConfig() Config {
 func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("REALMS_ENV"); v != "" {
 		cfg.Env = v
-	}
-	if v := strings.TrimSpace(os.Getenv("REALMS_MODE")); v != "" {
-		cfg.Mode = Mode(v)
 	}
 	if v := os.Getenv("REALMS_ADDR"); v != "" {
 		cfg.Server.Addr = v

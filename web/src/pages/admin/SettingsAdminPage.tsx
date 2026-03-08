@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { getAdminSettings, resetAdminSettings, updateAdminSettings, type AdminSettings, type FeatureBanItem, type UpdateAdminSettingsRequest } from '../../api/admin/settings';
-import { useAuth } from '../../auth/AuthContext';
 import { AutoSaveIndicator } from '../../components/AutoSaveIndicator';
 import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { TimeZoneInput } from '../../components/TimeZoneInput';
 import { useAutoSave } from '../../hooks/useAutoSave';
-import { PersonalAPIKeysPanel } from './PersonalAPIKeysPanel';
 
-type TabKey = 'features' | 'api_keys' | 'base' | 'email' | 'billing';
+type TabKey = 'features' | 'base' | 'email' | 'billing';
 
 function boolBadge(on: boolean): string {
   return on ? 'badge bg-light text-secondary border' : 'badge bg-light text-secondary border';
@@ -47,14 +45,10 @@ function initForm(s: AdminSettings): UpdateAdminSettingsRequest {
 function featureToggleDisabled(item: FeatureBanItem): boolean {
   if (!item.editable) return true;
   if (item.forced_by_build) return true;
-  if (item.forced_by_personal_mode) return true;
   return false;
 }
 
 export function SettingsAdminPage() {
-  const { user } = useAuth();
-  const isPersonalMode = user?.mode === 'personal';
-
   const [tab, setTab] = useState<TabKey>('features');
 
   const [settings, setSettings] = useState<AdminSettings | null>(null);
@@ -71,12 +65,8 @@ export function SettingsAdminPage() {
   }, [settings]);
 
   const visibleFeatureBanGroups = useMemo(() => {
-    const groups = settings?.feature_ban_groups || [];
-    if (!isPersonalMode) return groups;
-    return groups
-      .map((g) => ({ ...g, items: (g.items || []).filter((it) => !it.forced_by_personal_mode) }))
-      .filter((g) => (g.items || []).length > 0);
-  }, [isPersonalMode, settings?.feature_ban_groups]);
+    return settings?.feature_ban_groups || [];
+  }, [settings?.feature_ban_groups]);
 
   async function refresh() {
     setErr('');
@@ -115,13 +105,6 @@ export function SettingsAdminPage() {
   useEffect(() => {
     void refresh();
   }, []);
-
-  useEffect(() => {
-    if (!isPersonalMode) return;
-    if (tab === 'base' || tab === 'email' || tab === 'billing') {
-      setTab('features');
-    }
-  }, [isPersonalMode, tab]);
 
   const autosaveTrackForm = useMemo(() => {
     if (!form) return null;
@@ -189,28 +172,17 @@ export function SettingsAdminPage() {
                   <i className="ri-function-line"></i> 功能开关
                 </button>
               </li>
-              {isPersonalMode ? (
-                <li className="nav-item" role="presentation">
-                  <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'api_keys' ? 'active' : ''}`} type="button" onClick={() => setTab('api_keys')}>
-                    <i className="ri-key-2-line"></i> API Keys
-                  </button>
-                </li>
-              ) : null}
-              {!isPersonalMode ? (
-                <li className="nav-item" role="presentation">
-                  <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'base' ? 'active' : ''}`} type="button" onClick={() => setTab('base')}>
-                    <i className="ri-settings-4-line"></i> 基础设置
-                  </button>
-                </li>
-              ) : null}
-              {!isPersonalMode ? (
-                <li className="nav-item" role="presentation">
-                  <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'email' ? 'active' : ''}`} type="button" onClick={() => setTab('email')}>
-                    <i className="ri-mail-settings-line"></i> 邮件服务
-                  </button>
-                </li>
-              ) : null}
-              {!isPersonalMode && showBillingTab ? (
+              <li className="nav-item" role="presentation">
+                <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'base' ? 'active' : ''}`} type="button" onClick={() => setTab('base')}>
+                  <i className="ri-settings-4-line"></i> 基础设置
+                </button>
+              </li>
+              <li className="nav-item" role="presentation">
+                <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'email' ? 'active' : ''}`} type="button" onClick={() => setTab('email')}>
+                  <i className="ri-mail-settings-line"></i> 邮件服务
+                </button>
+              </li>
+              {showBillingTab ? (
                 <li className="nav-item" role="presentation">
                   <button className={`nav-link d-flex align-items-center gap-2 ${tab === 'billing' ? 'active' : ''}`} type="button" onClick={() => setTab('billing')}>
                     <i className="ri-bank-card-line"></i> 计费支付
@@ -276,10 +248,6 @@ export function SettingsAdminPage() {
                                     <span className="badge bg-warning-subtle text-warning-emphasis border smaller">
                                       编译期剔除
                                     </span>
-                                  ) : item.forced_by_personal_mode ? (
-                                    <span className="badge bg-warning-subtle text-warning-emphasis border smaller">
-                                      personal 模式强制
-                                    </span>
                                   ) : item.override ? (
                                     <span className="badge bg-light text-dark border smaller">
                                       已覆盖
@@ -309,8 +277,6 @@ export function SettingsAdminPage() {
                 ))}
               </div>
             ) : null}
-
-            {tab === 'api_keys' ? <PersonalAPIKeysPanel /> : null}
 
             {tab === 'base' ? (
               <div className="row g-4">

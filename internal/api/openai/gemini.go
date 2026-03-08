@@ -45,11 +45,8 @@ func (h *Handler) GeminiModels(w http.ResponseWriter, r *http.Request) {
 	ags := allowGroupsFromPrincipal(p)
 	allowSet := ags.Set
 	if len(ags.Order) == 0 {
-		if !h.selfMode {
-			http.Error(w, "Token 未配置渠道组", http.StatusBadRequest)
-			return
-		}
-		allowSet = nil
+		http.Error(w, "Token 未配置渠道组", http.StatusBadRequest)
+		return
 	}
 
 	items := make([]geminiModelItem, 0, len(ms))
@@ -120,14 +117,13 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 
 	maxOut := extractGeminiMaxOutputTokens(sanitizedBody)
 
-	freeMode := h.selfMode
+	freeMode := false
 	modelPassthrough := false
 	if h.features != nil {
-		fs := h.features.FeatureStateEffective(r.Context(), h.selfMode)
+		fs := h.features.FeatureStateEffective(r.Context())
 		freeMode = fs.BillingDisabled
 		modelPassthrough = fs.ModelsDisabled
 	}
-	modelPassthrough = modelPassthrough || h.selfMode
 
 	if h.models == nil {
 		http.Error(w, "服务未配置模型目录", http.StatusBadGateway)
@@ -138,18 +134,12 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 	cons.RequireChannelType = store.UpstreamTypeOpenAICompatible
 	ags := allowGroupsFromPrincipal(p)
 	allowSet := ags.Set
-	if h.selfMode {
-		allowSet = nil
-		cons.AllowGroups = nil
-		cons.AllowGroupOrder = nil
-	} else {
-		if len(ags.Order) == 0 {
-			http.Error(w, "Token 未配置渠道组", http.StatusBadRequest)
-			return
-		}
-		cons.AllowGroups = allowSet
-		cons.AllowGroupOrder = ags.Order
+	if len(ags.Order) == 0 {
+		http.Error(w, "Token 未配置渠道组", http.StatusBadRequest)
+		return
 	}
+	cons.AllowGroups = allowSet
+	cons.AllowGroupOrder = ags.Order
 
 	var upstreamByChannel map[int64]string
 	if !modelPassthrough {
@@ -291,7 +281,7 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	reqBytes := int64(len(body))
 
-	if h.groups == nil && !h.selfMode {
+	if h.groups == nil {
 		if usageID != 0 && h.quota != nil {
 			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_ = h.quota.Void(bookCtx, usageID)

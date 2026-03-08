@@ -523,11 +523,9 @@ func (h *Handler) ModelRetrieve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ags := allowGroupsFromPrincipal(p)
-	if !h.selfMode {
-		if _, ok := ags.Set[managedModelGroupName(m)]; !ok {
-			writeNotFound(w)
-			return
-		}
+	if _, ok := ags.Set[managedModelGroupName(m)]; !ok {
+		writeNotFound(w)
+		return
 	}
 	// 与 Models() 保持一致：无绑定则视为不可用。
 	if bindings, err := h.models.ListEnabledChannelModelBindingsByPublicID(r.Context(), id); err != nil || len(bindings) == 0 {

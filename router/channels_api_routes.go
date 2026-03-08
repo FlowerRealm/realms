@@ -76,10 +76,8 @@ func setChannelAPIRoutes(r gin.IRoutes, opts Options) {
 
 	r.PUT("/channel", admin, updateChannelHandler(opts))
 	r.PUT("/channel/", admin, updateChannelHandler(opts))
-	if opts.PersonalMode {
-		r.POST("/channel/reorder", admin, reorderChannelsHandler(opts))
-		r.POST("/channel/reorder/", admin, reorderChannelsHandler(opts))
-	}
+	r.POST("/channel/reorder", admin, reorderChannelsHandler(opts))
+	r.POST("/channel/reorder/", admin, reorderChannelsHandler(opts))
 
 	r.GET("/channel/:channel_id", admin, getChannelHandler(opts))
 	r.DELETE("/channel/:channel_id", admin, deleteChannelHandler(opts))
@@ -91,15 +89,13 @@ func setChannelAPIRoutes(r gin.IRoutes, opts Options) {
 	r.GET("/channel/:channel_id/credentials", admin, listChannelCredentialsHandler(opts))
 	r.POST("/channel/:channel_id/credentials", admin, createChannelCredentialHandler(opts))
 	r.DELETE("/channel/:channel_id/credentials/:credential_id", admin, deleteChannelCredentialHandler(opts))
-	if !opts.PersonalMode {
-		r.GET("/channel/:channel_id/codex-accounts", admin, listChannelCodexAccountsHandler(opts))
-		r.POST("/channel/:channel_id/codex-oauth/start", admin, startChannelCodexOAuthHandler(opts))
-		r.POST("/channel/:channel_id/codex-oauth/complete", admin, completeChannelCodexOAuthHandler(opts))
-		r.POST("/channel/:channel_id/codex-accounts", admin, createChannelCodexAccountHandler(opts))
-		r.POST("/channel/:channel_id/codex-accounts/refresh", admin, refreshChannelCodexAccountsHandler(opts))
-		r.POST("/channel/:channel_id/codex-accounts/:account_id/refresh", admin, refreshChannelCodexAccountHandler(opts))
-		r.DELETE("/channel/:channel_id/codex-accounts/:account_id", admin, deleteChannelCodexAccountHandler(opts))
-	}
+	r.GET("/channel/:channel_id/codex-accounts", admin, listChannelCodexAccountsHandler(opts))
+	r.POST("/channel/:channel_id/codex-oauth/start", admin, startChannelCodexOAuthHandler(opts))
+	r.POST("/channel/:channel_id/codex-oauth/complete", admin, completeChannelCodexOAuthHandler(opts))
+	r.POST("/channel/:channel_id/codex-accounts", admin, createChannelCodexAccountHandler(opts))
+	r.POST("/channel/:channel_id/codex-accounts/refresh", admin, refreshChannelCodexAccountsHandler(opts))
+	r.POST("/channel/:channel_id/codex-accounts/:account_id/refresh", admin, refreshChannelCodexAccountHandler(opts))
+	r.DELETE("/channel/:channel_id/codex-accounts/:account_id", admin, deleteChannelCodexAccountHandler(opts))
 
 	r.PUT("/channel/:channel_id/meta", admin, updateChannelMetaHandler(opts))
 	r.PUT("/channel/:channel_id/setting", admin, updateChannelSettingHandler(opts))
@@ -617,16 +613,6 @@ func createChannelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		mut, ok := beginPersonalConfigMutation(c, opts)
-		if !ok {
-			return
-		}
-		finalized := false
-		defer func() {
-			if mut != nil && !finalized {
-				abortPersonalConfigMutation(c, mut)
-			}
-		}()
 		var req createChannelRequest
 		if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
@@ -653,10 +639,6 @@ func createChannelHandler(opts Options) gin.HandlerFunc {
 		case store.UpstreamTypeOpenAICompatible, store.UpstreamTypeAnthropic, store.UpstreamTypeCodexOAuth:
 		default:
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "不支持的渠道类型"})
-			return
-		}
-		if opts.PersonalMode && req.Type == store.UpstreamTypeCodexOAuth {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "personal 模式不支持 codex_oauth 渠道"})
 			return
 		}
 		if req.Type == store.UpstreamTypeCodexOAuth && req.Key != nil {
@@ -703,14 +685,6 @@ func createChannelHandler(opts Options) gin.HandlerFunc {
 				}
 			}
 		}
-		if mut != nil {
-			if err := mut.Commit(c.Request.Context(), true); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-				finalized = true
-				return
-			}
-		}
-		finalized = true
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"id": id}})
 	}
 }
@@ -732,24 +706,10 @@ type updateChannelRequest struct {
 
 func reorderChannelsHandler(opts Options) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !opts.PersonalMode {
-			c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "not found"})
-			return
-		}
 		if opts.Store == nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		mut, ok := beginPersonalConfigMutation(c, opts)
-		if !ok {
-			return
-		}
-		finalized := false
-		defer func() {
-			if mut != nil && !finalized {
-				abortPersonalConfigMutation(c, mut)
-			}
-		}()
 		var ids []int64
 		if err := c.ShouldBindJSON(&ids); err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
@@ -772,14 +732,6 @@ func reorderChannelsHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "更新失败"})
 			return
 		}
-		if mut != nil {
-			if err := mut.Commit(c.Request.Context(), true); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-				finalized = true
-				return
-			}
-		}
-		finalized = true
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
 	}
 }
@@ -790,16 +742,6 @@ func updateChannelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		mut, ok := beginPersonalConfigMutation(c, opts)
-		if !ok {
-			return
-		}
-		finalized := false
-		defer func() {
-			if mut != nil && !finalized {
-				abortPersonalConfigMutation(c, mut)
-			}
-		}()
 		var req updateChannelRequest
 		if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
@@ -817,10 +759,6 @@ func updateChannelHandler(opts Options) gin.HandlerFunc {
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询 channel 失败"})
-			return
-		}
-		if opts.PersonalMode && ch.Type == store.UpstreamTypeCodexOAuth {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "personal 模式不支持 codex_oauth 渠道（建议删除）"})
 			return
 		}
 		if ch.Type == store.UpstreamTypeCodexOAuth && req.Key != nil && strings.TrimSpace(*req.Key) != "" {
@@ -915,14 +853,6 @@ func updateChannelHandler(opts Options) gin.HandlerFunc {
 			}
 		}
 
-		if mut != nil {
-			if err := mut.Commit(c.Request.Context(), true); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-				finalized = true
-				return
-			}
-		}
-		finalized = true
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
 	}
 }
@@ -1452,16 +1382,6 @@ func createChannelCredentialHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		mut, ok := beginPersonalConfigMutation(c, opts)
-		if !ok {
-			return
-		}
-		finalized := false
-		defer func() {
-			if mut != nil && !finalized {
-				abortPersonalConfigMutation(c, mut)
-			}
-		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
 		if err != nil || channelID <= 0 {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
@@ -1505,14 +1425,6 @@ func createChannelCredentialHandler(opts Options) gin.HandlerFunc {
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建失败"})
 				return
 			}
-			if mut != nil {
-				if err := mut.Commit(c.Request.Context(), true); err != nil {
-					c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-					finalized = true
-					return
-				}
-			}
-			finalized = true
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "已添加", "data": gin.H{"id": id, "api_key_hint": hint}})
 		case store.UpstreamTypeAnthropic:
 			id, hint, err := opts.Store.CreateAnthropicCredential(c.Request.Context(), ep.ID, name, apiKey)
@@ -1520,14 +1432,6 @@ func createChannelCredentialHandler(opts Options) gin.HandlerFunc {
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建失败"})
 				return
 			}
-			if mut != nil {
-				if err := mut.Commit(c.Request.Context(), true); err != nil {
-					c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-					finalized = true
-					return
-				}
-			}
-			finalized = true
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "已添加", "data": gin.H{"id": id, "api_key_hint": hint}})
 		default:
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "不支持的渠道类型"})
@@ -1542,16 +1446,6 @@ func deleteChannelCredentialHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		mut, ok := beginPersonalConfigMutation(c, opts)
-		if !ok {
-			return
-		}
-		finalized := false
-		defer func() {
-			if mut != nil && !finalized {
-				abortPersonalConfigMutation(c, mut)
-			}
-		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
 		if err != nil || channelID <= 0 {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
@@ -1615,14 +1509,6 @@ func deleteChannelCredentialHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
-		if mut != nil {
-			if err := mut.Commit(c.Request.Context(), true); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-				finalized = true
-				return
-			}
-		}
-		finalized = true
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已删除"})
 	}
 }
@@ -1641,16 +1527,6 @@ func updateChannelMetaHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		mut, ok := beginPersonalConfigMutation(c, opts)
-		if !ok {
-			return
-		}
-		finalized := false
-		defer func() {
-			if mut != nil && !finalized {
-				abortPersonalConfigMutation(c, mut)
-			}
-		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
 		if err != nil || channelID <= 0 {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
@@ -1701,14 +1577,6 @@ func updateChannelMetaHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 			return
 		}
-		if mut != nil {
-			if err := mut.Commit(c.Request.Context(), true); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-				finalized = true
-				return
-			}
-		}
-		finalized = true
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
 	}
 }
@@ -1728,16 +1596,6 @@ func updateChannelSettingHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		mut, ok := beginPersonalConfigMutation(c, opts)
-		if !ok {
-			return
-		}
-		finalized := false
-		defer func() {
-			if mut != nil && !finalized {
-				abortPersonalConfigMutation(c, mut)
-			}
-		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
 		if err != nil || channelID <= 0 {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
@@ -1793,14 +1651,6 @@ func updateChannelSettingHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
 			return
 		}
-		if mut != nil {
-			if err := mut.Commit(c.Request.Context(), true); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-				finalized = true
-				return
-			}
-		}
-		finalized = true
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
 	}
 }
@@ -1814,16 +1664,6 @@ func updateChannelParamOverrideHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		mut, ok := beginPersonalConfigMutation(c, opts)
-		if !ok {
-			return
-		}
-		finalized := false
-		defer func() {
-			if mut != nil && !finalized {
-				abortPersonalConfigMutation(c, mut)
-			}
-		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
 		if err != nil || channelID <= 0 {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
@@ -1851,14 +1691,6 @@ func updateChannelParamOverrideHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 			return
 		}
-		if mut != nil {
-			if err := mut.Commit(c.Request.Context(), true); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-				finalized = true
-				return
-			}
-		}
-		finalized = true
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
 	}
 }
@@ -1872,16 +1704,6 @@ func updateChannelHeaderOverrideHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		mut, ok := beginPersonalConfigMutation(c, opts)
-		if !ok {
-			return
-		}
-		finalized := false
-		defer func() {
-			if mut != nil && !finalized {
-				abortPersonalConfigMutation(c, mut)
-			}
-		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
 		if err != nil || channelID <= 0 {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
@@ -1909,14 +1731,6 @@ func updateChannelHeaderOverrideHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 			return
 		}
-		if mut != nil {
-			if err := mut.Commit(c.Request.Context(), true); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-				finalized = true
-				return
-			}
-		}
-		finalized = true
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
 	}
 }
@@ -1930,16 +1744,6 @@ func updateChannelModelSuffixPreserveHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		mut, ok := beginPersonalConfigMutation(c, opts)
-		if !ok {
-			return
-		}
-		finalized := false
-		defer func() {
-			if mut != nil && !finalized {
-				abortPersonalConfigMutation(c, mut)
-			}
-		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
 		if err != nil || channelID <= 0 {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
@@ -1967,14 +1771,6 @@ func updateChannelModelSuffixPreserveHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 			return
 		}
-		if mut != nil {
-			if err := mut.Commit(c.Request.Context(), true); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-				finalized = true
-				return
-			}
-		}
-		finalized = true
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
 	}
 }
@@ -1988,16 +1784,6 @@ func updateChannelRequestBodyWhitelistHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		mut, ok := beginPersonalConfigMutation(c, opts)
-		if !ok {
-			return
-		}
-		finalized := false
-		defer func() {
-			if mut != nil && !finalized {
-				abortPersonalConfigMutation(c, mut)
-			}
-		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
 		if err != nil || channelID <= 0 {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
@@ -2025,14 +1811,6 @@ func updateChannelRequestBodyWhitelistHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 			return
 		}
-		if mut != nil {
-			if err := mut.Commit(c.Request.Context(), true); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-				finalized = true
-				return
-			}
-		}
-		finalized = true
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
 	}
 }
@@ -2046,16 +1824,6 @@ func updateChannelRequestBodyBlacklistHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		mut, ok := beginPersonalConfigMutation(c, opts)
-		if !ok {
-			return
-		}
-		finalized := false
-		defer func() {
-			if mut != nil && !finalized {
-				abortPersonalConfigMutation(c, mut)
-			}
-		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
 		if err != nil || channelID <= 0 {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
@@ -2083,14 +1851,6 @@ func updateChannelRequestBodyBlacklistHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 			return
 		}
-		if mut != nil {
-			if err := mut.Commit(c.Request.Context(), true); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-				finalized = true
-				return
-			}
-		}
-		finalized = true
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
 	}
 }
@@ -2104,16 +1864,6 @@ func updateChannelStatusCodeMappingHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		mut, ok := beginPersonalConfigMutation(c, opts)
-		if !ok {
-			return
-		}
-		finalized := false
-		defer func() {
-			if mut != nil && !finalized {
-				abortPersonalConfigMutation(c, mut)
-			}
-		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
 		if err != nil || channelID <= 0 {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
@@ -2141,14 +1891,6 @@ func updateChannelStatusCodeMappingHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 			return
 		}
-		if mut != nil {
-			if err := mut.Commit(c.Request.Context(), true); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-				finalized = true
-				return
-			}
-		}
-		finalized = true
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已保存"})
 	}
 }
@@ -2159,16 +1901,6 @@ func deleteChannelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		mut, ok := beginPersonalConfigMutation(c, opts)
-		if !ok {
-			return
-		}
-		finalized := false
-		defer func() {
-			if mut != nil && !finalized {
-				abortPersonalConfigMutation(c, mut)
-			}
-		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
 		if err != nil || channelID <= 0 {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
@@ -2187,14 +1919,6 @@ func deleteChannelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "删除失败"})
 			return
 		}
-		if mut != nil {
-			if err := mut.Commit(c.Request.Context(), true); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-				finalized = true
-				return
-			}
-		}
-		finalized = true
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
 	}
 }
@@ -2310,11 +2034,6 @@ func streamChannelCLITestHandler(c *gin.Context, opts Options, channelID int64) 
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel 不存在"})
 		return
 	}
-	if opts.PersonalMode && ch.Type == store.UpstreamTypeCodexOAuth {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": "personal 模式不支持 codex_oauth 渠道测试"})
-		return
-	}
-
 	ep, err := st.GetUpstreamEndpointByChannelID(c.Request.Context(), ch.ID)
 	if err != nil || ep.ID <= 0 {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "endpoint 不存在"})

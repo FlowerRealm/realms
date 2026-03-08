@@ -398,16 +398,6 @@ func adminCreateManagedModelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		mut, ok := beginPersonalConfigMutation(c, opts)
-		if !ok {
-			return
-		}
-		finalized := false
-		defer func() {
-			if mut != nil && !finalized {
-				abortPersonalConfigMutation(c, mut)
-			}
-		}()
 		var req reqBody
 		if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
@@ -440,14 +430,6 @@ func adminCreateManagedModelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建失败"})
 			return
 		}
-		if mut != nil {
-			if err := mut.Commit(c.Request.Context(), true); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-				finalized = true
-				return
-			}
-		}
-		finalized = true
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"id": id}})
 	}
 }
@@ -474,16 +456,6 @@ func adminUpdateManagedModelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		mut, ok := beginPersonalConfigMutation(c, opts)
-		if !ok {
-			return
-		}
-		finalized := false
-		defer func() {
-			if mut != nil && !finalized {
-				abortPersonalConfigMutation(c, mut)
-			}
-		}()
 
 		statusOnly := strings.TrimSpace(c.Query("status_only")) == "true"
 
@@ -555,14 +527,6 @@ func adminUpdateManagedModelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "更新失败"})
 			return
 		}
-		if mut != nil {
-			if err := mut.Commit(c.Request.Context(), true); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-				finalized = true
-				return
-			}
-		}
-		finalized = true
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
 	}
 }
@@ -573,16 +537,6 @@ func adminDeleteManagedModelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		mut, ok := beginPersonalConfigMutation(c, opts)
-		if !ok {
-			return
-		}
-		finalized := false
-		defer func() {
-			if mut != nil && !finalized {
-				abortPersonalConfigMutation(c, mut)
-			}
-		}()
 		id, err := strconv.ParseInt(strings.TrimSpace(c.Param("model_id")), 10, 64)
 		if err != nil || id <= 0 {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "id 不合法"})
@@ -592,14 +546,6 @@ func adminDeleteManagedModelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "删除失败"})
 			return
 		}
-		if mut != nil {
-			if err := mut.Commit(c.Request.Context(), true); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-				finalized = true
-				return
-			}
-		}
-		finalized = true
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
 	}
 }
@@ -654,16 +600,6 @@ func adminCreateChannelModelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		mut, ok := beginPersonalConfigMutation(c, opts)
-		if !ok {
-			return
-		}
-		finalized := false
-		defer func() {
-			if mut != nil && !finalized {
-				abortPersonalConfigMutation(c, mut)
-			}
-		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
 		if err != nil || channelID <= 0 {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
@@ -696,14 +632,6 @@ func adminCreateChannelModelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建失败"})
 			return
 		}
-		if mut != nil {
-			if err := mut.Commit(c.Request.Context(), true); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-				finalized = true
-				return
-			}
-		}
-		finalized = true
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"id": id}})
 	}
 }
@@ -721,16 +649,6 @@ func adminUpdateChannelModelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		mut, ok := beginPersonalConfigMutation(c, opts)
-		if !ok {
-			return
-		}
-		finalized := false
-		defer func() {
-			if mut != nil && !finalized {
-				abortPersonalConfigMutation(c, mut)
-			}
-		}()
 		channelID, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
 		if err != nil || channelID <= 0 {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
@@ -764,14 +682,6 @@ func adminUpdateChannelModelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "更新失败"})
 			return
 		}
-		if mut != nil {
-			if err := mut.Commit(c.Request.Context(), true); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-				finalized = true
-				return
-			}
-		}
-		finalized = true
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
 	}
 }
@@ -782,16 +692,6 @@ func adminDeleteChannelModelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
 			return
 		}
-		mut, ok := beginPersonalConfigMutation(c, opts)
-		if !ok {
-			return
-		}
-		finalized := false
-		defer func() {
-			if mut != nil && !finalized {
-				abortPersonalConfigMutation(c, mut)
-			}
-		}()
 		_, err := strconv.ParseInt(strings.TrimSpace(c.Param("channel_id")), 10, 64)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
@@ -806,14 +706,6 @@ func adminDeleteChannelModelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "删除失败"})
 			return
 		}
-		if mut != nil {
-			if err := mut.Commit(c.Request.Context(), true); err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "写入配置文件失败"})
-				finalized = true
-				return
-			}
-		}
-		finalized = true
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
 	}
 }

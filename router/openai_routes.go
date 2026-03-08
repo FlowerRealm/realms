@@ -10,13 +10,11 @@ import (
 )
 
 func setOpenAIRoutes(r *gin.Engine, opts Options) {
-	personalMode := opts.PersonalMode
-
 	apiChain := func(h http.Handler) gin.HandlerFunc {
 		return wrapHTTP(middleware.Chain(h,
 			middleware.RequestID,
 			middleware.AccessLog,
-			middleware.TokenAuth(opts.Store, personalMode),
+			middleware.TokenAuth(opts.Store),
 			middleware.BodyCache(0),
 		))
 	}
@@ -24,8 +22,8 @@ func setOpenAIRoutes(r *gin.Engine, opts Options) {
 		return wrapHTTP(middleware.Chain(h,
 			middleware.RequestID,
 			middleware.AccessLog,
-			middleware.FeatureGateEffective(opts.Store, personalMode, featureKey),
-			middleware.TokenAuth(opts.Store, personalMode),
+			middleware.FeatureGateEffective(opts.Store, featureKey),
+			middleware.TokenAuth(opts.Store),
 			middleware.BodyCache(0),
 		))
 	}

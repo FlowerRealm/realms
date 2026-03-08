@@ -39,7 +39,7 @@ func adminUsersFeatureDisabled(c *gin.Context, opts Options) bool {
 	if c == nil || opts.Store == nil {
 		return false
 	}
-	if opts.Store.FeatureDisabledEffective(c.Request.Context(), opts.PersonalMode, store.SettingFeatureDisableAdminUsers) {
+	if opts.Store.FeatureDisabledEffective(c.Request.Context(), store.SettingFeatureDisableAdminUsers) {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Not Found"})
 		return true
 	}

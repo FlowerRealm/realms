@@ -35,8 +35,6 @@ import (
 func newTestApp(t *testing.T, cfg config.Config) *App {
 	t.Helper()
 
-	personalMode := cfg.IsPersonalMode()
-
 	dir := t.TempDir()
 	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
 	db, err := store.OpenSQLite(path)
@@ -53,7 +51,7 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 	st.SetAppSettingsDefaults(cfg.AppSettingsDefaults)
 	ticketStorage := tickets.NewStorage(filepath.Join(dir, "tickets"))
 
-	openaiHandler := openaiapi.NewHandler(nil, nil, nil, nil, nil, nil, personalMode, nil, nil, nil, nil, upstream.SSEPumpOptions{}, nil)
+	openaiHandler := openaiapi.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, upstream.SSEPumpOptions{}, nil)
 
 	app := &App{
 		cfg:           cfg,
@@ -78,11 +76,10 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 	})
-	engine.Use(sessions.Sessions(SessionCookieNameForPersonalMode(personalMode), sessionStore))
+	engine.Use(sessions.Sessions(SessionCookieName, sessionStore))
 
 	router.SetRouter(engine, router.Options{
 		Store:                           st,
-		PersonalMode:                    personalMode,
 		AdminAPIKeyHash:                 adminAPIKeyHash,
 		AllowOpenRegistration:           cfg.Security.AllowOpenRegistration,
 		EmailVerificationEnabledDefault: cfg.EmailVerif.Enable,
@@ -108,32 +105,6 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 	return app
 }
 
-func TestRoutes_PersonalMode_DisablesBillingWebhooks(t *testing.T) {
-	cfg := config.Config{
-		Mode:     config.ModePersonal,
-		Security: config.SecurityConfig{SubscriptionOrderWebhookSecret: "secret"},
-	}
-	app := newTestApp(t, cfg)
-
-	cases := []struct {
-		method string
-		path   string
-	}{
-		{method: http.MethodPost, path: "/api/webhooks/subscription-orders/1/paid"},
-		{method: http.MethodPost, path: "/api/pay/stripe/webhook/1"},
-		{method: http.MethodGet, path: "/api/pay/epay/notify/1"},
-	}
-
-	for _, tc := range cases {
-		req := httptest.NewRequest(tc.method, "http://example.com"+tc.path, nil)
-		rr := httptest.NewRecorder()
-		app.Handler().ServeHTTP(rr, req)
-		if rr.Code != http.StatusNotFound {
-			t.Fatalf("%s %s expected status %d, got %d", tc.method, tc.path, http.StatusNotFound, rr.Code)
-		}
-	}
-}
-
 func TestRoutes_DefaultMode_KeepsSubscriptionOrderWebhook(t *testing.T) {
 	cfg := config.Config{
 		Mode:     config.ModeBusiness,
@@ -151,226 +122,6 @@ func TestRoutes_DefaultMode_KeepsSubscriptionOrderWebhook(t *testing.T) {
 	if got := rr.Header().Get("WWW-Authenticate"); got == "" {
 		t.Fatalf("expected WWW-Authenticate header")
 	}
-}
-
-func TestSelfMode_KeyAuth_AllowsAdminUsageWithoutSession(t *testing.T) {
-	cfg := config.Config{
-		Mode:       config.ModePersonal,
-		Security:   config.SecurityConfig{SubscriptionOrderWebhookSecret: "secret"},
-		EmailVerif: config.EmailVerifConfig{Enable: false},
-	}
-	app := newTestApp(t, cfg)
-
-	t.Run("meta shows key not set", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "http://example.com/api/meta", nil)
-		rr := httptest.NewRecorder()
-		app.Handler().ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-			t.Fatalf("unmarshal json: %v", err)
-		}
-		data, _ := payload["data"].(map[string]any)
-		if v, _ := data["personal_mode_key_set"].(bool); v {
-			t.Fatalf("expected personal_mode_key_set=false")
-		}
-	})
-
-	t.Run("admin usage rejects before bootstrap", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage", nil)
-		req.Header.Set("Authorization", "Bearer k_test_123")
-		rr := httptest.NewRecorder()
-		app.Handler().ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-			t.Fatalf("unmarshal json: %v", err)
-		}
-		if ok, _ := payload["success"].(bool); ok {
-			t.Fatalf("expected success=false, got %v", payload["success"])
-		}
-	})
-
-	t.Run("bootstrap sets key", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "http://example.com/api/personal/bootstrap", strings.NewReader(`{"key":"k_test_123"}`))
-		req.Header.Set("Content-Type", "application/json")
-		rr := httptest.NewRecorder()
-		app.Handler().ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-			t.Fatalf("unmarshal json: %v", err)
-		}
-		if ok, _ := payload["success"].(bool); !ok {
-			t.Fatalf("expected success=true, got %v", payload["success"])
-		}
-	})
-
-	t.Run("bootstrap cannot be called twice", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "http://example.com/api/personal/bootstrap", strings.NewReader(`{"key":"k_other"}`))
-		req.Header.Set("Content-Type", "application/json")
-		rr := httptest.NewRecorder()
-		app.Handler().ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-			t.Fatalf("unmarshal json: %v", err)
-		}
-		if ok, _ := payload["success"].(bool); ok {
-			t.Fatalf("expected success=false, got %v", payload["success"])
-		}
-	})
-
-	t.Run("admin usage accepts after bootstrap", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage", nil)
-		req.Header.Set("Authorization", "Bearer k_test_123")
-		rr := httptest.NewRecorder()
-		app.Handler().ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-			t.Fatalf("unmarshal json: %v", err)
-		}
-		if ok, _ := payload["success"].(bool); !ok {
-			t.Fatalf("expected success=true, got %v", payload["success"])
-		}
-	})
-
-	t.Run("admin mcp accepts after bootstrap", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/mcp", nil)
-		req.Header.Set("Authorization", "Bearer k_test_123")
-		rr := httptest.NewRecorder()
-		app.Handler().ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-			t.Fatalf("unmarshal json: %v", err)
-		}
-		if ok, _ := payload["success"].(bool); !ok {
-			t.Fatalf("expected success=true, got %v", payload["success"])
-		}
-	})
-}
-
-func TestSelfMode_KeyAuth_RejectsAdminUsageWithoutKey(t *testing.T) {
-	cfg := config.Config{
-		Mode: config.ModePersonal,
-	}
-	app := newTestApp(t, cfg)
-
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/personal/bootstrap", strings.NewReader(`{"key":"k_test_123"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rr := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage", nil)
-	rr = httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("unmarshal json: %v", err)
-	}
-	if ok, _ := payload["success"].(bool); ok {
-		t.Fatalf("expected success=false, got %v", payload["success"])
-	}
-}
-
-func TestSelfMode_KeyAuth_DataPlaneUsageEventsRequiresKey(t *testing.T) {
-	cfg := config.Config{
-		Mode: config.ModePersonal,
-	}
-	app := newTestApp(t, cfg)
-
-	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/personal/bootstrap", strings.NewReader(`{"key":"k_test_123"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rr := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
-	}
-
-	t.Run("missing key returns 401", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "http://example.com/v1/usage/events", nil)
-		rr := httptest.NewRecorder()
-		app.Handler().ServeHTTP(rr, req)
-		if rr.Code != http.StatusUnauthorized {
-			t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, rr.Code)
-		}
-	})
-
-	t.Run("admin key is not accepted by data plane", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "http://example.com/v1/usage/events", nil)
-		req.Header.Set("Authorization", "Bearer k_test_123")
-		rr := httptest.NewRecorder()
-		app.Handler().ServeHTTP(rr, req)
-		if rr.Code != http.StatusUnauthorized {
-			t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, rr.Code)
-		}
-	})
-
-	t.Run("personal api key allows data plane but not admin", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "http://example.com/api/personal/keys", strings.NewReader(`{"name":"cli"}`))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer k_test_123")
-		rr := httptest.NewRecorder()
-		app.Handler().ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-			t.Fatalf("unmarshal json: %v", err)
-		}
-		if ok, _ := payload["success"].(bool); !ok {
-			t.Fatalf("expected success=true, got %v", payload["success"])
-		}
-		data, _ := payload["data"].(map[string]any)
-		pk, _ := data["key"].(string)
-		if pk == "" {
-			t.Fatalf("expected key, got empty")
-		}
-
-		req = httptest.NewRequest(http.MethodGet, "http://example.com/v1/usage/events", nil)
-		req.Header.Set("Authorization", "Bearer "+pk)
-		rr = httptest.NewRecorder()
-		app.Handler().ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
-		}
-
-		req = httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage", nil)
-		req.Header.Set("Authorization", "Bearer "+pk)
-		rr = httptest.NewRecorder()
-		app.Handler().ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
-		}
-		payload = nil
-		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-			t.Fatalf("unmarshal json: %v", err)
-		}
-		if ok, _ := payload["success"].(bool); ok {
-			t.Fatalf("expected success=false for admin, got %v", payload["success"])
-		}
-	})
 }
 
 func TestBusinessMode_AdminAPIKey_AllowsAdminRoutesWithoutSession(t *testing.T) {
@@ -463,7 +214,7 @@ func TestBusinessMode_AdminAPIKey_InvalidKeyFallsBackToSession(t *testing.T) {
 	}
 	var sessionCookie string
 	for _, c := range loginRR.Result().Cookies() {
-		if c.Name == SessionCookieNameForPersonalMode(false) {
+		if c.Name == SessionCookieName {
 			sessionCookie = c.String()
 			break
 		}
@@ -679,59 +430,6 @@ func TestRoutes_SPAFallback(t *testing.T) {
 	})
 }
 
-func TestRoutes_PersonalMode_SPAAllowedPaths(t *testing.T) {
-	cfg := config.Config{
-		Mode: config.ModePersonal,
-	}
-	app := newTestApp(t, cfg)
-
-	t.Run("allowed paths serve index", func(t *testing.T) {
-		paths := []string{
-			"/",
-			"/login",
-			"/mcp",
-			"/admin",
-			"/admin?tab=channels",
-			"/admin?tab=usage",
-			"/admin?tab=settings",
-			"/admin/channels",
-			"/admin/usage",
-			"/admin/settings",
-			"/admin/api-keys",
-		}
-
-		for _, p := range paths {
-			req := httptest.NewRequest(http.MethodGet, "http://example.com"+p, nil)
-			rr := httptest.NewRecorder()
-			app.Handler().ServeHTTP(rr, req)
-			if rr.Code != http.StatusOK {
-				t.Fatalf("GET %s expected status %d, got %d", p, http.StatusOK, rr.Code)
-			}
-			if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
-				t.Fatalf("GET %s expected Content-Type text/html, got %q", p, ct)
-			}
-			if body := rr.Body.String(); !strings.Contains(body, "INDEX") {
-				t.Fatalf("GET %s expected index html body, got %q", p, body)
-			}
-		}
-	})
-
-	t.Run("disallowed paths return 404", func(t *testing.T) {
-		for _, p := range []string{
-			"/usage",
-			"/admin/mcp",
-			"/admin/mcp/x",
-		} {
-			req := httptest.NewRequest(http.MethodGet, "http://example.com"+p, nil)
-			rr := httptest.NewRecorder()
-			app.Handler().ServeHTTP(rr, req)
-			if rr.Code != http.StatusNotFound {
-				t.Fatalf("GET %s expected status %d, got %d", p, http.StatusNotFound, rr.Code)
-			}
-		}
-	})
-}
-
 func TestRoutes_NoChatFeature(t *testing.T) {
 	cfg := config.Config{
 		Mode:     config.ModeBusiness,
@@ -856,67 +554,6 @@ func TestQuotaProviderForConfig(t *testing.T) {
 		}
 		if ev.ReservedUSD.String() != "0.001" {
 			t.Fatalf("reserved_usd mismatch: got %s want %s", ev.ReservedUSD.String(), "0.001")
-		}
-	})
-
-	t.Run("personal mode uses free provider", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
-
-		db, err := store.OpenSQLite(path)
-		if err != nil {
-			t.Fatalf("OpenSQLite: %v", err)
-		}
-		t.Cleanup(func() { _ = db.Close() })
-
-		if err := store.EnsureSQLiteSchema(db); err != nil {
-			t.Fatalf("EnsureSQLiteSchema: %v", err)
-		}
-
-		st := store.New(db)
-		st.SetDialect(store.DialectSQLite)
-
-		ctx := context.Background()
-		userID, err := st.CreateUser(ctx, "alice@example.com", "alice", []byte("pw-hash"), store.UserRoleUser)
-		if err != nil {
-			t.Fatalf("CreateUser: %v", err)
-		}
-		tokenID, _, err := st.CreateUserToken(ctx, userID, nil, "tok_test_123")
-		if err != nil {
-			t.Fatalf("CreateUserToken: %v", err)
-		}
-		if _, err := st.AddUserBalanceUSD(ctx, userID, decimal.RequireFromString("10")); err != nil {
-			t.Fatalf("AddUserBalanceUSD: %v", err)
-		}
-
-		cfg := config.Config{
-			Mode:    config.ModePersonal,
-			Billing: config.BillingConfig{EnablePayAsYouGo: true},
-		}
-		st.SetAppSettingsDefaults(cfg.AppSettingsDefaults)
-
-		qp := quotaProvider(st, cfg)
-		res, err := qp.Reserve(ctx, quota.ReserveInput{
-			RequestID: "req_1",
-			UserID:    userID,
-			TokenID:   tokenID,
-		})
-		if err != nil {
-			t.Fatalf("Reserve: %v", err)
-		}
-
-		if got, err := st.GetUserBalanceUSD(ctx, userID); err != nil {
-			t.Fatalf("GetUserBalanceUSD: %v", err)
-		} else if got.String() != "10" {
-			t.Fatalf("balance after reserve: got %s want %s", got.String(), "10")
-		}
-
-		ev, err := st.GetUsageEvent(ctx, res.UsageEventID)
-		if err != nil {
-			t.Fatalf("GetUsageEvent: %v", err)
-		}
-		if ev.ReservedUSD.String() != "0" {
-			t.Fatalf("reserved_usd mismatch: got %s want %s", ev.ReservedUSD.String(), "0")
 		}
 	})
 

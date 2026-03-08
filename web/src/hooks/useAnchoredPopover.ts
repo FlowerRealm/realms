@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
+import { useLayoutEffect, useMemo, useState, type CSSProperties, type RefObject } from 'react';
 
 type PopoverPos = { left: number; top: number };
 
@@ -14,13 +14,15 @@ export function useAnchoredPopover(opts: {
   const margin = typeof opts.margin === 'number' ? opts.margin : 12;
   const offset = typeof opts.offset === 'number' ? opts.offset : 8;
   const [pos, setPos] = useState<PopoverPos | null>(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
 
   useLayoutEffect(() => {
     if (!open) {
-      setPos(null);
-      return;
+      const resetFrame = requestAnimationFrame(() => {
+        setPos(null);
+      });
+      return () => {
+        cancelAnimationFrame(resetFrame);
+      };
     }
 
     const reposition = () => {
@@ -44,19 +46,20 @@ export function useAnchoredPopover(opts: {
       setPos({ left, top });
     };
 
-    setPos(null);
-    reposition();
     const raf1 = requestAnimationFrame(() => reposition());
+    const raf2 = requestAnimationFrame(() => {
+      requestAnimationFrame(() => reposition());
+    });
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCloseRef.current();
+      if (e.key === 'Escape') onClose();
     };
     const onPointerDown = (e: MouseEvent | PointerEvent) => {
       const target = e.target as Node | null;
       if (!target) return;
       if (panelRef.current && panelRef.current.contains(target)) return;
       if (triggerRef.current && triggerRef.current.contains(target)) return;
-      onCloseRef.current();
+      onClose();
     };
     const onResize = () => reposition();
     const onScroll = () => reposition();
@@ -70,8 +73,9 @@ export function useAnchoredPopover(opts: {
       window.removeEventListener('resize', onResize);
       window.removeEventListener('scroll', onScroll, true);
       cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
     };
-  }, [margin, offset, open, panelRef, triggerRef]);
+  }, [margin, offset, onClose, open, panelRef, triggerRef]);
 
   return useMemo((): CSSProperties => {
     const hidden = open && pos == null;

@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "vite",
     "build": "npm run check:sri && tsc -b && vite build",
-    "build:personal": "tsc -b && vite build --mode personal && node scripts/postbuild-personal.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "check:sri": "node scripts/sri.mjs",
