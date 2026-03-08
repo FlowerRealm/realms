@@ -277,6 +277,11 @@ function ChannelCommonTab({
       disable_store: editDisableStore,
       allow_safety_identifier: editAllowSafetyIdentifier,
     },
+    validate: (v) => {
+      if (v.fast_mode && !v.allow_service_tier)
+        return "启用 Fast mode 时必须同时允许透传 service_tier";
+      return "";
+    },
     save: async (v) => {
       const res = await updateChannel({
         id: channelID,
@@ -458,7 +463,7 @@ function ChannelCommonTab({
                   允许透传 <code>service_tier</code>
                 </label>
                 <div className="form-text small text-muted">
-                  可能触发上游额外计费；默认会过滤。
+                  可能触发上游额外计费；启用 Fast mode 时必须同时开启。
                 </div>
               </div>
               <div className="form-check">
@@ -467,14 +472,17 @@ function ChannelCommonTab({
                   type="checkbox"
                   id="editFastMode"
                   checked={editFastMode}
-                  onChange={(e) => setEditFastMode(e.target.checked)}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setEditFastMode(checked);
+                    if (checked) setEditAllowServiceTier(true);
+                  }}
                 />
                 <label className="form-check-label" htmlFor="editFastMode">
                   允许用户使用 Fast mode（<code>service_tier="priority"</code>）
                 </label>
                 <div className="form-text small text-muted">
-                  仅控制是否允许透传 Fast；不会自动把请求改写成
-                  Fast。关闭后只会删除 <code>service_tier="priority"</code>。
+                  仅控制是否允许透传 Fast；不会自动把请求改写成 Fast。启用时会强制保留 <code>service_tier</code> 透传。
                 </div>
               </div>
               <div className="form-check">
@@ -1872,7 +1880,9 @@ export function ChannelsPage() {
         setEditStatus(ch.status || 0);
         setEditPriority(String(ch.priority || 0));
         setEditPromotion(!!ch.promotion);
-        setEditAllowServiceTier(!!ch.allow_service_tier);
+        setEditAllowServiceTier(
+          ch.fast_mode !== false ? true : ch.allow_service_tier !== false,
+        );
         setEditFastMode(ch.fast_mode !== false);
         setEditDisableStore(!!ch.disable_store);
         setEditAllowSafetyIdentifier(!!ch.allow_safety_identifier);
@@ -3585,12 +3595,10 @@ export function ChannelsPage() {
                 type="checkbox"
                 id="createAllowServiceTier"
                 checked={createAllowServiceTier}
+                disabled={createFastMode}
                 onChange={(e) => setCreateAllowServiceTier(e.target.checked)}
               />
-              <label
-                className="form-check-label"
-                htmlFor="createAllowServiceTier"
-              >
+              <label className="form-check-label" htmlFor="createAllowServiceTier">
                 允许透传 <code>service_tier</code>
               </label>
             </div>
@@ -3600,13 +3608,17 @@ export function ChannelsPage() {
                 type="checkbox"
                 id="createFastMode"
                 checked={createFastMode}
-                onChange={(e) => setCreateFastMode(e.target.checked)}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setCreateFastMode(checked);
+                  if (checked) setCreateAllowServiceTier(true);
+                }}
               />
               <label className="form-check-label" htmlFor="createFastMode">
                 允许用户使用 Fast mode（<code>service_tier="priority"</code>）
               </label>
               <div className="form-text small text-muted">
-                默认允许。该开关只控制是否接受 Fast，不会自动开启 Fast。
+                默认允许。该开关只控制是否接受 Fast，不会自动开启 Fast；启用时会强制保留 <code>service_tier</code> 透传。
               </div>
             </div>
             <div className="form-check">

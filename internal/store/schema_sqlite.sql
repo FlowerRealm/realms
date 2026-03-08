@@ -120,7 +120,7 @@ CREATE TABLE IF NOT EXISTS `upstream_channels` (
   `status` INTEGER NOT NULL DEFAULT 1,
   `priority` INTEGER NOT NULL DEFAULT 0,
   `promotion` INTEGER NOT NULL DEFAULT 0,
-  `allow_service_tier` INTEGER NOT NULL DEFAULT 0,
+  `allow_service_tier` INTEGER NOT NULL DEFAULT 1,
   `fast_mode` INTEGER NOT NULL DEFAULT 1,
   `disable_store` INTEGER NOT NULL DEFAULT 0,
   `allow_safety_identifier` INTEGER NOT NULL DEFAULT 0,
