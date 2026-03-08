@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sort"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/gin-contrib/sessions"
@@ -166,5 +168,176 @@ func TestUserModelsDetail_UsesMainGroupSubgroupsAndBasePricing(t *testing.T) {
 	}
 	if model.CacheOutputUSDPer1M != "0.25" {
 		t.Fatalf("cache_output_usd_per_1m mismatch: got=%q want=%q", model.CacheOutputUSDPer1M, "0.25")
+	}
+}
+
+func TestAdminSelectableManagedModelIDs_OnlyEnabledSorted(t *testing.T) {
+	st, cleanup := newTestSQLiteStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	for _, model := range []store.ManagedModelCreate{
+		{PublicID: "z-last", GroupName: "vip", InputUSDPer1M: decimal.RequireFromString("1"), OutputUSDPer1M: decimal.RequireFromString("2"), CacheInputUSDPer1M: decimal.RequireFromString("0.5"), CacheOutputUSDPer1M: decimal.RequireFromString("0.25"), Status: 1},
+		{PublicID: "a-first", GroupName: "vip", InputUSDPer1M: decimal.RequireFromString("1"), OutputUSDPer1M: decimal.RequireFromString("2"), CacheInputUSDPer1M: decimal.RequireFromString("0.5"), CacheOutputUSDPer1M: decimal.RequireFromString("0.25"), Status: 1},
+		{PublicID: "m-disabled", GroupName: "vip", InputUSDPer1M: decimal.RequireFromString("1"), OutputUSDPer1M: decimal.RequireFromString("2"), CacheInputUSDPer1M: decimal.RequireFromString("0.5"), CacheOutputUSDPer1M: decimal.RequireFromString("0.25"), Status: 2},
+	} {
+		if _, err := st.CreateManagedModel(ctx, model); err != nil {
+			t.Fatalf("CreateManagedModel(%s): %v", model.PublicID, err)
+		}
+	}
+
+	engine, sessionCookie, userID := setupRootSession(t, st)
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/api/models/selectable", nil)
+	req.Header.Set("Cookie", sessionCookie)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got struct {
+		Success bool     `json:"success"`
+		Message string   `json:"message"`
+		Data    []string `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("expected success, got message=%q", got.Message)
+	}
+	want := []string{"a-first", "z-last"}
+	if len(got.Data) != len(want) {
+		t.Fatalf("len(data)=%d want=%d data=%v", len(got.Data), len(want), got.Data)
+	}
+	if !sort.StringsAreSorted(got.Data) {
+		t.Fatalf("data not sorted: %v", got.Data)
+	}
+	for i := range want {
+		if got.Data[i] != want[i] {
+			t.Fatalf("data[%d]=%q want=%q full=%v", i, got.Data[i], want[i], got.Data)
+		}
+	}
+}
+
+func TestAdminCreateChannelModel_RejectsMissingOrDisabledManagedModel(t *testing.T) {
+	st, cleanup := newTestSQLiteStore(t)
+	defer cleanup()
+	ctx := context.Background()
+	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, decimal.RequireFromString("1.5")); err != nil {
+		t.Fatalf("CreateChannelGroup(vip): %v", err)
+	}
+
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch-model", "vip", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel: %v", err)
+	}
+	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
+		PublicID:            "gpt-disabled",
+		GroupName:           "vip",
+		InputUSDPer1M:       decimal.RequireFromString("1"),
+		OutputUSDPer1M:      decimal.RequireFromString("2"),
+		CacheInputUSDPer1M:  decimal.RequireFromString("0.5"),
+		CacheOutputUSDPer1M: decimal.RequireFromString("0.25"),
+		Status:              2,
+	}); err != nil {
+		t.Fatalf("CreateManagedModel: %v", err)
+	}
+
+	engine, sessionCookie, userID := setupRootSession(t, st)
+	for _, tc := range []struct {
+		name      string
+		publicID  string
+		messageIn string
+	}{
+		{name: "missing", publicID: "ghost-model", messageIn: "模型不存在"},
+		{name: "disabled", publicID: "gpt-disabled", messageIn: "模型已禁用"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]any{"public_id": tc.publicID, "upstream_model": tc.publicID, "status": 1})
+			req := httptest.NewRequest(http.MethodPost, "http://example.com/api/channel/"+strconv.FormatInt(channelID, 10)+"/models", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json; charset=utf-8")
+			req.Header.Set("Cookie", sessionCookie)
+			req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+			rr := httptest.NewRecorder()
+			engine.ServeHTTP(rr, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+			}
+
+			var got struct {
+				Success bool   `json:"success"`
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+				t.Fatalf("json.Unmarshal: %v", err)
+			}
+			if got.Success {
+				t.Fatalf("expected failure, got success body=%s", rr.Body.String())
+			}
+			if !strings.Contains(got.Message, tc.messageIn) {
+				t.Fatalf("message=%q want contains %q", got.Message, tc.messageIn)
+			}
+		})
+	}
+}
+
+func TestAdminUpdateChannelModel_AllowsDisablingMissingManagedModel(t *testing.T) {
+	st, cleanup := newTestSQLiteStore(t)
+	defer cleanup()
+	ctx := context.Background()
+	if _, err := st.CreateChannelGroup(ctx, "vip", nil, 1, decimal.RequireFromString("1.5")); err != nil {
+		t.Fatalf("CreateChannelGroup(vip): %v", err)
+	}
+
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch-model", "vip", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel: %v", err)
+	}
+	bindingID, err := st.CreateChannelModel(ctx, store.ChannelModelCreate{
+		ChannelID:     channelID,
+		PublicID:      "ghost-model",
+		UpstreamModel: "ghost-model",
+		Status:        1,
+	})
+	if err != nil {
+		t.Fatalf("CreateChannelModel: %v", err)
+	}
+
+	engine, sessionCookie, userID := setupRootSession(t, st)
+	body, _ := json.Marshal(map[string]any{
+		"id":             bindingID,
+		"public_id":      "ghost-model",
+		"upstream_model": "ghost-model",
+		"status":         2,
+	})
+	req := httptest.NewRequest(http.MethodPut, "http://example.com/api/channel/"+strconv.FormatInt(channelID, 10)+"/models", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Cookie", sessionCookie)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("expected success, got message=%q", got.Message)
+	}
+
+	binding, err := st.GetChannelModelByID(ctx, bindingID)
+	if err != nil {
+		t.Fatalf("GetChannelModelByID: %v", err)
+	}
+	if binding.Status != 2 {
+		t.Fatalf("binding status=%d want=2", binding.Status)
 	}
 }

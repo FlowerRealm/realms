@@ -1,8 +1,10 @@
 package router
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 	"strconv"
@@ -56,6 +58,7 @@ func setModelAPIRoutes(r gin.IRoutes, opts Options) {
 	models.Use(requireRoot(opts))
 	{
 		models.GET("/", adminListManagedModelsHandler(opts))
+		models.GET("/selectable", adminListSelectableManagedModelIDsHandler(opts))
 		models.GET("/:model_id", adminGetManagedModelHandler(opts))
 		models.POST("/", adminCreateManagedModelHandler(opts))
 		models.POST("/library-lookup", adminModelLibraryLookupHandler(opts))
@@ -72,6 +75,35 @@ func setModelAPIRoutes(r gin.IRoutes, opts Options) {
 		ch.POST("/:channel_id/models", adminCreateChannelModelHandler(opts))
 		ch.PUT("/:channel_id/models", adminUpdateChannelModelHandler(opts))
 		ch.DELETE("/:channel_id/models/:binding_id", adminDeleteChannelModelHandler(opts))
+	}
+}
+
+func adminListSelectableManagedModelIDsHandler(opts Options) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if opts.Store == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			return
+		}
+
+		all, err := opts.Store.ListManagedModels(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询模型失败"})
+			return
+		}
+
+		ids := make([]string, 0, len(all))
+		for _, m := range all {
+			if m.Status != 1 {
+				continue
+			}
+			id := strings.TrimSpace(m.PublicID)
+			if id == "" {
+				continue
+			}
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": ids})
 	}
 }
 
@@ -622,6 +654,10 @@ func adminCreateChannelModelHandler(opts Options) gin.HandlerFunc {
 		if req.Status == 0 {
 			req.Status = 1
 		}
+		if err := validateCreateChannelModelPublicID(c.Request.Context(), opts.Store, publicID, req.Status); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+			return
+		}
 		id, err := opts.Store.CreateChannelModel(c.Request.Context(), store.ChannelModelCreate{
 			ChannelID:     channelID,
 			PublicID:      publicID,
@@ -672,6 +708,10 @@ func adminUpdateChannelModelHandler(opts Options) gin.HandlerFunc {
 		if req.Status == 0 {
 			req.Status = 1
 		}
+		if err := validateUpdateChannelModelPublicID(c.Request.Context(), opts.Store, publicID, req.Status); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+			return
+		}
 		if err := opts.Store.UpdateChannelModel(c.Request.Context(), store.ChannelModelUpdate{
 			ID:            req.ID,
 			ChannelID:     channelID,
@@ -684,6 +724,34 @@ func adminUpdateChannelModelHandler(opts Options) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
 	}
+}
+
+func validateCreateChannelModelPublicID(ctx context.Context, st *store.Store, publicID string, status int) error {
+	return validateChannelModelPublicID(ctx, st, publicID, status, false)
+}
+
+func validateUpdateChannelModelPublicID(ctx context.Context, st *store.Store, publicID string, status int) error {
+	return validateChannelModelPublicID(ctx, st, publicID, status, true)
+}
+
+func validateChannelModelPublicID(ctx context.Context, st *store.Store, publicID string, status int, allowMissingWhenDisabled bool) error {
+	if st == nil {
+		return errors.New("store 未初始化")
+	}
+	model, err := st.GetManagedModelByPublicID(ctx, publicID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			if allowMissingWhenDisabled && status != 1 {
+				return nil
+			}
+			return errors.New("模型不存在，请先在模型目录中创建")
+		}
+		return errors.New("查询模型失败")
+	}
+	if status == 1 && model.Status != 1 {
+		return errors.New("模型已禁用，不能绑定为启用状态")
+	}
+	return nil
 }
 
 func adminDeleteChannelModelHandler(opts Options) gin.HandlerFunc {

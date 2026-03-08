@@ -71,6 +71,11 @@ export async function listManagedModelsAdmin(page = 1, pageSize = 20) {
   return res.data;
 }
 
+export async function listSelectableManagedModelIDsAdmin() {
+  const res = await api.get<APIResponse<string[]>>('/api/models/selectable');
+  return res.data;
+}
+
 export async function createManagedModelAdmin(model: Omit<ManagedModel, 'id'>) {
   const res = await api.post<APIResponse<{ id: number }>>('/api/models/', model);
   return res.data;
