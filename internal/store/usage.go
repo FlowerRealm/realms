@@ -1390,8 +1390,8 @@ func (s *Store) GetGlobalUsageStats(ctx context.Context, since time.Time) (Globa
 	err := s.db.QueryRowContext(ctx, `
 SELECT COUNT(1)
 FROM usage_events
-WHERE time >= ?
-`, since).Scan(&stats.Requests)
+WHERE time >= ? AND state=?
+`, since, UsageStateCommitted).Scan(&stats.Requests)
 	if err != nil {
 		return GlobalUsageStats{}, fmt.Errorf("统计请求数失败: %w", err)
 	}
@@ -1408,8 +1408,8 @@ SELECT
   SUM(CASE WHEN first_token_latency_ms > 0 THEN 1 ELSE 0 END),
   SUM(CASE WHEN latency_ms > first_token_latency_ms THEN latency_ms - first_token_latency_ms ELSE 0 END)
 FROM usage_events
-WHERE time >= ?
-`, UsageStateCommitted, since).Scan(&committedUSD, &inputTokens, &outputTokens, &cachedInputTokens, &cachedOutputTokens, &firstTokenLatencySum, &firstTokenSamples, &decodeLatencyMS)
+WHERE time >= ? AND state=?
+`, UsageStateCommitted, since, UsageStateCommitted).Scan(&committedUSD, &inputTokens, &outputTokens, &cachedInputTokens, &cachedOutputTokens, &firstTokenLatencySum, &firstTokenSamples, &decodeLatencyMS)
 	if err != nil {
 		return GlobalUsageStats{}, fmt.Errorf("统计用量失败: %w", err)
 	}
@@ -1460,8 +1460,8 @@ func (s *Store) GetGlobalUsageStatsRange(ctx context.Context, since, until time.
 	err := s.db.QueryRowContext(ctx, `
 SELECT COUNT(1)
 FROM usage_events
-WHERE time >= ? AND time < ?
-`, since, until).Scan(&stats.Requests)
+WHERE time >= ? AND time < ? AND state=?
+`, since, until, UsageStateCommitted).Scan(&stats.Requests)
 	if err != nil {
 		return GlobalUsageStats{}, fmt.Errorf("统计请求数失败: %w", err)
 	}
@@ -1477,8 +1477,8 @@ SELECT
   SUM(CASE WHEN first_token_latency_ms > 0 THEN 1 ELSE 0 END),
   SUM(CASE WHEN latency_ms > first_token_latency_ms THEN latency_ms - first_token_latency_ms ELSE 0 END)
 FROM usage_events
-WHERE time >= ? AND time < ?
-`, UsageStateCommitted, since, until).Scan(&committedUSD, &inputTokens, &outputTokens, &cachedInputTokens, &cachedOutputTokens, &firstTokenLatencySum, &firstTokenSamples, &decodeLatencyMS)
+WHERE time >= ? AND time < ? AND state=?
+`, UsageStateCommitted, since, until, UsageStateCommitted).Scan(&committedUSD, &inputTokens, &outputTokens, &cachedInputTokens, &cachedOutputTokens, &firstTokenLatencySum, &firstTokenSamples, &decodeLatencyMS)
 	if err != nil {
 		return GlobalUsageStats{}, fmt.Errorf("统计用量失败: %w", err)
 	}
@@ -1552,9 +1552,9 @@ SELECT
   SUM(CASE WHEN first_token_latency_ms > 0 THEN 1 ELSE 0 END),
   SUM(CASE WHEN latency_ms > first_token_latency_ms THEN latency_ms - first_token_latency_ms ELSE 0 END)
 FROM usage_events
-WHERE upstream_channel_id IS NOT NULL AND time >= ? AND time < ?
+WHERE upstream_channel_id IS NOT NULL AND time >= ? AND time < ? AND state=?
 GROUP BY upstream_channel_id
-`, UsageStateCommitted, since, until)
+`, UsageStateCommitted, since, until, UsageStateCommitted)
 	if err != nil {
 		return nil, fmt.Errorf("按渠道统计用量失败: %w", err)
 	}
@@ -1699,10 +1699,10 @@ SELECT
   SUM(input_tokens + output_tokens),
   SUM(CASE WHEN state=? THEN committed_usd ELSE 0 END)
 FROM usage_events
-WHERE user_id=? AND time >= ? AND time < ? AND model IS NOT NULL
+WHERE user_id=? AND time >= ? AND time < ? AND model IS NOT NULL AND state=?
 GROUP BY model
 ORDER BY SUM(committed_usd) DESC
-`, UsageStateCommitted, userID, since, until)
+`, UsageStateCommitted, userID, since, until, UsageStateCommitted)
 	if err != nil {
 		return nil, fmt.Errorf("按模型统计失败: %w", err)
 	}
@@ -1753,7 +1753,7 @@ SELECT
   SUM(input_tokens + output_tokens),
   SUM(CASE WHEN state=? THEN committed_usd ELSE 0 END)
 FROM usage_events
-WHERE user_id=? AND time >= ? AND time < ?
+WHERE user_id=? AND time >= ? AND time < ? AND state=?
 GROUP BY hr
 ORDER BY hr ASC
 `
@@ -1765,13 +1765,13 @@ SELECT
   SUM(input_tokens + output_tokens),
   SUM(CASE WHEN state=? THEN committed_usd ELSE 0 END)
 FROM usage_events
-WHERE user_id=? AND time >= ? AND time < ?
+WHERE user_id=? AND time >= ? AND time < ? AND state=?
 GROUP BY hr
 ORDER BY hr ASC
 `
 	}
 
-	rows, err := s.db.QueryContext(ctx, query, UsageStateCommitted, userID, since, until)
+	rows, err := s.db.QueryContext(ctx, query, UsageStateCommitted, userID, since, until, UsageStateCommitted)
 	if err != nil {
 		return nil, fmt.Errorf("查询时间序列失败: %w", err)
 	}
@@ -1825,7 +1825,7 @@ SELECT
   SUM(COALESCE(output_tokens, 0)),
   SUM(CASE WHEN latency_ms > first_token_latency_ms THEN latency_ms - first_token_latency_ms ELSE 0 END)
 FROM usage_events
-WHERE user_id=? AND time >= ? AND time < ?
+WHERE user_id=? AND time >= ? AND time < ? AND state=?
 GROUP BY hr
 ORDER BY hr ASC
 `
@@ -1842,13 +1842,13 @@ SELECT
   SUM(COALESCE(output_tokens, 0)),
   SUM(CASE WHEN latency_ms > first_token_latency_ms THEN latency_ms - first_token_latency_ms ELSE 0 END)
 FROM usage_events
-WHERE user_id=? AND time >= ? AND time < ?
+WHERE user_id=? AND time >= ? AND time < ? AND state=?
 GROUP BY hr
 ORDER BY hr ASC
 `
 	}
 
-	rows, err := s.db.QueryContext(ctx, query, UsageStateCommitted, userID, since, until)
+	rows, err := s.db.QueryContext(ctx, query, UsageStateCommitted, userID, since, until, UsageStateCommitted)
 	if err != nil {
 		return nil, fmt.Errorf("查询用户时间序列失败: %w", err)
 	}
@@ -1922,7 +1922,7 @@ SELECT
   SUM(COALESCE(output_tokens, 0)),
   SUM(CASE WHEN latency_ms > first_token_latency_ms THEN latency_ms - first_token_latency_ms ELSE 0 END)
 FROM usage_events
-WHERE token_id=? AND time >= ? AND time < ?
+WHERE token_id=? AND time >= ? AND time < ? AND state=?
 GROUP BY hr
 ORDER BY hr ASC
 `
@@ -1939,13 +1939,13 @@ SELECT
   SUM(COALESCE(output_tokens, 0)),
   SUM(CASE WHEN latency_ms > first_token_latency_ms THEN latency_ms - first_token_latency_ms ELSE 0 END)
 FROM usage_events
-WHERE token_id=? AND time >= ? AND time < ?
+WHERE token_id=? AND time >= ? AND time < ? AND state=?
 GROUP BY hr
 ORDER BY hr ASC
 `
 	}
 
-	rows, err := s.db.QueryContext(ctx, query, UsageStateCommitted, tokenID, since, until)
+	rows, err := s.db.QueryContext(ctx, query, UsageStateCommitted, tokenID, since, until, UsageStateCommitted)
 	if err != nil {
 		return nil, fmt.Errorf("查询 token 时间序列失败: %w", err)
 	}
@@ -2016,7 +2016,7 @@ SELECT
   SUM(COALESCE(output_tokens, 0)),
   SUM(CASE WHEN latency_ms > first_token_latency_ms THEN latency_ms - first_token_latency_ms ELSE 0 END)
 FROM usage_events
-WHERE time >= ? AND time < ?
+WHERE time >= ? AND time < ? AND state=?
 GROUP BY hr
 ORDER BY hr ASC
 `
@@ -2033,13 +2033,13 @@ SELECT
   SUM(COALESCE(output_tokens, 0)),
   SUM(CASE WHEN latency_ms > first_token_latency_ms THEN latency_ms - first_token_latency_ms ELSE 0 END)
 FROM usage_events
-WHERE time >= ? AND time < ?
+WHERE time >= ? AND time < ? AND state=?
 GROUP BY hr
 ORDER BY hr ASC
 `
 	}
 
-	rows, err := s.db.QueryContext(ctx, query, UsageStateCommitted, since, until)
+	rows, err := s.db.QueryContext(ctx, query, UsageStateCommitted, since, until, UsageStateCommitted)
 	if err != nil {
 		return nil, fmt.Errorf("查询全站时间序列失败: %w", err)
 	}
@@ -2113,7 +2113,7 @@ SELECT
   SUM(COALESCE(output_tokens, 0)),
   SUM(CASE WHEN latency_ms > first_token_latency_ms THEN latency_ms - first_token_latency_ms ELSE 0 END)
 FROM usage_events
-WHERE upstream_channel_id=? AND time >= ? AND time < ?
+WHERE upstream_channel_id=? AND time >= ? AND time < ? AND state=?
 GROUP BY hr
 ORDER BY hr ASC
 `
@@ -2130,13 +2130,13 @@ SELECT
   SUM(COALESCE(output_tokens, 0)),
   SUM(CASE WHEN latency_ms > first_token_latency_ms THEN latency_ms - first_token_latency_ms ELSE 0 END)
 FROM usage_events
-WHERE upstream_channel_id=? AND time >= ? AND time < ?
+WHERE upstream_channel_id=? AND time >= ? AND time < ? AND state=?
 GROUP BY hr
 ORDER BY hr ASC
 `
 	}
 
-	rows, err := s.db.QueryContext(ctx, query, UsageStateCommitted, channelID, since, until)
+	rows, err := s.db.QueryContext(ctx, query, UsageStateCommitted, channelID, since, until, UsageStateCommitted)
 	if err != nil {
 		return nil, fmt.Errorf("查询渠道时间序列失败: %w", err)
 	}
@@ -2198,8 +2198,8 @@ SELECT
   SUM(cached_input_tokens),
   SUM(cached_output_tokens)
 FROM usage_events
-WHERE user_id=? AND time >= ?
-`, userID, since).Scan(&stats.Requests, &inputTokens, &outputTokens, &cachedInputTokens, &cachedOutputTokens)
+WHERE user_id=? AND time >= ? AND state=?
+`, userID, since, UsageStateCommitted).Scan(&stats.Requests, &inputTokens, &outputTokens, &cachedInputTokens, &cachedOutputTokens)
 	if err != nil {
 		return UsageTokenStats{}, fmt.Errorf("统计用量失败: %w", err)
 	}
@@ -2237,8 +2237,8 @@ SELECT
   SUM(cached_input_tokens),
   SUM(cached_output_tokens)
 FROM usage_events
-WHERE user_id=? AND time >= ? AND time < ?
-`, userID, since, until).Scan(&stats.Requests, &inputTokens, &outputTokens, &cachedInputTokens, &cachedOutputTokens)
+WHERE user_id=? AND time >= ? AND time < ? AND state=?
+`, userID, since, until, UsageStateCommitted).Scan(&stats.Requests, &inputTokens, &outputTokens, &cachedInputTokens, &cachedOutputTokens)
 	if err != nil {
 		return UsageTokenStats{}, fmt.Errorf("统计用量失败: %w", err)
 	}
@@ -2276,8 +2276,8 @@ SELECT
   SUM(cached_input_tokens),
   SUM(cached_output_tokens)
 FROM usage_events
-WHERE token_id=? AND time >= ? AND time < ?
-`, tokenID, since, until).Scan(&stats.Requests, &inputTokens, &outputTokens, &cachedInputTokens, &cachedOutputTokens)
+WHERE token_id=? AND time >= ? AND time < ? AND state=?
+`, tokenID, since, until, UsageStateCommitted).Scan(&stats.Requests, &inputTokens, &outputTokens, &cachedInputTokens, &cachedOutputTokens)
 	if err != nil {
 		return UsageTokenStats{}, fmt.Errorf("统计用量失败: %w", err)
 	}

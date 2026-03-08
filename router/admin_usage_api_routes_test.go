@@ -187,6 +187,154 @@ func TestAdminUsagePage_EventIncludesFirstTokenLatencyAndTokensPerSecond(t *test
 	}
 }
 
+func TestAdminUsagePage_WindowAndTimeseries_IgnoreNonCommittedRows(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	userID, err := st.CreateUser(ctx, "root_usage_noise@example.com", "rootusagenoise", pwHash, store.UserRoleRoot)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	tokenID, _, err := st.CreateUserToken(ctx, userID, nil, "tok_usage_noise")
+	if err != nil {
+		t.Fatalf("CreateUserToken: %v", err)
+	}
+
+	now := time.Now().UTC()
+	insertUsageEventRow(t, db, "req_admin_usage_committed", userID, tokenID, store.UsageStateCommitted, now, 100, 50, "1.23", "0", 1000, 200)
+	insertUsageEventRow(t, db, "req_admin_usage_reserved_noise", userID, tokenID, store.UsageStateReserved, now, 900, 600, "0", "9.99", 5000, 1000)
+
+	engine, cookieName := newTestEngine(t, st)
+	sessionCookie := loginCookie(t, engine, cookieName, "root_usage_noise@example.com", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("admin usage status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Window struct {
+				Requests             int64  `json:"requests"`
+				Tokens               int64  `json:"tokens"`
+				InputTokens          int64  `json:"input_tokens"`
+				OutputTokens         int64  `json:"output_tokens"`
+				AvgFirstTokenLatency string `json:"avg_first_token_latency"`
+				TokensPerSecond      string `json:"tokens_per_second"`
+				CommittedUSD         string `json:"committed_usd"`
+				ReservedUSD          string `json:"reserved_usd"`
+				TotalUSD             string `json:"total_usd"`
+			} `json:"window"`
+			Events []struct {
+				RequestID string `json:"request_id"`
+			} `json:"events"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal admin usage: %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("admin usage expected success, got message=%q", got.Message)
+	}
+	if got.Data.Window.Requests != 1 {
+		t.Fatalf("expected window requests=1, got %d", got.Data.Window.Requests)
+	}
+	if got.Data.Window.Tokens != 150 {
+		t.Fatalf("expected window tokens=150, got %d", got.Data.Window.Tokens)
+	}
+	if got.Data.Window.InputTokens != 100 || got.Data.Window.OutputTokens != 50 {
+		t.Fatalf("expected input/output=100/50, got %d/%d", got.Data.Window.InputTokens, got.Data.Window.OutputTokens)
+	}
+	if got.Data.Window.AvgFirstTokenLatency != "200.0 ms" {
+		t.Fatalf("expected avg_first_token_latency=200.0 ms, got %q", got.Data.Window.AvgFirstTokenLatency)
+	}
+	if got.Data.Window.TokensPerSecond != "62.50" {
+		t.Fatalf("expected tokens_per_second=62.50, got %q", got.Data.Window.TokensPerSecond)
+	}
+	if got.Data.Window.CommittedUSD != "1.23" {
+		t.Fatalf("expected committed_usd=1.23, got %q", got.Data.Window.CommittedUSD)
+	}
+	if got.Data.Window.ReservedUSD != "9.99" {
+		t.Fatalf("expected reserved_usd=9.99, got %q", got.Data.Window.ReservedUSD)
+	}
+	if got.Data.Window.TotalUSD != "11.22" {
+		t.Fatalf("expected total_usd=11.22, got %q", got.Data.Window.TotalUSD)
+	}
+	if len(got.Data.Events) == 0 {
+		t.Fatalf("expected non-empty events list")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage/timeseries?granularity=hour", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("admin usage timeseries status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var ts struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Points []struct {
+				Requests             int64   `json:"requests"`
+				Tokens               int64   `json:"tokens"`
+				CommittedUSD         float64 `json:"committed_usd"`
+				AvgFirstTokenLatency float64 `json:"avg_first_token_latency"`
+				TokensPerSecond      float64 `json:"tokens_per_second"`
+			} `json:"points"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &ts); err != nil {
+		t.Fatalf("json.Unmarshal admin usage timeseries: %v", err)
+	}
+	if !ts.Success {
+		t.Fatalf("admin usage timeseries expected success, got message=%q", ts.Message)
+	}
+	if len(ts.Data.Points) == 0 {
+		t.Fatalf("expected non-empty timeseries points")
+	}
+	point := ts.Data.Points[len(ts.Data.Points)-1]
+	if point.Requests != 1 {
+		t.Fatalf("expected point requests=1, got %d", point.Requests)
+	}
+	if point.Tokens != 150 {
+		t.Fatalf("expected point tokens=150, got %d", point.Tokens)
+	}
+	if point.CommittedUSD != 1.23 {
+		t.Fatalf("expected point committed_usd=1.23, got %f", point.CommittedUSD)
+	}
+	if point.AvgFirstTokenLatency != 200 {
+		t.Fatalf("expected point avg_first_token_latency=200, got %f", point.AvgFirstTokenLatency)
+	}
+	if point.TokensPerSecond != 62.5 {
+		t.Fatalf("expected point tokens_per_second=62.5, got %f", point.TokensPerSecond)
+	}
+}
+
 func TestAdminUsagePage_IndexFilters_UserChannelAndModel(t *testing.T) {
 	st, closeDB := newTestSQLiteStore(t)
 	defer closeDB()

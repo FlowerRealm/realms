@@ -89,6 +89,24 @@ func TestUsageStatsByToken_SQLite(t *testing.T) {
 	ev1 := newUsageEvent("req_t1_1", t1ID, "1.23", 10, 5)
 	_ = ev1
 	newUsageEvent("req_t2_1", t2ID, "9.99", 7, 3)
+	ts := now.Format("2006-01-02 15:04:05")
+	expiresAt := now.Add(time.Hour).Format("2006-01-02 15:04:05")
+	_, err = db.Exec(`
+INSERT INTO usage_events(
+  time, request_id, user_id, token_id, state,
+  input_tokens, output_tokens,
+  reserved_usd, committed_usd, reserve_expires_at,
+  latency_ms, first_token_latency_ms,
+  created_at, updated_at
+) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, ts, "req_t1_reserved_noise", userID, t1ID, store.UsageStateReserved,
+		900, 600,
+		"9.99", "0", expiresAt,
+		5000, 1000,
+		ts, ts)
+	if err != nil {
+		t.Fatalf("insert reserved noise usage_event: %v", err)
+	}
 
 	committed, reserved, err := st.SumCommittedAndReservedUSDRangeByToken(ctx, store.UsageSumWithReservedRangeByTokenInput{
 		TokenID: t1ID,
@@ -102,8 +120,8 @@ func TestUsageStatsByToken_SQLite(t *testing.T) {
 	if got := committed.StringFixed(2); got != "1.23" {
 		t.Fatalf("committed mismatch: got=%s want=%s", got, "1.23")
 	}
-	if !reserved.Equal(decimal.Zero) {
-		t.Fatalf("reserved mismatch: got=%s want=0", reserved.String())
+	if got := reserved.StringFixed(2); got != "9.99" {
+		t.Fatalf("reserved mismatch: got=%s want=%s", got, "9.99")
 	}
 
 	stats, err := st.GetUsageTokenStatsByTokenRange(ctx, t1ID, since, until)
@@ -134,5 +152,12 @@ func TestUsageStatsByToken_SQLite(t *testing.T) {
 	}
 	if len(series) == 0 {
 		t.Fatalf("expected non-empty series")
+	}
+	point := series[len(series)-1]
+	if point.Requests != 1 {
+		t.Fatalf("timeseries requests mismatch: got=%d want=%d", point.Requests, 1)
+	}
+	if point.Tokens != 15 {
+		t.Fatalf("timeseries tokens mismatch: got=%d want=%d", point.Tokens, 15)
 	}
 }

@@ -467,6 +467,7 @@ func TestUsageTimeSeries_UserResponse_ReturnsPoints(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("FinalizeUsageEvent: %v", err)
 	}
+	insertUsageEventRow(t, db, "req_series_reserved_noise", userID, tokenID, store.UsageStateReserved, time.Now().UTC(), 900, 600, "0", "9.99", 5000, 1000)
 
 	engine := gin.New()
 	engine.Use(gin.Recovery())
@@ -833,6 +834,7 @@ func TestUsageWindows_TokenFilter_WorksAndChecksOwnership(t *testing.T) {
 	}
 
 	newUsageEvent("req_u1w_t1", t1ID, "1.23", 10, 5)
+	insertUsageEventRow(t, db, "req_u1w_t1_reserved_noise", user1ID, t1ID, store.UsageStateReserved, time.Now().UTC(), 900, 600, "0", "9.99", 5000, 1000)
 
 	engine := gin.New()
 	engine.Use(gin.Recovery())
@@ -918,11 +920,11 @@ func TestUsageWindows_TokenFilter_WorksAndChecksOwnership(t *testing.T) {
 	if gotUSD := w.CommittedUSD.StringFixed(2); gotUSD != "1.23" {
 		t.Fatalf("committed_usd mismatch: got=%s want=%s", gotUSD, "1.23")
 	}
-	if !w.ReservedUSD.Equal(decimal.Zero) {
-		t.Fatalf("reserved_usd mismatch: got=%s want=0", w.ReservedUSD.String())
+	if gotUSD := w.ReservedUSD.StringFixed(2); gotUSD != "9.99" {
+		t.Fatalf("reserved_usd mismatch: got=%s want=%s", gotUSD, "9.99")
 	}
-	if gotUSD := w.UsedUSD.StringFixed(2); gotUSD != "1.23" {
-		t.Fatalf("used_usd mismatch: got=%s want=%s", gotUSD, "1.23")
+	if gotUSD := w.UsedUSD.StringFixed(2); gotUSD != "11.22" {
+		t.Fatalf("used_usd mismatch: got=%s want=%s", gotUSD, "11.22")
 	}
 
 	// token_id not owned by user1 should return not found
