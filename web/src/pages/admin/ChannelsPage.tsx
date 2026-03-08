@@ -61,7 +61,7 @@ import {
   updateChannelModel,
   type ChannelModelBinding,
 } from "../../api/channelModels";
-import { listManagedModelsAdmin } from "../../api/models";
+import { listSelectableManagedModelIDsAdmin } from "../../api/models";
 import { DateRangePicker } from "../../components/DateRangePicker";
 
 function channelTypeLabel(t: string): string {
@@ -1343,14 +1343,10 @@ export function ChannelsPage() {
       const v = id.trim();
       if (v) uniq.add(v);
     }
-    for (const b of bindings) {
-      const v = b.public_id.trim();
-      if (v) uniq.add(v);
-    }
     const out = Array.from(uniq);
     out.sort((a, b) => a.localeCompare(b, "zh-CN"));
     return out;
-  }, [managedModelIDs, bindings]);
+  }, [managedModelIDs]);
 
   const filteredModelIDs = useMemo(() => {
     const q = modelSearch.trim().toLowerCase();
@@ -1362,11 +1358,22 @@ export function ChannelsPage() {
     () => new Set(selectedModelIDs),
     [selectedModelIDs],
   );
+  const managedModelIDSet = useMemo(
+    () => new Set(managedModelIDs.map((id) => id.trim()).filter((id) => id !== "")),
+    [managedModelIDs],
+  );
   const bindingByPublicID = useMemo(() => {
     const m = new Map<string, ChannelModelBinding>();
     for (const b of bindings) m.set(b.public_id, b);
     return m;
   }, [bindings]);
+  const staleEnabledBindings = useMemo(
+    () =>
+      bindings
+        .filter((b) => b.status === 1)
+        .filter((b) => !managedModelIDSet.has(b.public_id.trim())),
+    [bindings, managedModelIDSet],
+  );
 
   function normalizeChannelSections(
     list: ChannelAdminItem[],
@@ -1519,14 +1526,12 @@ export function ChannelsPage() {
 
         const [pageRes, modelsRes] = await Promise.all([
           getChannelsPage(pageParams),
-          listManagedModelsAdmin(1, 1000),
+          listSelectableManagedModelIDsAdmin(),
         ]);
         if (!modelsRes.success)
           throw new Error(modelsRes.message || "加载模型失败");
         setManagedModelIDs(
-          (modelsRes.data?.items || [])
-            .filter((m) => m.status === 1)
-            .map((m) => m.public_id)
+          (modelsRes.data || [])
             .filter((id) => typeof id === "string" && id.trim() !== ""),
         );
 
@@ -1835,6 +1840,7 @@ export function ChannelsPage() {
       const selected = items
         .filter((b) => b.status === 1)
         .map((b) => b.public_id)
+        .filter((id) => managedModelIDSet.has(id.trim()))
         .filter((id) => id.trim() !== "");
       selected.sort((a, b) => a.localeCompare(b, "zh-CN"));
       setSelectedModelIDs(selected);
@@ -1849,7 +1855,7 @@ export function ChannelsPage() {
       }
       setModelRedirects(redirects);
     },
-    [],
+    [managedModelIDSet],
   );
 
   async function reloadBindings(channelID: number) {
@@ -2016,7 +2022,9 @@ export function ChannelsPage() {
     debounceMs: 1200,
     value: { selectedModelIDs, modelRedirects },
     validate: () => {
-      if (!selectedModelIDs.length) return "请先在上方选择模型";
+      if (!selectedModelIDs.length && staleEnabledBindings.length === 0) {
+        return "请先在上方选择模型";
+      }
       return "";
     },
     save: async () => {
@@ -4406,6 +4414,17 @@ export function ChannelsPage() {
                         ))
                       )}
                     </div>
+
+                    {staleEnabledBindings.length > 0 ? (
+                      <div className="alert alert-warning py-2 px-3 mt-3 mb-0 small">
+                        当前渠道还有 {staleEnabledBindings.length} 个已启用绑定不在模型目录中：{" "}
+                        {staleEnabledBindings
+                          .map((b) => b.public_id.trim())
+                          .filter((id) => id !== "")
+                          .join("、")}
+                        。它们不会再出现在可选列表；保存后会被自动禁用。
+                      </div>
+                    ) : null}
 
                     <div className="form-text small text-muted mt-2">
                       选择该渠道允许使用的模型；下方可选配置“模型重定向”。
