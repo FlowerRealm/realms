@@ -2022,7 +2022,9 @@ export function ChannelsPage() {
     debounceMs: 1200,
     value: { selectedModelIDs, modelRedirects },
     validate: () => {
-      if (!selectedModelIDs.length) return "请先在上方选择模型";
+      if (!selectedModelIDs.length && staleEnabledBindings.length === 0) {
+        return "请先在上方选择模型";
+      }
       return "";
     },
     save: async () => {
