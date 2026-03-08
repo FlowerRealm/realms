@@ -49,12 +49,14 @@ WHERE type='table' AND name IN ('managed_models', 'channel_models')
 	}
 
 	if _, err := tx.ExecContext(ctx, `
-DELETE FROM channel_models
-WHERE NOT EXISTS (
-  SELECT 1 FROM managed_models m WHERE m.public_id = channel_models.public_id
-)
+UPDATE channel_models
+SET status=0, updated_at=CURRENT_TIMESTAMP
+WHERE status=1
+  AND NOT EXISTS (
+    SELECT 1 FROM managed_models m WHERE m.public_id = channel_models.public_id
+  )
 `); err != nil {
-		return fmt.Errorf("清理 SQLite 脏 channel_models 失败: %w", err)
+		return fmt.Errorf("禁用 SQLite 脏 channel_models 失败: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {

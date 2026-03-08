@@ -64,10 +64,17 @@ func TestEnsureSQLiteSchema_CleansUpStaleChannelModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListChannelModelsByChannelID: %v", err)
 	}
-	if len(bindings) != 1 {
-		t.Fatalf("expected 1 binding after cleanup, got %d", len(bindings))
+	if len(bindings) != 2 {
+		t.Fatalf("expected 2 bindings after cleanup, got %d", len(bindings))
 	}
-	if bindings[0].PublicID != "gpt-valid" {
-		t.Fatalf("binding public_id=%q want=%q", bindings[0].PublicID, "gpt-valid")
+	seen := map[string]int{}
+	for _, binding := range bindings {
+		seen[binding.PublicID] = binding.Status
+	}
+	if seen["gpt-valid"] != 1 {
+		t.Fatalf("gpt-valid status=%d want=1", seen["gpt-valid"])
+	}
+	if seen["ghost-model"] != 0 {
+		t.Fatalf("ghost-model status=%d want=0", seen["ghost-model"])
 	}
 }
