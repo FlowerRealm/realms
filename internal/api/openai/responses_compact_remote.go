@@ -211,6 +211,25 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		cw := &countingResponseWriter{ResponseWriter: w}
+		copyResponseHeaders(cw.Header(), resp.Header)
+		cw.WriteHeader(resp.StatusCode)
+
+		var capBuf limitedPrefixBuffer
+		capBuf.maxBytes = upstreamErrorBodyMaxBytes
+		_, _ = io.Copy(cw, io.TeeReader(resp.Body, &capBuf))
+		respBytes := cw.bytes
+		voidUsage()
+		msg := ""
+		if !capBuf.exceeded {
+			msg = summarizeUpstreamErrorBody(capBuf.buf.Bytes())
+		}
+		h.maybeLogProxyFailure(r.Context(), r, p, nil, modelPtr, resp.StatusCode, "upstream_status", msg, time.Since(reqStart), false)
+		h.finalizeUsageEvent(r, usageID, nil, resp.StatusCode, "upstream_status", msg, time.Since(reqStart), 0, false, reqBytes, respBytes)
+		return
+	}
+
 	var routeGroup *string
 	if usageID != 0 && h.quota != nil {
 		var routeGroupErr error
@@ -227,21 +246,6 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 	cw := &countingResponseWriter{ResponseWriter: w}
 	copyResponseHeaders(cw.Header(), resp.Header)
 	cw.WriteHeader(resp.StatusCode)
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		var capBuf limitedPrefixBuffer
-		capBuf.maxBytes = upstreamErrorBodyMaxBytes
-		_, _ = io.Copy(cw, io.TeeReader(resp.Body, &capBuf))
-		respBytes := cw.bytes
-		voidUsage()
-		msg := ""
-		if !capBuf.exceeded {
-			msg = summarizeUpstreamErrorBody(capBuf.buf.Bytes())
-		}
-		h.maybeLogProxyFailure(r.Context(), r, p, nil, modelPtr, resp.StatusCode, "upstream_status", msg, time.Since(reqStart), false)
-		h.finalizeUsageEvent(r, usageID, nil, resp.StatusCode, "upstream_status", msg, time.Since(reqStart), 0, false, reqBytes, respBytes)
-		return
-	}
 
 	var capBuf limitedPrefixBuffer
 	capBuf.maxBytes = upstreamNonStreamExtractMaxBytes

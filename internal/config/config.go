@@ -539,11 +539,19 @@ func applyEnvOverrides(cfg *Config) {
 
 	if v := os.Getenv("REALMS_COMPACT_GATEWAY_BASE_URL"); v != "" {
 		cfg.CompactGateway.BaseURL = v
+	} else if v := os.Getenv("REALMS_SUB2API_BASE_URL"); v != "" {
+		cfg.CompactGateway.BaseURL = v
 	}
 	if v := os.Getenv("REALMS_COMPACT_GATEWAY_KEY"); v != "" {
 		cfg.CompactGateway.GatewayKey = v
+	} else if v := os.Getenv("REALMS_SUB2API_KEY"); v != "" {
+		cfg.CompactGateway.GatewayKey = v
 	}
 	if v := os.Getenv("REALMS_COMPACT_GATEWAY_TIMEOUT_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.CompactGateway.TimeoutMS = n
+		}
+	} else if v := os.Getenv("REALMS_SUB2API_TIMEOUT_MS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.CompactGateway.TimeoutMS = n
 		}

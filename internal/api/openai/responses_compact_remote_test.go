@@ -162,6 +162,55 @@ func TestResponsesCompact_Remote_Upstream4xxVoidsQuota(t *testing.T) {
 	}
 }
 
+func TestResponsesCompact_Remote_Upstream4xxDoesNotRequireRouteGroup(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":{"type":"invalid_request_error","message":"bad"}}`)
+	}))
+	defer ts.Close()
+
+	fs := &fakeStore{}
+	sched := scheduler.New(fs)
+	q := &fakeQuota{}
+	usage := &recordingUsage{}
+	features := staticFeatures{fs: store.FeatureState{BillingDisabled: false}}
+	compactGateway := upstream.NewCompactGatewayClient(ts.URL, "gwk_test", 5*time.Second)
+	h := NewHandler(fs, fs, sched, DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		t.Fatalf("unexpected scheduler-based upstream call")
+		return nil, nil
+	}), nil, features, q, fakeAudit{}, usage, nil, upstream.SSEPumpOptions{}, compactGateway)
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{"g1", "g2"}}
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses/compact", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","session_id":"s1"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.ResponsesCompact), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "compact route_group") {
+		t.Fatalf("unexpected route_group error on upstream 4xx: %s", rr.Body.String())
+	}
+	if len(q.commitCalls) != 0 {
+		t.Fatalf("expected commit not called, got=%d", len(q.commitCalls))
+	}
+	if len(q.voidCalls) != 1 {
+		t.Fatalf("expected void called once, got=%d", len(q.voidCalls))
+	}
+	if len(usage.calls) == 0 {
+		t.Fatalf("expected usage finalized")
+	}
+	if usage.calls[0].ErrorClass != nil && *usage.calls[0].ErrorClass == "compact_gateway_route_group_missing" {
+		t.Fatalf("unexpected route group billing error finalization: %+v", usage.calls[0])
+	}
+}
+
 func TestResponsesCompact_Remote_PropagatesPriorityServiceTierToQuota(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Realms-Route-Group", store.DefaultGroupName)
