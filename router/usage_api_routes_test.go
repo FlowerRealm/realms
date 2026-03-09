@@ -392,6 +392,13 @@ func TestUsageLeaderboard_RejectsInvalidWindow(t *testing.T) {
 	}
 }
 
+func TestUsageLeaderboardDisplayName_DoesNotExposeEmailWhenUsernameMissing(t *testing.T) {
+	got := usageLeaderboardDisplayName("", "masked@example.com", 42)
+	if got != "用户42" {
+		t.Fatalf("expected anonymized display name, got %q", got)
+	}
+}
+
 func TestUsageEvents_User_IndexKeyFiltersByTokenName(t *testing.T) {
 	st, closeDB := newTestSQLiteStore(t)
 	defer closeDB()

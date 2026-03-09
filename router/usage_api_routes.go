@@ -764,8 +764,5 @@ func usageLeaderboardDisplayName(username, email string, rankedUserID int64) str
 	if name := strings.TrimSpace(username); name != "" {
 		return name
 	}
-	if mail := strings.TrimSpace(email); mail != "" {
-		return mail
-	}
-	return "用户#" + strconv.FormatInt(rankedUserID, 10)
+	return "用户" + strconv.FormatInt(rankedUserID, 10)
 }
