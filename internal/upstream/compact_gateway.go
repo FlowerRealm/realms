@@ -18,6 +18,17 @@ type CompactGatewayClient struct {
 	client     *http.Client
 }
 
+const (
+	CompactGatewayTargetGroupHeader  = "X-Realms-Target-Group"
+	CompactGatewayRouteKeyHashHeader = "X-Realms-Route-Key-Hash"
+	CompactGatewayErrorClassHeader   = "X-Realms-Gateway-Error-Class"
+)
+
+type CompactGatewayRequestOptions struct {
+	TargetGroup  string
+	RouteKeyHash string
+}
+
 func NewCompactGatewayClient(baseURL string, gatewayKey string, timeout time.Duration) *CompactGatewayClient {
 	return &CompactGatewayClient{
 		baseURL:    strings.TrimRight(strings.TrimSpace(baseURL), "/"),
@@ -41,11 +52,11 @@ func (c *CompactGatewayClient) Timeout() time.Duration {
 	return c.timeout
 }
 
-func (c *CompactGatewayClient) ForwardResponsesCompact(ctx context.Context, downstream *http.Request, body []byte, traceID string) (*http.Response, error) {
-	return c.forward(ctx, downstream, "/v1/responses/compact", body, traceID)
+func (c *CompactGatewayClient) ForwardResponsesCompact(ctx context.Context, downstream *http.Request, body []byte, traceID string, opts CompactGatewayRequestOptions) (*http.Response, error) {
+	return c.forward(ctx, downstream, "/v1/responses/compact", body, traceID, opts)
 }
 
-func (c *CompactGatewayClient) forward(ctx context.Context, downstream *http.Request, path string, body []byte, traceID string) (*http.Response, error) {
+func (c *CompactGatewayClient) forward(ctx context.Context, downstream *http.Request, path string, body []byte, traceID string, opts CompactGatewayRequestOptions) (*http.Response, error) {
 	if c == nil {
 		return nil, errors.New("compact gateway client is nil")
 	}
@@ -103,6 +114,12 @@ func (c *CompactGatewayClient) forward(ctx context.Context, downstream *http.Req
 
 	if strings.TrimSpace(traceID) != "" {
 		req.Header.Set("X-Gateway-Trace-Id", strings.TrimSpace(traceID))
+	}
+	if v := strings.TrimSpace(opts.TargetGroup); v != "" {
+		req.Header.Set(CompactGatewayTargetGroupHeader, v)
+	}
+	if v := strings.TrimSpace(opts.RouteKeyHash); v != "" {
+		req.Header.Set(CompactGatewayRouteKeyHashHeader, v)
 	}
 
 	resp, err := c.client.Do(req)

@@ -14,6 +14,7 @@ import (
 	"realms/internal/auth"
 	"realms/internal/middleware"
 	"realms/internal/quota"
+	"realms/internal/upstream"
 )
 
 func extractSessionIDForCompact(headers http.Header, body map[string]any) string {
@@ -39,37 +40,59 @@ func extractSessionIDForCompact(headers http.Header, body map[string]any) string
 	return ""
 }
 
-func extractRouteGroupForCompact(headers http.Header) string {
-	for _, name := range []string{"X-Realms-Route-Group", "X-Route-Group", "route_group"} {
-		if v := strings.TrimSpace(headers.Get(name)); v != "" {
-			return v
-		}
+func compactGatewayErrorClass(headers http.Header) string {
+	if headers == nil {
+		return ""
 	}
-	return ""
+	return strings.ToLower(strings.TrimSpace(headers.Get(upstream.CompactGatewayErrorClassHeader)))
 }
 
-func resolveCompactRouteGroup(groupHeader string, principal auth.Principal) (*string, error) {
-	groupName := strings.TrimSpace(groupHeader)
-	if groupName != "" {
-		ags := allowGroupsFromPrincipal(principal)
-		if len(ags.Order) > 0 {
-			if _, ok := ags.Set[groupName]; !ok {
-				return nil, errors.New("compact route_group is not allowed for current token")
-			}
-		}
-		return &groupName, nil
+func stripCompactGatewayInternalHeaders(headers http.Header) {
+	if headers == nil {
+		return
 	}
-	ags := allowGroupsFromPrincipal(principal)
-	if len(ags.Order) == 1 {
-		only := strings.TrimSpace(ags.Order[0])
-		if only != "" {
-			return &only, nil
-		}
+	for _, name := range []string{
+		upstream.CompactGatewayErrorClassHeader,
+		"X-Realms-Route-Group",
+		"X-Route-Group",
+		"route_group",
+	} {
+		headers.Del(name)
 	}
-	if len(ags.Order) == 0 {
-		return nil, errors.New("compact route_group missing and token has no effective channel groups")
+}
+
+func compactRouteKeySource(payload map[string]any, r *http.Request) string {
+	if normalizeRouteKey(extractRouteKeyFromPayload(payload)) != "" {
+		return "payload"
 	}
-	return nil, errors.New("compact route_group missing and token has multiple effective channel groups")
+	if r != nil && normalizeRouteKey(extractRouteKey(r)) != "" {
+		return "header"
+	}
+	if normalizeRouteKey(deriveRouteKeyFromConversationPayload(payload)) != "" {
+		return "derived"
+	}
+	return "missing"
+}
+
+func compactRouteKeyHash(payload map[string]any, r *http.Request, routeKeySource string, sched routeKeyHasher) string {
+	if sched == nil {
+		return ""
+	}
+	routeKey := normalizeRouteKey(extractRouteKeyFromPayload(payload))
+	if routeKey == "" && r != nil {
+		routeKey = normalizeRouteKey(extractRouteKey(r))
+	}
+	if routeKey == "" {
+		routeKey = normalizeRouteKey(deriveRouteKeyFromConversationPayload(payload))
+	}
+	if routeKey == "" || !shouldEnableStickyRouting(payload, r, routeKeySource) {
+		return ""
+	}
+	return sched.RouteKeyHash(routeKey)
+}
+
+type routeKeyHasher interface {
+	RouteKeyHash(routeKey string) string
 }
 
 func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
@@ -127,10 +150,21 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", "session_id is required")
 		return
 	}
+	ags := allowGroupsFromPrincipal(p)
+	if len(ags.Order) == 0 {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", "Token 未配置渠道组")
+		return
+	}
 
 	if h.compactGateway == nil || !h.compactGateway.Configured() {
 		writeOpenAIError(w, http.StatusInternalServerError, "api_error", "compact gateway is not configured")
 		return
+	}
+	routeKeySource := compactRouteKeySource(payload, r)
+	w.Header().Set("X-Realms-Route-Key-Source", routeKeySource)
+	routeKeyHash := ""
+	if h.sched != nil {
+		routeKeyHash = compactRouteKeyHash(payload, r, routeKeySource, h.sched)
 	}
 
 	freeMode := false
@@ -185,103 +219,130 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		_ = h.quota.Void(bookCtx, usageID)
 	}
+	bestFailure := proxyFailureInfo{}
+	for _, groupName := range ags.Order {
+		targetGroup := strings.TrimSpace(groupName)
+		if targetGroup == "" {
+			continue
+		}
+		resp, err := h.compactGateway.ForwardResponsesCompact(r.Context(), r, body, middleware.GetRequestID(r.Context()), upstream.CompactGatewayRequestOptions{
+			TargetGroup:  targetGroup,
+			RouteKeyHash: routeKeyHash,
+		})
+		if err != nil {
+			voidUsage()
 
-	resp, err := h.compactGateway.ForwardResponsesCompact(r.Context(), r, body, middleware.GetRequestID(r.Context()))
-	if err != nil {
-		voidUsage()
-
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(r.Context().Err(), context.DeadlineExceeded) {
-			timeoutMs := int64(h.compactGateway.Timeout() / time.Millisecond)
-			if timeoutMs < 0 {
-				timeoutMs = 0
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(r.Context().Err(), context.DeadlineExceeded) {
+				timeoutMs := int64(h.compactGateway.Timeout() / time.Millisecond)
+				if timeoutMs < 0 {
+					timeoutMs = 0
+				}
+				writeOpenAIError(w, http.StatusGatewayTimeout, "upstream_error", "Upstream timeout after "+strconv.FormatInt(timeoutMs, 10)+"ms")
+				h.finalizeUsageEvent(r, usageID, nil, http.StatusGatewayTimeout, "upstream_timeout", "upstream_timeout", time.Since(reqStart), 0, false, reqBytes, 0)
+				return
 			}
-			writeOpenAIError(w, http.StatusGatewayTimeout, "upstream_error", "Upstream timeout after "+strconv.FormatInt(timeoutMs, 10)+"ms")
-			h.finalizeUsageEvent(r, usageID, nil, http.StatusGatewayTimeout, "upstream_timeout", "upstream_timeout", time.Since(reqStart), 0, false, reqBytes, 0)
+			if errors.Is(err, context.Canceled) || errors.Is(r.Context().Err(), context.Canceled) {
+				writeOpenAIError(w, 499, "api_error", "Client disconnected before upstream completed")
+				h.finalizeUsageEvent(r, usageID, nil, 499, "client_disconnect", "client_disconnect", time.Since(reqStart), 0, false, reqBytes, 0)
+				return
+			}
+
+			writeOpenAIError(w, http.StatusBadGateway, "upstream_error", "Failed to reach upstream service")
+			h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_network_error", "upstream_network_error", time.Since(reqStart), 0, false, reqBytes, 0)
 			return
 		}
-		if errors.Is(err, context.Canceled) || errors.Is(r.Context().Err(), context.Canceled) {
-			writeOpenAIError(w, 499, "api_error", "Client disconnected before upstream completed")
-			h.finalizeUsageEvent(r, usageID, nil, 499, "client_disconnect", "client_disconnect", time.Since(reqStart), 0, false, reqBytes, 0)
+		if resp == nil {
+			voidUsage()
+			writeOpenAIError(w, http.StatusBadGateway, "upstream_error", "Failed to reach upstream service")
+			h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_network_error", "upstream_network_error", time.Since(reqStart), 0, false, reqBytes, 0)
 			return
 		}
 
-		writeOpenAIError(w, http.StatusBadGateway, "upstream_error", "Failed to reach upstream service")
-		h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_network_error", "upstream_network_error", time.Since(reqStart), 0, false, reqBytes, 0)
-		return
-	}
-	if resp == nil {
-		voidUsage()
-		writeOpenAIError(w, http.StatusBadGateway, "upstream_error", "Failed to reach upstream service")
-		h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_network_error", "upstream_network_error", time.Since(reqStart), 0, false, reqBytes, 0)
-		return
-	}
-	defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			errClass := compactGatewayErrorClass(resp.Header)
+			if errClass == "group_unavailable" {
+				bodyBytes := readPrefixBestEffort(resp.Body, upstreamErrorBodyMaxBytes)
+				recordProxyFailure(&bestFailure, proxyFailureInfo{
+					Valid:      true,
+					Class:      "upstream_group_unavailable",
+					StatusCode: resp.StatusCode,
+					Message:    summarizeUpstreamErrorBody(bodyBytes),
+					Body:       bodyBytes,
+				})
+				_ = resp.Body.Close()
+				continue
+			}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			cw := &countingResponseWriter{ResponseWriter: w}
+			copyResponseHeaders(cw.Header(), resp.Header)
+			stripCompactGatewayInternalHeaders(cw.Header())
+			cw.WriteHeader(resp.StatusCode)
+
+			var capBuf limitedPrefixBuffer
+			capBuf.maxBytes = upstreamErrorBodyMaxBytes
+			_, _ = io.Copy(cw, io.TeeReader(resp.Body, &capBuf))
+			respBytes := cw.bytes
+			_ = resp.Body.Close()
+			voidUsage()
+			msg := ""
+			if !capBuf.exceeded {
+				msg = summarizeUpstreamErrorBody(capBuf.buf.Bytes())
+			}
+			h.maybeLogProxyFailure(r.Context(), r, p, nil, modelPtr, resp.StatusCode, "upstream_status", msg, time.Since(reqStart), false)
+			h.finalizeUsageEvent(r, usageID, nil, resp.StatusCode, "upstream_status", msg, time.Since(reqStart), 0, false, reqBytes, respBytes)
+			return
+		}
+
 		cw := &countingResponseWriter{ResponseWriter: w}
 		copyResponseHeaders(cw.Header(), resp.Header)
+		stripCompactGatewayInternalHeaders(cw.Header())
 		cw.WriteHeader(resp.StatusCode)
 
 		var capBuf limitedPrefixBuffer
-		capBuf.maxBytes = upstreamErrorBodyMaxBytes
-		_, _ = io.Copy(cw, io.TeeReader(resp.Body, &capBuf))
+		capBuf.maxBytes = upstreamNonStreamExtractMaxBytes
+		_, copyErr := io.Copy(cw, io.TeeReader(resp.Body, &capBuf))
 		respBytes := cw.bytes
-		voidUsage()
-		msg := ""
-		if !capBuf.exceeded {
-			msg = summarizeUpstreamErrorBody(capBuf.buf.Bytes())
-		}
-		h.maybeLogProxyFailure(r.Context(), r, p, nil, modelPtr, resp.StatusCode, "upstream_status", msg, time.Since(reqStart), false)
-		h.finalizeUsageEvent(r, usageID, nil, resp.StatusCode, "upstream_status", msg, time.Since(reqStart), 0, false, reqBytes, respBytes)
-		return
-	}
-
-	var routeGroup *string
-	if usageID != 0 && h.quota != nil {
-		var routeGroupErr error
-		routeGroup, routeGroupErr = resolveCompactRouteGroup(extractRouteGroupForCompact(resp.Header), p)
-		if routeGroupErr != nil {
+		_ = resp.Body.Close()
+		if copyErr != nil {
 			voidUsage()
-			writeOpenAIError(w, http.StatusBadGateway, "billing_error", routeGroupErr.Error())
-			h.maybeLogProxyFailure(r.Context(), r, p, nil, modelPtr, http.StatusBadGateway, "compact_gateway_route_group_missing", routeGroupErr.Error(), time.Since(reqStart), false)
-			h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "compact_gateway_route_group_missing", routeGroupErr.Error(), time.Since(reqStart), 0, false, reqBytes, 0)
+			h.maybeLogProxyFailure(r.Context(), r, p, nil, modelPtr, resp.StatusCode, "proxy_copy", copyErr.Error(), time.Since(reqStart), false)
+			h.finalizeUsageEvent(r, usageID, nil, resp.StatusCode, "proxy_copy", "", time.Since(reqStart), 0, false, reqBytes, respBytes)
 			return
 		}
-	}
 
-	cw := &countingResponseWriter{ResponseWriter: w}
-	copyResponseHeaders(cw.Header(), resp.Header)
-	cw.WriteHeader(resp.StatusCode)
+		var inTok, outTok, cachedInTok, cachedOutTok *int64
+		if !capBuf.exceeded {
+			inTok, outTok, cachedInTok, cachedOutTok = extractUsageTokens(capBuf.buf.Bytes())
+		}
+		if usageID != 0 && h.quota != nil {
+			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = h.quota.Commit(bookCtx, quota.CommitInput{
+				UsageEventID:       usageID,
+				Model:              modelPtr,
+				ServiceTier:        serviceTier,
+				RouteGroup:         &targetGroup,
+				InputTokens:        inTok,
+				CachedInputTokens:  cachedInTok,
+				OutputTokens:       outTok,
+				CachedOutputTokens: cachedOutTok,
+			})
+		}
 
-	var capBuf limitedPrefixBuffer
-	capBuf.maxBytes = upstreamNonStreamExtractMaxBytes
-	_, copyErr := io.Copy(cw, io.TeeReader(resp.Body, &capBuf))
-	respBytes := cw.bytes
-	if copyErr != nil {
-		voidUsage()
-		h.maybeLogProxyFailure(r.Context(), r, p, nil, modelPtr, resp.StatusCode, "proxy_copy", copyErr.Error(), time.Since(reqStart), false)
-		h.finalizeUsageEvent(r, usageID, nil, resp.StatusCode, "proxy_copy", "", time.Since(reqStart), 0, false, reqBytes, respBytes)
+		h.finalizeUsageEvent(r, usageID, nil, resp.StatusCode, "", "", time.Since(reqStart), 0, false, reqBytes, respBytes)
 		return
 	}
 
-	var inTok, outTok, cachedInTok, cachedOutTok *int64
-	if !capBuf.exceeded {
-		inTok, outTok, cachedInTok, cachedOutTok = extractUsageTokens(capBuf.buf.Bytes())
+	voidUsage()
+	failResp := h.buildFailoverExhaustedResponse("openai", bestFailure)
+	cw := &countingResponseWriter{ResponseWriter: w}
+	writeOpenAIErrorWithRetryAfter(cw, failResp.Status, failResp.ErrType, failResp.Message, failResp.RetryAfterSeconds)
+	if !failResp.SkipMonitoring {
+		h.maybeLogProxyFailure(r.Context(), r, p, nil, modelPtr, failResp.Status, failResp.ErrorClass, failResp.Message, time.Since(reqStart), false)
 	}
-	if usageID != 0 && h.quota != nil {
-		bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = h.quota.Commit(bookCtx, quota.CommitInput{
-			UsageEventID:       usageID,
-			Model:              modelPtr,
-			ServiceTier:        serviceTier,
-			RouteGroup:         routeGroup,
-			InputTokens:        inTok,
-			CachedInputTokens:  cachedInTok,
-			OutputTokens:       outTok,
-			CachedOutputTokens: cachedOutTok,
-		})
+	finalClass := failResp.ErrorClass
+	if failResp.SkipMonitoring {
+		finalClass = ""
 	}
-
-	h.finalizeUsageEvent(r, usageID, nil, resp.StatusCode, "", "", time.Since(reqStart), 0, false, reqBytes, respBytes)
+	h.finalizeUsageEvent(r, usageID, nil, failResp.Status, finalClass, failResp.UsageMessage, time.Since(reqStart), 0, false, reqBytes, cw.bytes)
 }
