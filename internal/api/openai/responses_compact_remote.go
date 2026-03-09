@@ -240,9 +240,12 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 			RouteKeyHash: routeKeyHash,
 		})
 		if err != nil {
-			voidUsage()
-
-			if errors.Is(err, context.DeadlineExceeded) || errors.Is(r.Context().Err(), context.DeadlineExceeded) {
+			if errors.Is(err, context.Canceled) || errors.Is(r.Context().Err(), context.Canceled) {
+				writeOpenAIError(w, 499, "api_error", "Client disconnected before upstream completed")
+				h.finalizeUsageEvent(r, usageID, nil, 499, "client_disconnect", "client_disconnect", time.Since(reqStart), 0, false, reqBytes, 0)
+				return
+			}
+			if errors.Is(r.Context().Err(), context.DeadlineExceeded) {
 				timeoutMs := int64(h.compactGateway.Timeout() / time.Millisecond)
 				if timeoutMs < 0 {
 					timeoutMs = 0
@@ -251,21 +254,33 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 				h.finalizeUsageEvent(r, usageID, nil, http.StatusGatewayTimeout, "upstream_timeout", "upstream_timeout", time.Since(reqStart), 0, false, reqBytes, 0)
 				return
 			}
-			if errors.Is(err, context.Canceled) || errors.Is(r.Context().Err(), context.Canceled) {
-				writeOpenAIError(w, 499, "api_error", "Client disconnected before upstream completed")
-				h.finalizeUsageEvent(r, usageID, nil, 499, "client_disconnect", "client_disconnect", time.Since(reqStart), 0, false, reqBytes, 0)
-				return
+			if errors.Is(err, context.DeadlineExceeded) {
+				timeoutMs := int64(h.compactGateway.Timeout() / time.Millisecond)
+				if timeoutMs < 0 {
+					timeoutMs = 0
+				}
+				recordProxyFailure(&bestFailure, proxyFailureInfo{
+					Valid:      true,
+					Class:      "upstream_timeout",
+					StatusCode: http.StatusGatewayTimeout,
+					Message:    "Upstream timeout after " + strconv.FormatInt(timeoutMs, 10) + "ms",
+				})
+				continue
 			}
-
-			writeOpenAIError(w, http.StatusBadGateway, "upstream_error", "Failed to reach upstream service")
-			h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_network_error", "upstream_network_error", time.Since(reqStart), 0, false, reqBytes, 0)
-			return
+			recordProxyFailure(&bestFailure, proxyFailureInfo{
+				Valid:   true,
+				Class:   "network",
+				Message: trimSummary(err.Error()),
+			})
+			continue
 		}
 		if resp == nil {
-			voidUsage()
-			writeOpenAIError(w, http.StatusBadGateway, "upstream_error", "Failed to reach upstream service")
-			h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "upstream_network_error", "upstream_network_error", time.Since(reqStart), 0, false, reqBytes, 0)
-			return
+			recordProxyFailure(&bestFailure, proxyFailureInfo{
+				Valid:   true,
+				Class:   "network",
+				Message: "empty upstream response",
+			})
+			continue
 		}
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
