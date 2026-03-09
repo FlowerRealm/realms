@@ -327,7 +327,18 @@ func (r *GroupRouter) appendSequentialCandidatesFromGroup(ctx context.Context, g
 		return err
 	}
 
-	for _, m := range c.members {
+	members := append([]store.ChannelGroupMemberDetail(nil), c.members...)
+	sort.SliceStable(members, func(i, j int) bool {
+		if members[i].Promotion != members[j].Promotion {
+			return members[i].Promotion
+		}
+		if members[i].Priority != members[j].Priority {
+			return members[i].Priority > members[j].Priority
+		}
+		return members[i].MemberID > members[j].MemberID
+	})
+
+	for _, m := range members {
 		if m.MemberGroupID != nil && m.MemberChannelID != nil {
 			continue
 		}
