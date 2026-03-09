@@ -1854,6 +1854,9 @@ func shouldEnableStickyRouting(payload map[string]any, r *http.Request, routeKey
 	if strings.TrimSpace(extractSessionIDFromHeaders(r.Header)) != "" {
 		return true
 	}
+	if path == "/v1/responses/compact" && strings.TrimSpace(extractSessionIDForCompact(r.Header, payload)) != "" {
+		return true
+	}
 	if strings.TrimSpace(stringFromAny(payload["prompt_cache_key"])) != "" {
 		return true
 	}
