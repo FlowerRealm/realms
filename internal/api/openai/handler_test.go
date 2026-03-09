@@ -1833,7 +1833,7 @@ func TestResponsesCompact_RemoteRequiresSessionID(t *testing.T) {
 }
 
 func TestResponsesCompact_RemoteNotUsingLegacyStickyRouting(t *testing.T) {
-	fs := &fakeStore{}
+	fs := &fakeStore{models: map[string]store.ManagedModel{"gpt-5.2": {PublicID: "gpt-5.2", GroupName: store.DefaultGroupName, Status: 1}}}
 	sched := scheduler.New(fs)
 	h := NewHandler(fs, fs, sched, DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
 		t.Fatalf("unexpected scheduler-based upstream call")

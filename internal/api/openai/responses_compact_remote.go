@@ -130,22 +130,6 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
 	}
-	if h.models != nil && isPriorityServiceTier(serviceTier) {
-		mm, err := h.models.GetManagedModelByPublicID(r.Context(), reqModel)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", serviceTierBadRequestMessage(err))
-			} else {
-				writeOpenAIError(w, http.StatusBadGateway, "api_error", "failed to query model")
-			}
-			return
-		}
-		if err := validateManagedModelServiceTier(mm, serviceTier); err != nil {
-			writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", serviceTierBadRequestMessage(err))
-			return
-		}
-	}
-
 	if sessionID := extractSessionIDForCompact(r.Header, payload); sessionID == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", "session_id is required")
 		return
@@ -153,6 +137,32 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 	ags := allowGroupsFromPrincipal(p)
 	if len(ags.Order) == 0 {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", "Token 未配置渠道组")
+		return
+	}
+	allowSet := ags.Set
+
+	if h.models == nil {
+		writeOpenAIError(w, http.StatusBadGateway, "api_error", "failed to query model")
+		return
+	}
+	mm, err := h.models.GetEnabledManagedModelByPublicID(r.Context(), reqModel)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", "模型未启用")
+		} else {
+			writeOpenAIError(w, http.StatusBadGateway, "api_error", "failed to query model")
+		}
+		return
+	}
+	groupName := managedModelGroupName(mm)
+	if allowSet != nil {
+		if _, ok := allowSet[groupName]; !ok {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", "无权限使用该模型")
+			return
+		}
+	}
+	if err := validateManagedModelServiceTier(mm, serviceTier); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", serviceTierBadRequestMessage(err))
 		return
 	}
 

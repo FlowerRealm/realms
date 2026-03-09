@@ -140,7 +140,7 @@ func TestResponsesCompact_Remote_Upstream4xxVoidsQuota(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	fs := &fakeStore{}
+	fs := &fakeStore{models: map[string]store.ManagedModel{"gpt-5.2": {PublicID: "gpt-5.2", GroupName: store.DefaultGroupName, Status: 1}}}
 	sched := scheduler.New(fs)
 	q := &fakeQuota{}
 	features := staticFeatures{fs: store.FeatureState{BillingDisabled: false}}
@@ -184,7 +184,7 @@ func TestResponsesCompact_Remote_Upstream4xxDoesNotRequireRouteGroup(t *testing.
 	}))
 	defer ts.Close()
 
-	fs := &fakeStore{}
+	fs := &fakeStore{models: map[string]store.ManagedModel{"gpt-5.2": {PublicID: "gpt-5.2", GroupName: "g1", Status: 1}}}
 	sched := scheduler.New(fs)
 	q := &fakeQuota{}
 	usage := &recordingUsage{}
@@ -273,7 +273,7 @@ func TestResponsesCompact_Remote_FallsBackToSingleEffectiveGroup(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	fs := &fakeStore{models: map[string]store.ManagedModel{"gpt-5.2": {PublicID: "gpt-5.2", GroupName: store.DefaultGroupName, Status: 1}}}
+	fs := &fakeStore{models: map[string]store.ManagedModel{"gpt-5.2": {PublicID: "gpt-5.2", GroupName: "solo", Status: 1}}}
 	sched := scheduler.New(fs)
 	q := &fakeQuota{}
 	features := staticFeatures{fs: store.FeatureState{BillingDisabled: false}}
@@ -304,6 +304,49 @@ func TestResponsesCompact_Remote_FallsBackToSingleEffectiveGroup(t *testing.T) {
 	}
 }
 
+func TestResponsesCompact_Remote_RejectsModelOutsideAllowedGroups(t *testing.T) {
+	var attempts int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_ok"}`))
+	}))
+	defer ts.Close()
+
+	fs := &fakeStore{models: map[string]store.ManagedModel{"gpt-5.2": {PublicID: "gpt-5.2", GroupName: "g1", Status: 1}}}
+	sched := scheduler.New(fs)
+	q := &fakeQuota{}
+	features := staticFeatures{fs: store.FeatureState{BillingDisabled: false}}
+	compactGateway := upstream.NewCompactGatewayClient(ts.URL, "gwk_test", 5*time.Second)
+	h := NewHandler(fs, fs, sched, DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		t.Fatalf("unexpected scheduler-based upstream call")
+		return nil, nil
+	}), nil, features, q, fakeAudit{}, &recordingUsage{}, nil, upstream.SSEPumpOptions{}, compactGateway)
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{"solo"}}
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses/compact", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","session_id":"s1"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.ResponsesCompact), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "无权限使用该模型") {
+		t.Fatalf("expected unauthorized model error, got body=%s", rr.Body.String())
+	}
+	if attempts != 0 {
+		t.Fatalf("expected no gateway attempts, got=%d", attempts)
+	}
+	if len(q.reserveCalls) != 0 {
+		t.Fatalf("expected reserve not called, got=%d", len(q.reserveCalls))
+	}
+}
+
 func TestResponsesCompact_Remote_ExhaustsGroupsWhenGatewayReportsGroupUnavailable(t *testing.T) {
 	var attempts []string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -316,7 +359,7 @@ func TestResponsesCompact_Remote_ExhaustsGroupsWhenGatewayReportsGroupUnavailabl
 	}))
 	defer ts.Close()
 
-	fs := &fakeStore{models: map[string]store.ManagedModel{"gpt-5.2": {PublicID: "gpt-5.2", GroupName: store.DefaultGroupName, Status: 1}}}
+	fs := &fakeStore{models: map[string]store.ManagedModel{"gpt-5.2": {PublicID: "gpt-5.2", GroupName: "g1", Status: 1}}}
 	sched := scheduler.New(fs)
 	q := &fakeQuota{}
 	features := staticFeatures{fs: store.FeatureState{BillingDisabled: false}}
@@ -373,7 +416,7 @@ func TestResponsesCompact_Remote_FailsOverToNextGroupOnGroupUnavailable(t *testi
 	}))
 	defer ts.Close()
 
-	fs := &fakeStore{models: map[string]store.ManagedModel{"gpt-5.2": {PublicID: "gpt-5.2", GroupName: store.DefaultGroupName, Status: 1}}}
+	fs := &fakeStore{models: map[string]store.ManagedModel{"gpt-5.2": {PublicID: "gpt-5.2", GroupName: "g1", Status: 1}}}
 	sched := scheduler.New(fs)
 	q := &fakeQuota{}
 	features := staticFeatures{fs: store.FeatureState{BillingDisabled: false}}
@@ -419,7 +462,7 @@ func TestResponsesCompact_Remote_IgnoresRouteGroupResponseHeader(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	fs := &fakeStore{models: map[string]store.ManagedModel{"gpt-5.2": {PublicID: "gpt-5.2", GroupName: store.DefaultGroupName, Status: 1}}}
+	fs := &fakeStore{models: map[string]store.ManagedModel{"gpt-5.2": {PublicID: "gpt-5.2", GroupName: "g1", Status: 1}}}
 	sched := scheduler.New(fs)
 	q := &fakeQuota{}
 	usage := &recordingUsage{}
