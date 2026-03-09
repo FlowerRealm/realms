@@ -12,6 +12,7 @@ import (
 )
 
 var errGroupExhausted = errors.New("group exhausted")
+var ErrSequentialStartMissing = errors.New("sequential start missing")
 
 type ChannelGroupStore interface {
 	GetChannelGroupByName(ctx context.Context, name string) (store.ChannelGroup, error)
@@ -214,6 +215,8 @@ func (r *GroupRouter) nextFromOrderedGroupsSequential(ctx context.Context) (Sele
 			if r.sequentialStartExclusive {
 				startIdx++
 			}
+		} else {
+			return Selection{}, ErrSequentialStartMissing
 		}
 	}
 	if startIdx < 0 {
@@ -228,8 +231,18 @@ func (r *GroupRouter) nextFromOrderedGroupsSequential(ctx context.Context) (Sele
 
 	fastModeUnsupported := false
 	hasNonFastModeFailure := false
+	bestBannedID := int64(0)
+	bestBannedUntil := time.Time{}
+	bestBannedRouteGroup := ""
 	for _, cand := range ordered[startIdx:] {
 		if r.sched.state != nil && r.sched.state.IsChannelBanned(cand.ChannelID, now) {
+			if until, ok := r.sched.state.ChannelBanUntil(cand.ChannelID, now); ok {
+				if bestBannedID == 0 || until.Before(bestBannedUntil) {
+					bestBannedID = cand.ChannelID
+					bestBannedUntil = until
+					bestBannedRouteGroup = cand.RouteGroup
+				}
+			}
 			continue
 		}
 		cons := r.cons
@@ -247,6 +260,17 @@ func (r *GroupRouter) nextFromOrderedGroupsSequential(ctx context.Context) (Sele
 		r.sequentialStartExclusive = false
 		sel.RouteGroup = cand.RouteGroup
 		return sel, nil
+	}
+	if bestBannedID != 0 {
+		cons := r.cons
+		cons.RequireChannelID = bestBannedID
+		sel, err := r.sched.SelectWithConstraintsAllowBannedRequiredChannel(ctx, r.userID, r.routeKeyHash, cons)
+		if err == nil {
+			r.sequentialStartChannelID = bestBannedID
+			r.sequentialStartExclusive = false
+			sel.RouteGroup = bestBannedRouteGroup
+			return sel, nil
+		}
 	}
 	if fastModeUnsupported && !hasNonFastModeFailure {
 		return Selection{}, ErrFastModeUnsupported

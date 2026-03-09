@@ -2264,6 +2264,94 @@ func TestResponses_CodexSession_BindingPersistsCredentialAcrossHandlerInstances(
 	}
 }
 
+func TestResponses_CodexSession_ClearsStaleStartBindingBeforeRestartingFromHead(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 0},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+			2: {
+				{ID: 22, ChannelID: 2, BaseURL: "https://b.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+			},
+			22: {
+				{ID: 222, EndpointID: 22, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 2, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+				{ID: 2, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	doer1 := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+	sched1 := scheduler.New(fs)
+	h1 := NewHandler(fs, fs, sched1, doer1, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+
+	req1 := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses",
+		bytes.NewReader([]byte(`{"model":"gpt-5.2","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":false,"prompt_cache_key":"rk_stale_start"}`)))
+	req1.Header.Set("Content-Type", "application/json")
+	req1 = req1.WithContext(auth.WithPrincipal(req1.Context(), p))
+	rr1 := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h1.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr1, req1)
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr1.Code, rr1.Body.String())
+	}
+
+	fs.channels = []store.UpstreamChannel{
+		{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+	}
+	fs.bindings["gpt-5.2"] = []store.ChannelModelBinding{
+		{ID: 2, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+	}
+
+	doer2 := &okDoer{}
+	sched2 := scheduler.New(fs)
+	h2 := NewHandler(fs, fs, sched2, doer2, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+
+	req2 := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses",
+		bytes.NewReader([]byte(`{"model":"gpt-5.2","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}],"stream":false,"prompt_cache_key":"rk_stale_start"}`)))
+	req2.Header.Set("Content-Type", "application/json")
+	req2 = req2.WithContext(auth.WithPrincipal(req2.Context(), p))
+	rr2 := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h2.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr2.Code, rr2.Body.String())
+	}
+	if got := rr2.Header().Get("X-Realms-Codex-Sticky-Cleared"); got != "1" {
+		t.Fatalf("expected stale sticky header cleared, got=%q", got)
+	}
+	if len(doer2.calls) != 1 {
+		t.Fatalf("expected 1 upstream call, got=%d", len(doer2.calls))
+	}
+	if doer2.calls[0].ChannelID != 1 {
+		t.Fatalf("expected restart from head to channel 1, got=%d", doer2.calls[0].ChannelID)
+	}
+}
+
 func TestResponses_AuditFailoverDoesNotRecordResponseBody(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{

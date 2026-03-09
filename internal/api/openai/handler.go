@@ -650,6 +650,20 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 				h.finalizeUsageEvent(r, usageID, nil, http.StatusBadRequest, "service_tier", msg, time.Since(reqStart), 0, stream, reqBytes, 0)
 				return
 			}
+			if bindingActive && errors.Is(err, scheduler.ErrSequentialStartMissing) {
+				h.clearCodexStickyBindingBestEffort(r.Context(), p.UserID, stickyRouteKeyHash)
+				bindingActive = false
+				cons.StartChannelID = 0
+				cons.RequireChannelID = 0
+				cons.RequireCredentialKey = ""
+				w.Header().Set("X-Realms-Codex-Sticky-Cleared", "1")
+				w.Header().Set("X-Realms-Codex-Prev-Channel", strconv.FormatInt(boundRoute.channelID, 10))
+				if strings.TrimSpace(boundRoute.credentialKey) != "" {
+					w.Header().Set("X-Realms-Codex-Prev-Credential", boundRoute.credentialKey)
+				}
+				router = scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
+				continue
+			}
 			if bindingCredentialPinned {
 				bindingCredentialPinned = false
 				cons.RequireChannelID = 0

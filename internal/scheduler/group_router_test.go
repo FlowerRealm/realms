@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -374,6 +375,91 @@ func TestGroupRouter_Next_SequentialChannelFailoverIgnoresGroupPointer(t *testin
 	}
 	if sel.ChannelID != 2 {
 		t.Fatalf("expected sequential failover to ignore pinned pointer and pick channel=2, got=%d", sel.ChannelID)
+	}
+}
+
+func TestGroupRouter_Next_SequentialChannelFailoverMissingStartReturnsExplicitError(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Groups: "g0"},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1}},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {{ID: 101, EndpointID: 11, Status: 1}},
+		},
+	}
+	s := New(fs)
+
+	g0 := store.ChannelGroup{ID: 1, Name: "g0", Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	gs := &fakeGroupStore{
+		groupsByID:   map[int64]store.ChannelGroup{1: g0},
+		groupsByName: map[string]store.ChannelGroup{g0.Name: g0},
+		members: map[int64][]store.ChannelGroupMemberDetail{
+			1: {
+				{MemberID: 1, ParentGroupID: 1, MemberChannelID: ptrInt64(1), MemberChannelType: ptrString(store.UpstreamTypeOpenAICompatible), MemberChannelGroups: ptrString(g0.Name), Priority: 100, CreatedAt: time.Now(), UpdatedAt: time.Now()},
+			},
+		},
+	}
+
+	router := NewGroupRouter(gs, s, 10, "", Constraints{
+		AllowGroups:               map[string]struct{}{g0.Name: {}},
+		AllowGroupOrder:           []string{g0.Name},
+		SequentialChannelFailover: true,
+		StartChannelID:            99,
+	})
+
+	if _, err := router.nextFromOrderedGroupsSequential(context.Background()); !errors.Is(err, ErrSequentialStartMissing) {
+		t.Fatalf("expected ErrSequentialStartMissing, got=%v", err)
+	}
+}
+
+func TestGroupRouter_Next_SequentialChannelFailoverFallsBackToNearestUnban(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Groups: "g0"},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Groups: "g0"},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1}},
+			2: {{ID: 21, ChannelID: 2, BaseURL: "https://b.example", Status: 1}},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {{ID: 101, EndpointID: 11, Status: 1}},
+			21: {{ID: 201, EndpointID: 21, Status: 1}},
+		},
+	}
+	s := New(fs)
+
+	now := time.Now()
+	s.state.BanChannelImmediate(1, now, 20*time.Second)
+	s.state.BanChannelImmediate(2, now, 10*time.Second)
+
+	g0 := store.ChannelGroup{ID: 1, Name: "g0", Status: 1, CreatedAt: now, UpdatedAt: now}
+	gs := &fakeGroupStore{
+		groupsByID:   map[int64]store.ChannelGroup{1: g0},
+		groupsByName: map[string]store.ChannelGroup{g0.Name: g0},
+		members: map[int64][]store.ChannelGroupMemberDetail{
+			1: {
+				{MemberID: 1, ParentGroupID: 1, MemberChannelID: ptrInt64(1), MemberChannelType: ptrString(store.UpstreamTypeOpenAICompatible), MemberChannelGroups: ptrString(g0.Name), Priority: 200, CreatedAt: now, UpdatedAt: now},
+				{MemberID: 2, ParentGroupID: 1, MemberChannelID: ptrInt64(2), MemberChannelType: ptrString(store.UpstreamTypeOpenAICompatible), MemberChannelGroups: ptrString(g0.Name), Priority: 100, CreatedAt: now, UpdatedAt: now},
+			},
+		},
+	}
+
+	router := NewGroupRouter(gs, s, 10, "", Constraints{
+		AllowGroups:               map[string]struct{}{g0.Name: {}},
+		AllowGroupOrder:           []string{g0.Name},
+		SequentialChannelFailover: true,
+	})
+
+	sel, err := router.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next err: %v", err)
+	}
+	if sel.ChannelID != 2 {
+		t.Fatalf("expected nearest-unban channel=2, got=%d", sel.ChannelID)
 	}
 }
 
