@@ -241,11 +241,13 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(r.Context().Err(), context.Canceled) {
+				voidUsage()
 				writeOpenAIError(w, 499, "api_error", "Client disconnected before upstream completed")
 				h.finalizeUsageEvent(r, usageID, nil, 499, "client_disconnect", "client_disconnect", time.Since(reqStart), 0, false, reqBytes, 0)
 				return
 			}
 			if errors.Is(r.Context().Err(), context.DeadlineExceeded) {
+				voidUsage()
 				timeoutMs := int64(h.compactGateway.Timeout() / time.Millisecond)
 				if timeoutMs < 0 {
 					timeoutMs = 0
