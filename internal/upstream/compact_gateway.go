@@ -75,14 +75,16 @@ func (c *CompactGatewayClient) forward(ctx context.Context, downstream *http.Req
 
 	full := c.baseURL + path
 	reqCtx := ctx
-	cancel := func() {}
+	var cancel context.CancelFunc
 	if c.timeout > 0 {
 		reqCtx, cancel = context.WithTimeout(ctx, c.timeout)
 	}
-	defer cancel()
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, full, bytes.NewReader(body))
 	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		return nil, err
 	}
 
@@ -124,7 +126,13 @@ func (c *CompactGatewayClient) forward(ctx context.Context, downstream *http.Req
 
 	resp, err := c.client.Do(req)
 	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		return nil, err
+	}
+	if cancel != nil && resp.Body != nil {
+		resp.Body = cancelOnClose(resp.Body, cancel)
 	}
 	return resp, nil
 }
