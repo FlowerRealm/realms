@@ -30,7 +30,7 @@ func TestApplyCodexOAuthTransform_Basics(t *testing.T) {
 	seedOpencodeInstructionsCache(t, "cached-instructions")
 
 	reqBody := map[string]any{
-		"model":             "gpt-5",
+		"model":             "gpt-5.4",
 		"stream":            false,
 		"store":             true,
 		"max_output_tokens": 123,
@@ -45,8 +45,8 @@ func TestApplyCodexOAuthTransform_Basics(t *testing.T) {
 	if !out.Modified {
 		t.Fatalf("expected Modified=true")
 	}
-	if got := strings.TrimSpace(reqBody["model"].(string)); got != "gpt-5.1" {
-		t.Fatalf("model = %q, want %q", got, "gpt-5.1")
+	if got := strings.TrimSpace(reqBody["model"].(string)); got != "gpt-5.4" {
+		t.Fatalf("model = %q, want %q", got, "gpt-5.4")
 	}
 	if v, ok := reqBody["store"].(bool); !ok || v != false {
 		t.Fatalf("store = (%T)%v, want bool(false)", reqBody["store"], reqBody["store"])

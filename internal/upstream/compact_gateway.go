@@ -11,15 +11,15 @@ import (
 	"time"
 )
 
-type Sub2APIClient struct {
+type CompactGatewayClient struct {
 	baseURL    string
 	gatewayKey string
 	timeout    time.Duration
 	client     *http.Client
 }
 
-func NewSub2APIClient(baseURL string, gatewayKey string, timeout time.Duration) *Sub2APIClient {
-	return &Sub2APIClient{
+func NewCompactGatewayClient(baseURL string, gatewayKey string, timeout time.Duration) *CompactGatewayClient {
+	return &CompactGatewayClient{
 		baseURL:    strings.TrimRight(strings.TrimSpace(baseURL), "/"),
 		gatewayKey: strings.TrimSpace(gatewayKey),
 		timeout:    timeout,
@@ -30,36 +30,36 @@ func NewSub2APIClient(baseURL string, gatewayKey string, timeout time.Duration) 
 	}
 }
 
-func (c *Sub2APIClient) Configured() bool {
+func (c *CompactGatewayClient) Configured() bool {
 	return c != nil && strings.TrimSpace(c.baseURL) != "" && strings.TrimSpace(c.gatewayKey) != ""
 }
 
-func (c *Sub2APIClient) Timeout() time.Duration {
+func (c *CompactGatewayClient) Timeout() time.Duration {
 	if c == nil {
 		return 0
 	}
 	return c.timeout
 }
 
-func (c *Sub2APIClient) ForwardResponsesCompact(ctx context.Context, downstream *http.Request, body []byte, traceID string) (*http.Response, error) {
+func (c *CompactGatewayClient) ForwardResponsesCompact(ctx context.Context, downstream *http.Request, body []byte, traceID string) (*http.Response, error) {
 	return c.forward(ctx, downstream, "/v1/responses/compact", body, traceID)
 }
 
-func (c *Sub2APIClient) forward(ctx context.Context, downstream *http.Request, path string, body []byte, traceID string) (*http.Response, error) {
+func (c *CompactGatewayClient) forward(ctx context.Context, downstream *http.Request, path string, body []byte, traceID string) (*http.Response, error) {
 	if c == nil {
-		return nil, errors.New("sub2api client is nil")
+		return nil, errors.New("compact gateway client is nil")
 	}
 	if !c.Configured() {
-		return nil, errors.New("sub2api is not configured")
+		return nil, errors.New("compact gateway is not configured")
 	}
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return nil, errors.New("sub2api path is empty")
+		return nil, errors.New("compact gateway path is empty")
 	}
 
 	base, err := url.Parse(c.baseURL)
 	if err != nil || base == nil || base.Host == "" {
-		return nil, fmt.Errorf("invalid sub2api base url: %w", err)
+		return nil, fmt.Errorf("invalid compact gateway base url: %w", err)
 	}
 
 	full := c.baseURL + path

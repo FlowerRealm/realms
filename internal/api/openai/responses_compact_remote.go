@@ -39,6 +39,33 @@ func extractSessionIDForCompact(headers http.Header, body map[string]any) string
 	return ""
 }
 
+func extractRouteGroupForCompact(headers http.Header) string {
+	for _, name := range []string{"X-Realms-Route-Group", "X-Route-Group", "route_group"} {
+		if v := strings.TrimSpace(headers.Get(name)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func resolveCompactRouteGroup(groupHeader string, principal auth.Principal) (*string, error) {
+	groupName := strings.TrimSpace(groupHeader)
+	if groupName != "" {
+		return &groupName, nil
+	}
+	ags := allowGroupsFromPrincipal(principal)
+	if len(ags.Order) == 1 {
+		only := strings.TrimSpace(ags.Order[0])
+		if only != "" {
+			return &only, nil
+		}
+	}
+	if len(ags.Order) == 0 {
+		return nil, errors.New("compact route_group missing and token has no effective channel groups")
+	}
+	return nil, errors.New("compact route_group missing and token has multiple effective channel groups")
+}
+
 func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 	reqStart := time.Now()
 	p, ok := auth.PrincipalFromContext(r.Context())
@@ -95,8 +122,8 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.sub2api == nil || !h.sub2api.Configured() {
-		writeOpenAIError(w, http.StatusInternalServerError, "api_error", "SUB2API is not configured")
+	if h.compactGateway == nil || !h.compactGateway.Configured() {
+		writeOpenAIError(w, http.StatusInternalServerError, "api_error", "compact gateway is not configured")
 		return
 	}
 
@@ -153,12 +180,12 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 		_ = h.quota.Void(bookCtx, usageID)
 	}
 
-	resp, err := h.sub2api.ForwardResponsesCompact(r.Context(), r, body, middleware.GetRequestID(r.Context()))
+	resp, err := h.compactGateway.ForwardResponsesCompact(r.Context(), r, body, middleware.GetRequestID(r.Context()))
 	if err != nil {
 		voidUsage()
 
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(r.Context().Err(), context.DeadlineExceeded) {
-			timeoutMs := int64(h.sub2api.Timeout() / time.Millisecond)
+			timeoutMs := int64(h.compactGateway.Timeout() / time.Millisecond)
 			if timeoutMs < 0 {
 				timeoutMs = 0
 			}
@@ -183,6 +210,19 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
+
+	var routeGroup *string
+	if usageID != 0 && h.quota != nil {
+		var routeGroupErr error
+		routeGroup, routeGroupErr = resolveCompactRouteGroup(extractRouteGroupForCompact(resp.Header), p)
+		if routeGroupErr != nil {
+			voidUsage()
+			writeOpenAIError(w, http.StatusBadGateway, "billing_error", routeGroupErr.Error())
+			h.maybeLogProxyFailure(r.Context(), r, p, nil, modelPtr, http.StatusBadGateway, "compact_gateway_route_group_missing", routeGroupErr.Error(), time.Since(reqStart), false)
+			h.finalizeUsageEvent(r, usageID, nil, http.StatusBadGateway, "compact_gateway_route_group_missing", routeGroupErr.Error(), time.Since(reqStart), 0, false, reqBytes, 0)
+			return
+		}
+	}
 
 	cw := &countingResponseWriter{ResponseWriter: w}
 	copyResponseHeaders(cw.Header(), resp.Header)
@@ -225,6 +265,7 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 			UsageEventID:       usageID,
 			Model:              modelPtr,
 			ServiceTier:        serviceTier,
+			RouteGroup:         routeGroup,
 			InputTokens:        inTok,
 			CachedInputTokens:  cachedInTok,
 			OutputTokens:       outTok,

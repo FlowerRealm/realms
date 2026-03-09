@@ -1850,10 +1850,10 @@ func TestResponsesCompact_RemoteNotUsingLegacyStickyRouting(t *testing.T) {
 	rr := httptest.NewRecorder()
 	middleware.Chain(http.HandlerFunc(h.ResponsesCompact), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
 	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500 without sub2api config, got=%d body=%s", rr.Code, rr.Body.String())
+		t.Fatalf("expected 500 without compact gateway config, got=%d body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "SUB2API is not configured") {
-		t.Fatalf("expected sub2api config error, got body=%s", rr.Body.String())
+	if !strings.Contains(rr.Body.String(), "compact gateway is not configured") {
+		t.Fatalf("expected compact gateway config error, got body=%s", rr.Body.String())
 	}
 }
 

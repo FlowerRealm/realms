@@ -14,19 +14,19 @@ import (
 )
 
 type Config struct {
-	Env        string           `yaml:"env"`
-	Mode       Mode             `yaml:"mode"`
-	Server     ServerConfig     `yaml:"server"`
-	DB         DBConfig         `yaml:"db"`
-	Redis      RedisConfig      `yaml:"redis"`
-	Gateway    GatewayConfig    `yaml:"gateway"`
-	Sub2API    Sub2APIConfig    `yaml:"sub2api"`
-	Security   SecurityConfig   `yaml:"security"`
-	Debug      DebugConfig      `yaml:"debug"`
-	Billing    BillingConfig    `yaml:"billing"`
-	SMTP       SMTPConfig       `yaml:"smtp"`
-	EmailVerif EmailVerifConfig `yaml:"email_verification"`
-	Tickets    TicketsConfig    `yaml:"tickets"`
+	Env            string               `yaml:"env"`
+	Mode           Mode                 `yaml:"mode"`
+	Server         ServerConfig         `yaml:"server"`
+	DB             DBConfig             `yaml:"db"`
+	Redis          RedisConfig          `yaml:"redis"`
+	Gateway        GatewayConfig        `yaml:"gateway"`
+	CompactGateway CompactGatewayConfig `yaml:"compact_gateway"`
+	Security       SecurityConfig       `yaml:"security"`
+	Debug          DebugConfig          `yaml:"debug"`
+	Billing        BillingConfig        `yaml:"billing"`
+	SMTP           SMTPConfig           `yaml:"smtp"`
+	EmailVerif     EmailVerifConfig     `yaml:"email_verification"`
+	Tickets        TicketsConfig        `yaml:"tickets"`
 
 	// ChannelTestCLIRunnerURL 是可选的 CLI Runner 服务地址（如 http://cli-runner:3100）。
 	// 配置后启用基于 CLI（Codex/Claude/Gemini）的渠道测试功能。
@@ -119,7 +119,7 @@ type GatewayConfig struct {
 	EnableErrorPassthrough bool `yaml:"enable_error_passthrough"`
 }
 
-type Sub2APIConfig struct {
+type CompactGatewayConfig struct {
 	BaseURL    string `yaml:"base_url"`
 	GatewayKey string `yaml:"gateway_key"`
 	TimeoutMS  int    `yaml:"timeout_ms"`
@@ -230,20 +230,20 @@ func normalizeAndValidate(cfg Config) (Config, error) {
 		return Config{}, fmt.Errorf("db.driver 不支持：%s（仅支持 mysql/sqlite）", cfg.DB.Driver)
 	}
 
-	cfg.Sub2API.BaseURL = strings.TrimSpace(cfg.Sub2API.BaseURL)
-	if cfg.Sub2API.BaseURL != "" {
-		sub2BaseURL, err := NormalizeHTTPBaseURL(cfg.Sub2API.BaseURL, "sub2api.base_url")
+	cfg.CompactGateway.BaseURL = strings.TrimSpace(cfg.CompactGateway.BaseURL)
+	if cfg.CompactGateway.BaseURL != "" {
+		compactGatewayBaseURL, err := NormalizeHTTPBaseURL(cfg.CompactGateway.BaseURL, "compact_gateway.base_url")
 		if err != nil {
 			return Config{}, err
 		}
-		cfg.Sub2API.BaseURL = sub2BaseURL
+		cfg.CompactGateway.BaseURL = compactGatewayBaseURL
 	}
-	cfg.Sub2API.GatewayKey = strings.TrimSpace(cfg.Sub2API.GatewayKey)
-	if cfg.Sub2API.TimeoutMS <= 0 {
-		cfg.Sub2API.TimeoutMS = 300000
+	cfg.CompactGateway.GatewayKey = strings.TrimSpace(cfg.CompactGateway.GatewayKey)
+	if cfg.CompactGateway.TimeoutMS <= 0 {
+		cfg.CompactGateway.TimeoutMS = 300000
 	}
-	if cfg.Sub2API.TimeoutMS < 1000 {
-		cfg.Sub2API.TimeoutMS = 1000
+	if cfg.CompactGateway.TimeoutMS < 1000 {
+		cfg.CompactGateway.TimeoutMS = 1000
 	}
 
 	cfg.Redis.Addr = strings.TrimSpace(cfg.Redis.Addr)
@@ -387,7 +387,7 @@ func defaultConfig() Config {
 		Server: ServerConfig{
 			Addr: ":8080",
 		},
-		Sub2API: Sub2APIConfig{
+		CompactGateway: CompactGatewayConfig{
 			BaseURL:    "",
 			GatewayKey: "",
 			TimeoutMS:  300000,
@@ -537,15 +537,15 @@ func applyEnvOverrides(cfg *Config) {
 		}
 	}
 
-	if v := os.Getenv("REALMS_SUB2API_BASE_URL"); v != "" {
-		cfg.Sub2API.BaseURL = v
+	if v := os.Getenv("REALMS_COMPACT_GATEWAY_BASE_URL"); v != "" {
+		cfg.CompactGateway.BaseURL = v
 	}
-	if v := os.Getenv("REALMS_SUB2API_GATEWAY_KEY"); v != "" {
-		cfg.Sub2API.GatewayKey = v
+	if v := os.Getenv("REALMS_COMPACT_GATEWAY_KEY"); v != "" {
+		cfg.CompactGateway.GatewayKey = v
 	}
-	if v := os.Getenv("REALMS_SUB2API_TIMEOUT_MS"); v != "" {
+	if v := os.Getenv("REALMS_COMPACT_GATEWAY_TIMEOUT_MS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Sub2API.TimeoutMS = n
+			cfg.CompactGateway.TimeoutMS = n
 		}
 	}
 	if v := os.Getenv("REALMS_ALLOW_OPEN_REGISTRATION"); v != "" {

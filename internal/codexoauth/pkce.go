@@ -21,7 +21,7 @@ func newRandomHex(bytesLen int) (string, error) {
 }
 
 func NewPKCE() (verifier string, challenge string, err error) {
-	// 对齐 sub2api：verifier 使用 64 bytes 随机数的 hex 字符串。
+	// 对齐 compact gateway：verifier 使用 64 bytes 随机数的 hex 字符串。
 	v, err := newRandomHex(64)
 	if err != nil {
 		return "", "", err

@@ -270,7 +270,7 @@ func routeKeyHashFromText(content string) string {
 		return ""
 	}
 	sum := sha256.Sum256([]byte(content))
-	// 对齐 sub2api：使用前 16 字节（32 hex）作为会话键。
+	// 对齐 compact gateway：使用前 16 字节（32 hex）作为会话键。
 	return hex.EncodeToString(sum[:16])
 }
 

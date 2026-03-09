@@ -60,7 +60,7 @@ type Handler struct {
 	codexRouteCache *codexSessionRouteCache
 	sessionBindings SessionBindingStore
 
-	sub2api *upstream.Sub2APIClient
+	compactGateway *upstream.CompactGatewayClient
 }
 
 type Doer interface {
@@ -104,7 +104,7 @@ type OpenAIObjectRefStore interface {
 	DeleteOpenAIObjectRef(ctx context.Context, objectType string, objectID string) error
 }
 
-func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *scheduler.Scheduler, exec Doer, proxyLog *proxylog.Writer, features FeatureResolver, qp quota.Provider, audit AuditSink, usage UsageEventSink, refs OpenAIObjectRefStore, sseOpts upstream.SSEPumpOptions, sub2api *upstream.Sub2APIClient) *Handler {
+func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *scheduler.Scheduler, exec Doer, proxyLog *proxylog.Writer, features FeatureResolver, qp quota.Provider, audit AuditSink, usage UsageEventSink, refs OpenAIObjectRefStore, sseOpts upstream.SSEPumpOptions, compactGateway *upstream.CompactGatewayClient) *Handler {
 	var sessionBindings SessionBindingStore
 	for _, candidate := range []any{models, groups, features, audit, usage, refs} {
 		if candidate == nil {
@@ -130,7 +130,7 @@ func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *
 		sseOpts:         sseOpts,
 		codexRouteCache: newCodexSessionRouteCache(),
 		sessionBindings: sessionBindings,
-		sub2api:         sub2api,
+		compactGateway:  compactGateway,
 	}
 }
 
