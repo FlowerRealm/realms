@@ -555,9 +555,15 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	boundRoute, boundOK := h.loadCodexStickyBinding(r.Context(), p.UserID, stickyRouteKeyHash, time.Now())
 	bindingActive := false
 	bindingMovedHeaderSet := false
+	bindingCredentialPinned := false
 	if stickyRouteKeyHash != "" && boundOK && boundRoute.channelID > 0 {
 		bindingActive = true
 		cons.StartChannelID = boundRoute.channelID
+		if strings.TrimSpace(boundRoute.credentialKey) != "" {
+			bindingCredentialPinned = true
+			cons.RequireChannelID = boundRoute.channelID
+			cons.RequireCredentialKey = boundRoute.credentialKey
+		}
 	}
 
 	usageID := int64(0)
@@ -644,6 +650,14 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 				h.finalizeUsageEvent(r, usageID, nil, http.StatusBadRequest, "service_tier", msg, time.Since(reqStart), 0, stream, reqBytes, 0)
 				return
 			}
+			if bindingCredentialPinned {
+				bindingCredentialPinned = false
+				cons.RequireChannelID = 0
+				cons.RequireCredentialKey = ""
+				cons.StartChannelID = boundRoute.channelID
+				router = scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
+				continue
+			}
 			break
 		}
 		selCopy := sel
@@ -673,6 +687,14 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 
 		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), usageID, reqStart, reqBytes, loopStart, 2, &bestFailure) {
 			return
+		}
+		if bindingCredentialPinned {
+			bindingCredentialPinned = false
+			cons.RequireChannelID = 0
+			cons.RequireCredentialKey = ""
+			cons.StartChannelID = boundRoute.channelID
+			router = scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
+			continue
 		}
 		switches++
 		if h.failoverExhausted(loopStart, switches) {
