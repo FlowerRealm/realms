@@ -201,6 +201,197 @@ func TestUsageEvents_UserResponse_HidesUpstreamChannel(t *testing.T) {
 	}
 }
 
+func TestUsageLeaderboard_ReturnsRankedUsersByWindow(t *testing.T) {
+	st, db, closeDB := newTestSQLiteStoreWithDB(t)
+	defer closeDB()
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	aliceID, err := st.CreateUser(ctx, "alice@example.com", "alice", pwHash, store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser(alice): %v", err)
+	}
+	bobID, err := st.CreateUser(ctx, "bob@example.com", "bob", pwHash, store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser(bob): %v", err)
+	}
+	carolID, err := st.CreateUser(ctx, "carol@example.com", "carol", pwHash, store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser(carol): %v", err)
+	}
+
+	mustToken := func(userID int64, raw string) int64 {
+		t.Helper()
+		name := "token-" + raw
+		tokenID, _, err := st.CreateUserToken(ctx, userID, &name, raw)
+		if err != nil {
+			t.Fatalf("CreateUserToken(%s): %v", raw, err)
+		}
+		return tokenID
+	}
+
+	aliceTokenID := mustToken(aliceID, "sk-alice")
+	bobTokenID := mustToken(bobID, "sk-bob")
+	carolTokenID := mustToken(carolID, "sk-carol")
+
+	shanghai, err := loadAdminLocation(defaultAdminTimeZone)
+	if err != nil {
+		t.Fatalf("loadAdminLocation: %v", err)
+	}
+	now := time.Date(2026, 3, 9, 14, 30, 0, 0, shanghai).UTC()
+	prevNow := usageLeaderboardNow
+	usageLeaderboardNow = func() time.Time { return now }
+	defer func() {
+		usageLeaderboardNow = prevNow
+	}()
+
+	insertUsageEventRow(t, db, "req_lb_alice_today", aliceID, aliceTokenID, store.UsageStateCommitted, time.Date(2026, 3, 9, 1, 30, 0, 0, shanghai), 10, 10, "30", "0", 100, 10)
+	insertUsageEventRow(t, db, "req_lb_bob_today", bobID, bobTokenID, store.UsageStateCommitted, time.Date(2026, 3, 9, 10, 0, 0, 0, shanghai), 10, 10, "20", "0", 100, 10)
+	insertUsageEventRow(t, db, "req_lb_bob_before_today", bobID, bobTokenID, store.UsageStateCommitted, time.Date(2026, 3, 2, 23, 50, 0, 0, shanghai), 10, 10, "5", "0", 100, 10)
+	insertUsageEventRow(t, db, "req_lb_carol_week", carolID, carolTokenID, store.UsageStateCommitted, time.Date(2026, 3, 5, 9, 0, 0, 0, shanghai), 10, 10, "90", "0", 100, 10)
+	insertUsageEventRow(t, db, "req_lb_alice_month", aliceID, aliceTokenID, store.UsageStateCommitted, time.Date(2026, 2, 12, 8, 0, 0, 0, shanghai), 10, 10, "15", "0", 100, 10)
+	insertUsageEventRow(t, db, "req_lb_carol_before_month", carolID, carolTokenID, store.UsageStateCommitted, time.Date(2026, 2, 7, 23, 0, 0, 0, shanghai), 10, 10, "200", "0", 100, 10)
+
+	engine, cookieName := newTestEngine(t, st)
+	sessionCookie := loginCookie(t, engine, cookieName, "alice@example.com", "password123")
+
+	call := func(window string) struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Window string `json:"window"`
+			Since  string `json:"since"`
+			Until  string `json:"until"`
+			Users  []struct {
+				Rank          int    `json:"rank"`
+				DisplayName   string `json:"display_name"`
+				CommittedUSD  string `json:"committed_usd"`
+				ReservedUSD   string `json:"reserved_usd"`
+				IsCurrentUser bool   `json:"is_current_user"`
+			} `json:"users"`
+		} `json:"data"`
+	} {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "http://example.com/api/usage/leaderboard?window="+window, nil)
+		req.Header.Set("Realms-User", strconv.FormatInt(aliceID, 10))
+		req.Header.Set("Cookie", sessionCookie)
+		rr := httptest.NewRecorder()
+		engine.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("leaderboard status=%d body=%s", rr.Code, rr.Body.String())
+		}
+		var got struct {
+			Success bool   `json:"success"`
+			Message string `json:"message"`
+			Data    struct {
+				Window string `json:"window"`
+				Since  string `json:"since"`
+				Until  string `json:"until"`
+				Users  []struct {
+					Rank          int    `json:"rank"`
+					DisplayName   string `json:"display_name"`
+					CommittedUSD  string `json:"committed_usd"`
+					ReservedUSD   string `json:"reserved_usd"`
+					IsCurrentUser bool   `json:"is_current_user"`
+				} `json:"users"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+			t.Fatalf("json.Unmarshal leaderboard: %v", err)
+		}
+		if !got.Success {
+			t.Fatalf("leaderboard expected success, got message=%q", got.Message)
+		}
+		return got
+	}
+
+	got1d := call("1d")
+	if got1d.Data.Window != "1d" {
+		t.Fatalf("expected window=1d, got %q", got1d.Data.Window)
+	}
+	if got1d.Data.Since != "2026-03-09T00:00:00+08:00" || got1d.Data.Until != "2026-03-09T14:30:00+08:00" {
+		t.Fatalf("unexpected 1d range: since=%q until=%q", got1d.Data.Since, got1d.Data.Until)
+	}
+	if len(got1d.Data.Users) != 2 {
+		t.Fatalf("expected 2 users in 1d leaderboard, got %d", len(got1d.Data.Users))
+	}
+	if got1d.Data.Users[0].DisplayName != "alice" || !got1d.Data.Users[0].IsCurrentUser || got1d.Data.Users[0].CommittedUSD != "30" {
+		t.Fatalf("unexpected first user in 1d leaderboard: %+v", got1d.Data.Users[0])
+	}
+	if got1d.Data.Users[1].DisplayName != "bob" || got1d.Data.Users[1].CommittedUSD != "20" {
+		t.Fatalf("unexpected second user in 1d leaderboard: %+v", got1d.Data.Users[1])
+	}
+
+	got7d := call("7d")
+	if len(got7d.Data.Users) != 3 {
+		t.Fatalf("expected 3 users in 7d leaderboard, got %d", len(got7d.Data.Users))
+	}
+	if got7d.Data.Since != "2026-03-03T00:00:00+08:00" || got7d.Data.Until != "2026-03-09T14:30:00+08:00" {
+		t.Fatalf("unexpected 7d range: since=%q until=%q", got7d.Data.Since, got7d.Data.Until)
+	}
+	if got7d.Data.Users[0].DisplayName != "carol" || got7d.Data.Users[0].CommittedUSD != "90" {
+		t.Fatalf("unexpected first user in 7d leaderboard: %+v", got7d.Data.Users[0])
+	}
+
+	got1mo := call("1mo")
+	if len(got1mo.Data.Users) != 3 {
+		t.Fatalf("expected 3 users in 1mo leaderboard, got %d", len(got1mo.Data.Users))
+	}
+	if got1mo.Data.Since != "2026-02-08T00:00:00+08:00" || got1mo.Data.Until != "2026-03-09T14:30:00+08:00" {
+		t.Fatalf("unexpected 1mo range: since=%q until=%q", got1mo.Data.Since, got1mo.Data.Until)
+	}
+	if got1mo.Data.Users[0].DisplayName != "carol" || got1mo.Data.Users[1].DisplayName != "alice" {
+		t.Fatalf("unexpected order in 1mo leaderboard: %+v", got1mo.Data.Users)
+	}
+	if got1mo.Data.Users[1].CommittedUSD != "45" {
+		t.Fatalf("expected alice month total to aggregate to 45, got %q", got1mo.Data.Users[1].CommittedUSD)
+	}
+}
+
+func TestUsageLeaderboard_RejectsInvalidWindow(t *testing.T) {
+	st, closeDB := newTestSQLiteStore(t)
+	defer closeDB()
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	userID, err := st.CreateUser(ctx, "invalid@example.com", "invalid", pwHash, store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	engine, cookieName := newTestEngine(t, st)
+	sessionCookie := loginCookie(t, engine, cookieName, "invalid@example.com", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/api/usage/leaderboard?window=90d", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("leaderboard status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal invalid leaderboard: %v", err)
+	}
+	if got.Success {
+		t.Fatalf("expected invalid window request to fail")
+	}
+	if got.Message != "window 仅支持 1d/7d/1mo" {
+		t.Fatalf("unexpected invalid window message: %q", got.Message)
+	}
+}
+
 func TestUsageEvents_User_IndexKeyFiltersByTokenName(t *testing.T) {
 	st, closeDB := newTestSQLiteStore(t)
 	defer closeDB()

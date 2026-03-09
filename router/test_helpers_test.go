@@ -18,6 +18,11 @@ import (
 )
 
 func newTestSQLiteStore(t *testing.T) (*store.Store, func()) {
+	st, _, cleanup := newTestSQLiteStoreWithDB(t)
+	return st, cleanup
+}
+
+func newTestSQLiteStoreWithDB(t *testing.T) (*store.Store, *sql.DB, func()) {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -34,7 +39,7 @@ func newTestSQLiteStore(t *testing.T) (*store.Store, func()) {
 	st := store.New(db)
 	st.SetDialect(store.DialectSQLite)
 
-	return st, func() { _ = db.Close() }
+	return st, db, func() { _ = db.Close() }
 }
 
 func newTestEngine(t *testing.T, st *store.Store) (*gin.Engine, string) {

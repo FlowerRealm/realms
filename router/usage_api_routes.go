@@ -2,6 +2,7 @@ package router
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -70,6 +71,25 @@ type usageTimeSeriesAPIResponse struct {
 	Points      []usageTimeSeriesPointAPI `json:"points"`
 }
 
+type usageLeaderboardUserAPI struct {
+	Rank          int             `json:"rank"`
+	DisplayName   string          `json:"display_name"`
+	CommittedUSD  decimal.Decimal `json:"committed_usd"`
+	ReservedUSD   decimal.Decimal `json:"reserved_usd"`
+	IsCurrentUser bool            `json:"is_current_user"`
+}
+
+type usageLeaderboardAPIResponse struct {
+	Window string                    `json:"window"`
+	Since  time.Time                 `json:"since"`
+	Until  time.Time                 `json:"until"`
+	Users  []usageLeaderboardUserAPI `json:"users"`
+}
+
+var usageLeaderboardNow = func() time.Time {
+	return time.Now().UTC()
+}
+
 func setUsageAPIRoutes(r gin.IRoutes, opts Options) {
 	authn := requireUserSession(opts)
 
@@ -77,6 +97,7 @@ func setUsageAPIRoutes(r gin.IRoutes, opts Options) {
 	r.GET("/usage/events", authn, usageEventsHandler(opts))
 	r.GET("/usage/events/:event_id/detail", authn, usageEventDetailHandler(opts))
 	r.GET("/usage/timeseries", authn, usageTimeSeriesHandler(opts))
+	r.GET("/usage/leaderboard", authn, usageLeaderboardHandler(opts))
 }
 
 type usageEventAPI struct {
@@ -586,6 +607,85 @@ func usageTimeSeriesHandler(opts Options) gin.HandlerFunc {
 	}
 }
 
+func usageLeaderboardHandler(opts Options) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if opts.Store == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			return
+		}
+		userID, ok := userIDFromContext(c)
+		if !ok {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "未登录"})
+			return
+		}
+
+		window := strings.TrimSpace(strings.ToLower(c.Query("window")))
+		if window == "" {
+			window = "7d"
+		}
+		loc, err := loadAdminLocation(defaultAdminTimeZone)
+		if err != nil || loc == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "排行榜时区初始化失败"})
+			return
+		}
+		now := usageLeaderboardNow()
+		since, until, err := usageLeaderboardRange(now, window, loc)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+			return
+		}
+
+		limit := 200
+		if v := strings.TrimSpace(c.Query("limit")); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "limit 不合法"})
+				return
+			}
+			limit = n
+		}
+		if limit <= 0 {
+			limit = 200
+		}
+		if limit > 200 {
+			limit = 200
+		}
+
+		rows, err := opts.Store.ListUsageTopUsers(c.Request.Context(), store.UsageTopUsersInput{
+			Since: since,
+			Until: until,
+			Now:   now,
+			Limit: limit,
+		})
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "排行榜查询失败"})
+			return
+		}
+
+		users := make([]usageLeaderboardUserAPI, 0, len(rows))
+		for i, row := range rows {
+			users = append(users, usageLeaderboardUserAPI{
+				Rank:          i + 1,
+				DisplayName:   usageLeaderboardDisplayName(row.Username, row.Email, row.UserID),
+				CommittedUSD:  row.CommittedUSD,
+				ReservedUSD:   row.ReservedUSD,
+				IsCurrentUser: row.UserID == userID,
+			})
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data": usageLeaderboardAPIResponse{
+				Window: window,
+				Since:  since.In(loc),
+				Until:  until.In(loc),
+				Users:  users,
+			},
+		})
+	}
+}
+
 func usageRequestLocation(c *gin.Context) (*time.Location, string, bool) {
 	tz := normalizeAdminTimeZoneName(strings.TrimSpace(c.Query("tz")))
 	if tz == "" {
@@ -640,4 +740,32 @@ func parseDateRangeInLocation(nowUTC time.Time, startStr, endStr string, loc *ti
 		untilLocal = nowLocal
 	}
 	return sinceLocal.UTC(), untilLocal.UTC(), sinceLocal, untilLocal, true
+}
+
+func usageLeaderboardRange(now time.Time, window string, loc *time.Location) (time.Time, time.Time, error) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	nowLocal := now.In(loc)
+	todayStartLocal := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc)
+	switch window {
+	case "1d":
+		return todayStartLocal.UTC(), now, nil
+	case "7d":
+		return todayStartLocal.AddDate(0, 0, -6).UTC(), now, nil
+	case "1mo":
+		return todayStartLocal.AddDate(0, 0, -29).UTC(), now, nil
+	default:
+		return time.Time{}, time.Time{}, errors.New("window 仅支持 1d/7d/1mo")
+	}
+}
+
+func usageLeaderboardDisplayName(username, email string, rankedUserID int64) string {
+	if name := strings.TrimSpace(username); name != "" {
+		return name
+	}
+	if mail := strings.TrimSpace(email); mail != "" {
+		return mail
+	}
+	return "用户#" + strconv.FormatInt(rankedUserID, 10)
 }
