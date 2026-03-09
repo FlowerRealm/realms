@@ -60,7 +60,7 @@ func TestResponsesCompact_Remote_ProxiesHeadersAndCommitsQuota(t *testing.T) {
 	}), nil, features, q, fakeAudit{}, usage, nil, upstream.SSEPumpOptions{}, compactGateway)
 
 	tokenID := int64(123)
-	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName, "vip"}}
 
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses/compact", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","session_id":"s1"}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -327,6 +327,52 @@ func TestResponsesCompact_Remote_RejectsMissingRouteGroupForMultiGroupToken(t *t
 	}
 	if !strings.Contains(rr.Body.String(), "compact route_group") {
 		t.Fatalf("expected missing route_group error, got body=%s", rr.Body.String())
+	}
+	if len(q.commitCalls) != 0 {
+		t.Fatalf("expected commit not called, got=%d", len(q.commitCalls))
+	}
+	if len(q.voidCalls) != 1 {
+		t.Fatalf("expected void called once, got=%d", len(q.voidCalls))
+	}
+	if len(usage.calls) == 0 || usage.calls[0].ErrorClass == nil || *usage.calls[0].ErrorClass != "compact_gateway_route_group_missing" {
+		t.Fatalf("expected compact_gateway_route_group_missing usage finalization, got=%+v", usage.calls)
+	}
+}
+
+func TestResponsesCompact_Remote_RejectsUnauthorizedRouteGroupFromGateway(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Realms-Route-Group", "vip")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_ok","usage":{"input_tokens":10,"output_tokens":20}}`))
+	}))
+	defer ts.Close()
+
+	fs := &fakeStore{models: map[string]store.ManagedModel{"gpt-5.2": {PublicID: "gpt-5.2", GroupName: store.DefaultGroupName, Status: 1}}}
+	sched := scheduler.New(fs)
+	q := &fakeQuota{}
+	usage := &recordingUsage{}
+	features := staticFeatures{fs: store.FeatureState{BillingDisabled: false}}
+	compactGateway := upstream.NewCompactGatewayClient(ts.URL, "gwk_test", 5*time.Second)
+	h := NewHandler(fs, fs, sched, DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		t.Fatalf("unexpected scheduler-based upstream call")
+		return nil, nil
+	}), nil, features, q, fakeAudit{}, usage, nil, upstream.SSEPumpOptions{}, compactGateway)
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{"g1", "g2"}}
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses/compact", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","session_id":"s1"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.ResponsesCompact), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "not allowed") {
+		t.Fatalf("expected unauthorized route_group error, got body=%s", rr.Body.String())
 	}
 	if len(q.commitCalls) != 0 {
 		t.Fatalf("expected commit not called, got=%d", len(q.commitCalls))

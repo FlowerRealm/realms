@@ -51,6 +51,12 @@ func extractRouteGroupForCompact(headers http.Header) string {
 func resolveCompactRouteGroup(groupHeader string, principal auth.Principal) (*string, error) {
 	groupName := strings.TrimSpace(groupHeader)
 	if groupName != "" {
+		ags := allowGroupsFromPrincipal(principal)
+		if len(ags.Order) > 0 {
+			if _, ok := ags.Set[groupName]; !ok {
+				return nil, errors.New("compact route_group is not allowed for current token")
+			}
+		}
 		return &groupName, nil
 	}
 	ags := allowGroupsFromPrincipal(principal)
