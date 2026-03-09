@@ -205,7 +205,7 @@ func TestLoad_CompactGatewayLegacyEnvFallback(t *testing.T) {
 	t.Setenv("REALMS_COMPACT_GATEWAY_KEY", "")
 	t.Setenv("REALMS_COMPACT_GATEWAY_TIMEOUT_MS", "")
 	t.Setenv("REALMS_SUB2API_BASE_URL", "https://legacy-gateway.example.com")
-	t.Setenv("REALMS_SUB2API_KEY", "legacy-key")
+	t.Setenv("REALMS_SUB2API_GATEWAY_KEY", "legacy-key")
 	t.Setenv("REALMS_SUB2API_TIMEOUT_MS", "4321")
 
 	cfg, err := config.LoadFromEnv()
@@ -225,7 +225,7 @@ func TestLoad_CompactGatewayLegacyEnvFallback(t *testing.T) {
 
 func TestLoad_CompactGatewayNewEnvOverridesLegacy(t *testing.T) {
 	t.Setenv("REALMS_SUB2API_BASE_URL", "https://legacy-gateway.example.com")
-	t.Setenv("REALMS_SUB2API_KEY", "legacy-key")
+	t.Setenv("REALMS_SUB2API_GATEWAY_KEY", "legacy-key")
 	t.Setenv("REALMS_SUB2API_TIMEOUT_MS", "4321")
 	t.Setenv("REALMS_COMPACT_GATEWAY_BASE_URL", "https://new-gateway.example.com")
 	t.Setenv("REALMS_COMPACT_GATEWAY_KEY", "new-key")

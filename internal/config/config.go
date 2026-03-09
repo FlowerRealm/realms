@@ -544,7 +544,7 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("REALMS_COMPACT_GATEWAY_KEY"); v != "" {
 		cfg.CompactGateway.GatewayKey = v
-	} else if v := os.Getenv("REALMS_SUB2API_KEY"); v != "" {
+	} else if v := os.Getenv("REALMS_SUB2API_GATEWAY_KEY"); v != "" {
 		cfg.CompactGateway.GatewayKey = v
 	}
 	if v := os.Getenv("REALMS_COMPACT_GATEWAY_TIMEOUT_MS"); v != "" {
