@@ -1,6 +1,7 @@
 package store
 
 // token_channel_groups_store.go: Token 绑定渠道组（token_channel_groups）。
+// 这些绑定的顺序会直接成为用户侧 API key 的渠道转移顺序。
 
 import (
 	"context"

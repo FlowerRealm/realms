@@ -140,6 +140,7 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	cons.AllowGroups = allowSet
 	cons.AllowGroupOrder = ags.Order
+	cons.SequentialChannelFailover = true
 
 	var upstreamByChannel map[int64]string
 	if !modelPassthrough {

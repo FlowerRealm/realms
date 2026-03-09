@@ -89,6 +89,7 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 	}
 	cons.AllowGroups = allowSet
 	cons.AllowGroupOrder = ags.Order
+	cons.SequentialChannelFailover = true
 
 	if wantStore {
 		ownerTag := realmsOwnerTagForUser(p.UserID)

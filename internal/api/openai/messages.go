@@ -83,6 +83,7 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	cons.AllowGroups = allowSet
 	cons.AllowGroupOrder = ags.Order
+	cons.SequentialChannelFailover = true
 
 	var rewriteBody func(sel scheduler.Selection) ([]byte, error)
 	var upstreamByChannel map[int64]string

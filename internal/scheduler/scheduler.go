@@ -101,6 +101,12 @@ type Constraints struct {
 	AllowGroups          map[string]struct{}
 	AllowGroupOrder      []string
 	AllowChannelIDs      map[int64]struct{}
+	// SequentialChannelFailover 用于用户侧 API key 的顺序转移：
+	// 候选 channel 按绑定顺序从前往后尝试，失败后只向后推进，不做 ring/回绕/运行时重排。
+	SequentialChannelFailover bool
+	// StartChannelID 表示“本次顺序转移”的当前起点。
+	// 命中后先尝试该 channel；若失败，则继续尝试它后面的 channel。
+	StartChannelID int64
 }
 
 type Options struct {
