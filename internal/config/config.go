@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
+	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
@@ -39,6 +40,44 @@ type Config struct {
 	// AppSettingsDefaults 提供管理后台"系统设置"（app_settings）的配置文件默认值。
 	// 仅当数据库未配置对应 app_settings 键时才会生效（app_settings 仍优先）。
 	AppSettingsDefaults AppSettingsDefaultsConfig `yaml:"app_settings_defaults"`
+}
+
+func (c *Config) UnmarshalYAML(value *yaml.Node) error {
+	type rawConfig Config
+
+	var raw rawConfig
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*c = Config(raw)
+
+	if hasYAMLKey(value, "compact_gateway") {
+		return nil
+	}
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		if strings.TrimSpace(value.Content[i].Value) != "sub2api" {
+			continue
+		}
+		var legacy CompactGatewayConfig
+		if err := value.Content[i+1].Decode(&legacy); err != nil {
+			return err
+		}
+		c.CompactGateway = legacy
+		return nil
+	}
+	return nil
+}
+
+func hasYAMLKey(node *yaml.Node, key string) bool {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if strings.TrimSpace(node.Content[i].Value) == key {
+			return true
+		}
+	}
+	return false
 }
 
 type Mode string
