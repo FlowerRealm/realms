@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"realms/internal/config"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestLoad_DefaultsToSQLite(t *testing.T) {
@@ -197,5 +199,99 @@ func TestLoad_GatewayZeroEnvOverridesPreserved(t *testing.T) {
 		cfg.Gateway.MaxRetryElapsedMS != 0 ||
 		cfg.Gateway.MaxFailoverSwitches != 0 {
 		t.Fatalf("expected explicit gateway zeros to be preserved, got %+v", cfg.Gateway)
+	}
+}
+
+func TestLoad_CompactGatewayLegacyEnvFallback(t *testing.T) {
+	t.Setenv("REALMS_COMPACT_GATEWAY_BASE_URL", "")
+	t.Setenv("REALMS_COMPACT_GATEWAY_KEY", "")
+	t.Setenv("REALMS_COMPACT_GATEWAY_TIMEOUT_MS", "")
+	t.Setenv("REALMS_SUB2API_BASE_URL", "https://legacy-gateway.example.com")
+	t.Setenv("REALMS_SUB2API_GATEWAY_KEY", "legacy-key")
+	t.Setenv("REALMS_SUB2API_TIMEOUT_MS", "4321")
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	if cfg.CompactGateway.BaseURL != "https://legacy-gateway.example.com" {
+		t.Fatalf("expected legacy base url, got %q", cfg.CompactGateway.BaseURL)
+	}
+	if cfg.CompactGateway.GatewayKey != "legacy-key" {
+		t.Fatalf("expected legacy gateway key, got %q", cfg.CompactGateway.GatewayKey)
+	}
+	if cfg.CompactGateway.TimeoutMS != 4321 {
+		t.Fatalf("expected legacy timeout, got %d", cfg.CompactGateway.TimeoutMS)
+	}
+}
+
+func TestLoad_CompactGatewayNewEnvOverridesLegacy(t *testing.T) {
+	t.Setenv("REALMS_SUB2API_BASE_URL", "https://legacy-gateway.example.com")
+	t.Setenv("REALMS_SUB2API_GATEWAY_KEY", "legacy-key")
+	t.Setenv("REALMS_SUB2API_TIMEOUT_MS", "4321")
+	t.Setenv("REALMS_COMPACT_GATEWAY_BASE_URL", "https://new-gateway.example.com")
+	t.Setenv("REALMS_COMPACT_GATEWAY_KEY", "new-key")
+	t.Setenv("REALMS_COMPACT_GATEWAY_TIMEOUT_MS", "9876")
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	if cfg.CompactGateway.BaseURL != "https://new-gateway.example.com" {
+		t.Fatalf("expected new base url to win, got %q", cfg.CompactGateway.BaseURL)
+	}
+	if cfg.CompactGateway.GatewayKey != "new-key" {
+		t.Fatalf("expected new gateway key to win, got %q", cfg.CompactGateway.GatewayKey)
+	}
+	if cfg.CompactGateway.TimeoutMS != 9876 {
+		t.Fatalf("expected new timeout to win, got %d", cfg.CompactGateway.TimeoutMS)
+	}
+}
+
+func TestConfigYAML_AllowsLegacySub2APIKey(t *testing.T) {
+	var cfg config.Config
+	err := yaml.Unmarshal([]byte(`
+sub2api:
+  base_url: https://legacy-gateway.example.com
+  gateway_key: legacy-key
+  timeout_ms: 4321
+`), &cfg)
+	if err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if cfg.CompactGateway.BaseURL != "https://legacy-gateway.example.com" {
+		t.Fatalf("expected legacy base url, got %q", cfg.CompactGateway.BaseURL)
+	}
+	if cfg.CompactGateway.GatewayKey != "legacy-key" {
+		t.Fatalf("expected legacy gateway key, got %q", cfg.CompactGateway.GatewayKey)
+	}
+	if cfg.CompactGateway.TimeoutMS != 4321 {
+		t.Fatalf("expected legacy timeout, got %d", cfg.CompactGateway.TimeoutMS)
+	}
+}
+
+func TestConfigYAML_NewCompactGatewayKeyOverridesLegacy(t *testing.T) {
+	var cfg config.Config
+	err := yaml.Unmarshal([]byte(`
+sub2api:
+  base_url: https://legacy-gateway.example.com
+  gateway_key: legacy-key
+  timeout_ms: 4321
+compact_gateway:
+  base_url: https://new-gateway.example.com
+  gateway_key: new-key
+  timeout_ms: 9876
+`), &cfg)
+	if err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if cfg.CompactGateway.BaseURL != "https://new-gateway.example.com" {
+		t.Fatalf("expected new base url to win, got %q", cfg.CompactGateway.BaseURL)
+	}
+	if cfg.CompactGateway.GatewayKey != "new-key" {
+		t.Fatalf("expected new gateway key to win, got %q", cfg.CompactGateway.GatewayKey)
+	}
+	if cfg.CompactGateway.TimeoutMS != 9876 {
+		t.Fatalf("expected new timeout to win, got %d", cfg.CompactGateway.TimeoutMS)
 	}
 }

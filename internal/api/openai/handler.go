@@ -60,7 +60,7 @@ type Handler struct {
 	codexRouteCache *codexSessionRouteCache
 	sessionBindings SessionBindingStore
 
-	sub2api *upstream.Sub2APIClient
+	compactGateway *upstream.CompactGatewayClient
 }
 
 type Doer interface {
@@ -104,7 +104,7 @@ type OpenAIObjectRefStore interface {
 	DeleteOpenAIObjectRef(ctx context.Context, objectType string, objectID string) error
 }
 
-func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *scheduler.Scheduler, exec Doer, proxyLog *proxylog.Writer, features FeatureResolver, qp quota.Provider, audit AuditSink, usage UsageEventSink, refs OpenAIObjectRefStore, sseOpts upstream.SSEPumpOptions, sub2api *upstream.Sub2APIClient) *Handler {
+func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *scheduler.Scheduler, exec Doer, proxyLog *proxylog.Writer, features FeatureResolver, qp quota.Provider, audit AuditSink, usage UsageEventSink, refs OpenAIObjectRefStore, sseOpts upstream.SSEPumpOptions, compactGateway *upstream.CompactGatewayClient) *Handler {
 	var sessionBindings SessionBindingStore
 	for _, candidate := range []any{models, groups, features, audit, usage, refs} {
 		if candidate == nil {
@@ -130,7 +130,7 @@ func NewHandler(models ModelCatalog, groups scheduler.ChannelGroupStore, sched *
 		sseOpts:         sseOpts,
 		codexRouteCache: newCodexSessionRouteCache(),
 		sessionBindings: sessionBindings,
-		sub2api:         sub2api,
+		compactGateway:  compactGateway,
 	}
 }
 
@@ -1852,6 +1852,9 @@ func shouldEnableStickyRouting(payload map[string]any, r *http.Request, routeKey
 
 	// 只在客户端显式提供会话键时启用粘性（或 Codex UA 兜底），避免无意间改变路由行为。
 	if strings.TrimSpace(extractSessionIDFromHeaders(r.Header)) != "" {
+		return true
+	}
+	if path == "/v1/responses/compact" && strings.TrimSpace(extractSessionIDForCompact(r.Header, payload)) != "" {
 		return true
 	}
 	if strings.TrimSpace(stringFromAny(payload["prompt_cache_key"])) != "" {

@@ -317,6 +317,11 @@ func mapFailoverFailure(best proxyFailureInfo) gatewayErrorResponse {
 		resp.Message = "请求过于频繁，请稍后重试"
 		resp.RetryAfterSeconds = 30
 		resp.ErrorClass = "upstream_throttled"
+	case best.StatusCode == http.StatusGatewayTimeout || strings.EqualFold(best.Class, "upstream_timeout"):
+		resp.Status = http.StatusGatewayTimeout
+		resp.ErrType = "upstream_error"
+		resp.Message = "上游超时，请稍后重试"
+		resp.ErrorClass = "upstream_timeout"
 	case best.StatusCode == 529:
 		resp.Status = http.StatusServiceUnavailable
 		resp.ErrType = "upstream_error"

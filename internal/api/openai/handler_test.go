@@ -1833,7 +1833,7 @@ func TestResponsesCompact_RemoteRequiresSessionID(t *testing.T) {
 }
 
 func TestResponsesCompact_RemoteNotUsingLegacyStickyRouting(t *testing.T) {
-	fs := &fakeStore{}
+	fs := &fakeStore{models: map[string]store.ManagedModel{"gpt-5.2": {PublicID: "gpt-5.2", GroupName: store.DefaultGroupName, Status: 1}}}
 	sched := scheduler.New(fs)
 	h := NewHandler(fs, fs, sched, DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
 		t.Fatalf("unexpected scheduler-based upstream call")
@@ -1850,10 +1850,10 @@ func TestResponsesCompact_RemoteNotUsingLegacyStickyRouting(t *testing.T) {
 	rr := httptest.NewRecorder()
 	middleware.Chain(http.HandlerFunc(h.ResponsesCompact), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
 	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500 without sub2api config, got=%d body=%s", rr.Code, rr.Body.String())
+		t.Fatalf("expected 500 without compact gateway config, got=%d body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "SUB2API is not configured") {
-		t.Fatalf("expected sub2api config error, got body=%s", rr.Body.String())
+	if !strings.Contains(rr.Body.String(), "compact gateway is not configured") {
+		t.Fatalf("expected compact gateway config error, got body=%s", rr.Body.String())
 	}
 }
 
