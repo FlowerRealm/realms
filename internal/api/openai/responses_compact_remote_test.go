@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/shopspring/decimal"
 	"io"
 	"net/http"
@@ -399,6 +400,48 @@ func TestResponsesCompact_Remote_DoesNotRewriteModelWithoutTargetGroupBinding(t 
 	}
 	if usage.calls[0].ForwardedModel == nil || *usage.calls[0].ForwardedModel != "alias" {
 		t.Fatalf("expected forwarded_model=%q, got=%v", "alias", usage.calls[0].ForwardedModel)
+	}
+}
+
+func TestResponsesCompact_Remote_RejectsWhenBindingLookupFails(t *testing.T) {
+	var attempts int
+	fs := &fakeStore{
+		models: map[string]store.ManagedModel{
+			"alias": {PublicID: "alias", GroupName: store.DefaultGroupName, Status: 1},
+		},
+		bindingsErr: errors.New("db down"),
+	}
+	sched := scheduler.New(fs)
+	q := &fakeQuota{}
+	features := staticFeatures{fs: store.FeatureState{BillingDisabled: false}}
+	compactGateway := upstream.NewCompactGatewayClient("https://compact.example.com", "gwk_test", 5*time.Second)
+	h := NewHandler(fs, fs, sched, DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		attempts++
+		t.Fatalf("unexpected scheduler-based upstream call")
+		return nil, nil
+	}), nil, features, q, fakeAudit{}, &recordingUsage{}, nil, upstream.SSEPumpOptions{}, compactGateway)
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses/compact", bytes.NewReader([]byte(`{"model":"alias","input":"hi","session_id":"s1"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.ResponsesCompact), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "查询模型绑定失败") {
+		t.Fatalf("expected binding lookup error, got body=%s", rr.Body.String())
+	}
+	if attempts != 0 {
+		t.Fatalf("expected no upstream attempts, got=%d", attempts)
+	}
+	if len(q.reserveCalls) != 0 {
+		t.Fatalf("expected reserve not called, got=%d", len(q.reserveCalls))
 	}
 }
 

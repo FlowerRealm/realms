@@ -237,11 +237,10 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 
 	usageID := int64(0)
 	modelPtr := optionalString(reqModel)
-	var bindings []store.ChannelModelBinding
-	if h.models != nil {
-		if got, err := h.models.ListEnabledChannelModelBindingsByPublicID(r.Context(), reqModel); err == nil {
-			bindings = got
-		}
+	bindings, err := h.models.ListEnabledChannelModelBindingsByPublicID(r.Context(), reqModel)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadGateway, "api_error", "查询模型绑定失败")
+		return
 	}
 	if !freeMode && h.quota != nil {
 		res, err := h.quota.Reserve(r.Context(), quota.ReserveInput{

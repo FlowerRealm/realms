@@ -387,6 +387,7 @@ type fakeStore struct {
 	accounts       map[int64][]store.CodexOAuthAccount
 	models         map[string]store.ManagedModel
 	bindings       map[string][]store.ChannelModelBinding
+	bindingsErr    error
 
 	groupByName   map[string]store.ChannelGroup
 	groupNameByID map[int64]string
@@ -474,6 +475,9 @@ func (f *fakeStore) ListEnabledManagedModelsWithBindings(_ context.Context) ([]s
 }
 
 func (f *fakeStore) ListEnabledChannelModelBindingsByPublicID(_ context.Context, publicID string) ([]store.ChannelModelBinding, error) {
+	if f.bindingsErr != nil {
+		return nil, f.bindingsErr
+	}
 	return f.bindings[publicID], nil
 }
 
