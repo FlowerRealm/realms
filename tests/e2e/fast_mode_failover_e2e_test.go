@@ -1,0 +1,256 @@
+package e2e_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/shopspring/decimal"
+
+	"realms/internal/auth"
+	"realms/internal/config"
+	"realms/internal/server"
+	"realms/internal/store"
+	"realms/internal/version"
+)
+
+func TestResponses_FastModeFailover_E2E(t *testing.T) {
+	const (
+		model     = "gpt-5.2"
+		userGroup = "ug1"
+		routeGroup = "rg1"
+	)
+
+	var nonFastCalls int
+	nonFastUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nonFastCalls++
+		t.Fatalf("non-fast upstream should not be called, method=%s path=%s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(nonFastUpstream.Close)
+
+	var fastCalls int
+	var fastBodies [][]byte
+	fastUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		_ = r.Body.Close()
+		fastCalls++
+		fastBodies = append(fastBodies, append([]byte(nil), body...))
+
+		resp := map[string]any{
+			"id":     "resp_fast_mode_ok",
+			"object": "response",
+			"model":  model,
+			"output": []any{
+				map[string]any{
+					"type": "message",
+					"role": "assistant",
+					"content": []any{
+						map[string]any{"type": "output_text", "text": "OK"},
+					},
+				},
+			},
+			"usage": map[string]any{
+				"input_tokens":  10,
+				"output_tokens": 5,
+			},
+			"status": "completed",
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(fastUpstream.Close)
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+	ctx := context.Background()
+
+	if _, err := st.CreateChannelGroup(ctx, routeGroup, nil, 1, store.DefaultGroupPriceMultiplier); err != nil {
+		t.Fatalf("CreateChannelGroup: %v", err)
+	}
+	if err := st.CreateMainGroup(ctx, userGroup, nil, 1); err != nil {
+		t.Fatalf("CreateMainGroup: %v", err)
+	}
+	if err := st.ReplaceMainGroupSubgroups(ctx, userGroup, []string{routeGroup}); err != nil {
+		t.Fatalf("ReplaceMainGroupSubgroups: %v", err)
+	}
+
+	nonFastChannelID, err := st.CreateUpstreamChannelWithRequestPolicy(ctx, store.UpstreamTypeOpenAICompatible, "non-fast", routeGroup, 10, false, true, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannelWithRequestPolicy(non-fast): %v", err)
+	}
+	nonFastEndpointID, err := st.CreateUpstreamEndpoint(ctx, nonFastChannelID, strings.TrimRight(strings.TrimSpace(nonFastUpstream.URL), "/")+"/v1", 0)
+	if err != nil {
+		t.Fatalf("CreateUpstreamEndpoint(non-fast): %v", err)
+	}
+	if _, _, err := st.CreateOpenAICompatibleCredential(ctx, nonFastEndpointID, strPtr("non-fast"), "sk-non-fast"); err != nil {
+		t.Fatalf("CreateOpenAICompatibleCredential(non-fast): %v", err)
+	}
+
+	fastChannelID, err := st.CreateUpstreamChannelWithRequestPolicy(ctx, store.UpstreamTypeOpenAICompatible, "fast", routeGroup, 1, false, true, false, false, true)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannelWithRequestPolicy(fast): %v", err)
+	}
+	fastEndpointID, err := st.CreateUpstreamEndpoint(ctx, fastChannelID, strings.TrimRight(strings.TrimSpace(fastUpstream.URL), "/")+"/v1", 0)
+	if err != nil {
+		t.Fatalf("CreateUpstreamEndpoint(fast): %v", err)
+	}
+	if _, _, err := st.CreateOpenAICompatibleCredential(ctx, fastEndpointID, strPtr("fast"), "sk-fast"); err != nil {
+		t.Fatalf("CreateOpenAICompatibleCredential(fast): %v", err)
+	}
+
+	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
+		PublicID:               model,
+		GroupName:              routeGroup,
+		OwnedBy:                strPtr("upstream"),
+		InputUSDPer1M:          decimal.NewFromInt(1),
+		OutputUSDPer1M:         decimal.NewFromInt(1),
+		CacheInputUSDPer1M:     decimal.Zero,
+		CacheOutputUSDPer1M:    decimal.Zero,
+		PriorityPricingEnabled: true,
+		PriorityInputUSDPer1M:  decimalPtr("2"),
+		PriorityOutputUSDPer1M: decimalPtr("3"),
+		Status:                 1,
+	}); err != nil {
+		t.Fatalf("CreateManagedModel: %v", err)
+	}
+	if _, err := st.CreateChannelModel(ctx, store.ChannelModelCreate{
+		ChannelID:     nonFastChannelID,
+		PublicID:      model,
+		UpstreamModel: model,
+		Status:        1,
+	}); err != nil {
+		t.Fatalf("CreateChannelModel(non-fast): %v", err)
+	}
+	if _, err := st.CreateChannelModel(ctx, store.ChannelModelCreate{
+		ChannelID:     fastChannelID,
+		PublicID:      model,
+		UpstreamModel: model,
+		Status:        1,
+	}); err != nil {
+		t.Fatalf("CreateChannelModel(fast): %v", err)
+	}
+
+	userID, err := st.CreateUser(ctx, "fast-mode@example.com", "fastmode", []byte("x"), store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if err := st.SetUserMainGroup(ctx, userID, userGroup); err != nil {
+		t.Fatalf("SetUserMainGroup: %v", err)
+	}
+	if _, err := st.AddUserBalanceUSD(ctx, userID, decimal.RequireFromString("1")); err != nil {
+		t.Fatalf("AddUserBalanceUSD: %v", err)
+	}
+	rawToken, err := auth.NewRandomToken("sk_", 32)
+	if err != nil {
+		t.Fatalf("NewRandomToken: %v", err)
+	}
+	tokenID, _, err := st.CreateUserToken(ctx, userID, strPtr("fast-mode-token"), rawToken)
+	if err != nil {
+		t.Fatalf("CreateUserToken: %v", err)
+	}
+	if err := st.ReplaceTokenChannelGroups(ctx, tokenID, []string{routeGroup}); err != nil {
+		t.Fatalf("ReplaceTokenChannelGroups: %v", err)
+	}
+
+	t.Setenv("REALMS_DB_DRIVER", "")
+	t.Setenv("REALMS_DB_DSN", "")
+	t.Setenv("REALMS_SQLITE_PATH", "")
+
+	appCfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	appCfg.Env = "dev"
+	appCfg.Mode = config.ModeBusiness
+	appCfg.DB.Driver = "sqlite"
+	appCfg.DB.DSN = ""
+	appCfg.DB.SQLitePath = dbPath
+	appCfg.Security.AllowOpenRegistration = false
+	appCfg.Billing.EnablePayAsYouGo = true
+
+	app, err := server.NewApp(server.AppOptions{
+		Config:  appCfg,
+		DB:      db,
+		Version: version.Info(),
+	})
+	if err != nil {
+		t.Fatalf("NewApp: %v", err)
+	}
+	ts := httptest.NewServer(app.Handler())
+	t.Cleanup(ts.Close)
+
+	reqBody := []byte(`{"model":"` + model + `","input":"hi","service_tier":"fast","stream":false}`)
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/v1/responses", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+rawToken)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", resp.StatusCode, string(bodyBytes))
+	}
+
+	if nonFastCalls != 0 {
+		t.Fatalf("expected non-fast upstream not to be called, got=%d", nonFastCalls)
+	}
+	if fastCalls != 1 {
+		t.Fatalf("expected fast upstream called once, got=%d", fastCalls)
+	}
+	if len(fastBodies) != 1 {
+		t.Fatalf("expected exactly one forwarded request body, got=%d", len(fastBodies))
+	}
+	var forwarded map[string]any
+	if err := json.Unmarshal(fastBodies[0], &forwarded); err != nil {
+		t.Fatalf("Unmarshal forwarded body: %v", err)
+	}
+	if got, _ := forwarded["service_tier"].(string); got != "priority" {
+		t.Fatalf("forwarded service_tier mismatch: got=%q want=%q body=%s", got, "priority", string(fastBodies[0]))
+	}
+
+	events := waitUsageEventsByUser(t, st, ctx, userID, 1)
+	ev := events[0]
+	if ev.State != store.UsageStateCommitted {
+		t.Fatalf("usage_event state mismatch: got=%q want=%q (id=%d)", ev.State, store.UsageStateCommitted, ev.ID)
+	}
+	if ev.UpstreamChannelID == nil || *ev.UpstreamChannelID != fastChannelID {
+		t.Fatalf("upstream_channel_id mismatch: got=%v want=%d", ev.UpstreamChannelID, fastChannelID)
+	}
+	if ev.ServiceTier == nil || strings.TrimSpace(*ev.ServiceTier) != "priority" {
+		t.Fatalf("usage_event service_tier mismatch: got=%v want=priority", ev.ServiceTier)
+	}
+}
+
+func decimalPtr(v string) *decimal.Decimal {
+	d := decimal.RequireFromString(v)
+	return &d
+}

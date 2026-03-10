@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shopspring/decimal"
+	"github.com/tidwall/gjson"
+
 	"realms/internal/auth"
 	"realms/internal/middleware"
 	"realms/internal/scheduler"
@@ -295,5 +298,165 @@ func TestChatCompletions_InvalidServiceTierReturnsBadRequest(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "service_tier 非法") {
 		t.Fatalf("unexpected body: %s", rr.Body.String())
+	}
+}
+
+func TestChatCompletions_FastModeUnsupportedFallsBackToExhaustedResponse(t *testing.T) {
+	decimalPtr := func(v string) *decimal.Decimal {
+		d, err := decimal.NewFromString(v)
+		if err != nil {
+			t.Fatalf("decimal parse: %v", err)
+		}
+		return &d
+	}
+	const groupName = "g1"
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Groups: groupName, AllowServiceTier: true, FastMode: false},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {{ID: 11, ChannelID: 1, BaseURL: "https://openai.example", Status: 1}},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {{ID: 1, EndpointID: 11, Status: 1}},
+		},
+		models: map[string]store.ManagedModel{
+			"m1": {
+				ID:                     1,
+				PublicID:               "m1",
+				GroupName:              groupName,
+				InputUSDPer1M:          decimal.NewFromInt(1),
+				OutputUSDPer1M:         decimal.NewFromInt(1),
+				CacheInputUSDPer1M:     decimal.Zero,
+				CacheOutputUSDPer1M:    decimal.Zero,
+				PriorityPricingEnabled: true,
+				PriorityInputUSDPer1M:  decimalPtr("2"),
+				PriorityOutputUSDPer1M: decimalPtr("3"),
+				Status:                 1,
+			},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"m1": {{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "gpt-5.2", Status: 1}},
+		},
+	}
+
+	doer := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		t.Fatal("unexpected upstream call")
+		return nil, nil
+	})
+
+	sched := scheduler.New(fs)
+	q := &fakeQuota{}
+	h := NewHandler(fs, fs, sched, doer, nil, nil, q, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+
+	reqBody := `{"model":"m1","messages":[{"role":"user","content":"hi"}],"service_tier":"fast"}`
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/chat/completions", bytes.NewReader([]byte(reqBody)))
+	req.Header.Set("Content-Type", "application/json")
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{groupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.ChatCompletions), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"upstream_error"`) {
+		t.Fatalf("expected upstream_error body, got=%s", rr.Body.String())
+	}
+	if len(q.reserveCalls) != 1 {
+		t.Fatalf("expected reserve called once, got=%d", len(q.reserveCalls))
+	}
+	if len(q.voidCalls) != 1 {
+		t.Fatalf("expected void called once, got=%d", len(q.voidCalls))
+	}
+}
+
+func TestChatCompletions_FastModeUnsupportedFailoversToFastModeChannel(t *testing.T) {
+	decimalPtr := func(v string) *decimal.Decimal {
+		d, err := decimal.NewFromString(v)
+		if err != nil {
+			t.Fatalf("decimal parse: %v", err)
+		}
+		return &d
+	}
+	const groupName = "g1"
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Groups: groupName, AllowServiceTier: true, FastMode: false, Priority: 10},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Groups: groupName, AllowServiceTier: true, FastMode: true, Priority: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1}},
+			2: {{ID: 22, ChannelID: 2, BaseURL: "https://b.example", Status: 1}},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {{ID: 1, EndpointID: 11, Status: 1}},
+			22: {{ID: 2, EndpointID: 22, Status: 1}},
+		},
+		models: map[string]store.ManagedModel{
+			"m1": {
+				ID:                     1,
+				PublicID:               "m1",
+				GroupName:              groupName,
+				InputUSDPer1M:          decimal.NewFromInt(1),
+				OutputUSDPer1M:         decimal.NewFromInt(1),
+				CacheInputUSDPer1M:     decimal.Zero,
+				CacheOutputUSDPer1M:    decimal.Zero,
+				PriorityPricingEnabled: true,
+				PriorityInputUSDPer1M:  decimalPtr("2"),
+				PriorityOutputUSDPer1M: decimalPtr("3"),
+				Status:                 1,
+			},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"m1": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "gpt-5.2", Status: 1},
+				{ID: 2, ChannelID: 2, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	var gotSel scheduler.Selection
+	var gotBody []byte
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, body []byte) (*http.Response, error) {
+		gotSel = sel
+		gotBody = append([]byte(nil), body...)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"prompt_tokens":1,"completion_tokens":2}}`))),
+		}, nil
+	})
+
+	sched := scheduler.New(fs)
+	q := &fakeQuota{}
+	h := NewHandler(fs, fs, sched, doer, nil, nil, q, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+	h.SetGatewayPolicy(GatewayPolicy{MaxFailoverSwitches: 2})
+
+	reqBody := `{"model":"m1","messages":[{"role":"user","content":"hi"}],"service_tier":"fast"}`
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/chat/completions", bytes.NewReader([]byte(reqBody)))
+	req.Header.Set("Content-Type", "application/json")
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{groupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.ChatCompletions), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if gotSel.ChannelID != 2 {
+		t.Fatalf("expected fast-mode channel 2, got=%d", gotSel.ChannelID)
+	}
+	if got := gjson.GetBytes(gotBody, "service_tier").String(); got != "priority" {
+		t.Fatalf("expected forwarded service_tier=priority, got=%q body=%s", got, string(gotBody))
+	}
+	if len(q.voidCalls) != 0 {
+		t.Fatalf("expected no quota void, got=%d", len(q.voidCalls))
 	}
 }

@@ -39,6 +39,13 @@ type GroupRouter struct {
 	sequentialStartExclusive bool
 }
 
+func (r *GroupRouter) ExcludeChannel(channelID int64) {
+	if r == nil || channelID <= 0 {
+		return
+	}
+	r.excludedChannels[channelID] = struct{}{}
+}
+
 type groupCursor struct {
 	group store.ChannelGroup
 
@@ -68,6 +75,11 @@ func (r *GroupRouter) Next(ctx context.Context) (Selection, error) {
 	// 强约束：当上层要求固定 channel 时，直接交给调度器做可用性过滤与 credential 选择。
 	// 这是有意保留“同 channel 内 credential/account 接管”的入口，避免 group router 在候选集遍历时覆盖 RequireChannelID。
 	if r.cons.RequireChannelID != 0 || strings.TrimSpace(r.cons.RequireCredentialKey) != "" {
+		if r.cons.RequireChannelID != 0 {
+			if _, excluded := r.excludedChannels[r.cons.RequireChannelID]; excluded {
+				return Selection{}, errGroupExhausted
+			}
+		}
 		return r.sched.SelectWithConstraints(ctx, r.userID, r.routeKeyHash, r.cons)
 	}
 
