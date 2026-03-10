@@ -2361,6 +2361,78 @@ func TestResponses_CodexSession_FallsBackWithinSameChannelBeforeMovingForward(t 
 	}
 }
 
+func TestResponses_CodexSession_DoesNotRelaxPinnedCredentialOnSchedulerError(t *testing.T) {
+	routeKey := "rk_scheduler_error"
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+				{ID: 112, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	schedSeed := scheduler.New(fs)
+	if err := fs.UpsertSessionBindingPayload(
+		context.Background(),
+		10,
+		schedSeed.RouteKeyHash(routeKey),
+		`{"kind":"codex_route_v1","channel_id":1,"credential_key":"openai_compatible:111"}`,
+		time.Now().Add(30*time.Minute),
+	); err != nil {
+		t.Fatalf("seed sticky binding err: %v", err)
+	}
+
+	fs.endpoints = map[int64][]store.UpstreamEndpoint{
+		1: nil,
+	}
+
+	var calls []scheduler.Selection
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		calls = append(calls, sel)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses",
+		bytes.NewReader([]byte(fmt.Sprintf(`{"model":"gpt-5.2","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":false,"prompt_cache_key":%q}`, routeKey))))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("expected scheduler error to surface as upstream unavailable, got=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(calls) != 0 {
+		t.Fatalf("expected no upstream call when scheduler cannot build a selection, got calls=%+v", calls)
+	}
+}
+
 func TestResponses_SequentialFailoverAlsoAppliesWithoutStickySession(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{

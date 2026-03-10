@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"testing"
@@ -236,8 +237,8 @@ func TestSelectWithConstraints_RequireCredentialKey_CoolingFailsSelection(t *tes
 	if _, err := s.SelectWithConstraints(context.Background(), 10, "", Constraints{
 		RequireChannelID:     1,
 		RequireCredentialKey: key,
-	}); err == nil {
-		t.Fatalf("expected selection to fail when required credential is cooling")
+	}); !errors.Is(err, ErrRequiredCredentialUnavailable) {
+		t.Fatalf("expected ErrRequiredCredentialUnavailable when required credential is cooling, got=%v", err)
 	}
 }
 

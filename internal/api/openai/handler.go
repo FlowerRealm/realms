@@ -666,7 +666,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 				router = scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
 				continue
 			}
-			if bindingCredentialPinned {
+			if bindingCredentialPinned && errors.Is(err, scheduler.ErrRequiredCredentialUnavailable) {
 				bindingCredentialPinned = false
 				cons.RequireChannelID = 0
 				cons.RequireCredentialKey = ""

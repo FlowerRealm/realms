@@ -115,6 +115,8 @@ type Options struct {
 	DisableCodexOAuth bool
 }
 
+var ErrRequiredCredentialUnavailable = errors.New("required credential unavailable")
+
 type UpstreamStore interface {
 	ListUpstreamChannels(ctx context.Context) ([]store.UpstreamChannel, error)
 	ListUpstreamEndpointsByChannel(ctx context.Context, channelID int64) ([]store.UpstreamEndpoint, error)
@@ -428,6 +430,9 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 		if claimedProbe {
 			s.state.ReleaseChannelProbeClaim(ch.ID)
 		}
+	}
+	if strings.TrimSpace(cons.RequireCredentialKey) != "" {
+		return Selection{}, ErrRequiredCredentialUnavailable
 	}
 	return Selection{}, errors.New("未找到可用上游 credential/account")
 }
