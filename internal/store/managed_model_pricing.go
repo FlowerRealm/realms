@@ -12,6 +12,7 @@ var (
 	ErrManagedModelPriorityPricingMissing = errors.New("模型 fast mode 定价缺失")
 	ErrPriorityServiceTierUnsupported     = ErrManagedModelServiceTierUnsupported
 	ErrPriorityPricingMissing             = ErrManagedModelPriorityPricingMissing
+	defaultFastModePriceMultiplier        = decimal.RequireFromString("2")
 )
 
 type ManagedModelPricing struct {
@@ -45,7 +46,29 @@ func IsPriorityServiceTier(raw string) bool {
 	return NormalizeServiceTier(raw) == "priority"
 }
 
+func applyDefaultManagedModelPriorityPricing(m *ManagedModel) error {
+	if m == nil || !m.PriorityPricingEnabled {
+		return nil
+	}
+	if m.PriorityInputUSDPer1M == nil {
+		v := m.InputUSDPer1M.Truncate(USDScale).Mul(defaultFastModePriceMultiplier).Truncate(USDScale)
+		m.PriorityInputUSDPer1M = &v
+	}
+	if m.PriorityOutputUSDPer1M == nil {
+		v := m.OutputUSDPer1M.Truncate(USDScale).Mul(defaultFastModePriceMultiplier).Truncate(USDScale)
+		m.PriorityOutputUSDPer1M = &v
+	}
+	if m.PriorityCacheInputUSDPer1M == nil {
+		v := m.CacheInputUSDPer1M.Truncate(USDScale).Mul(defaultFastModePriceMultiplier).Truncate(USDScale)
+		m.PriorityCacheInputUSDPer1M = &v
+	}
+	return nil
+}
+
 func ResolveManagedModelPricing(m ManagedModel, serviceTier string) (ManagedModelPricing, error) {
+	if err := applyDefaultManagedModelPriorityPricing(&m); err != nil {
+		return ManagedModelPricing{}, err
+	}
 	pricing := ManagedModelPricing{
 		ServiceTier:         NormalizeServiceTier(serviceTier),
 		InputUSDPer1M:       m.InputUSDPer1M.Truncate(USDScale),

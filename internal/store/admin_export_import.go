@@ -899,6 +899,21 @@ ON CONFLICT(public_id) DO UPDATE SET
 		if err != nil {
 			return AdminConfigImportReport{}, fmt.Errorf("managed_models[%s] fast cache input 定价不合法", publicID)
 		}
+		tmp := ManagedModel{
+			InputUSDPer1M:              inUSD,
+			OutputUSDPer1M:             outUSD,
+			CacheInputUSDPer1M:         cacheInUSD,
+			PriorityPricingEnabled:     m.PriorityPricingEnabled,
+			PriorityInputUSDPer1M:      priorityInUSD,
+			PriorityOutputUSDPer1M:     priorityOutUSD,
+			PriorityCacheInputUSDPer1M: priorityCacheInUSD,
+		}
+		if err := applyDefaultManagedModelPriorityPricing(&tmp); err != nil {
+			return AdminConfigImportReport{}, fmt.Errorf("managed_models[%s] %w", publicID, err)
+		}
+		priorityInUSD = tmp.PriorityInputUSDPer1M
+		priorityOutUSD = tmp.PriorityOutputUSDPer1M
+		priorityCacheInUSD = tmp.PriorityCacheInputUSDPer1M
 		if err := validateManagedModelPriorityPricing(m.PriorityPricingEnabled, priorityInUSD, priorityOutUSD); err != nil {
 			return AdminConfigImportReport{}, fmt.Errorf("managed_models[%s] %w", publicID, err)
 		}

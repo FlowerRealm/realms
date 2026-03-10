@@ -2,10 +2,12 @@ package router
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -16,7 +18,12 @@ import (
 	"realms/internal/store"
 )
 
-var modelsDevCatalog = modellibrary.NewModelsDevCatalog(modellibrary.ModelsDevCatalogOptions{})
+var modelLibraryCatalogImpl modelLibraryCatalog = modellibrary.NewModelsDevCatalog(modellibrary.OpenRouterCatalogOptions{})
+
+type modelLibraryCatalog interface {
+	Lookup(ctx context.Context, modelID string) (modellibrary.LookupResult, error)
+	Suggest(ctx context.Context, q string, limit int) ([]modellibrary.SuggestResult, error)
+}
 
 type modelLibraryLookupRequest struct {
 	ModelID string `json:"model_id"`
@@ -30,6 +37,13 @@ type modelLibraryLookupResult struct {
 	CacheOutputUSDPer1M string `json:"cache_output_usd_per_1m"`
 	Source              string `json:"source"`
 	IconURL             string `json:"icon_url"`
+}
+
+type modelLibrarySuggestResult struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	OwnedBy string `json:"owned_by"`
+	IconURL string `json:"icon_url"`
 }
 
 func adminModelLibraryLookupHandler(opts Options) gin.HandlerFunc {
@@ -51,7 +65,7 @@ func adminModelLibraryLookupHandler(opts Options) gin.HandlerFunc {
 			return
 		}
 
-		res, err := modelsDevCatalog.Lookup(c.Request.Context(), modelID)
+		res, err := modelLibraryCatalogImpl.Lookup(c.Request.Context(), modelID)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 			return
@@ -66,7 +80,49 @@ func adminModelLibraryLookupHandler(opts Options) gin.HandlerFunc {
 			CacheOutputUSDPer1M: formatUSDPlain(res.CacheOutputUSDPer1M),
 			IconURL:             icons.ModelIconURL(modelID, res.OwnedBy),
 		}
-		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已从模型库填充（models.dev）", "data": out})
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已从 OpenRouter 填充", "data": out})
+	}
+}
+
+func adminModelLibrarySuggestHandler(opts Options) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if opts.Store == nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			return
+		}
+
+		q := strings.TrimSpace(c.Query("q"))
+		if q == "" {
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": []modelLibrarySuggestResult{}})
+			return
+		}
+
+		limit := 20
+		if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+			if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+				if parsed > 50 {
+					parsed = 50
+				}
+				limit = parsed
+			}
+		}
+
+		items, err := modelLibraryCatalogImpl.Suggest(c.Request.Context(), q, limit)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+			return
+		}
+
+		out := make([]modelLibrarySuggestResult, 0, len(items))
+		for _, item := range items {
+			out = append(out, modelLibrarySuggestResult{
+				ID:      item.ModelID,
+				Name:    item.Name,
+				OwnedBy: item.OwnedBy,
+				IconURL: icons.ModelIconURL(item.ModelID, item.OwnedBy),
+			})
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": out})
 	}
 }
 

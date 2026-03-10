@@ -3,7 +3,6 @@ package modellibrary
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,22 +11,19 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-func TestModelsDevCatalog_Lookup_OpenAI(t *testing.T) {
+func TestOpenRouterCatalog_Lookup_ConvertsPerTokenPricing(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"openai": map[string]any{
-				"id":   "openai",
-				"name": "OpenAI",
-				"models": map[string]any{
-					"gpt-4o": map[string]any{
-						"id": "gpt-4o",
-						"cost": map[string]any{
-							"input":      2.5,
-							"output":     10,
-							"cache_read": 1.25,
-						},
+			"data": []map[string]any{
+				{
+					"id":   "openai/gpt-5.4",
+					"name": "OpenAI: GPT-5.4",
+					"pricing": map[string]any{
+						"prompt":           "0.0000025",
+						"completion":       "0.000015",
+						"input_cache_read": "0.00000025",
 					},
 				},
 			},
@@ -35,14 +31,13 @@ func TestModelsDevCatalog_Lookup_OpenAI(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := NewModelsDevCatalog(ModelsDevCatalogOptions{
-		URL: srv.URL,
-		TTL: time.Minute,
-	})
-
-	res, err := c.Lookup(context.Background(), "gpt-4o")
+	c := NewModelsDevCatalog(OpenRouterCatalogOptions{URL: srv.URL, TTL: time.Minute})
+	res, err := c.Lookup(context.Background(), "openai/gpt-5.4")
 	if err != nil {
 		t.Fatalf("Lookup() err = %v", err)
+	}
+	if res.Source != "openrouter" {
+		t.Fatalf("Source = %q, want %q", res.Source, "openrouter")
 	}
 	if res.OwnedBy != "openai" {
 		t.Fatalf("OwnedBy = %q, want %q", res.OwnedBy, "openai")
@@ -50,209 +45,130 @@ func TestModelsDevCatalog_Lookup_OpenAI(t *testing.T) {
 	if !res.InputUSDPer1M.Equal(decimal.RequireFromString("2.5")) {
 		t.Fatalf("InputUSDPer1M = %s", res.InputUSDPer1M)
 	}
-	if !res.OutputUSDPer1M.Equal(decimal.RequireFromString("10")) {
+	if !res.OutputUSDPer1M.Equal(decimal.RequireFromString("15")) {
 		t.Fatalf("OutputUSDPer1M = %s", res.OutputUSDPer1M)
 	}
-	if !res.CacheInputUSDPer1M.Equal(decimal.RequireFromString("1.25")) {
+	if !res.CacheInputUSDPer1M.Equal(decimal.RequireFromString("0.25")) {
 		t.Fatalf("CacheInputUSDPer1M = %s", res.CacheInputUSDPer1M)
 	}
-	if !res.CacheOutputUSDPer1M.Equal(decimal.RequireFromString("1.25")) {
+	if !res.CacheOutputUSDPer1M.Equal(decimal.RequireFromString("0.25")) {
 		t.Fatalf("CacheOutputUSDPer1M = %s", res.CacheOutputUSDPer1M)
 	}
 }
 
-func TestModelsDevCatalog_Lookup_PreferOpenAIWhenAmbiguous(t *testing.T) {
+func TestOpenRouterCatalog_Lookup_MissingPricing(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"openai": map[string]any{
-				"id": "openai",
-				"models": map[string]any{
-					"gpt-4o": map[string]any{
-						"id": "gpt-4o",
-						"cost": map[string]any{
-							"input":      2.5,
-							"output":     10,
-							"cache_read": 1.25,
-						},
-					},
-				},
-			},
-			"azure": map[string]any{
-				"id": "azure",
-				"models": map[string]any{
-					"gpt-4o": map[string]any{
-						"id": "gpt-4o",
-						"cost": map[string]any{
-							"input":  3,
-							"output": 12,
-						},
-					},
+			"data": []map[string]any{
+				{
+					"id":      "openrouter/auto",
+					"name":    "OpenRouter Auto",
+					"pricing": map[string]any{"prompt": "-1", "completion": "-1"},
 				},
 			},
 		})
 	}))
 	t.Cleanup(srv.Close)
 
-	c := NewModelsDevCatalog(ModelsDevCatalogOptions{URL: srv.URL, TTL: time.Minute})
-
-	res, err := c.Lookup(context.Background(), "gpt-4o")
-	if err != nil {
-		t.Fatalf("Lookup() err = %v", err)
-	}
-	if res.OwnedBy != "openai" {
-		t.Fatalf("OwnedBy = %q, want %q", res.OwnedBy, "openai")
-	}
-	if !res.InputUSDPer1M.Equal(decimal.RequireFromString("2.5")) {
-		t.Fatalf("InputUSDPer1M = %s", res.InputUSDPer1M)
-	}
-	if !res.OutputUSDPer1M.Equal(decimal.RequireFromString("10")) {
-		t.Fatalf("OutputUSDPer1M = %s", res.OutputUSDPer1M)
-	}
-}
-
-func TestModelsDevCatalog_Lookup_ExplicitProviderBeatsOpenRouter(t *testing.T) {
-	t.Parallel()
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"openai": map[string]any{
-				"id": "openai",
-				"models": map[string]any{
-					"gpt-4o": map[string]any{
-						"id": "gpt-4o",
-						"cost": map[string]any{
-							"input":      2.5,
-							"output":     10,
-							"cache_read": 1.25,
-						},
-					},
-				},
-			},
-			"openrouter": map[string]any{
-				"id": "openrouter",
-				"models": map[string]any{
-					"openai/gpt-4o": map[string]any{
-						"id": "openai/gpt-4o",
-						"cost": map[string]any{
-							"input":  100,
-							"output": 200,
-						},
-					},
-				},
-			},
-		})
-	}))
-	t.Cleanup(srv.Close)
-
-	c := NewModelsDevCatalog(ModelsDevCatalogOptions{URL: srv.URL, TTL: time.Minute})
-
-	res, err := c.Lookup(context.Background(), "openai/gpt-4o")
-	if err != nil {
-		t.Fatalf("Lookup() err = %v", err)
-	}
-	if res.OwnedBy != "openai" {
-		t.Fatalf("OwnedBy = %q, want %q", res.OwnedBy, "openai")
-	}
-	if !res.InputUSDPer1M.Equal(decimal.RequireFromString("2.5")) {
-		t.Fatalf("InputUSDPer1M = %s", res.InputUSDPer1M)
-	}
-	if !res.OutputUSDPer1M.Equal(decimal.RequireFromString("10")) {
-		t.Fatalf("OutputUSDPer1M = %s", res.OutputUSDPer1M)
-	}
-}
-
-func TestModelsDevCatalog_Lookup_OpenRouterCompositeID(t *testing.T) {
-	t.Parallel()
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"openrouter": map[string]any{
-				"id":   "openrouter",
-				"name": "OpenRouter",
-				"models": map[string]any{
-					"moonshotai/kimi-k2": map[string]any{
-						"id": "moonshotai/kimi-k2",
-						"cost": map[string]any{
-							"input":  0.55,
-							"output": 2.2,
-						},
-					},
-				},
-			},
-			"moonshotai": map[string]any{
-				"id":   "moonshotai",
-				"name": "Moonshot",
-				"models": map[string]any{
-					"kimi-k2": map[string]any{
-						"id":   "kimi-k2",
-						"cost": nil,
-					},
-				},
-			},
-		})
-	}))
-	t.Cleanup(srv.Close)
-
-	c := NewModelsDevCatalog(ModelsDevCatalogOptions{
-		URL: srv.URL,
-		TTL: time.Minute,
-	})
-
-	res, err := c.Lookup(context.Background(), "moonshotai/kimi-k2")
-	if err != nil {
-		t.Fatalf("Lookup() err = %v", err)
-	}
-	if res.OwnedBy != "moonshotai" {
-		t.Fatalf("OwnedBy = %q, want %q", res.OwnedBy, "moonshotai")
-	}
-	if !res.InputUSDPer1M.Equal(decimal.RequireFromString("0.55")) {
-		t.Fatalf("InputUSDPer1M = %s", res.InputUSDPer1M)
-	}
-	if !res.OutputUSDPer1M.Equal(decimal.RequireFromString("2.2")) {
-		t.Fatalf("OutputUSDPer1M = %s", res.OutputUSDPer1M)
-	}
-	if !res.CacheInputUSDPer1M.Equal(decimal.Zero) {
-		t.Fatalf("CacheInputUSDPer1M = %s", res.CacheInputUSDPer1M)
-	}
-	if !res.CacheOutputUSDPer1M.Equal(decimal.Zero) {
-		t.Fatalf("CacheOutputUSDPer1M = %s", res.CacheOutputUSDPer1M)
-	}
-}
-
-func TestModelsDevCatalog_Lookup_Ambiguous(t *testing.T) {
-	t.Parallel()
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"openai": map[string]any{
-				"id": "openai",
-				"models": map[string]any{
-					"x": map[string]any{"id": "x", "cost": map[string]any{"input": 1, "output": 2}},
-				},
-			},
-			"anthropic": map[string]any{
-				"id": "anthropic",
-				"models": map[string]any{
-					"x": map[string]any{"id": "x", "cost": map[string]any{"input": 1, "output": 2}},
-				},
-			},
-		})
-	}))
-	t.Cleanup(srv.Close)
-
-	c := NewModelsDevCatalog(ModelsDevCatalogOptions{URL: srv.URL, TTL: time.Minute})
-
-	_, err := c.Lookup(context.Background(), "x")
+	c := NewModelsDevCatalog(OpenRouterCatalogOptions{URL: srv.URL, TTL: time.Minute})
+	_, err := c.Lookup(context.Background(), "openrouter/auto")
 	if err == nil {
-		t.Fatalf("Lookup() err = nil, want ambiguous error")
+		t.Fatal("Lookup() err = nil, want pricing error")
 	}
-	var amb *AmbiguousModelError
-	if !errors.As(err, &amb) {
-		t.Fatalf("Lookup() err = %T, want *AmbiguousModelError", err)
+	if err != ErrModelNoPricing {
+		t.Fatalf("Lookup() err = %v, want %v", err, ErrModelNoPricing)
 	}
-	if len(amb.Providers) != 2 {
-		t.Fatalf("Providers = %v, want 2 items", amb.Providers)
+}
+
+func TestOpenRouterCatalog_Suggest_SortsByMatchQuality(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{
+					"id":   "openai/gpt-5.4",
+					"name": "OpenAI: GPT-5.4",
+					"pricing": map[string]any{
+						"prompt":     "0.0000025",
+						"completion": "0.000015",
+					},
+				},
+				{
+					"id":   "openai/gpt-5.4-mini",
+					"name": "OpenAI: GPT-5.4 Mini",
+					"pricing": map[string]any{
+						"prompt":     "0.000001",
+						"completion": "0.000004",
+					},
+				},
+				{
+					"id":   "anthropic/claude-4.5-sonnet",
+					"name": "Claude GPT competitor",
+					"pricing": map[string]any{
+						"prompt":     "0.000003",
+						"completion": "0.000015",
+					},
+				},
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewModelsDevCatalog(OpenRouterCatalogOptions{URL: srv.URL, TTL: time.Minute})
+	got, err := c.Suggest(context.Background(), "gpt-5.4", 10)
+	if err != nil {
+		t.Fatalf("Suggest() err = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len(Suggest()) = %d, want 2", len(got))
+	}
+	if got[0].ModelID != "openai/gpt-5.4" {
+		t.Fatalf("first model = %q, want exact match", got[0].ModelID)
+	}
+	if got[1].ModelID != "openai/gpt-5.4-mini" {
+		t.Fatalf("second model = %q, want prefix match", got[1].ModelID)
+	}
+}
+
+func TestOpenRouterCatalog_Suggest_IncludesModelsWithoutPricing(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{
+					"id":      "openrouter/auto",
+					"name":    "OpenRouter Auto",
+					"pricing": map[string]any{"prompt": "-1", "completion": "-1"},
+				},
+				{
+					"id":   "openai/gpt-5.4",
+					"name": "OpenAI: GPT-5.4",
+					"pricing": map[string]any{
+						"prompt":     "0.0000025",
+						"completion": "0.000015",
+					},
+				},
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewModelsDevCatalog(OpenRouterCatalogOptions{URL: srv.URL, TTL: time.Minute})
+	got, err := c.Suggest(context.Background(), "open", 10)
+	if err != nil {
+		t.Fatalf("Suggest() err = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len(Suggest()) = %d, want 2", len(got))
+	}
+	if got[0].ModelID != "openai/gpt-5.4" {
+		t.Fatalf("first model = %q, want %q", got[0].ModelID, "openai/gpt-5.4")
+	}
+	if got[1].ModelID != "openrouter/auto" {
+		t.Fatalf("second model = %q, want %q", got[1].ModelID, "openrouter/auto")
 	}
 }

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 
 import { AutoSaveIndicator } from '../../components/AutoSaveIndicator';
 import { BootstrapModal } from '../../components/BootstrapModal';
 import { DividedStack } from '../../components/DividedStack';
+import { OpenRouterModelSuggestInput, type OpenRouterModelOption } from '../../components/OpenRouterModelSuggestInput';
 import { SegmentedFrame } from '../../components/SegmentedFrame';
 import { closeModalById } from '../../components/modal';
 import { useAutoSave } from '../../hooks/useAutoSave';
@@ -32,9 +33,6 @@ type ModelForm = {
   cache_input_usd_per_1m: string;
   cache_output_usd_per_1m: string;
   priority_pricing_enabled: boolean;
-  priority_input_usd_per_1m: string;
-  priority_output_usd_per_1m: string;
-  priority_cache_input_usd_per_1m: string;
   status: number;
 };
 
@@ -49,16 +47,60 @@ function modelToForm(m: ManagedModel, fallbackGroupName: string): ModelForm {
     cache_input_usd_per_1m: m.cache_input_usd_per_1m || '0',
     cache_output_usd_per_1m: m.cache_output_usd_per_1m || '0',
     priority_pricing_enabled: !!m.priority_pricing_enabled,
-    priority_input_usd_per_1m: m.priority_input_usd_per_1m || '',
-    priority_output_usd_per_1m: m.priority_output_usd_per_1m || '',
-    priority_cache_input_usd_per_1m: m.priority_cache_input_usd_per_1m || '',
     status: m.status || 0,
   };
 }
 
-function optionalPriceValue(v: string): string | null {
-  const s = (v || '').trim();
-  return s ? s : null;
+async function applyLookupToForm(
+  modelID: string,
+  setForm: Dispatch<SetStateAction<ModelForm>>,
+  setLookupErr: Dispatch<SetStateAction<string>>,
+  setLookupNotice: Dispatch<SetStateAction<string>>,
+  setIconPreview: Dispatch<SetStateAction<string | null>>,
+) {
+  const trimmed = modelID.trim();
+  if (!trimmed) {
+    setLookupErr('请先填写模型 ID');
+    setLookupNotice('');
+    setIconPreview(null);
+    return;
+  }
+  setLookupErr('');
+  try {
+    const res = await lookupModelFromLibraryAdmin(trimmed);
+    if (!res.success) throw new Error(res.message || '查询失败');
+    const d = res.data;
+    if (d) {
+      setForm((p) => ({
+        ...p,
+        public_id: trimmed,
+        owned_by: d.owned_by || '',
+        input_usd_per_1m: d.input_usd_per_1m || p.input_usd_per_1m,
+        output_usd_per_1m: d.output_usd_per_1m || p.output_usd_per_1m,
+        cache_input_usd_per_1m: d.cache_input_usd_per_1m || p.cache_input_usd_per_1m,
+        cache_output_usd_per_1m: d.cache_output_usd_per_1m || p.cache_output_usd_per_1m,
+      }));
+      setIconPreview(d.icon_url || null);
+    }
+    setLookupNotice(res.message || '已从 OpenRouter 填充');
+  } catch (e) {
+    setLookupErr(e instanceof Error ? e.message : '查询失败');
+    setLookupNotice('');
+    setIconPreview(null);
+  }
+}
+
+function applyManualModelIDToForm(
+  modelID: string,
+  setForm: Dispatch<SetStateAction<ModelForm>>,
+  setLookupErr: Dispatch<SetStateAction<string>>,
+  setLookupNotice: Dispatch<SetStateAction<string>>,
+  setIconPreview: Dispatch<SetStateAction<string | null>>,
+) {
+  setForm((p) => ({ ...p, public_id: modelID }));
+  setLookupErr('');
+  setLookupNotice('未命中 OpenRouter，可继续使用当前输入值并手工填写模型信息。');
+  setIconPreview(null);
 }
 
 export function ModelsAdminPage() {
@@ -70,10 +112,12 @@ export function ModelsAdminPage() {
   const [err, setErr] = useState('');
   const [notice, setNotice] = useState('');
 
-  const [createLookupLoading, setCreateLookupLoading] = useState(false);
   const [createLookupErr, setCreateLookupErr] = useState('');
   const [createLookupNotice, setCreateLookupNotice] = useState('');
   const [createIconPreview, setCreateIconPreview] = useState<string | null>(null);
+  const [editLookupErr, setEditLookupErr] = useState('');
+  const [editLookupNotice, setEditLookupNotice] = useState('');
+  const [editIconPreview, setEditIconPreview] = useState<string | null>(null);
 
   const [importPricingJSON, setImportPricingJSON] = useState('');
   const [importPricingLoading, setImportPricingLoading] = useState(false);
@@ -88,10 +132,7 @@ export function ModelsAdminPage() {
     output_usd_per_1m: '15',
     cache_input_usd_per_1m: '0',
     cache_output_usd_per_1m: '0',
-    priority_pricing_enabled: false,
-    priority_input_usd_per_1m: '',
-    priority_output_usd_per_1m: '',
-    priority_cache_input_usd_per_1m: '',
+    priority_pricing_enabled: true,
     status: 1,
   });
 
@@ -105,9 +146,6 @@ export function ModelsAdminPage() {
     cache_input_usd_per_1m: '0',
     cache_output_usd_per_1m: '0',
     priority_pricing_enabled: false,
-    priority_input_usd_per_1m: '',
-    priority_output_usd_per_1m: '',
-    priority_cache_input_usd_per_1m: '',
     status: 1,
   });
 
@@ -170,6 +208,9 @@ export function ModelsAdminPage() {
   useEffect(() => {
     if (!editing) return;
     setEditForm(modelToForm(editing, defaultGroupName));
+    setEditLookupErr('');
+    setEditLookupNotice('');
+    setEditIconPreview(editing.icon_url || null);
   }, [editing, defaultGroupName]);
 
   const editAutosave = useAutoSave({
@@ -197,9 +238,6 @@ export function ModelsAdminPage() {
           cache_input_usd_per_1m: v.cache_input_usd_per_1m,
           cache_output_usd_per_1m: v.cache_output_usd_per_1m,
           priority_pricing_enabled: v.priority_pricing_enabled,
-          priority_input_usd_per_1m: optionalPriceValue(v.priority_input_usd_per_1m),
-          priority_output_usd_per_1m: optionalPriceValue(v.priority_output_usd_per_1m),
-          priority_cache_input_usd_per_1m: optionalPriceValue(v.priority_cache_input_usd_per_1m),
           status: v.status,
         };
         const res = await updateManagedModelAdmin(nextModel);
@@ -347,9 +385,7 @@ export function ModelsAdminPage() {
                               </div>
                               <div className="mt-1 text-muted smaller">
                                 {m.priority_pricing_enabled ? (
-                                  <span>
-                                    Fast：输入 ${m.priority_input_usd_per_1m || '-'} · 输出 ${m.priority_output_usd_per_1m || '-'} · 缓存输入 ${m.priority_cache_input_usd_per_1m || '-'}
-                                  </span>
+                                  <span>Fast 已启用</span>
                                 ) : (
                                   <span>Fast 未启用</span>
                                 )}
@@ -442,10 +478,7 @@ export function ModelsAdminPage() {
             output_usd_per_1m: '15',
             cache_input_usd_per_1m: '0',
             cache_output_usd_per_1m: '0',
-            priority_pricing_enabled: false,
-            priority_input_usd_per_1m: '',
-            priority_output_usd_per_1m: '',
-            priority_cache_input_usd_per_1m: '',
+            priority_pricing_enabled: true,
             status: 1,
           });
           setCreateLookupErr('');
@@ -470,9 +503,9 @@ export function ModelsAdminPage() {
                 cache_input_usd_per_1m: createForm.cache_input_usd_per_1m,
                 cache_output_usd_per_1m: createForm.cache_output_usd_per_1m,
                 priority_pricing_enabled: createForm.priority_pricing_enabled,
-                priority_input_usd_per_1m: optionalPriceValue(createForm.priority_input_usd_per_1m),
-                priority_output_usd_per_1m: optionalPriceValue(createForm.priority_output_usd_per_1m),
-                priority_cache_input_usd_per_1m: optionalPriceValue(createForm.priority_cache_input_usd_per_1m),
+                priority_input_usd_per_1m: null,
+                priority_output_usd_per_1m: null,
+                priority_cache_input_usd_per_1m: null,
                 status: createForm.status,
               });
               if (!res.success) throw new Error(res.message || '创建失败');
@@ -488,60 +521,25 @@ export function ModelsAdminPage() {
         >
           <div className="col-md-8">
             <label className="form-label">对外 ID（public_id）</label>
-            <div className="input-group">
-              <input
-                className="form-control font-monospace"
-                value={createForm.public_id}
-                onChange={(e) => {
-                  setCreateForm((p) => ({ ...p, public_id: e.target.value }));
-                  setCreateLookupErr('');
-                  setCreateLookupNotice('');
-                }}
-                required
-                placeholder="例如：gpt-5.2"
-              />
-              <button
-                className="btn btn-outline-secondary"
-                type="button"
-                disabled={createLookupLoading || !createForm.public_id.trim()}
-                onClick={async () => {
-                  const modelID = createForm.public_id.trim();
-                  if (!modelID) {
-                    setCreateLookupErr('请先填写对外 ID');
-                    return;
-                  }
-                  setCreateLookupErr('');
-                  setCreateLookupNotice('');
-                  setCreateLookupLoading(true);
-                  try {
-                    const res = await lookupModelFromLibraryAdmin(modelID);
-                    if (!res.success) throw new Error(res.message || '查询失败');
-                    const d = res.data;
-                    if (d) {
-                      setCreateForm((p) => ({
-                        ...p,
-                        owned_by: d.owned_by || '',
-                        input_usd_per_1m: d.input_usd_per_1m || p.input_usd_per_1m,
-                        output_usd_per_1m: d.output_usd_per_1m || p.output_usd_per_1m,
-                        cache_input_usd_per_1m: d.cache_input_usd_per_1m || p.cache_input_usd_per_1m,
-                        cache_output_usd_per_1m: d.cache_output_usd_per_1m || p.cache_output_usd_per_1m,
-                      }));
-                      setCreateIconPreview(d.icon_url || null);
-                    }
-                    setCreateLookupNotice(res.message || '已从模型库填充');
-                  } catch (e) {
-                    setCreateLookupErr(e instanceof Error ? e.message : '查询失败');
-                  } finally {
-                    setCreateLookupLoading(false);
-                  }
-                }}
-              >
-                {createLookupLoading ? '查询中…' : '从模型库填充'}
-              </button>
-            </div>
+            <OpenRouterModelSuggestInput
+              id="create-model-public-id"
+              value={createForm.public_id}
+              placeholder="例如：openai/gpt-5.2"
+              onChange={(value) => {
+                setCreateForm((p) => ({ ...p, public_id: value }));
+                setCreateLookupErr('');
+                setCreateLookupNotice('');
+              }}
+              onSelect={(item: OpenRouterModelOption) => {
+                if (item.kind === 'manual') {
+                  applyManualModelIDToForm(item.id, setCreateForm, setCreateLookupErr, setCreateLookupNotice, setCreateIconPreview);
+                  return;
+                }
+                void applyLookupToForm(item.item.id, setCreateForm, setCreateLookupErr, setCreateLookupNotice, setCreateIconPreview);
+              }}
+            />
             <div className="form-text small text-muted">
-              数据来源：models.dev（GitHub 开源模型目录）。将填充“归属方/输入单价/输出单价/缓存输入单价/缓存输出单价”，不会自动保存。如遇多个候选可用{' '}
-              <code>openai/gpt-4o</code> 形式指定 provider。
+              数据来源：OpenRouter。选择候选后将填充“归属方/输入单价/输出单价/缓存输入单价/缓存输出单价”，不会自动保存。未命中时可继续使用手工输入值。
               {createIconPreview ? (
                 <img
                   className="rlm-model-icon ms-2"
@@ -628,31 +626,7 @@ export function ModelsAdminPage() {
               <input className="form-check-input" type="checkbox" checked={createForm.priority_pricing_enabled} onChange={(e) => setCreateForm((p) => ({ ...p, priority_pricing_enabled: e.target.checked }))} />
               <label className="form-check-label">启用 Fast mode 专属定价</label>
             </div>
-            <div className="form-text">打开后，Fast mode 会按下列价格计费；关闭后即使填了价格也不会生效。</div>
-          </div>
-          <div className="col-md-4">
-            <label className="form-label">Fast 输入单价</label>
-            <div className="input-group">
-              <span className="input-group-text">$</span>
-              <input className="form-control" value={createForm.priority_input_usd_per_1m} onChange={(e) => setCreateForm((p) => ({ ...p, priority_input_usd_per_1m: e.target.value }))} inputMode="decimal" placeholder="可选" />
-              <span className="input-group-text">/ 1M Token</span>
-            </div>
-          </div>
-          <div className="col-md-4">
-            <label className="form-label">Fast 输出单价</label>
-            <div className="input-group">
-              <span className="input-group-text">$</span>
-              <input className="form-control" value={createForm.priority_output_usd_per_1m} onChange={(e) => setCreateForm((p) => ({ ...p, priority_output_usd_per_1m: e.target.value }))} inputMode="decimal" placeholder="可选" />
-              <span className="input-group-text">/ 1M Token</span>
-            </div>
-          </div>
-          <div className="col-md-4">
-            <label className="form-label">Fast 缓存输入单价</label>
-            <div className="input-group">
-              <span className="input-group-text">$</span>
-              <input className="form-control" value={createForm.priority_cache_input_usd_per_1m} onChange={(e) => setCreateForm((p) => ({ ...p, priority_cache_input_usd_per_1m: e.target.value }))} inputMode="decimal" placeholder="留空则沿用基础缓存输入价格" />
-              <span className="input-group-text">/ 1M Token</span>
-            </div>
+            <div className="form-text">打开后会自动按基础价格推导 Fast 定价；关闭后 Fast 不可用。</div>
           </div>
 
           <div className="alert alert-light border small mb-0 d-flex align-items-start">
@@ -744,7 +718,7 @@ export function ModelsAdminPage() {
               rows={10}
               value={importPricingJSON}
               onChange={(e) => setImportPricingJSON(e.target.value)}
-              placeholder='{"gpt-5.2":{"input_usd_per_1m":0.15,"output_usd_per_1m":0.60,"cache_input_usd_per_1m":0.00,"cache_output_usd_per_1m":0.00,"priority_pricing_enabled":true,"priority_input_usd_per_1m":0.30,"priority_output_usd_per_1m":1.20,"priority_cache_input_usd_per_1m":0.00}}'
+              placeholder='{"gpt-5.2":{"input_usd_per_1m":0.15,"output_usd_per_1m":0.60,"cache_input_usd_per_1m":0.00,"cache_output_usd_per_1m":0.00,"priority_pricing_enabled":true}}'
               required
             />
             <div className="form-text small text-muted">顶层支持对象或数组；支持 usd_per_1m 或 cost_per_token 格式。</div>
@@ -871,7 +845,49 @@ export function ModelsAdminPage() {
           >
             <div className="col-md-8">
               <label className="form-label">对外 ID（public_id）</label>
-              <input className="form-control font-monospace" value={editForm.public_id} onChange={(e) => setEditForm((p) => ({ ...p, public_id: e.target.value }))} required />
+              <OpenRouterModelSuggestInput
+                id="edit-model-public-id"
+                value={editForm.public_id}
+                placeholder="例如：openai/gpt-5.2"
+                onChange={(value) => {
+                  setEditForm((p) => ({ ...p, public_id: value }));
+                  setEditLookupErr('');
+                  setEditLookupNotice('');
+                }}
+                onSelect={(item: OpenRouterModelOption) => {
+                  if (item.kind === 'manual') {
+                    applyManualModelIDToForm(item.id, setEditForm, setEditLookupErr, setEditLookupNotice, setEditIconPreview);
+                    return;
+                  }
+                  void applyLookupToForm(item.item.id, setEditForm, setEditLookupErr, setEditLookupNotice, setEditIconPreview);
+                }}
+              />
+              <div className="form-text small text-muted">
+                数据来源：OpenRouter。选择候选会覆盖归属方与基础价格字段；未命中时仍可手工输入。
+                {editIconPreview ? (
+                  <img
+                    className="rlm-model-icon ms-2"
+                    src={editIconPreview}
+                    alt="icon"
+                    loading="lazy"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).style.display = 'none';
+                    }}
+                  />
+                ) : null}
+              </div>
+              {editLookupNotice ? (
+                <div className="text-success small mt-1">
+                  <i className="ri-checkbox-circle-line me-1"></i>
+                  {editLookupNotice}
+                </div>
+              ) : null}
+              {editLookupErr ? (
+                <div className="text-danger small mt-1">
+                  <i className="ri-error-warning-line me-1"></i>
+                  {editLookupErr}
+                </div>
+              ) : null}
             </div>
             <div className="col-md-4">
               <label className="form-label">状态</label>
@@ -932,31 +948,7 @@ export function ModelsAdminPage() {
                 <input className="form-check-input" type="checkbox" checked={editForm.priority_pricing_enabled} onChange={(e) => setEditForm((p) => ({ ...p, priority_pricing_enabled: e.target.checked }))} />
                 <label className="form-check-label">启用 Fast mode 专属定价</label>
               </div>
-              <div className="form-text">Fast 请求仅在开关打开时按专属价格计费。</div>
-            </div>
-            <div className="col-md-4">
-              <label className="form-label">Fast 输入单价</label>
-              <div className="input-group">
-                <span className="input-group-text">$</span>
-                <input className="form-control" value={editForm.priority_input_usd_per_1m} onChange={(e) => setEditForm((p) => ({ ...p, priority_input_usd_per_1m: e.target.value }))} inputMode="decimal" placeholder="可选" />
-                <span className="input-group-text">/ 1M Token</span>
-              </div>
-            </div>
-            <div className="col-md-4">
-              <label className="form-label">Fast 输出单价</label>
-              <div className="input-group">
-                <span className="input-group-text">$</span>
-                <input className="form-control" value={editForm.priority_output_usd_per_1m} onChange={(e) => setEditForm((p) => ({ ...p, priority_output_usd_per_1m: e.target.value }))} inputMode="decimal" placeholder="可选" />
-                <span className="input-group-text">/ 1M Token</span>
-              </div>
-            </div>
-            <div className="col-md-4">
-              <label className="form-label">Fast 缓存输入单价</label>
-              <div className="input-group">
-                <span className="input-group-text">$</span>
-                <input className="form-control" value={editForm.priority_cache_input_usd_per_1m} onChange={(e) => setEditForm((p) => ({ ...p, priority_cache_input_usd_per_1m: e.target.value }))} inputMode="decimal" placeholder="留空则沿用基础缓存输入价格" />
-                <span className="input-group-text">/ 1M Token</span>
-              </div>
+              <div className="form-text">打开后会自动按基础价格推导 Fast 定价；关闭后 Fast 不可用。</div>
             </div>
 
             <div className="modal-footer border-top-0 px-0 pb-0">
