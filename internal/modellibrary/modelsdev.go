@@ -83,7 +83,7 @@ type candidateMatch struct {
 }
 
 type LookupResult struct {
-	Source string
+	Source       string
 	SourceDetail string
 
 	// OwnedBy 是 Realms 的展示用归属方（用于图标映射与 /v1/models owned_by）。
@@ -142,7 +142,7 @@ func (c *ModelsDevCatalog) Lookup(ctx context.Context, modelID string) (LookupRe
 						return LookupResult{}, err
 					}
 					if ok {
-						return enrichLookupResult(ctx, res), nil
+						return enrichLookupResult(ctx, res)
 					}
 				}
 			}
@@ -158,7 +158,7 @@ func (c *ModelsDevCatalog) Lookup(ctx context.Context, modelID string) (LookupRe
 					return LookupResult{}, err
 				}
 				if ok {
-					return enrichLookupResult(ctx, res), nil
+					return enrichLookupResult(ctx, res)
 				}
 			}
 		}
@@ -188,7 +188,7 @@ func (c *ModelsDevCatalog) Lookup(ctx context.Context, modelID string) (LookupRe
 				return LookupResult{}, err
 			}
 			if ok {
-				return enrichLookupResult(ctx, res), nil
+				return enrichLookupResult(ctx, res)
 			}
 		}
 		ps := make([]string, 0, len(matches))
@@ -205,7 +205,7 @@ func (c *ModelsDevCatalog) Lookup(ctx context.Context, modelID string) (LookupRe
 	if !ok {
 		return LookupResult{}, ErrModelNoPricing
 	}
-	return enrichLookupResult(ctx, res), nil
+	return enrichLookupResult(ctx, res)
 }
 
 func ownedByFromCompositeID(modelID string) string {

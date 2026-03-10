@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -18,18 +19,111 @@ import (
 var defaultModelLibraryHTTPClient = &http.Client{Timeout: 10 * time.Second}
 var fetchURLFunc = fetchURL
 
-func enrichLookupResult(ctx context.Context, in LookupResult) LookupResult {
-	out := in
-	if hc, detail, err := lookupOpenAIHighContextPricing(ctx, in.ModelID, in); err == nil && hc != nil {
-		out.HighContextPricing = hc
-		out.SourceDetail = detail
-		return out
+var highContextLookupCacheTTL = 10 * time.Minute
+
+var (
+	highContextLookupCacheMu sync.Mutex
+	highContextLookupCache   = map[string]highContextLookupCacheEntry{}
+)
+
+type highContextLookupCacheEntry struct {
+	cachedAt     time.Time
+	pricing      *store.ManagedModelHighContextPricing
+	sourceDetail string
+	err          error
+}
+
+func enrichLookupResult(ctx context.Context, in LookupResult) (LookupResult, error) {
+	cachedEntry, ok := getCachedHighContextLookup(in)
+	if ok {
+		return applyHighContextLookupResult(in, cachedEntry), cachedEntry.err
 	}
-	if hc, detail, err := lookupOpenRouterHighContextPricing(ctx, in.ModelID, in); err == nil && hc != nil {
-		out.HighContextPricing = hc
-		out.SourceDetail = detail
+
+	entry := highContextLookupCacheEntry{}
+	if hc, detail, err := lookupOpenAIHighContextPricing(ctx, in.ModelID, in); err != nil {
+		entry.err = err
+	} else if hc != nil {
+		entry.pricing = cloneHighContextPricing(hc)
+		entry.sourceDetail = detail
+	} else if hc, detail, err := lookupOpenRouterHighContextPricing(ctx, in.ModelID, in); err != nil {
+		entry.err = err
+	} else if hc != nil {
+		entry.pricing = cloneHighContextPricing(hc)
+		entry.sourceDetail = detail
+	}
+
+	setCachedHighContextLookup(in, entry)
+	return applyHighContextLookupResult(in, entry), entry.err
+}
+
+func applyHighContextLookupResult(in LookupResult, entry highContextLookupCacheEntry) LookupResult {
+	out := in
+	if entry.pricing != nil {
+		out.HighContextPricing = cloneHighContextPricing(entry.pricing)
+		out.SourceDetail = entry.sourceDetail
 	}
 	return out
+}
+
+func getCachedHighContextLookup(in LookupResult) (highContextLookupCacheEntry, bool) {
+	key := highContextLookupCacheKey(in)
+	now := time.Now()
+
+	highContextLookupCacheMu.Lock()
+	defer highContextLookupCacheMu.Unlock()
+
+	entry, ok := highContextLookupCache[key]
+	if !ok {
+		return highContextLookupCacheEntry{}, false
+	}
+	if now.Sub(entry.cachedAt) > highContextLookupCacheTTL {
+		delete(highContextLookupCache, key)
+		return highContextLookupCacheEntry{}, false
+	}
+	return cloneHighContextLookupCacheEntry(entry), true
+}
+
+func setCachedHighContextLookup(in LookupResult, entry highContextLookupCacheEntry) {
+	key := highContextLookupCacheKey(in)
+
+	highContextLookupCacheMu.Lock()
+	defer highContextLookupCacheMu.Unlock()
+
+	entry.cachedAt = time.Now()
+	highContextLookupCache[key] = cloneHighContextLookupCacheEntry(entry)
+}
+
+func highContextLookupCacheKey(in LookupResult) string {
+	return strings.TrimSpace(in.OwnedBy) + "\x00" + strings.TrimSpace(in.ModelID)
+}
+
+func cloneHighContextLookupCacheEntry(in highContextLookupCacheEntry) highContextLookupCacheEntry {
+	out := in
+	out.pricing = cloneHighContextPricing(in.pricing)
+	return out
+}
+
+func cloneHighContextPricing(in *store.ManagedModelHighContextPricing) *store.ManagedModelHighContextPricing {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	if in.CacheInputUSDPer1M != nil {
+		cacheInput := *in.CacheInputUSDPer1M
+		out.CacheInputUSDPer1M = &cacheInput
+	}
+	if in.CacheOutputUSDPer1M != nil {
+		cacheOutput := *in.CacheOutputUSDPer1M
+		out.CacheOutputUSDPer1M = &cacheOutput
+	}
+	return &out
+}
+
+func resetHighContextLookupCache() {
+	highContextLookupCacheMu.Lock()
+	defer highContextLookupCacheMu.Unlock()
+
+	highContextLookupCache = map[string]highContextLookupCacheEntry{}
 }
 
 func lookupOpenAIHighContextPricing(ctx context.Context, modelID string, base LookupResult) (*store.ManagedModelHighContextPricing, string, error) {

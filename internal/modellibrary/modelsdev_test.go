@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -261,26 +262,28 @@ func TestModelsDevCatalog_Lookup_Ambiguous(t *testing.T) {
 func TestEnrichLookupResult_OpenRouterHighContextFallback(t *testing.T) {
 	oldFetch := fetchURLFunc
 	t.Cleanup(func() { fetchURLFunc = oldFetch })
+	resetHighContextLookupCache()
+	t.Cleanup(resetHighContextLookupCache)
 	fetchURLFunc = func(ctx context.Context, client *http.Client, url string) (string, error) {
-		if strings.HasPrefix(url, "https://developers.openai.com/") {
-			return "", errors.New("official docs unavailable")
-		}
-		if !strings.Contains(url, "openrouter.ai/openai/gpt-5.4/pricing") {
+		if !strings.Contains(url, "openrouter.ai/openai/o3/pricing") {
 			t.Fatalf("unexpected url: %s", url)
 		}
 		return `{"pricing_json":{"openai_responses:high_context_threshold":"272000","openai_responses:prompt_tokens_high_context":"5e-6","openai_responses:completion_tokens_high_context":"22.5e-6","openai_responses:cached_prompt_tokens_high_context":"0.5e-6"}}`, nil
 	}
 
-	res := enrichLookupResult(context.Background(), LookupResult{
+	res, err := enrichLookupResult(context.Background(), LookupResult{
 		Source:              "models.dev",
 		SourceDetail:        "models.dev",
 		OwnedBy:             "openai",
-		ModelID:             "openai/gpt-5.4",
+		ModelID:             "openai/o3",
 		InputUSDPer1M:       decimal.RequireFromString("2.5"),
 		OutputUSDPer1M:      decimal.RequireFromString("15"),
 		CacheInputUSDPer1M:  decimal.RequireFromString("0.25"),
 		CacheOutputUSDPer1M: decimal.RequireFromString("0.25"),
 	})
+	if err != nil {
+		t.Fatalf("enrichLookupResult() err = %v", err)
+	}
 	if res.HighContextPricing == nil {
 		t.Fatal("expected high_context_pricing")
 	}
@@ -298,6 +301,8 @@ func TestEnrichLookupResult_OpenRouterHighContextFallback(t *testing.T) {
 func TestEnrichLookupResult_OpenAIOfficialHighContextPricing(t *testing.T) {
 	oldFetch := fetchURLFunc
 	t.Cleanup(func() { fetchURLFunc = oldFetch })
+	resetHighContextLookupCache()
+	t.Cleanup(resetHighContextLookupCache)
 	fetchURLFunc = func(ctx context.Context, client *http.Client, url string) (string, error) {
 		switch url {
 		case "https://developers.openai.com/api/docs/pricing/":
@@ -310,7 +315,7 @@ func TestEnrichLookupResult_OpenAIOfficialHighContextPricing(t *testing.T) {
 		}
 	}
 
-	res := enrichLookupResult(context.Background(), LookupResult{
+	res, err := enrichLookupResult(context.Background(), LookupResult{
 		Source:              "models.dev",
 		SourceDetail:        "models.dev",
 		OwnedBy:             "openai",
@@ -320,6 +325,9 @@ func TestEnrichLookupResult_OpenAIOfficialHighContextPricing(t *testing.T) {
 		CacheInputUSDPer1M:  decimal.RequireFromString("0.25"),
 		CacheOutputUSDPer1M: decimal.RequireFromString("0.25"),
 	})
+	if err != nil {
+		t.Fatalf("enrichLookupResult() err = %v", err)
+	}
 	if res.HighContextPricing == nil {
 		t.Fatal("expected high_context_pricing")
 	}
@@ -331,5 +339,91 @@ func TestEnrichLookupResult_OpenAIOfficialHighContextPricing(t *testing.T) {
 	}
 	if res.SourceDetail != "openai_official_pricing_docs" {
 		t.Fatalf("source_detail=%q, want openai_official_pricing_docs", res.SourceDetail)
+	}
+}
+
+func TestEnrichLookupResult_OpenAIFailureDoesNotFallback(t *testing.T) {
+	oldFetch := fetchURLFunc
+	t.Cleanup(func() { fetchURLFunc = oldFetch })
+	resetHighContextLookupCache()
+	t.Cleanup(resetHighContextLookupCache)
+	fetchURLFunc = func(ctx context.Context, client *http.Client, url string) (string, error) {
+		if strings.HasPrefix(url, "https://developers.openai.com/") {
+			return "", errors.New("official docs unavailable")
+		}
+		t.Fatalf("unexpected fallback url: %s", url)
+		return "", nil
+	}
+
+	res, err := enrichLookupResult(context.Background(), LookupResult{
+		Source:              "models.dev",
+		SourceDetail:        "models.dev",
+		OwnedBy:             "openai",
+		ModelID:             "gpt-5.4",
+		InputUSDPer1M:       decimal.RequireFromString("2.5"),
+		OutputUSDPer1M:      decimal.RequireFromString("15"),
+		CacheInputUSDPer1M:  decimal.RequireFromString("0.25"),
+		CacheOutputUSDPer1M: decimal.RequireFromString("0.25"),
+	})
+	if err == nil {
+		t.Fatal("expected enrichLookupResult() error")
+	}
+	if res.HighContextPricing != nil {
+		t.Fatal("expected no high_context_pricing on official lookup failure")
+	}
+	if res.SourceDetail != "models.dev" {
+		t.Fatalf("source_detail=%q, want models.dev", res.SourceDetail)
+	}
+}
+
+func TestEnrichLookupResult_HighContextCacheHit(t *testing.T) {
+	oldFetch := fetchURLFunc
+	oldTTL := highContextLookupCacheTTL
+	t.Cleanup(func() {
+		fetchURLFunc = oldFetch
+		highContextLookupCacheTTL = oldTTL
+	})
+	resetHighContextLookupCache()
+	t.Cleanup(resetHighContextLookupCache)
+	highContextLookupCacheTTL = time.Minute
+
+	var fetchCount int32
+	fetchURLFunc = func(ctx context.Context, client *http.Client, url string) (string, error) {
+		atomic.AddInt32(&fetchCount, 1)
+		switch url {
+		case "https://developers.openai.com/api/docs/pricing/":
+			return `<table><tr><td>gpt-5.4 (&gt;272K context length)</td></tr></table>`, nil
+		case "https://developers.openai.com/api/docs/guides/latest-model/":
+			return `Requests above 272K tokens is automatically processed at standard rates.`, nil
+		default:
+			t.Fatalf("unexpected url: %s", url)
+			return "", nil
+		}
+	}
+
+	in := LookupResult{
+		Source:              "models.dev",
+		SourceDetail:        "models.dev",
+		OwnedBy:             "openai",
+		ModelID:             "gpt-5.4",
+		InputUSDPer1M:       decimal.RequireFromString("2.5"),
+		OutputUSDPer1M:      decimal.RequireFromString("15"),
+		CacheInputUSDPer1M:  decimal.RequireFromString("0.25"),
+		CacheOutputUSDPer1M: decimal.RequireFromString("0.25"),
+	}
+
+	first, err := enrichLookupResult(context.Background(), in)
+	if err != nil {
+		t.Fatalf("first enrichLookupResult() err = %v", err)
+	}
+	second, err := enrichLookupResult(context.Background(), in)
+	if err != nil {
+		t.Fatalf("second enrichLookupResult() err = %v", err)
+	}
+	if first.HighContextPricing == nil || second.HighContextPricing == nil {
+		t.Fatal("expected cached high_context_pricing")
+	}
+	if got := atomic.LoadInt32(&fetchCount); got != 2 {
+		t.Fatalf("fetch count = %d, want 2", got)
 	}
 }
