@@ -27,9 +27,8 @@ var (
 )
 
 type highContextLookupCacheEntry struct {
-	cachedAt     time.Time
-	pricing      *store.ManagedModelHighContextPricing
-	sourceDetail string
+	cachedAt time.Time
+	pricing  *store.ManagedModelHighContextPricing
 }
 
 func enrichLookupResult(ctx context.Context, in LookupResult) (LookupResult, error) {
@@ -39,16 +38,13 @@ func enrichLookupResult(ctx context.Context, in LookupResult) (LookupResult, err
 	}
 
 	entry := highContextLookupCacheEntry{}
-	if hc, detail, err := lookupOpenAIHighContextPricing(ctx, in.ModelID, in); err == nil && hc != nil {
+	if hc, _, err := lookupOpenAIHighContextPricing(ctx, in.ModelID, in); err == nil && hc != nil {
 		entry.pricing = cloneHighContextPricing(hc)
-		entry.sourceDetail = detail
 	} else if hc != nil {
 		entry.pricing = cloneHighContextPricing(hc)
-		entry.sourceDetail = detail
 	} else {
-		if hc, detail, err := lookupOpenRouterHighContextPricing(ctx, in.ModelID, in); err == nil && hc != nil {
+		if hc, _, err := lookupOpenRouterHighContextPricing(ctx, in.ModelID, in); err == nil && hc != nil {
 			entry.pricing = cloneHighContextPricing(hc)
-			entry.sourceDetail = detail
 		}
 	}
 
@@ -62,7 +58,6 @@ func applyHighContextLookupResult(in LookupResult, entry highContextLookupCacheE
 	out := in
 	if entry.pricing != nil {
 		out.HighContextPricing = cloneHighContextPricing(entry.pricing)
-		out.SourceDetail = entry.sourceDetail
 	}
 	return out
 }

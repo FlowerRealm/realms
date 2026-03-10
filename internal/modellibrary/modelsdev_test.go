@@ -293,8 +293,11 @@ func TestEnrichLookupResult_OpenRouterHighContextFallback(t *testing.T) {
 	if !res.HighContextPricing.InputUSDPer1M.Equal(decimal.RequireFromString("5")) {
 		t.Fatalf("input=%s, want 5", res.HighContextPricing.InputUSDPer1M)
 	}
-	if res.SourceDetail != "openrouter_pricing_page" {
-		t.Fatalf("source_detail=%q, want openrouter_pricing_page", res.SourceDetail)
+	if res.SourceDetail != "models.dev" {
+		t.Fatalf("source_detail=%q, want models.dev", res.SourceDetail)
+	}
+	if res.HighContextPricing.SourceDetail != "openrouter_pricing_page" {
+		t.Fatalf("high_context source_detail=%q, want openrouter_pricing_page", res.HighContextPricing.SourceDetail)
 	}
 }
 
@@ -337,8 +340,11 @@ func TestEnrichLookupResult_OpenAIOfficialHighContextPricing(t *testing.T) {
 	if !res.HighContextPricing.OutputUSDPer1M.Equal(decimal.RequireFromString("22.5")) {
 		t.Fatalf("output=%s, want 22.5", res.HighContextPricing.OutputUSDPer1M)
 	}
-	if res.SourceDetail != "openai_official_pricing_docs" {
-		t.Fatalf("source_detail=%q, want openai_official_pricing_docs", res.SourceDetail)
+	if res.SourceDetail != "models.dev" {
+		t.Fatalf("source_detail=%q, want models.dev", res.SourceDetail)
+	}
+	if res.HighContextPricing.SourceDetail != "openai_official_pricing_docs" {
+		t.Fatalf("high_context source_detail=%q, want openai_official_pricing_docs", res.HighContextPricing.SourceDetail)
 	}
 }
 
@@ -519,8 +525,11 @@ func TestEnrichLookupResult_OpenAISoftFailureFallsBackToOpenRouter(t *testing.T)
 	if res.HighContextPricing == nil {
 		t.Fatal("expected fallback high_context_pricing")
 	}
-	if res.SourceDetail != "openrouter_pricing_page" {
-		t.Fatalf("source_detail=%q, want openrouter_pricing_page", res.SourceDetail)
+	if res.SourceDetail != "models.dev" {
+		t.Fatalf("source_detail=%q, want models.dev", res.SourceDetail)
+	}
+	if res.HighContextPricing.SourceDetail != "openrouter_pricing_page" {
+		t.Fatalf("high_context source_detail=%q, want openrouter_pricing_page", res.HighContextPricing.SourceDetail)
 	}
 	if got := atomic.LoadInt32(&openRouterFetches); got != 1 {
 		t.Fatalf("openrouter fetch count = %d, want 1", got)
