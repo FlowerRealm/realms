@@ -201,6 +201,172 @@ func TestUsageEvents_UserResponse_HidesUpstreamChannel(t *testing.T) {
 	}
 }
 
+func TestUsageEvents_UserResponse_ExposesModelCheck(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	userID, err := st.CreateUser(ctx, "mismatch@example.com", "mismatch", pwHash, store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	tokenID, _, err := st.CreateUserToken(ctx, userID, nil, "sk-model-check")
+	if err != nil {
+		t.Fatalf("CreateUserToken: %v", err)
+	}
+
+	usageEventID, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
+		RequestID:        "req_model_check_1",
+		UserID:           userID,
+		TokenID:          tokenID,
+		Model:            optionalStringForUsageRouteTest("alias"),
+		ReservedUSD:      decimal.Zero,
+		ReserveExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("ReserveUsage: %v", err)
+	}
+	if err := st.CommitUsage(ctx, store.CommitUsageInput{
+		UsageEventID: usageEventID,
+		CommittedUSD: decimal.Zero,
+	}); err != nil {
+		t.Fatalf("CommitUsage: %v", err)
+	}
+
+	if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
+		UsageEventID:          usageEventID,
+		Endpoint:              "/v1/responses",
+		Method:                "POST",
+		StatusCode:            200,
+		ForwardedModel:        optionalStringForUsageRouteTest("gpt-5.2"),
+		UpstreamResponseModel: optionalStringForUsageRouteTest("gpt-5.2-mini"),
+	}); err != nil {
+		t.Fatalf("FinalizeUsageEvent: %v", err)
+	}
+
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+
+	cookieName := "realms_session"
+	sessionStore := cookie.NewStore([]byte("test-secret"))
+	sessionStore.Options(sessions.Options{
+		Path:     "/",
+		MaxAge:   2592000,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	engine.Use(sessions.Sessions(cookieName, sessionStore))
+
+	SetRouter(engine, Options{
+		Store:             st,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
+
+	loginBody, _ := json.Marshal(map[string]any{
+		"login":    "mismatch@example.com",
+		"password": "password123",
+	})
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/user/login", bytes.NewReader(loginBody))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	sessionCookie := ""
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == cookieName {
+			sessionCookie = c.String()
+			break
+		}
+	}
+	if sessionCookie == "" {
+		t.Fatalf("expected session cookie %q", cookieName)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/usage/events", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("usage events status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var listResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Events []struct {
+				ID            int64 `json:"id"`
+				ModelMismatch bool  `json:"model_mismatch"`
+			} `json:"events"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("json.Unmarshal usage events: %v", err)
+	}
+	if !listResp.Success {
+		t.Fatalf("usage events expected success, got message=%q", listResp.Message)
+	}
+	if len(listResp.Data.Events) != 1 || !listResp.Data.Events[0].ModelMismatch {
+		t.Fatalf("expected model_mismatch=true, got=%+v", listResp.Data.Events)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/usage/events/"+strconv.FormatInt(usageEventID, 10)+"/detail", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("detail status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var detailResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			ModelCheck struct {
+				ForwardedModel        string `json:"forwarded_model"`
+				UpstreamResponseModel string `json:"upstream_response_model"`
+				Mismatch              bool   `json:"mismatch"`
+			} `json:"model_check"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &detailResp); err != nil {
+		t.Fatalf("json.Unmarshal detail: %v", err)
+	}
+	if !detailResp.Success {
+		t.Fatalf("detail expected success, got message=%q", detailResp.Message)
+	}
+	if detailResp.Data.ModelCheck.ForwardedModel != "gpt-5.2" || detailResp.Data.ModelCheck.UpstreamResponseModel != "gpt-5.2-mini" || !detailResp.Data.ModelCheck.Mismatch {
+		t.Fatalf("unexpected model_check=%+v", detailResp.Data.ModelCheck)
+	}
+}
+
+func optionalStringForUsageRouteTest(v string) *string {
+	return &v
+}
+
 func TestUsageLeaderboard_ReturnsRankedUsersByWindow(t *testing.T) {
 	st, db, closeDB := newTestSQLiteStoreWithDB(t)
 	defer closeDB()

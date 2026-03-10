@@ -124,6 +124,7 @@ type usageEventAPI struct {
 	IsStream           bool            `json:"is_stream"`
 	RequestBytes       int64           `json:"request_bytes"`
 	ResponseBytes      int64           `json:"response_bytes"`
+	ModelMismatch      bool            `json:"model_mismatch"`
 	CreatedAt          time.Time       `json:"created_at"`
 	UpdatedAt          time.Time       `json:"updated_at"`
 }
@@ -137,6 +138,35 @@ func normalizeUsageServiceTierPtr(raw *string) *string {
 		return nil
 	}
 	return &tier
+}
+
+type usageEventModelCheckAPI struct {
+	ForwardedModel        *string `json:"forwarded_model,omitempty"`
+	UpstreamResponseModel *string `json:"upstream_response_model,omitempty"`
+	Mismatch              bool    `json:"mismatch"`
+}
+
+func usageEventModelMismatch(forwardedModel *string, upstreamResponseModel *string) bool {
+	if forwardedModel == nil || upstreamResponseModel == nil {
+		return false
+	}
+	forwarded := strings.TrimSpace(*forwardedModel)
+	upstream := strings.TrimSpace(*upstreamResponseModel)
+	if forwarded == "" || upstream == "" {
+		return false
+	}
+	return forwarded != upstream
+}
+
+func buildUsageEventModelCheck(ev store.UsageEvent) *usageEventModelCheckAPI {
+	if ev.ForwardedModel == nil && ev.UpstreamResponseModel == nil {
+		return nil
+	}
+	return &usageEventModelCheckAPI{
+		ForwardedModel:        ev.ForwardedModel,
+		UpstreamResponseModel: ev.UpstreamResponseModel,
+		Mismatch:              usageEventModelMismatch(ev.ForwardedModel, ev.UpstreamResponseModel),
+	}
 }
 
 func usageWindowsHandler(opts Options) gin.HandlerFunc {
@@ -428,6 +458,7 @@ func usageEventsHandler(opts Options) gin.HandlerFunc {
 				IsStream:           e.IsStream,
 				RequestBytes:       e.RequestBytes,
 				ResponseBytes:      e.ResponseBytes,
+				ModelMismatch:      usageEventModelMismatch(e.ForwardedModel, e.UpstreamResponseModel),
 				CreatedAt:          e.CreatedAt,
 				UpdatedAt:          e.UpdatedAt,
 			})
@@ -444,6 +475,7 @@ func usageEventsHandler(opts Options) gin.HandlerFunc {
 type usageEventDetailAPIResponse struct {
 	EventID          int64                          `json:"event_id"`
 	PricingBreakdown *usageEventPricingBreakdownAPI `json:"pricing_breakdown,omitempty"`
+	ModelCheck       *usageEventModelCheckAPI       `json:"model_check,omitempty"`
 }
 
 func usageEventDetailHandler(opts Options) gin.HandlerFunc {
@@ -509,6 +541,7 @@ func usageEventDetailHandler(opts Options) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": usageEventDetailAPIResponse{
 			EventID:          id,
 			PricingBreakdown: &pricingBreakdown,
+			ModelCheck:       buildUsageEventModelCheck(ev),
 		}})
 	}
 }

@@ -126,6 +126,7 @@ export function UsageEventsCard({
                 const state = stateLabel(e.state);
                 const errText = errorText(e.error_class, e.error_message);
                 const serviceTier = serviceTierBadgeLabel(e.service_tier);
+                const modelCheck = detailByEventID[e.id]?.model_check;
 
                 return (
                   <>
@@ -182,6 +183,9 @@ export function UsageEventsCard({
                         {serviceTier ? (
                           <div className="badge bg-warning-subtle text-warning border border-warning-subtle rounded-pill px-2 scale-90 mt-1">{serviceTier}</div>
                         ) : null}
+                        {e.model_mismatch ? (
+                          <div className="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill px-2 scale-90 mt-1">MODEL</div>
+                        ) : null}
                         {errText ? (
                           <div className="text-danger smaller mt-1" title={errText}>
                             <span className="material-symbols-rounded">error</span> 错误
@@ -222,6 +226,24 @@ export function UsageEventsCard({
                                   <div className="text-muted smaller">Service Tier</div>
                                   <div className="font-monospace">{serviceTierText(detailByEventID[e.id]?.pricing_breakdown?.service_tier || e.service_tier)}</div>
                                 </div>
+                                {modelCheck ? (
+                                  <>
+                                    <div className="col-12 col-lg-4">
+                                      <div className="text-muted smaller">转发模型</div>
+                                      <div className="font-monospace text-break">{modelCheck.forwarded_model || '-'}</div>
+                                    </div>
+                                    <div className="col-12 col-lg-4">
+                                      <div className="text-muted smaller">上游返回模型</div>
+                                      <div className="font-monospace text-break">{modelCheck.upstream_response_model || '-'}</div>
+                                    </div>
+                                    <div className="col-12 col-lg-4">
+                                      <div className="text-muted smaller">模型一致性</div>
+                                      <div className={modelCheck.mismatch ? 'text-danger fw-bold' : 'text-success fw-bold'}>
+                                        {modelCheck.mismatch ? '不一致' : '一致'}
+                                      </div>
+                                    </div>
+                                  </>
+                                ) : null}
 
                                 {detailByEventID[e.id]?.pricing_breakdown ? (
                                   <div className="col-12">

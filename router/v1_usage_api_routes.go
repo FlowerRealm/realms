@@ -273,6 +273,7 @@ func v1UsageEventsHTTPHandler(opts Options) http.HandlerFunc {
 				IsStream:           e.IsStream,
 				RequestBytes:       e.RequestBytes,
 				ResponseBytes:      e.ResponseBytes,
+				ModelMismatch:      usageEventModelMismatch(e.ForwardedModel, e.UpstreamResponseModel),
 				CreatedAt:          e.CreatedAt,
 				UpdatedAt:          e.UpdatedAt,
 			})
@@ -347,6 +348,7 @@ func v1UsageEventDetailHTTPHandler(opts Options) http.HandlerFunc {
 		writeHTTPAPIJSON(w, true, "", usageEventDetailAPIResponse{
 			EventID:          id,
 			PricingBreakdown: &pricingBreakdown,
+			ModelCheck:       buildUsageEventModelCheck(ev),
 		})
 	}
 }

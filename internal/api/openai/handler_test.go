@@ -104,6 +104,131 @@ func TestResponses_Stream_ExtractsUsageFromSSE(t *testing.T) {
 	}
 }
 
+func TestResponses_NonStream_FinalizeUsageCapturesModelCheck(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"alias": {ID: 1, PublicID: "alias", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"alias": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "alias", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	doer := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		body := `{"id":"resp_123","model":"gpt-5.2-mini","usage":{"input_tokens":3,"output_tokens":4}}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}, nil
+	})
+	sched := scheduler.New(fs)
+	q := &fakeQuota{}
+	u := &recordingUsage{}
+	h := NewHandler(fs, fs, sched, doer, nil, nil, q, fakeAudit{}, u, nil, upstream.SSEPumpOptions{}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"alias","input":"hi","stream":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(u.calls) != 1 {
+		t.Fatalf("expected 1 finalize call, got=%d", len(u.calls))
+	}
+	if u.calls[0].ForwardedModel == nil || *u.calls[0].ForwardedModel != "gpt-5.2" {
+		t.Fatalf("expected forwarded_model=%q, got=%v", "gpt-5.2", u.calls[0].ForwardedModel)
+	}
+	if u.calls[0].UpstreamResponseModel == nil || *u.calls[0].UpstreamResponseModel != "gpt-5.2-mini" {
+		t.Fatalf("expected upstream_response_model=%q, got=%v", "gpt-5.2-mini", u.calls[0].UpstreamResponseModel)
+	}
+}
+
+func TestResponses_Stream_FinalizeUsageCapturesModelCheck(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"alias": {ID: 1, PublicID: "alias", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"alias": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "alias", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	doer := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		body := "data: {\"model\":\"gpt-5.2-mini\",\"type\":\"response.output_text.delta\",\"delta\":\"pong\"}\n\n" +
+			"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":3,\"output_tokens\":4}}}\n\n" +
+			"data: [DONE]\n\n"
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}, nil
+	})
+	sched := scheduler.New(fs)
+	q := &fakeQuota{}
+	u := &recordingUsage{}
+	h := NewHandler(fs, fs, sched, doer, nil, nil, q, fakeAudit{}, u, nil, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"alias","input":"hi","stream":true}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(u.calls) != 1 {
+		t.Fatalf("expected 1 finalize call, got=%d", len(u.calls))
+	}
+	if u.calls[0].ForwardedModel == nil || *u.calls[0].ForwardedModel != "gpt-5.2" {
+		t.Fatalf("expected forwarded_model=%q, got=%v", "gpt-5.2", u.calls[0].ForwardedModel)
+	}
+	if u.calls[0].UpstreamResponseModel == nil || *u.calls[0].UpstreamResponseModel != "gpt-5.2-mini" {
+		t.Fatalf("expected upstream_response_model=%q, got=%v", "gpt-5.2-mini", u.calls[0].UpstreamResponseModel)
+	}
+}
+
 type DoerFunc func(ctx context.Context, sel scheduler.Selection, downstream *http.Request, body []byte) (*http.Response, error)
 
 func (f DoerFunc) Do(ctx context.Context, sel scheduler.Selection, downstream *http.Request, body []byte) (*http.Response, error) {

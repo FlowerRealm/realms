@@ -319,6 +319,8 @@ type UsageEvent struct {
 	UpstreamCredID           *int64
 	State                    string
 	Model                    *string
+	ForwardedModel           *string
+	UpstreamResponseModel    *string
 	ServiceTier              *string
 	InputTokens              *int64
 	CachedInputTokens        *int64

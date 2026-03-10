@@ -357,7 +357,7 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if h.tryWithSelection(w, req2, p, sel, rewritten, wantStream, optionalString(publicModel), usageID, reqStart, reqBytes, loopStart, 2, &bestFailure) {
+		if h.tryWithSelection(w, req2, p, sel, rewritten, wantStream, optionalString(publicModel), optionalString(upstreamModel), usageID, reqStart, reqBytes, loopStart, 2, &bestFailure) {
 			return
 		}
 		switches++

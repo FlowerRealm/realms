@@ -60,6 +60,7 @@ export type UsageEvent = {
   is_stream: boolean;
   request_bytes: number;
   response_bytes: number;
+  model_mismatch: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -177,6 +178,13 @@ export async function getUsageLeaderboard(window: '1d' | '7d' | '1mo', limit = 1
 export type UsageEventDetail = {
   event_id: number;
   pricing_breakdown?: UsageEventPricingBreakdown;
+  model_check?: UsageEventModelCheck;
+};
+
+export type UsageEventModelCheck = {
+  forwarded_model?: string | null;
+  upstream_response_model?: string | null;
+  mismatch: boolean;
 };
 
 export type UsageEventPricingBreakdown = {

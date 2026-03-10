@@ -243,7 +243,7 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 			if errors.Is(err, context.Canceled) || errors.Is(r.Context().Err(), context.Canceled) {
 				voidUsage()
 				writeOpenAIError(w, 499, "api_error", "Client disconnected before upstream completed")
-				h.finalizeUsageEvent(r, usageID, nil, 499, "client_disconnect", "client_disconnect", time.Since(reqStart), 0, false, reqBytes, 0)
+				h.finalizeUsageEventWithModelCheck(r, usageID, nil, 499, "client_disconnect", "client_disconnect", time.Since(reqStart), 0, false, reqBytes, 0, modelPtr, nil)
 				return
 			}
 			if errors.Is(r.Context().Err(), context.DeadlineExceeded) {
@@ -253,7 +253,7 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 					timeoutMs = 0
 				}
 				writeOpenAIError(w, http.StatusGatewayTimeout, "upstream_error", "Upstream timeout after "+strconv.FormatInt(timeoutMs, 10)+"ms")
-				h.finalizeUsageEvent(r, usageID, nil, http.StatusGatewayTimeout, "upstream_timeout", "upstream_timeout", time.Since(reqStart), 0, false, reqBytes, 0)
+				h.finalizeUsageEventWithModelCheck(r, usageID, nil, http.StatusGatewayTimeout, "upstream_timeout", "upstream_timeout", time.Since(reqStart), 0, false, reqBytes, 0, modelPtr, nil)
 				return
 			}
 			if errors.Is(err, context.DeadlineExceeded) {
@@ -316,7 +316,7 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 				msg = summarizeUpstreamErrorBody(capBuf.buf.Bytes())
 			}
 			h.maybeLogProxyFailure(r.Context(), r, p, nil, modelPtr, resp.StatusCode, "upstream_status", msg, time.Since(reqStart), false)
-			h.finalizeUsageEvent(r, usageID, nil, resp.StatusCode, "upstream_status", msg, time.Since(reqStart), 0, false, reqBytes, respBytes)
+			h.finalizeUsageEventWithModelCheck(r, usageID, nil, resp.StatusCode, "upstream_status", msg, time.Since(reqStart), 0, false, reqBytes, respBytes, modelPtr, nil)
 			return
 		}
 
@@ -333,13 +333,15 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 		if copyErr != nil {
 			voidUsage()
 			h.maybeLogProxyFailure(r.Context(), r, p, nil, modelPtr, resp.StatusCode, "proxy_copy", copyErr.Error(), time.Since(reqStart), false)
-			h.finalizeUsageEvent(r, usageID, nil, resp.StatusCode, "proxy_copy", "", time.Since(reqStart), 0, false, reqBytes, respBytes)
+			h.finalizeUsageEventWithModelCheck(r, usageID, nil, resp.StatusCode, "proxy_copy", "", time.Since(reqStart), 0, false, reqBytes, respBytes, modelPtr, nil)
 			return
 		}
 
 		var inTok, outTok, cachedInTok, cachedOutTok *int64
+		var responseModel *string
 		if !capBuf.exceeded {
 			inTok, outTok, cachedInTok, cachedOutTok = extractUsageTokens(capBuf.buf.Bytes())
+			responseModel = extractTopLevelModel(capBuf.buf.Bytes())
 		}
 		if usageID != 0 && h.quota != nil {
 			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -356,7 +358,7 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 
-		h.finalizeUsageEvent(r, usageID, nil, resp.StatusCode, "", "", time.Since(reqStart), 0, false, reqBytes, respBytes)
+		h.finalizeUsageEventWithModelCheck(r, usageID, nil, resp.StatusCode, "", "", time.Since(reqStart), 0, false, reqBytes, respBytes, modelPtr, responseModel)
 		return
 	}
 
@@ -371,5 +373,5 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 	if failResp.SkipMonitoring {
 		finalClass = ""
 	}
-	h.finalizeUsageEvent(r, usageID, nil, failResp.Status, finalClass, failResp.UsageMessage, time.Since(reqStart), 0, false, reqBytes, cw.bytes)
+	h.finalizeUsageEventWithModelCheck(r, usageID, nil, failResp.Status, finalClass, failResp.UsageMessage, time.Since(reqStart), 0, false, reqBytes, cw.bytes, modelPtr, nil)
 }
