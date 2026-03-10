@@ -3,9 +3,11 @@ package router
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -29,6 +31,8 @@ type modelLibraryLookupResult struct {
 	CacheInputUSDPer1M  string `json:"cache_input_usd_per_1m"`
 	CacheOutputUSDPer1M string `json:"cache_output_usd_per_1m"`
 	Source              string `json:"source"`
+	SourceDetail        string `json:"source_detail"`
+	HighContextPricing  *store.ManagedModelHighContextPricing `json:"high_context_pricing,omitempty"`
 	IconURL             string `json:"icon_url"`
 }
 
@@ -59,11 +63,13 @@ func adminModelLibraryLookupHandler(opts Options) gin.HandlerFunc {
 
 		out := modelLibraryLookupResult{
 			Source:              res.Source,
+			SourceDetail:        res.SourceDetail,
 			OwnedBy:             res.OwnedBy,
 			InputUSDPer1M:       formatUSDPlain(res.InputUSDPer1M),
 			OutputUSDPer1M:      formatUSDPlain(res.OutputUSDPer1M),
 			CacheInputUSDPer1M:  formatUSDPlain(res.CacheInputUSDPer1M),
 			CacheOutputUSDPer1M: formatUSDPlain(res.CacheOutputUSDPer1M),
+			HighContextPricing:  res.HighContextPricing,
 			IconURL:             icons.ModelIconURL(modelID, res.OwnedBy),
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已从模型库填充（models.dev）", "data": out})
@@ -265,6 +271,24 @@ func parsePricingFromMap(m map[string]any) (store.ManagedModelPricingUpsert, boo
 			}
 			item.PriorityCacheInputUSDPer1M = v
 		}
+		if hasAnyKey(m, "high_context_pricing") {
+			raw, ok := m["high_context_pricing"]
+			if !ok || raw == nil {
+				item.HighContextPricingSpecified = true
+				item.HighContextPricing = nil
+				return "", true
+			}
+			obj, ok := raw.(map[string]any)
+			if !ok {
+				return "high_context_pricing 不合法", false
+			}
+			hc, err := parseHighContextPricingFromMap(obj)
+			if err != nil {
+				return err.Error(), false
+			}
+			item.HighContextPricingSpecified = true
+			item.HighContextPricing = hc
+		}
 		return "", true
 	}
 
@@ -348,6 +372,66 @@ func parsePricingFromMap(m map[string]any) (store.ManagedModelPricingUpsert, boo
 		return store.ManagedModelPricingUpsert{}, false, reason
 	}
 	return item, true, ""
+}
+
+func parseHighContextPricingFromMap(m map[string]any) (*store.ManagedModelHighContextPricing, error) {
+	if m == nil {
+		return nil, nil
+	}
+	threshold, ok := parseInt64Any(m["threshold_input_tokens"])
+	if !ok || threshold <= 0 {
+		return nil, errors.New("high_context_pricing.threshold_input_tokens 不合法")
+	}
+	inputUSD, err := parseDecimalFieldOptional(m, "input_usd_per_1m")
+	if err != nil {
+		return nil, errors.New("high_context_pricing.input_usd_per_1m 不合法")
+	}
+	outputUSD, err := parseDecimalFieldOptional(m, "output_usd_per_1m")
+	if err != nil {
+		return nil, errors.New("high_context_pricing.output_usd_per_1m 不合法")
+	}
+	cacheInputUSD, err := parseDecimalFieldPointer(m, "cache_input_usd_per_1m")
+	if err != nil {
+		return nil, errors.New("high_context_pricing.cache_input_usd_per_1m 不合法")
+	}
+	cacheOutputUSD, err := parseDecimalFieldPointer(m, "cache_output_usd_per_1m")
+	if err != nil {
+		return nil, errors.New("high_context_pricing.cache_output_usd_per_1m 不合法")
+	}
+	return &store.ManagedModelHighContextPricing{
+		ThresholdInputTokens: threshold,
+		AppliesTo:            pickString(m, "applies_to"),
+		ServiceTierPolicy:    pickString(m, "service_tier_policy"),
+		InputUSDPer1M:        inputUSD,
+		OutputUSDPer1M:       outputUSD,
+		CacheInputUSDPer1M:   cacheInputUSD,
+		CacheOutputUSDPer1M:  cacheOutputUSD,
+		Source:               pickString(m, "source"),
+		SourceDetail:         pickString(m, "source_detail"),
+	}, nil
+}
+
+func parseInt64Any(raw any) (int64, bool) {
+	switch v := raw.(type) {
+	case int64:
+		return v, true
+	case int:
+		return int64(v), true
+	case float64:
+		return int64(v), v == float64(int64(v))
+	case json.Number:
+		n, err := v.Int64()
+		return n, err == nil
+	case string:
+		s := strings.TrimSpace(v)
+		if s == "" {
+			return 0, false
+		}
+		n, err := strconv.ParseInt(s, 10, 64)
+		return n, err == nil
+	default:
+		return 0, false
+	}
 }
 
 func parseDecimalFieldOptional(m map[string]any, key string) (decimal.Decimal, error) {

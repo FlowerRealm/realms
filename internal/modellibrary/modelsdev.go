@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
+
+	"realms/internal/store"
 )
 
 const DefaultModelsDevURL = "https://models.dev/api.json"
@@ -82,6 +84,7 @@ type candidateMatch struct {
 
 type LookupResult struct {
 	Source string
+	SourceDetail string
 
 	// OwnedBy 是 Realms 的展示用归属方（用于图标映射与 /v1/models owned_by）。
 	OwnedBy string
@@ -93,6 +96,7 @@ type LookupResult struct {
 	OutputUSDPer1M      decimal.Decimal
 	CacheInputUSDPer1M  decimal.Decimal
 	CacheOutputUSDPer1M decimal.Decimal
+	HighContextPricing  *store.ManagedModelHighContextPricing
 }
 
 func NewModelsDevCatalog(opts ModelsDevCatalogOptions) *ModelsDevCatalog {
@@ -138,7 +142,7 @@ func (c *ModelsDevCatalog) Lookup(ctx context.Context, modelID string) (LookupRe
 						return LookupResult{}, err
 					}
 					if ok {
-						return res, nil
+						return enrichLookupResult(ctx, res), nil
 					}
 				}
 			}
@@ -154,7 +158,7 @@ func (c *ModelsDevCatalog) Lookup(ctx context.Context, modelID string) (LookupRe
 					return LookupResult{}, err
 				}
 				if ok {
-					return res, nil
+					return enrichLookupResult(ctx, res), nil
 				}
 			}
 		}
@@ -184,7 +188,7 @@ func (c *ModelsDevCatalog) Lookup(ctx context.Context, modelID string) (LookupRe
 				return LookupResult{}, err
 			}
 			if ok {
-				return res, nil
+				return enrichLookupResult(ctx, res), nil
 			}
 		}
 		ps := make([]string, 0, len(matches))
@@ -201,7 +205,7 @@ func (c *ModelsDevCatalog) Lookup(ctx context.Context, modelID string) (LookupRe
 	if !ok {
 		return LookupResult{}, ErrModelNoPricing
 	}
-	return res, nil
+	return enrichLookupResult(ctx, res), nil
 }
 
 func ownedByFromCompositeID(modelID string) string {
@@ -313,6 +317,7 @@ func buildResultFromProviderModel(source string, queryID string, m modelsDevMode
 	}
 	return LookupResult{
 		Source:              source,
+		SourceDetail:        source,
 		OwnedBy:             ownedBy,
 		ModelID:             strings.TrimSpace(queryID),
 		InputUSDPer1M:       m.Cost.Input,

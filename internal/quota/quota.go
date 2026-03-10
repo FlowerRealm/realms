@@ -87,7 +87,7 @@ func estimateCostUSD(ctx context.Context, st *store.Store, model, serviceTier *s
 	if serviceTier != nil {
 		tier = *serviceTier
 	}
-	pricing, err := store.ResolveManagedModelPricing(mm, tier)
+	pricing, err := store.ResolveManagedModelPricing(mm, tier, inputTokens)
 	if err != nil {
 		if errors.Is(err, store.ErrManagedModelServiceTierUnsupported) {
 			return decimal.Zero, ErrServiceTierUnsupported

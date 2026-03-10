@@ -508,6 +508,7 @@ CREATE TABLE IF NOT EXISTS `managed_models` (
   `priority_input_usd_per_1m` DECIMAL(20,6) NULL,
   `priority_output_usd_per_1m` DECIMAL(20,6) NULL,
   `priority_cache_input_usd_per_1m` DECIMAL(20,6) NULL,
+  `high_context_pricing_json` TEXT NULL,
   `status` INTEGER NOT NULL DEFAULT 1,
   `created_at` DATETIME NOT NULL
 );

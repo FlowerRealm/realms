@@ -30,6 +30,7 @@ type managedModelView struct {
 	PriorityInputUSDPer1M      *decimal.Decimal `json:"priority_input_usd_per_1m,omitempty"`
 	PriorityOutputUSDPer1M     *decimal.Decimal `json:"priority_output_usd_per_1m,omitempty"`
 	PriorityCacheInputUSDPer1M *decimal.Decimal `json:"priority_cache_input_usd_per_1m,omitempty"`
+	HighContextPricing         *store.ManagedModelHighContextPricing `json:"high_context_pricing,omitempty"`
 	Status                     int              `json:"status"`
 	IconURL                    *string          `json:"icon_url,omitempty"`
 }
@@ -120,6 +121,7 @@ type userManagedModelView struct {
 	PriorityInputUSDPer1M      *decimal.Decimal `json:"priority_input_usd_per_1m,omitempty"`
 	PriorityOutputUSDPer1M     *decimal.Decimal `json:"priority_output_usd_per_1m,omitempty"`
 	PriorityCacheInputUSDPer1M *decimal.Decimal `json:"priority_cache_input_usd_per_1m,omitempty"`
+	HighContextPricing         *store.ManagedModelHighContextPricing `json:"high_context_pricing,omitempty"`
 	Status                     int              `json:"status"`
 	IconURL                    *string          `json:"icon_url,omitempty"`
 }
@@ -258,6 +260,7 @@ func userModelsDetailHandler(opts Options) gin.HandlerFunc {
 				PriorityInputUSDPer1M:      m.PriorityInputUSDPer1M,
 				PriorityOutputUSDPer1M:     m.PriorityOutputUSDPer1M,
 				PriorityCacheInputUSDPer1M: m.PriorityCacheInputUSDPer1M,
+				HighContextPricing:         m.HighContextPricing,
 				Status:                     m.Status,
 				IconURL:                    iconPtr,
 			})
@@ -346,6 +349,7 @@ func adminListManagedModelsHandler(opts Options) gin.HandlerFunc {
 				PriorityInputUSDPer1M:      m.PriorityInputUSDPer1M,
 				PriorityOutputUSDPer1M:     m.PriorityOutputUSDPer1M,
 				PriorityCacheInputUSDPer1M: m.PriorityCacheInputUSDPer1M,
+				HighContextPricing:         m.HighContextPricing,
 				Status:                     m.Status,
 				IconURL:                    iconPtr,
 			})
@@ -397,6 +401,7 @@ func adminGetManagedModelHandler(opts Options) gin.HandlerFunc {
 			PriorityInputUSDPer1M:      m.PriorityInputUSDPer1M,
 			PriorityOutputUSDPer1M:     m.PriorityOutputUSDPer1M,
 			PriorityCacheInputUSDPer1M: m.PriorityCacheInputUSDPer1M,
+			HighContextPricing:         m.HighContextPricing,
 			Status:                     m.Status,
 			IconURL: func() *string {
 				icon := strings.TrimSpace(icons.ModelIconURL(m.PublicID, derefString(m.OwnedBy)))
@@ -422,6 +427,7 @@ func adminCreateManagedModelHandler(opts Options) gin.HandlerFunc {
 		PriorityInputUSDPer1M      *decimal.Decimal `json:"priority_input_usd_per_1m"`
 		PriorityOutputUSDPer1M     *decimal.Decimal `json:"priority_output_usd_per_1m"`
 		PriorityCacheInputUSDPer1M *decimal.Decimal `json:"priority_cache_input_usd_per_1m"`
+		HighContextPricing         *store.ManagedModelHighContextPricing `json:"high_context_pricing"`
 		Status                     int              `json:"status"`
 	}
 
@@ -456,6 +462,7 @@ func adminCreateManagedModelHandler(opts Options) gin.HandlerFunc {
 			PriorityInputUSDPer1M:      req.PriorityInputUSDPer1M,
 			PriorityOutputUSDPer1M:     req.PriorityOutputUSDPer1M,
 			PriorityCacheInputUSDPer1M: req.PriorityCacheInputUSDPer1M,
+			HighContextPricing:         req.HighContextPricing,
 			Status:                     req.Status,
 		})
 		if err != nil {
@@ -480,6 +487,7 @@ func adminUpdateManagedModelHandler(opts Options) gin.HandlerFunc {
 		PriorityInputUSDPer1M      *decimal.Decimal `json:"priority_input_usd_per_1m"`
 		PriorityOutputUSDPer1M     *decimal.Decimal `json:"priority_output_usd_per_1m"`
 		PriorityCacheInputUSDPer1M *decimal.Decimal `json:"priority_cache_input_usd_per_1m"`
+		HighContextPricing         *store.ManagedModelHighContextPricing `json:"high_context_pricing"`
 		Status                     int              `json:"status"`
 	}
 
@@ -529,6 +537,7 @@ func adminUpdateManagedModelHandler(opts Options) gin.HandlerFunc {
 			PriorityInputUSDPer1M:      req.PriorityInputUSDPer1M,
 			PriorityOutputUSDPer1M:     req.PriorityOutputUSDPer1M,
 			PriorityCacheInputUSDPer1M: req.PriorityCacheInputUSDPer1M,
+			HighContextPricing:         req.HighContextPricing,
 			Status:                     req.Status,
 		}
 		if statusOnly {
@@ -543,10 +552,7 @@ func adminUpdateManagedModelHandler(opts Options) gin.HandlerFunc {
 			up.PriorityInputUSDPer1M = current.PriorityInputUSDPer1M
 			up.PriorityOutputUSDPer1M = current.PriorityOutputUSDPer1M
 			up.PriorityCacheInputUSDPer1M = current.PriorityCacheInputUSDPer1M
-			up.PriorityPricingEnabled = current.PriorityPricingEnabled
-			up.PriorityInputUSDPer1M = current.PriorityInputUSDPer1M
-			up.PriorityOutputUSDPer1M = current.PriorityOutputUSDPer1M
-			up.PriorityCacheInputUSDPer1M = current.PriorityCacheInputUSDPer1M
+			up.HighContextPricing = current.HighContextPricing
 		}
 		if up.PublicID == "" {
 			up.PublicID = current.PublicID

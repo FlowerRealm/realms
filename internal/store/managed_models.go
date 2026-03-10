@@ -24,6 +24,7 @@ type ManagedModelCreate struct {
 	PriorityInputUSDPer1M      *decimal.Decimal
 	PriorityOutputUSDPer1M     *decimal.Decimal
 	PriorityCacheInputUSDPer1M *decimal.Decimal
+	HighContextPricing         *ManagedModelHighContextPricing
 	Status                     int
 }
 
@@ -40,18 +41,19 @@ type ManagedModelUpdate struct {
 	PriorityInputUSDPer1M      *decimal.Decimal
 	PriorityOutputUSDPer1M     *decimal.Decimal
 	PriorityCacheInputUSDPer1M *decimal.Decimal
+	HighContextPricing         *ManagedModelHighContextPricing
 	Status                     int
 }
 
 const managedModelSelectColumns = `id, public_id, group_name, upstream_model, owned_by,
        input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m,
        priority_pricing_enabled, priority_input_usd_per_1m, priority_output_usd_per_1m, priority_cache_input_usd_per_1m,
-       status, created_at`
+       high_context_pricing_json, status, created_at`
 
 const managedModelSelectColumnsWithAliasM = `m.id, m.public_id, m.group_name, m.upstream_model, m.owned_by,
        m.input_usd_per_1m, m.output_usd_per_1m, m.cache_input_usd_per_1m, m.cache_output_usd_per_1m,
        m.priority_pricing_enabled, m.priority_input_usd_per_1m, m.priority_output_usd_per_1m, m.priority_cache_input_usd_per_1m,
-       m.status, m.created_at`
+       m.high_context_pricing_json, m.status, m.created_at`
 
 type managedModelScanner interface {
 	Scan(dest ...any) error
@@ -106,11 +108,12 @@ func scanManagedModelRow(scanner managedModelScanner) (ManagedModel, error) {
 	var priorityInputUSD sql.NullString
 	var priorityOutputUSD sql.NullString
 	var priorityCacheInputUSD sql.NullString
+	var highContextPricingJSON sql.NullString
 	if err := scanner.Scan(
 		&m.ID, &m.PublicID, &groupName, &upstreamModel, &ownedBy,
 		&m.InputUSDPer1M, &m.OutputUSDPer1M, &m.CacheInputUSDPer1M, &m.CacheOutputUSDPer1M,
 		&priorityPricingEnabled, &priorityInputUSD, &priorityOutputUSD, &priorityCacheInputUSD,
-		&m.Status, &m.CreatedAt,
+		&highContextPricingJSON, &m.Status, &m.CreatedAt,
 	); err != nil {
 		return ManagedModel{}, err
 	}
@@ -132,6 +135,10 @@ func scanManagedModelRow(scanner managedModelScanner) (ManagedModel, error) {
 		return ManagedModel{}, err
 	}
 	if err := validateManagedModelPriorityPricing(m.PriorityPricingEnabled, m.PriorityInputUSDPer1M, m.PriorityOutputUSDPer1M); err != nil {
+		return ManagedModel{}, err
+	}
+	m.HighContextPricing, err = parseManagedModelHighContextPricing(highContextPricingJSON)
+	if err != nil {
 		return ManagedModel{}, err
 	}
 	m.GroupName = normalizeManagedModelGroupName(groupName.String)
@@ -164,6 +171,10 @@ func normalizeManagedModelPricing(m *ManagedModel) error {
 		return err
 	}
 	m.PriorityCacheInputUSDPer1M, err = normalizeOptionalManagedModelPrice(m.PriorityCacheInputUSDPer1M)
+	if err != nil {
+		return err
+	}
+	m.HighContextPricing, err = normalizeManagedModelHighContextPricing(m.HighContextPricing)
 	if err != nil {
 		return err
 	}
@@ -474,6 +485,10 @@ func (s *Store) CreateManagedModel(ctx context.Context, in ManagedModelCreate) (
 	if err != nil {
 		return 0, err
 	}
+	highContextPricingJSON, err := marshalManagedModelHighContextPricing(in.HighContextPricing)
+	if err != nil {
+		return 0, err
+	}
 	if inUSD.IsNegative() || outUSD.IsNegative() || cacheInUSD.IsNegative() || cacheOutUSD.IsNegative() {
 		return 0, errors.New("模型定价不合法")
 	}
@@ -489,15 +504,18 @@ INSERT INTO managed_models(
   public_id, group_name, owned_by,
   input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m,
   priority_pricing_enabled, priority_input_usd_per_1m, priority_output_usd_per_1m, priority_cache_input_usd_per_1m,
+  high_context_pricing_json,
   status, created_at
 ) VALUES(
   ?, ?, ?,
   ?, ?, ?, ?,
   ?, ?, ?, ?,
+  ?,
   ?, CURRENT_TIMESTAMP
 )
 `, in.PublicID, in.GroupName, in.OwnedBy, inUSD, outUSD, cacheInUSD, cacheOutUSD,
 		priorityEnabled, priorityInUSD, priorityOutUSD, priorityCacheInUSD,
+		highContextPricingJSON,
 		in.Status)
 	if err != nil {
 		return 0, fmt.Errorf("创建 managed_model 失败: %w", err)
@@ -527,6 +545,10 @@ func (s *Store) UpdateManagedModel(ctx context.Context, in ManagedModelUpdate) e
 		return err
 	}
 	priorityCacheInUSD, err := normalizeOptionalManagedModelPrice(in.PriorityCacheInputUSDPer1M)
+	if err != nil {
+		return err
+	}
+	highContextPricingJSON, err := marshalManagedModelHighContextPricing(in.HighContextPricing)
 	if err != nil {
 		return err
 	}
@@ -560,10 +582,12 @@ UPDATE managed_models
 SET public_id=?, group_name=?, owned_by=?,
     input_usd_per_1m=?, output_usd_per_1m=?, cache_input_usd_per_1m=?, cache_output_usd_per_1m=?,
     priority_pricing_enabled=?, priority_input_usd_per_1m=?, priority_output_usd_per_1m=?, priority_cache_input_usd_per_1m=?,
+    high_context_pricing_json=?,
     status=?
 WHERE id=?
 `, in.PublicID, in.GroupName, in.OwnedBy, inUSD, outUSD, cacheInUSD, cacheOutUSD,
 		priorityEnabled, priorityInUSD, priorityOutUSD, priorityCacheInUSD,
+		highContextPricingJSON,
 		in.Status, in.ID); err != nil {
 		return fmt.Errorf("更新 managed_model 失败: %w", err)
 	}
@@ -628,6 +652,8 @@ type ManagedModelPricingUpsert struct {
 	PriorityInputUSDPer1M      *decimal.Decimal
 	PriorityOutputUSDPer1M     *decimal.Decimal
 	PriorityCacheInputUSDPer1M *decimal.Decimal
+	HighContextPricingSpecified bool
+	HighContextPricing          *ManagedModelHighContextPricing
 }
 
 type UpsertManagedModelPricingResult struct {
@@ -653,6 +679,8 @@ func (s *Store) UpsertManagedModelPricing(ctx context.Context, items []ManagedMo
 		PriorityInputUSDPer1M      *decimal.Decimal
 		PriorityOutputUSDPer1M     *decimal.Decimal
 		PriorityCacheInputUSDPer1M *decimal.Decimal
+		HighContextPricingSpecified bool
+		HighContextPricing          *ManagedModelHighContextPricing
 	}
 
 	byPublicID := make(map[string]normalizedPricingUpsert, len(items))
@@ -680,6 +708,10 @@ func (s *Store) UpsertManagedModelPricing(ctx context.Context, items []ManagedMo
 		if err != nil {
 			return UpsertManagedModelPricingResult{}, err
 		}
+		highContextPricing, err := normalizeManagedModelHighContextPricing(it.HighContextPricing)
+		if err != nil {
+			return UpsertManagedModelPricingResult{}, err
+		}
 		byPublicID[id] = normalizedPricingUpsert{
 			PublicID:                   id,
 			BasePricingSpecified:       it.BasePricingSpecified,
@@ -691,6 +723,8 @@ func (s *Store) UpsertManagedModelPricing(ctx context.Context, items []ManagedMo
 			PriorityInputUSDPer1M:      priorityInUSD,
 			PriorityOutputUSDPer1M:     priorityOutUSD,
 			PriorityCacheInputUSDPer1M: priorityCacheInUSD,
+			HighContextPricingSpecified: it.HighContextPricingSpecified,
+			HighContextPricing:          highContextPricing,
 		}
 	}
 
@@ -746,7 +780,8 @@ func (s *Store) UpsertManagedModelPricing(ctx context.Context, items []ManagedMo
 	updateStmt, err := tx.PrepareContext(ctx, `
 UPDATE managed_models
 SET input_usd_per_1m=?, output_usd_per_1m=?, cache_input_usd_per_1m=?, cache_output_usd_per_1m=?,
-    priority_pricing_enabled=?, priority_input_usd_per_1m=?, priority_output_usd_per_1m=?, priority_cache_input_usd_per_1m=?
+    priority_pricing_enabled=?, priority_input_usd_per_1m=?, priority_output_usd_per_1m=?, priority_cache_input_usd_per_1m=?,
+    high_context_pricing_json=?
 WHERE id=?
 `)
 	if err != nil {
@@ -759,11 +794,13 @@ INSERT INTO managed_models(
   public_id, group_name, owned_by,
   input_usd_per_1m, output_usd_per_1m, cache_input_usd_per_1m, cache_output_usd_per_1m,
   priority_pricing_enabled, priority_input_usd_per_1m, priority_output_usd_per_1m, priority_cache_input_usd_per_1m,
+  high_context_pricing_json,
   status, created_at
 ) VALUES(
   ?, ?, NULL,
   ?, ?, ?, ?,
   ?, ?, ?, ?,
+  ?,
   0, CURRENT_TIMESTAMP
 )
 `)
@@ -771,13 +808,6 @@ INSERT INTO managed_models(
 		return UpsertManagedModelPricingResult{}, fmt.Errorf("准备创建 managed_models 失败: %w", err)
 	}
 	defer insertStmt.Close()
-
-	equalOptionalDecimal := func(a, b *decimal.Decimal) bool {
-		if a == nil || b == nil {
-			return a == nil && b == nil
-		}
-		return a.Truncate(USDScale).Equal(b.Truncate(USDScale))
-	}
 
 	for _, publicID := range publicIDs {
 		it := byPublicID[publicID]
@@ -804,7 +834,15 @@ INSERT INTO managed_models(
 			if it.PriorityCacheInputUSDPer1M != nil {
 				priorityCacheInUSD = it.PriorityCacheInputUSDPer1M
 			}
+			highContextPricing := e.HighContextPricing
+			if it.HighContextPricingSpecified {
+				highContextPricing = it.HighContextPricing
+			}
 			if err := validateManagedModelPriorityPricing(priorityEnabled, priorityInUSD, priorityOutUSD); err != nil {
+				return UpsertManagedModelPricingResult{}, err
+			}
+			highContextPricingJSON, err := marshalManagedModelHighContextPricing(highContextPricing)
+			if err != nil {
 				return UpsertManagedModelPricingResult{}, err
 			}
 			if e.InputUSDPer1M.Truncate(USDScale).Equal(it.InputUSDPer1M) &&
@@ -814,7 +852,8 @@ INSERT INTO managed_models(
 				e.PriorityPricingEnabled == priorityEnabled &&
 				equalOptionalDecimal(e.PriorityInputUSDPer1M, priorityInUSD) &&
 				equalOptionalDecimal(e.PriorityOutputUSDPer1M, priorityOutUSD) &&
-				equalOptionalDecimal(e.PriorityCacheInputUSDPer1M, priorityCacheInUSD) {
+				equalOptionalDecimal(e.PriorityCacheInputUSDPer1M, priorityCacheInUSD) &&
+				equalManagedModelHighContextPricing(e.HighContextPricing, highContextPricing) {
 				res.Unchanged = append(res.Unchanged, publicID)
 				continue
 			}
@@ -825,6 +864,7 @@ INSERT INTO managed_models(
 			if _, err := updateStmt.ExecContext(ctx,
 				it.InputUSDPer1M, it.OutputUSDPer1M, it.CacheInputUSDPer1M, it.CacheOutputUSDPer1M,
 				priorityFlag, priorityInUSD, priorityOutUSD, priorityCacheInUSD,
+				highContextPricingJSON,
 				e.ID,
 			); err != nil {
 				return UpsertManagedModelPricingResult{}, fmt.Errorf("更新 managed_model(%s) 失败: %w", publicID, err)
@@ -843,6 +883,10 @@ INSERT INTO managed_models(
 		if err := validateManagedModelPriorityPricing(priorityEnabled, it.PriorityInputUSDPer1M, it.PriorityOutputUSDPer1M); err != nil {
 			return UpsertManagedModelPricingResult{}, err
 		}
+		highContextPricingJSON, err := marshalManagedModelHighContextPricing(it.HighContextPricing)
+		if err != nil {
+			return UpsertManagedModelPricingResult{}, err
+		}
 		priorityFlag := 0
 		if priorityEnabled {
 			priorityFlag = 1
@@ -851,6 +895,7 @@ INSERT INTO managed_models(
 			publicID, "",
 			it.InputUSDPer1M, it.OutputUSDPer1M, it.CacheInputUSDPer1M, it.CacheOutputUSDPer1M,
 			priorityFlag, it.PriorityInputUSDPer1M, it.PriorityOutputUSDPer1M, it.PriorityCacheInputUSDPer1M,
+			highContextPricingJSON,
 		); err != nil {
 			return UpsertManagedModelPricingResult{}, fmt.Errorf("创建 managed_model(%s) 失败: %w", publicID, err)
 		}
