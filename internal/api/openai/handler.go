@@ -732,6 +732,7 @@ type proxyFailureInfo struct {
 	StatusCode int
 	Message    string
 	Body       []byte
+	Result     *scheduler.Result
 }
 
 func (fi proxyFailureInfo) score() int {
@@ -767,6 +768,13 @@ func cloneProxyFailureBody(body []byte) []byte {
 		body = body[:failoverErrorBodyMaxBytes]
 	}
 	return append([]byte(nil), body...)
+}
+
+func (h *Handler) reportProxyFailure(sel scheduler.Selection, failure proxyFailureInfo) {
+	if h == nil || h.sched == nil || !failure.Valid || failure.Result == nil {
+		return
+	}
+	h.sched.Report(sel, *failure.Result)
 }
 
 func formatProxyFailureDetail(fi proxyFailureInfo) string {
@@ -822,15 +830,19 @@ func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p aut
 					if h.finalizeIfCanceled(r, usageID, &sel, reqStart, wantStream, reqBytes) {
 						return true
 					}
+					h.reportProxyFailure(sel, failure)
 					return false
 				}
 				backoff = h.nextBackoff(backoff)
 				continue
 			}
+			h.reportProxyFailure(sel, failure)
 			return false
 		case proxyAttemptFailover:
+			h.reportProxyFailure(sel, failure)
 			return false
 		default:
+			h.reportProxyFailure(sel, failure)
 			return false
 		}
 		// 当下游已经开始写回（SSE/非流式）时，proxyOnce 会返回 proxyAttemptDone；这里仅处理“未写回的失败”。
@@ -849,17 +861,18 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			if h.finalizeIfCanceled(r, usageID, &sel, reqStart, wantStream, reqBytes) {
 				return proxyAttemptDone, proxyFailureInfo{}
 			}
-			h.sched.Report(sel, scheduler.Result{
+			h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, 0, "network", time.Since(attemptStart))
+			res := scheduler.Result{
 				Success:    false,
 				Retriable:  true,
 				ErrorClass: "network",
 				Scope:      scheduler.FailureScopeEndpoint,
-			})
-			h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, 0, "network", time.Since(attemptStart))
+			}
 			return proxyAttemptRetrySameSelection, proxyFailureInfo{
 				Valid:   true,
 				Class:   "network",
 				Message: trimSummary(err.Error()),
+				Result:  &res,
 			}
 		}
 
@@ -908,14 +921,14 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 				if strings.TrimSpace(failMsg) == "" {
 					failMsg = strings.TrimSpace(resp.Status)
 				}
-				h.sched.Report(sel, scheduler.Result{
+				res := scheduler.Result{
 					Success:       false,
 					Retriable:     true,
 					StatusCode:    resp.StatusCode,
 					ErrorClass:    errorClass,
 					Scope:         scope,
 					CooldownUntil: cooldownUntil,
-				})
+				}
 				h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, errorClass, time.Since(attemptStart))
 				decision := proxyAttemptFailover
 				if shouldRetrySameSelection(scope, resp.StatusCode, errorClass) {
@@ -927,6 +940,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 					StatusCode: resp.StatusCode,
 					Message:    failMsg,
 					Body:       bodyBytes,
+					Result:     &res,
 				}
 			}
 
