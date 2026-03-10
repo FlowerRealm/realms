@@ -347,6 +347,7 @@ func (h *Handler) ChatCompletionsList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "解析对象归属失败", http.StatusBadGateway)
 		return
 	}
+	sel = h.resolveFixedRouteSelection(ctx, p.UserID, sel)
 
 	upReq := r.Clone(ctx)
 	q := upReq.URL.Query()

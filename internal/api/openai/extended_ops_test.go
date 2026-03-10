@@ -521,7 +521,16 @@ func TestResponseRetrieve_Upstream5xxCoolsFixedEndpoint(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
-	doer := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+	var gotEndpoints []int64
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		gotEndpoints = append(gotEndpoints, sel.EndpointID)
+		if sel.EndpointID == 12 {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"resp_999","ok":true}`))),
+			}, nil
+		}
 		return &http.Response{
 			StatusCode: http.StatusBadGateway,
 			Header:     http.Header{"Content-Type": []string{"application/json"}},
@@ -541,12 +550,13 @@ func TestResponseRetrieve_Upstream5xxCoolsFixedEndpoint(t *testing.T) {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	nextSel, err := sched.SelectWithConstraints(context.Background(), 10, "", scheduler.Constraints{RequireChannelID: 1})
-	if err != nil {
-		t.Fatalf("Select err: %v", err)
+	rr2 := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.ResponseRetrieve), middleware.BodyCache(1<<20)).ServeHTTP(rr2, req)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("unexpected second status: %d body=%s", rr2.Code, rr2.Body.String())
 	}
-	if nextSel.EndpointID != 12 {
-		t.Fatalf("expected endpoint=12 after fixed endpoint 5xx cooldown, got=%d", nextSel.EndpointID)
+	if len(gotEndpoints) != 2 || gotEndpoints[0] != 11 || gotEndpoints[1] != 12 {
+		t.Fatalf("expected fixed route to switch endpoints [11 12], got=%v", gotEndpoints)
 	}
 }
 
@@ -592,7 +602,16 @@ func TestResponseRetrieve_StreamIdleTimeoutCoolsFixedEndpoint(t *testing.T) {
 	defer pw.Close()
 
 	sched := scheduler.New(fs)
-	h := NewHandler(nil, nil, sched, DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+	var gotEndpoints []int64
+	h := NewHandler(nil, nil, sched, DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		gotEndpoints = append(gotEndpoints, sel.EndpointID)
+		if sel.EndpointID == 12 {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"resp_stream","ok":true}`))),
+			}, nil
+		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
@@ -616,12 +635,16 @@ func TestResponseRetrieve_StreamIdleTimeoutCoolsFixedEndpoint(t *testing.T) {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	nextSel, err := sched.SelectWithConstraints(context.Background(), 10, "", scheduler.Constraints{RequireChannelID: 1})
-	if err != nil {
-		t.Fatalf("Select err: %v", err)
+	req2 := httptest.NewRequest(http.MethodGet, "http://example.com/v1/responses/resp_stream", nil)
+	req2.Header.Set("Accept", "application/json")
+	req2 = req2.WithContext(auth.WithPrincipal(req2.Context(), p))
+	rr2 := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.ResponseRetrieve), middleware.BodyCache(1<<20)).ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("unexpected second status: %d body=%s", rr2.Code, rr2.Body.String())
 	}
-	if nextSel.EndpointID != 12 {
-		t.Fatalf("expected endpoint=12 after fixed endpoint stream idle timeout cooldown, got=%d", nextSel.EndpointID)
+	if len(gotEndpoints) != 2 || gotEndpoints[0] != 11 || gotEndpoints[1] != 12 {
+		t.Fatalf("expected fixed route to switch endpoints [11 12] after stream timeout, got=%v", gotEndpoints)
 	}
 }
 
@@ -740,7 +763,24 @@ func TestChatCompletionsList_Upstream5xxCoolsFixedEndpoint(t *testing.T) {
 	})
 
 	sched := scheduler.New(fs)
-	doer := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+	var gotEndpoints []int64
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		gotEndpoints = append(gotEndpoints, sel.EndpointID)
+		if sel.EndpointID == 12 {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body: io.NopCloser(bytes.NewReader([]byte(`{
+  "object":"list",
+  "data":[
+    {"id":"chatcmpl-allow","object":"chat.completion"}
+  ],
+  "first_id":"chatcmpl-allow",
+  "last_id":"chatcmpl-allow",
+  "has_more":false
+}`))),
+			}, nil
+		}
 		return &http.Response{
 			StatusCode: http.StatusServiceUnavailable,
 			Header:     http.Header{"Content-Type": []string{"application/json"}},
@@ -760,12 +800,13 @@ func TestChatCompletionsList_Upstream5xxCoolsFixedEndpoint(t *testing.T) {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	nextSel, err := sched.SelectWithConstraints(context.Background(), 10, "", scheduler.Constraints{RequireChannelID: 1})
-	if err != nil {
-		t.Fatalf("Select err: %v", err)
+	rr2 := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.ChatCompletionsList), middleware.BodyCache(1<<20)).ServeHTTP(rr2, req)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("unexpected second status: %d body=%s", rr2.Code, rr2.Body.String())
 	}
-	if nextSel.EndpointID != 12 {
-		t.Fatalf("expected endpoint=12 after list fixed endpoint 5xx cooldown, got=%d", nextSel.EndpointID)
+	if len(gotEndpoints) != 2 || gotEndpoints[0] != 11 || gotEndpoints[1] != 12 {
+		t.Fatalf("expected list fixed route to switch endpoints [11 12], got=%v", gotEndpoints)
 	}
 }
 

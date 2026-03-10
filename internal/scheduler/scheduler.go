@@ -803,6 +803,13 @@ func (s *Scheduler) Report(sel Selection, res Result) {
 	}
 }
 
+func (s *Scheduler) IsEndpointCooling(endpointID int64) bool {
+	if s == nil || s.state == nil {
+		return false
+	}
+	return s.state.IsEndpointCooling(endpointID, time.Now())
+}
+
 func codexLastUsedBefore(a, b *time.Time) bool {
 	if a == nil && b != nil {
 		return true
