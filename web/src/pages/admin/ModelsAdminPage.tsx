@@ -17,6 +17,7 @@ import {
   updateManagedModelAdmin,
   type ImportModelPricingResult,
   type ManagedModel,
+  type ManagedModelHighContextPricing,
 } from '../../api/models';
 
 function statusBadge(status: number): { cls: string; label: string } {
@@ -33,6 +34,18 @@ type ModelForm = {
   cache_input_usd_per_1m: string;
   cache_output_usd_per_1m: string;
   priority_pricing_enabled: boolean;
+  priority_input_usd_per_1m: string;
+  priority_output_usd_per_1m: string;
+  priority_cache_input_usd_per_1m: string;
+  high_context_enabled: boolean;
+  high_context_threshold_input_tokens: string;
+  high_context_service_tier_policy: string;
+  high_context_input_usd_per_1m: string;
+  high_context_output_usd_per_1m: string;
+  high_context_cache_input_usd_per_1m: string;
+  high_context_cache_output_usd_per_1m: string;
+  high_context_source: string;
+  high_context_source_detail: string;
   status: number;
 };
 
@@ -47,6 +60,18 @@ function modelToForm(m: ManagedModel, fallbackGroupName: string): ModelForm {
     cache_input_usd_per_1m: m.cache_input_usd_per_1m || '0',
     cache_output_usd_per_1m: m.cache_output_usd_per_1m || '0',
     priority_pricing_enabled: !!m.priority_pricing_enabled,
+    priority_input_usd_per_1m: m.priority_input_usd_per_1m || '',
+    priority_output_usd_per_1m: m.priority_output_usd_per_1m || '',
+    priority_cache_input_usd_per_1m: m.priority_cache_input_usd_per_1m || '',
+    high_context_enabled: !!m.high_context_pricing,
+    high_context_threshold_input_tokens: m.high_context_pricing ? String(m.high_context_pricing.threshold_input_tokens || '') : '',
+    high_context_service_tier_policy: m.high_context_pricing?.service_tier_policy || 'inherit',
+    high_context_input_usd_per_1m: m.high_context_pricing?.input_usd_per_1m || '',
+    high_context_output_usd_per_1m: m.high_context_pricing?.output_usd_per_1m || '',
+    high_context_cache_input_usd_per_1m: m.high_context_pricing?.cache_input_usd_per_1m || '',
+    high_context_cache_output_usd_per_1m: m.high_context_pricing?.cache_output_usd_per_1m || '',
+    high_context_source: m.high_context_pricing?.source || '',
+    high_context_source_detail: m.high_context_pricing?.source_detail || '',
     status: m.status || 0,
   };
 }
@@ -79,6 +104,15 @@ async function applyLookupToForm(
         output_usd_per_1m: d.output_usd_per_1m || p.output_usd_per_1m,
         cache_input_usd_per_1m: d.cache_input_usd_per_1m || p.cache_input_usd_per_1m,
         cache_output_usd_per_1m: d.cache_output_usd_per_1m || p.cache_output_usd_per_1m,
+        high_context_enabled: !!d.high_context_pricing,
+        high_context_threshold_input_tokens: d.high_context_pricing ? String(d.high_context_pricing.threshold_input_tokens || '') : p.high_context_threshold_input_tokens,
+        high_context_service_tier_policy: d.high_context_pricing?.service_tier_policy || p.high_context_service_tier_policy,
+        high_context_input_usd_per_1m: d.high_context_pricing?.input_usd_per_1m || p.high_context_input_usd_per_1m,
+        high_context_output_usd_per_1m: d.high_context_pricing?.output_usd_per_1m || p.high_context_output_usd_per_1m,
+        high_context_cache_input_usd_per_1m: d.high_context_pricing?.cache_input_usd_per_1m || p.high_context_cache_input_usd_per_1m,
+        high_context_cache_output_usd_per_1m: d.high_context_pricing?.cache_output_usd_per_1m || p.high_context_cache_output_usd_per_1m,
+        high_context_source: d.high_context_pricing?.source || p.high_context_source,
+        high_context_source_detail: d.high_context_pricing?.source_detail || p.high_context_source_detail,
       }));
       setIconPreview(d.icon_url || null);
     }
@@ -101,6 +135,31 @@ function applyManualModelIDToForm(
   setLookupErr('');
   setLookupNotice('未命中 OpenRouter，可继续使用当前输入值并手工填写模型信息。');
   setIconPreview(null);
+}
+
+function optionalPriceValue(v: string): string | null {
+  const s = (v || '').trim();
+  return s ? s : null;
+}
+
+function optionalTextValue(v: string): string | undefined {
+  const s = (v || '').trim();
+  return s ? s : undefined;
+}
+
+function highContextPricingValue(form: ModelForm): ManagedModelHighContextPricing | null {
+  if (!form.high_context_enabled) return null;
+  return {
+    threshold_input_tokens: Number.parseInt((form.high_context_threshold_input_tokens || '').trim(), 10) || 0,
+    applies_to: 'full_request',
+    service_tier_policy: (form.high_context_service_tier_policy || 'inherit').trim() || 'inherit',
+    input_usd_per_1m: form.high_context_input_usd_per_1m,
+    output_usd_per_1m: form.high_context_output_usd_per_1m,
+    cache_input_usd_per_1m: optionalPriceValue(form.high_context_cache_input_usd_per_1m),
+    cache_output_usd_per_1m: optionalPriceValue(form.high_context_cache_output_usd_per_1m),
+    source: optionalTextValue(form.high_context_source),
+    source_detail: optionalTextValue(form.high_context_source_detail),
+  };
 }
 
 export function ModelsAdminPage() {
@@ -132,7 +191,19 @@ export function ModelsAdminPage() {
     output_usd_per_1m: '15',
     cache_input_usd_per_1m: '0',
     cache_output_usd_per_1m: '0',
-    priority_pricing_enabled: true,
+    priority_pricing_enabled: false,
+    priority_input_usd_per_1m: '',
+    priority_output_usd_per_1m: '',
+    priority_cache_input_usd_per_1m: '',
+    high_context_enabled: false,
+    high_context_threshold_input_tokens: '',
+    high_context_service_tier_policy: 'inherit',
+    high_context_input_usd_per_1m: '',
+    high_context_output_usd_per_1m: '',
+    high_context_cache_input_usd_per_1m: '',
+    high_context_cache_output_usd_per_1m: '',
+    high_context_source: '',
+    high_context_source_detail: '',
     status: 1,
   });
 
@@ -146,6 +217,18 @@ export function ModelsAdminPage() {
     cache_input_usd_per_1m: '0',
     cache_output_usd_per_1m: '0',
     priority_pricing_enabled: false,
+    priority_input_usd_per_1m: '',
+    priority_output_usd_per_1m: '',
+    priority_cache_input_usd_per_1m: '',
+    high_context_enabled: false,
+    high_context_threshold_input_tokens: '',
+    high_context_service_tier_policy: 'inherit',
+    high_context_input_usd_per_1m: '',
+    high_context_output_usd_per_1m: '',
+    high_context_cache_input_usd_per_1m: '',
+    high_context_cache_output_usd_per_1m: '',
+    high_context_source: '',
+    high_context_source_detail: '',
     status: 1,
   });
 
@@ -238,6 +321,10 @@ export function ModelsAdminPage() {
           cache_input_usd_per_1m: v.cache_input_usd_per_1m,
           cache_output_usd_per_1m: v.cache_output_usd_per_1m,
           priority_pricing_enabled: v.priority_pricing_enabled,
+          priority_input_usd_per_1m: optionalPriceValue(v.priority_input_usd_per_1m),
+          priority_output_usd_per_1m: optionalPriceValue(v.priority_output_usd_per_1m),
+          priority_cache_input_usd_per_1m: optionalPriceValue(v.priority_cache_input_usd_per_1m),
+          high_context_pricing: highContextPricingValue(v),
           status: v.status,
         };
         const res = await updateManagedModelAdmin(nextModel);
@@ -390,6 +477,17 @@ export function ModelsAdminPage() {
                                   <span>Fast 未启用</span>
                                 )}
                               </div>
+                              <div className="mt-1 text-muted smaller">
+                                {m.high_context_pricing ? (
+                                  <span>
+                                    高上下文：阈值 {m.high_context_pricing.threshold_input_tokens} 输入 tokens，整单切换到 输入 ${m.high_context_pricing.input_usd_per_1m || '-'} · 输出 $
+                                    {m.high_context_pricing.output_usd_per_1m || '-'} · 缓存输入 ${m.high_context_pricing.cache_input_usd_per_1m || '-'} · 缓存输出 $
+                                    {m.high_context_pricing.cache_output_usd_per_1m || '-'}
+                                  </span>
+                                ) : (
+                                  <span>高上下文分段定价未配置</span>
+                                )}
+                              </div>
                           </td>
                           <td>
                             <span className={st.cls}>{st.label}</span>
@@ -478,7 +576,19 @@ export function ModelsAdminPage() {
             output_usd_per_1m: '15',
             cache_input_usd_per_1m: '0',
             cache_output_usd_per_1m: '0',
-            priority_pricing_enabled: true,
+            priority_pricing_enabled: false,
+            priority_input_usd_per_1m: '',
+            priority_output_usd_per_1m: '',
+            priority_cache_input_usd_per_1m: '',
+            high_context_enabled: false,
+            high_context_threshold_input_tokens: '',
+            high_context_service_tier_policy: 'inherit',
+            high_context_input_usd_per_1m: '',
+            high_context_output_usd_per_1m: '',
+            high_context_cache_input_usd_per_1m: '',
+            high_context_cache_output_usd_per_1m: '',
+            high_context_source: '',
+            high_context_source_detail: '',
             status: 1,
           });
           setCreateLookupErr('');
@@ -503,9 +613,10 @@ export function ModelsAdminPage() {
                 cache_input_usd_per_1m: createForm.cache_input_usd_per_1m,
                 cache_output_usd_per_1m: createForm.cache_output_usd_per_1m,
                 priority_pricing_enabled: createForm.priority_pricing_enabled,
-                priority_input_usd_per_1m: null,
-                priority_output_usd_per_1m: null,
-                priority_cache_input_usd_per_1m: null,
+                priority_input_usd_per_1m: optionalPriceValue(createForm.priority_input_usd_per_1m),
+                priority_output_usd_per_1m: optionalPriceValue(createForm.priority_output_usd_per_1m),
+                priority_cache_input_usd_per_1m: optionalPriceValue(createForm.priority_cache_input_usd_per_1m),
+                high_context_pricing: highContextPricingValue(createForm),
                 status: createForm.status,
               });
               if (!res.success) throw new Error(res.message || '创建失败');
@@ -539,7 +650,7 @@ export function ModelsAdminPage() {
               }}
             />
             <div className="form-text small text-muted">
-              数据来源：OpenRouter。选择候选后将填充“归属方/输入单价/输出单价/缓存输入单价/缓存输出单价”，不会自动保存。未命中时可继续使用手工输入值。
+              数据来源：OpenRouter。选择候选后将填充“归属方/基础价格/高上下文价格”，不会自动保存。未命中时可继续使用手工输入值。
               {createIconPreview ? (
                 <img
                   className="rlm-model-icon ms-2"
@@ -627,6 +738,101 @@ export function ModelsAdminPage() {
               <label className="form-check-label">启用 Fast mode 专属定价</label>
             </div>
             <div className="form-text">打开后会自动按基础价格推导 Fast 定价；关闭后 Fast 不可用。</div>
+          </div>
+
+          <div className="col-md-4">
+            <label className="form-label">Fast 输入单价</label>
+            <div className="input-group">
+              <span className="input-group-text">$</span>
+              <input className="form-control" value={createForm.priority_input_usd_per_1m} onChange={(e) => setCreateForm((p) => ({ ...p, priority_input_usd_per_1m: e.target.value }))} inputMode="decimal" placeholder="可选" />
+              <span className="input-group-text">/ 1M Token</span>
+            </div>
+          </div>
+          <div className="col-md-4">
+            <label className="form-label">Fast 输出单价</label>
+            <div className="input-group">
+              <span className="input-group-text">$</span>
+              <input className="form-control" value={createForm.priority_output_usd_per_1m} onChange={(e) => setCreateForm((p) => ({ ...p, priority_output_usd_per_1m: e.target.value }))} inputMode="decimal" placeholder="可选" />
+              <span className="input-group-text">/ 1M Token</span>
+            </div>
+          </div>
+          <div className="col-md-4">
+            <label className="form-label">Fast 缓存输入单价</label>
+            <div className="input-group">
+              <span className="input-group-text">$</span>
+              <input
+                className="form-control"
+                value={createForm.priority_cache_input_usd_per_1m}
+                onChange={(e) => setCreateForm((p) => ({ ...p, priority_cache_input_usd_per_1m: e.target.value }))}
+                inputMode="decimal"
+                placeholder="留空则沿用基础缓存输入价格"
+              />
+              <span className="input-group-text">/ 1M Token</span>
+            </div>
+          </div>
+
+          <div className="col-12">
+            <div className="form-check form-switch mt-1">
+              <input className="form-check-input" type="checkbox" checked={createForm.high_context_enabled} onChange={(e) => setCreateForm((p) => ({ ...p, high_context_enabled: e.target.checked }))} />
+              <label className="form-check-label">启用高上下文分段定价</label>
+            </div>
+            <div className="form-text">输入 tokens 超过阈值后整单切换到以下价格，不是只对超出部分加价。</div>
+          </div>
+          <div className="col-md-4">
+            <label className="form-label">阈值（输入 tokens）</label>
+            <input className="form-control" value={createForm.high_context_threshold_input_tokens} onChange={(e) => setCreateForm((p) => ({ ...p, high_context_threshold_input_tokens: e.target.value }))} inputMode="numeric" placeholder="例如 272000" />
+          </div>
+          <div className="col-md-4">
+            <label className="form-label">Service Tier 策略</label>
+            <select className="form-select" value={createForm.high_context_service_tier_policy} onChange={(e) => setCreateForm((p) => ({ ...p, high_context_service_tier_policy: e.target.value }))}>
+              <option value="inherit">inherit</option>
+              <option value="force_standard">force_standard</option>
+            </select>
+          </div>
+          <div className="col-md-4">
+            <label className="form-label">来源</label>
+            <input className="form-control" value={createForm.high_context_source} onChange={(e) => setCreateForm((p) => ({ ...p, high_context_source: e.target.value }))} placeholder="例如 openai_official" />
+          </div>
+          <div className="col-12">
+            <label className="form-label">来源详情</label>
+            <input
+              className="form-control"
+              value={createForm.high_context_source_detail}
+              onChange={(e) => setCreateForm((p) => ({ ...p, high_context_source_detail: e.target.value }))}
+              placeholder="例如 openai_official_pricing_docs"
+            />
+          </div>
+          <div className="col-md-6">
+            <label className="form-label">高上下文输入单价</label>
+            <div className="input-group">
+              <span className="input-group-text">$</span>
+              <input className="form-control" value={createForm.high_context_input_usd_per_1m} onChange={(e) => setCreateForm((p) => ({ ...p, high_context_input_usd_per_1m: e.target.value }))} inputMode="decimal" />
+              <span className="input-group-text">/ 1M Token</span>
+            </div>
+          </div>
+          <div className="col-md-6">
+            <label className="form-label">高上下文输出单价</label>
+            <div className="input-group">
+              <span className="input-group-text">$</span>
+              <input className="form-control" value={createForm.high_context_output_usd_per_1m} onChange={(e) => setCreateForm((p) => ({ ...p, high_context_output_usd_per_1m: e.target.value }))} inputMode="decimal" />
+              <span className="input-group-text">/ 1M Token</span>
+            </div>
+          </div>
+          <div className="col-md-6">
+            <label className="form-label">高上下文缓存输入单价</label>
+            <div className="input-group">
+              <span className="input-group-text">$</span>
+              <input className="form-control" value={createForm.high_context_cache_input_usd_per_1m} onChange={(e) => setCreateForm((p) => ({ ...p, high_context_cache_input_usd_per_1m: e.target.value }))} inputMode="decimal" placeholder="留空则沿用当前价格集" />
+              <span className="input-group-text">/ 1M Token</span>
+            </div>
+          </div>
+          <div className="col-md-6">
+            <label className="form-label">高上下文缓存输出单价</label>
+            <div className="input-group">
+              <span className="input-group-text">$</span>
+              <input className="form-control" value={createForm.high_context_cache_output_usd_per_1m} onChange={(e) => setCreateForm((p) => ({ ...p, high_context_cache_output_usd_per_1m: e.target.value }))} inputMode="decimal" placeholder="留空则沿用当前价格集" />
+              <span className="input-group-text">/ 1M Token</span>
+            </div>
           </div>
 
           <div className="alert alert-light border small mb-0 d-flex align-items-start">
@@ -718,7 +924,7 @@ export function ModelsAdminPage() {
               rows={10}
               value={importPricingJSON}
               onChange={(e) => setImportPricingJSON(e.target.value)}
-              placeholder='{"gpt-5.2":{"input_usd_per_1m":0.15,"output_usd_per_1m":0.60,"cache_input_usd_per_1m":0.00,"cache_output_usd_per_1m":0.00,"priority_pricing_enabled":true}}'
+              placeholder='{"gpt-5.4":{"input_usd_per_1m":2.5,"output_usd_per_1m":15,"cache_input_usd_per_1m":0.25,"cache_output_usd_per_1m":0.25,"high_context_pricing":{"threshold_input_tokens":272000,"service_tier_policy":"force_standard","input_usd_per_1m":5,"output_usd_per_1m":22.5,"cache_input_usd_per_1m":0.5,"source":"openai_official"}}}'
               required
             />
             <div className="form-text small text-muted">顶层支持对象或数组；支持 usd_per_1m 或 cost_per_token 格式。</div>
@@ -949,6 +1155,65 @@ export function ModelsAdminPage() {
                 <label className="form-check-label">启用 Fast mode 专属定价</label>
               </div>
               <div className="form-text">打开后会自动按基础价格推导 Fast 定价；关闭后 Fast 不可用。</div>
+            </div>
+
+            <div className="col-12">
+              <div className="form-check form-switch mt-1">
+                <input className="form-check-input" type="checkbox" checked={editForm.high_context_enabled} onChange={(e) => setEditForm((p) => ({ ...p, high_context_enabled: e.target.checked }))} />
+                <label className="form-check-label">启用高上下文分段定价</label>
+              </div>
+              <div className="form-text">输入 tokens 超过阈值后整单切换到高上下文价。</div>
+            </div>
+            <div className="col-md-4">
+              <label className="form-label">阈值（输入 tokens）</label>
+              <input className="form-control" value={editForm.high_context_threshold_input_tokens} onChange={(e) => setEditForm((p) => ({ ...p, high_context_threshold_input_tokens: e.target.value }))} inputMode="numeric" />
+            </div>
+            <div className="col-md-4">
+              <label className="form-label">Service Tier 策略</label>
+              <select className="form-select" value={editForm.high_context_service_tier_policy} onChange={(e) => setEditForm((p) => ({ ...p, high_context_service_tier_policy: e.target.value }))}>
+                <option value="inherit">inherit</option>
+                <option value="force_standard">force_standard</option>
+              </select>
+            </div>
+            <div className="col-md-4">
+              <label className="form-label">来源</label>
+              <input className="form-control" value={editForm.high_context_source} onChange={(e) => setEditForm((p) => ({ ...p, high_context_source: e.target.value }))} />
+            </div>
+            <div className="col-12">
+              <label className="form-label">来源详情</label>
+              <input className="form-control" value={editForm.high_context_source_detail} onChange={(e) => setEditForm((p) => ({ ...p, high_context_source_detail: e.target.value }))} />
+            </div>
+            <div className="col-md-6">
+              <label className="form-label">高上下文输入单价</label>
+              <div className="input-group">
+                <span className="input-group-text">$</span>
+                <input className="form-control" value={editForm.high_context_input_usd_per_1m} onChange={(e) => setEditForm((p) => ({ ...p, high_context_input_usd_per_1m: e.target.value }))} inputMode="decimal" />
+                <span className="input-group-text">/ 1M Token</span>
+              </div>
+            </div>
+            <div className="col-md-6">
+              <label className="form-label">高上下文输出单价</label>
+              <div className="input-group">
+                <span className="input-group-text">$</span>
+                <input className="form-control" value={editForm.high_context_output_usd_per_1m} onChange={(e) => setEditForm((p) => ({ ...p, high_context_output_usd_per_1m: e.target.value }))} inputMode="decimal" />
+                <span className="input-group-text">/ 1M Token</span>
+              </div>
+            </div>
+            <div className="col-md-6">
+              <label className="form-label">高上下文缓存输入单价</label>
+              <div className="input-group">
+                <span className="input-group-text">$</span>
+                <input className="form-control" value={editForm.high_context_cache_input_usd_per_1m} onChange={(e) => setEditForm((p) => ({ ...p, high_context_cache_input_usd_per_1m: e.target.value }))} inputMode="decimal" placeholder="留空则沿用当前价格集" />
+                <span className="input-group-text">/ 1M Token</span>
+              </div>
+            </div>
+            <div className="col-md-6">
+              <label className="form-label">高上下文缓存输出单价</label>
+              <div className="input-group">
+                <span className="input-group-text">$</span>
+                <input className="form-control" value={editForm.high_context_cache_output_usd_per_1m} onChange={(e) => setEditForm((p) => ({ ...p, high_context_cache_output_usd_per_1m: e.target.value }))} inputMode="decimal" placeholder="留空则沿用当前价格集" />
+                <span className="input-group-text">/ 1M Token</span>
+              </div>
             </div>
 
             <div className="modal-footer border-top-0 px-0 pb-0">

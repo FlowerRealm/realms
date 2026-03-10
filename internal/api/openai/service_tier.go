@@ -127,7 +127,7 @@ func validateManagedModelServiceTier(mm store.ManagedModel, serviceTier *string)
 	if serviceTier == nil {
 		return nil
 	}
-	_, err := store.ResolveManagedModelPricing(mm, *serviceTier)
+	_, err := store.ResolveManagedModelPricing(mm, *serviceTier, nil)
 	return err
 }
 

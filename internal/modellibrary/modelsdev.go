@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
+
+	"realms/internal/store"
 )
 
 const DefaultOpenRouterModelsURL = "https://openrouter.ai/api/v1/models"
@@ -59,7 +61,8 @@ type openRouterModelPricing struct {
 }
 
 type LookupResult struct {
-	Source string
+	Source       string
+	SourceDetail string
 
 	OwnedBy string
 	ModelID string
@@ -68,6 +71,7 @@ type LookupResult struct {
 	OutputUSDPer1M      decimal.Decimal
 	CacheInputUSDPer1M  decimal.Decimal
 	CacheOutputUSDPer1M decimal.Decimal
+	HighContextPricing  *store.ManagedModelHighContextPricing
 }
 
 type SuggestResult struct {
@@ -109,7 +113,11 @@ func (c *OpenRouterCatalog) Lookup(ctx context.Context, modelID string) (LookupR
 		if strings.TrimSpace(model.ID) != id {
 			continue
 		}
-		return buildLookupResult("openrouter", model)
+		res, err := buildLookupResult("openrouter", model)
+		if err != nil {
+			return LookupResult{}, err
+		}
+		return enrichLookupResult(ctx, res)
 	}
 	return LookupResult{}, ErrModelNotFound
 }
@@ -201,6 +209,7 @@ func buildLookupResult(source string, model openRouterModel) (LookupResult, erro
 	}
 	return LookupResult{
 		Source:              source,
+		SourceDetail:        source,
 		OwnedBy:             ownedBy,
 		ModelID:             strings.TrimSpace(model.ID),
 		InputUSDPer1M:       pricing.input,

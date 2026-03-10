@@ -247,6 +247,9 @@ func (r *GroupRouter) nextFromOrderedGroupsSequential(ctx context.Context) (Sele
 	bestBannedUntil := time.Time{}
 	bestBannedRouteGroup := ""
 	for _, cand := range ordered[startIdx:] {
+		if _, excluded := r.excludedChannels[cand.ChannelID]; excluded {
+			continue
+		}
 		if r.sched.state != nil && r.sched.state.IsChannelBanned(cand.ChannelID, now) {
 			if until, ok := r.sched.state.ChannelBanUntil(cand.ChannelID, now); ok {
 				if bestBannedID == 0 || until.Before(bestBannedUntil) {

@@ -279,6 +279,7 @@ type ManagedModel struct {
 	PriorityInputUSDPer1M      *decimal.Decimal
 	PriorityOutputUSDPer1M     *decimal.Decimal
 	PriorityCacheInputUSDPer1M *decimal.Decimal
+	HighContextPricing         *ManagedModelHighContextPricing
 	Status                     int
 	CreatedAt                  time.Time
 }

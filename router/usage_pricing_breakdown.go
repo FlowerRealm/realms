@@ -18,6 +18,11 @@ type usageEventPricingBreakdownAPI struct {
 	ModelPublicID string `json:"model_public_id,omitempty"`
 	ModelFound    bool   `json:"model_found"`
 	ServiceTier   string `json:"service_tier,omitempty"`
+	PricingKind   string `json:"pricing_kind,omitempty"`
+	HighContextApplied bool `json:"high_context_applied"`
+	HighContextThresholdTokens int64 `json:"high_context_threshold_tokens"`
+	HighContextTriggerInputTokens int64 `json:"high_context_trigger_input_tokens"`
+	EffectiveServiceTier string `json:"effective_service_tier,omitempty"`
 
 	InputTokensTotal    int64 `json:"input_tokens_total"`
 	InputTokensCached   int64 `json:"input_tokens_cached"`
@@ -71,16 +76,24 @@ func buildUsageEventPricingBreakdown(ctx context.Context, st *store.Store, ev st
 				}
 			} else {
 				out.ModelFound = true
-				pricing, err := store.ResolveManagedModelPricing(mm, out.ServiceTier)
+				pricing, err := store.ResolveManagedModelPricing(mm, out.ServiceTier, ev.InputTokens)
 				if err != nil {
 					return usageEventPricingBreakdownAPI{}, err
 				}
+				out.PricingKind = pricing.PricingKind
+				out.HighContextApplied = pricing.HighContextApplied
+				out.HighContextThresholdTokens = pricing.HighContextThresholdTokens
+				out.HighContextTriggerInputTokens = pricing.HighContextTriggerInputTokens
+				out.EffectiveServiceTier = pricing.EffectiveServiceTier
 				out.InputUSDPer1M = pricing.InputUSDPer1M.Truncate(store.USDScale)
 				out.OutputUSDPer1M = pricing.OutputUSDPer1M.Truncate(store.USDScale)
 				out.CacheInputUSDPer1M = pricing.CacheInputUSDPer1M.Truncate(store.USDScale)
 				out.CacheOutputUSDPer1M = pricing.CacheOutputUSDPer1M.Truncate(store.USDScale)
 			}
 		}
+	}
+	if out.EffectiveServiceTier == "" {
+		out.EffectiveServiceTier = out.ServiceTier
 	}
 
 	out.InputTokensTotal = usageTokensValue(ev.InputTokens)
