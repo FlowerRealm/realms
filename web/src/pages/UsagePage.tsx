@@ -16,12 +16,10 @@ import { DateRangePicker, SelectPicker } from '../components/DateRangePicker';
 import { SegmentedFrame } from '../components/SegmentedFrame';
 import { UsageAdvancedFiltersDropdown, type UsageAdvancedFiltersDropdownHandle } from '../components/UsageAdvancedFiltersDropdown';
 import { formatSecondsFromMilliseconds } from '../format/duration';
-import { formatUSDPlain } from '../format/money';
 import { UsageEventsCard } from './usage/UsageEventsCard';
 import { UsageSummaryCard } from './usage/UsageSummaryCard';
 import { UsageTimeSeriesCard } from './usage/UsageTimeSeriesCard';
-import { UsageTopUsersCard } from './usage/UsageTopUsersCard';
-import { formatLocalDate, formatLocalDateTimeMinute, type TopUserView } from './usage/usageUtils';
+import { formatLocalDate, formatLocalDateTimeMinute } from './usage/usageUtils';
 
 type DetailField = 'committed_usd' | 'requests' | 'tokens' | 'cache_ratio' | 'avg_first_token_latency' | 'tokens_per_second';
 type DetailGranularity = 'hour' | 'day';
@@ -240,21 +238,6 @@ export function UsagePage() {
     return avg.toFixed(2);
   }, [detailSeries]);
 
-  const topUsers: TopUserView[] = useMemo(() => {
-    if (!user || !data) return [];
-    const email = (user.email || user.username || '').toString().trim() || '-';
-    return [
-      {
-        user_id: user.id,
-        email,
-        role: (user.role || '').toString().trim() || '-',
-        status: typeof user.status === 'number' ? user.status : 1,
-        committed_usd: formatUSDPlain(data.committed_usd),
-        reserved_usd: formatUSDPlain(data.reserved_usd),
-      },
-    ];
-  }, [data, user]);
-
   const selfEmail = (user?.email || user?.username || '').toString().trim() || '-';
   const selfID = typeof user?.id === 'number' ? user.id : '-';
 
@@ -430,10 +413,6 @@ export function UsagePage() {
                 fieldOptions={fieldOptions}
                 granularityOptions={granularityOptions}
               />
-            </div>
-
-            <div className="col-12">
-              <UsageTopUsersCard topUsers={topUsers} />
             </div>
 
             <div className="col-12">

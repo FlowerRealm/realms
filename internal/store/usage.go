@@ -1280,6 +1280,7 @@ WHERE time >= ? AND time < ? AND (state=? OR state=?)
 type UsageUserSum struct {
 	UserID       int64
 	Email        string
+	Username     string
 	Role         string
 	Status       int
 	CommittedUSD decimal.Decimal
@@ -1301,6 +1302,7 @@ func (s *Store) ListUsageTopUsers(ctx context.Context, in UsageTopUsersInput) ([
 	rows, err := s.db.QueryContext(ctx, `
 SELECT x.user_id,
        COALESCE(u.email, ''),
+       COALESCE(u.username, ''),
        COALESCE(u.role, ''),
        COALESCE(u.status, 0),
        x.committed_sum, x.reserved_sum
@@ -1326,7 +1328,7 @@ LIMIT ?
 		var row UsageUserSum
 		var committedSum decimal.NullDecimal
 		var reservedSum decimal.NullDecimal
-		if err := rows.Scan(&row.UserID, &row.Email, &row.Role, &row.Status, &committedSum, &reservedSum); err != nil {
+		if err := rows.Scan(&row.UserID, &row.Email, &row.Username, &row.Role, &row.Status, &committedSum, &reservedSum); err != nil {
 			return nil, fmt.Errorf("扫描用户用量汇总失败: %w", err)
 		}
 		if committedSum.Valid {
@@ -1336,6 +1338,7 @@ LIMIT ?
 			row.ReservedUSD = reservedSum.Decimal.Truncate(USDScale)
 		}
 		row.Email = strings.TrimSpace(row.Email)
+		row.Username = strings.TrimSpace(row.Username)
 		if row.Email == "" {
 			row.Email = fmt.Sprintf("#%d", row.UserID)
 		}
