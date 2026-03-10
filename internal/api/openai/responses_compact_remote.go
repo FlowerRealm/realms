@@ -120,16 +120,10 @@ func compactResolveUpstreamModel(bindings []store.ChannelModelBinding, targetGro
 	}
 
 	groupModel := ""
-	allModel := ""
 	for _, binding := range bindings {
 		upstreamModel := strings.TrimSpace(binding.UpstreamModel)
 		if upstreamModel == "" {
 			continue
-		}
-		if allModel == "" {
-			allModel = upstreamModel
-		} else if allModel != upstreamModel {
-			allModel = "*"
 		}
 		if !compactBindingMatchesGroup(binding.ChannelGroups, targetGroup) {
 			continue
@@ -142,13 +136,7 @@ func compactResolveUpstreamModel(bindings []store.ChannelModelBinding, targetGro
 			return ""
 		}
 	}
-	if groupModel != "" {
-		return groupModel
-	}
-	if allModel != "" && allModel != "*" {
-		return allModel
-	}
-	return ""
+	return groupModel
 }
 
 func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
