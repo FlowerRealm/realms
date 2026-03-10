@@ -89,6 +89,8 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 	}
 	cons.AllowGroups = allowSet
 	cons.AllowGroupOrder = ags.Order
+	// 用户侧 token 默认按绑定顺序做 channel 级 failover；sticky 只影响“从哪里继续”，不决定是否启用该语义。
+	cons.SequentialChannelFailover = true
 
 	if wantStore {
 		ownerTag := realmsOwnerTagForUser(p.UserID)

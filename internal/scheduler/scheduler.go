@@ -101,11 +101,23 @@ type Constraints struct {
 	AllowGroups          map[string]struct{}
 	AllowGroupOrder      []string
 	AllowChannelIDs      map[int64]struct{}
+	// SequentialChannelFailover 用于用户侧 API key 的顺序转移：
+	// 候选 channel 按绑定顺序从前往后尝试，失败后只向后推进，不做 ring/回绕/运行时重排。
+	// 这里的“失败”定义在 channel 层：只有当前 channel 已无法选出任何可用 credential/account，
+	// 才继续尝试后续 channel；同 channel 内部允许 credential/account 接管。
+	SequentialChannelFailover bool
+	// StartChannelID 表示“本次顺序转移”的当前起点。
+	// 命中后先尝试该 channel；若该 channel 整体不可继续，才继续尝试它后面的 channel。
+	StartChannelID int64
 }
 
 type Options struct {
 	DisableCodexOAuth bool
 }
+
+var ErrRequiredCredentialUnavailable = errors.New("required credential unavailable")
+var ErrRequiredChannelUnavailable = errors.New("required channel unavailable")
+var ErrConstrainedSelectionUnavailable = errors.New("constrained selection unavailable")
 
 type UpstreamStore interface {
 	ListUpstreamChannels(ctx context.Context) ([]store.UpstreamChannel, error)
@@ -348,6 +360,12 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 		if cons.RequireFastMode {
 			return Selection{}, ErrFastModeUnsupported
 		}
+		if cons.RequireChannelID != 0 || strings.TrimSpace(cons.RequireCredentialKey) != "" {
+			if cons.RequireChannelID != 0 {
+				return Selection{}, errors.Join(ErrConstrainedSelectionUnavailable, ErrRequiredChannelUnavailable)
+			}
+			return Selection{}, errors.Join(ErrConstrainedSelectionUnavailable, ErrRequiredCredentialUnavailable)
+		}
 		return Selection{}, errors.New("未配置可用上游 channel")
 	}
 
@@ -420,6 +438,12 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 		if claimedProbe {
 			s.state.ReleaseChannelProbeClaim(ch.ID)
 		}
+	}
+	if strings.TrimSpace(cons.RequireCredentialKey) != "" {
+		return Selection{}, errors.Join(ErrConstrainedSelectionUnavailable, ErrRequiredCredentialUnavailable)
+	}
+	if cons.RequireChannelID != 0 {
+		return Selection{}, errors.Join(ErrConstrainedSelectionUnavailable, ErrRequiredChannelUnavailable)
 	}
 	return Selection{}, errors.New("未找到可用上游 credential/account")
 }

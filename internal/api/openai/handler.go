@@ -334,6 +334,9 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	cons.AllowGroups = allowSet
 	cons.AllowGroupOrder = ags.Order
+	// 用户侧 token 的上游选择语义就是“按绑定顺序做 channel 级 failover”；
+	// sticky 仅用于记住有状态会话应从哪个 channel/credential 继续，而不是决定是否启用顺序转移。
+	cons.SequentialChannelFailover = true
 
 	var rewriteBody func(sel scheduler.Selection) ([]byte, error)
 
@@ -538,7 +541,8 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Realms-Route-Key-Source", routeKeySource)
 	routeKeyHash := h.sched.RouteKeyHash(routeKey)
 	// Codex CLI（wire_api=responses）通常使用 input 数组并依赖 prompt_cache_key/session_id 做远程压缩（compaction）。
-	// 这类“有状态输入”要求粘性路由：同一会话应尽量落到同一上游 channel/credential，否则 encrypted_content 可能无法复用。
+	// 这类“有状态输入”要求记住当前会话已经转移到哪个上游 channel，
+	// 否则 encrypted_content 等续链状态可能无法复用。
 	//
 	// 为了避免影响普通 OpenAI SDK（input 为 string / 非 codex 形态）请求的负载均衡策略，这里仅对“显式会话键”的请求
 	// 启用 routeKeyHash 参与调度（例如 Codex 自带 session_id/prompt_cache_key）。
@@ -552,11 +556,16 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 
 	boundRoute, boundOK := h.loadCodexStickyBinding(r.Context(), p.UserID, stickyRouteKeyHash, time.Now())
 	bindingActive := false
-	bindingCleared := false
-	if stickyRouteKeyHash != "" && boundOK && boundRoute.channelID > 0 && strings.TrimSpace(boundRoute.credentialKey) != "" {
+	bindingMovedHeaderSet := false
+	bindingCredentialPinned := false
+	if stickyRouteKeyHash != "" && boundOK && boundRoute.channelID > 0 {
 		bindingActive = true
-		cons.RequireChannelID = boundRoute.channelID
-		cons.RequireCredentialKey = boundRoute.credentialKey
+		cons.StartChannelID = boundRoute.channelID
+		if strings.TrimSpace(boundRoute.credentialKey) != "" {
+			bindingCredentialPinned = true
+			cons.RequireChannelID = boundRoute.channelID
+			cons.RequireCredentialKey = boundRoute.credentialKey
+		}
 	}
 
 	usageID := int64(0)
@@ -643,15 +652,42 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 				h.finalizeUsageEvent(r, usageID, nil, http.StatusBadRequest, "service_tier", msg, time.Since(reqStart), 0, stream, reqBytes, 0)
 				return
 			}
-			if bindingActive && !bindingCleared {
+			if bindingActive && errors.Is(err, scheduler.ErrSequentialStartMissing) {
 				h.clearCodexStickyBindingBestEffort(r.Context(), p.UserID, stickyRouteKeyHash)
-				bindingCleared = true
 				bindingActive = false
+				cons.StartChannelID = 0
 				cons.RequireChannelID = 0
 				cons.RequireCredentialKey = ""
 				w.Header().Set("X-Realms-Codex-Sticky-Cleared", "1")
 				w.Header().Set("X-Realms-Codex-Prev-Channel", strconv.FormatInt(boundRoute.channelID, 10))
-				w.Header().Set("X-Realms-Codex-Prev-Credential", boundRoute.credentialKey)
+				if strings.TrimSpace(boundRoute.credentialKey) != "" {
+					w.Header().Set("X-Realms-Codex-Prev-Credential", boundRoute.credentialKey)
+				}
+				router = scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
+				continue
+			}
+			if bindingActive && errors.Is(err, scheduler.ErrRequiredChannelUnavailable) {
+				h.clearCodexStickyBindingBestEffort(r.Context(), p.UserID, stickyRouteKeyHash)
+				bindingActive = false
+				bindingCredentialPinned = false
+				cons.StartChannelID = 0
+				cons.RequireChannelID = 0
+				cons.RequireCredentialKey = ""
+				w.Header().Set("X-Realms-Codex-Sticky-Cleared", "1")
+				w.Header().Set("X-Realms-Codex-Prev-Channel", strconv.FormatInt(boundRoute.channelID, 10))
+				if strings.TrimSpace(boundRoute.credentialKey) != "" {
+					w.Header().Set("X-Realms-Codex-Prev-Credential", boundRoute.credentialKey)
+				}
+				router = scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
+				continue
+			}
+			if bindingCredentialPinned && errors.Is(err, scheduler.ErrConstrainedSelectionUnavailable) {
+				bindingCredentialPinned = false
+				cons.RequireChannelID = 0
+				cons.RequireCredentialKey = ""
+				// sticky 精确 credential 失效后，先退化为“保留原 channel，允许同 channel 内接管”，
+				// 仅对“channel 仍在、但 pinned credential 已不可用”做此降级。
+				cons.StartChannelID = boundRoute.channelID
 				router = scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
 				continue
 			}
@@ -659,6 +695,14 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		}
 		selCopy := sel
 		lastSel = &selCopy
+		if bindingActive && !bindingMovedHeaderSet && boundRoute.channelID > 0 && sel.ChannelID != boundRoute.channelID {
+			bindingMovedHeaderSet = true
+			w.Header().Set("X-Realms-Codex-Sticky-Cleared", "1")
+			w.Header().Set("X-Realms-Codex-Prev-Channel", strconv.FormatInt(boundRoute.channelID, 10))
+			if strings.TrimSpace(boundRoute.credentialKey) != "" {
+				w.Header().Set("X-Realms-Codex-Prev-Credential", boundRoute.credentialKey)
+			}
+		}
 		rewritten, err := rewriteBody(sel)
 		if err != nil {
 			h.voidQuotaBestEffort(usageID)
@@ -677,18 +721,16 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), usageID, reqStart, reqBytes, loopStart, 2, &bestFailure) {
 			return
 		}
-		switches++
-		if bindingActive && !bindingCleared {
-			h.clearCodexStickyBindingBestEffort(r.Context(), p.UserID, stickyRouteKeyHash)
-			bindingCleared = true
-			bindingActive = false
+		if bindingCredentialPinned {
+			bindingCredentialPinned = false
 			cons.RequireChannelID = 0
 			cons.RequireCredentialKey = ""
-			w.Header().Set("X-Realms-Codex-Sticky-Cleared", "1")
-			w.Header().Set("X-Realms-Codex-Prev-Channel", strconv.FormatInt(boundRoute.channelID, 10))
-			w.Header().Set("X-Realms-Codex-Prev-Credential", boundRoute.credentialKey)
+			// 运行期调用失败后的 sticky 降级语义与上面一致：先留在原 channel 内接管，再决定是否继续往后转移。
+			cons.StartChannelID = boundRoute.channelID
 			router = scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
+			continue
 		}
+		switches++
 		if h.failoverExhausted(loopStart, switches) {
 			break
 		}
@@ -1880,7 +1922,7 @@ func parseCodexStickyBindingPayload(payload string, now time.Time) (codexLastSuc
 	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
 		return codexLastSuccessRoute{}, false
 	}
-	if parsed.ChannelID <= 0 || strings.TrimSpace(parsed.CredentialKey) == "" {
+	if parsed.ChannelID <= 0 {
 		return codexLastSuccessRoute{}, false
 	}
 	kind := strings.TrimSpace(parsed.Kind)
@@ -1901,14 +1943,10 @@ func codexStickyBindingPayloadJSON(sel scheduler.Selection) (string, bool) {
 	if sel.ChannelID <= 0 {
 		return "", false
 	}
-	credKey := strings.TrimSpace(sel.CredentialKey())
-	if credKey == "" {
-		return "", false
-	}
 	b, err := json.Marshal(codexStickyBindingPayloadV1{
 		Kind:            "codex_route_v1",
 		ChannelID:       sel.ChannelID,
-		CredentialKey:   credKey,
+		CredentialKey:   strings.TrimSpace(sel.CredentialKey()),
 		UpdatedAtUnixMS: time.Now().UnixMilli(),
 	})
 	if err != nil || len(b) == 0 {
