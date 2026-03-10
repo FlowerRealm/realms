@@ -342,7 +342,7 @@ func TestEnrichLookupResult_OpenAIOfficialHighContextPricing(t *testing.T) {
 	}
 }
 
-func TestEnrichLookupResult_OpenAIStructuralFailureDoesNotFallback(t *testing.T) {
+func TestEnrichLookupResult_PreservesBasePricingWhenEnrichmentUnavailable(t *testing.T) {
 	oldFetch := fetchURLFunc
 	t.Cleanup(func() { fetchURLFunc = oldFetch })
 	resetHighContextLookupCache()
@@ -354,7 +354,10 @@ func TestEnrichLookupResult_OpenAIStructuralFailureDoesNotFallback(t *testing.T)
 		case "https://developers.openai.com/api/docs/guides/latest-model/":
 			return `Requests above 272K tokens is automatically processed at standard rates.`, nil
 		}
-		t.Fatalf("unexpected fallback url: %s", url)
+		if strings.Contains(url, "openrouter.ai/openai/gpt-5.4/pricing") {
+			return "", errors.New("openrouter unavailable")
+		}
+		t.Fatalf("unexpected url: %s", url)
 		return "", nil
 	}
 
@@ -368,11 +371,11 @@ func TestEnrichLookupResult_OpenAIStructuralFailureDoesNotFallback(t *testing.T)
 		CacheInputUSDPer1M:  decimal.RequireFromString("0.25"),
 		CacheOutputUSDPer1M: decimal.RequireFromString("0.25"),
 	})
-	if err == nil {
-		t.Fatal("expected enrichLookupResult() error")
+	if err != nil {
+		t.Fatalf("enrichLookupResult() err = %v", err)
 	}
 	if res.HighContextPricing != nil {
-		t.Fatal("expected no high_context_pricing on official lookup failure")
+		t.Fatal("expected no high_context_pricing when enrichment is unavailable")
 	}
 	if res.SourceDetail != "models.dev" {
 		t.Fatalf("source_detail=%q, want models.dev", res.SourceDetail)
@@ -466,11 +469,16 @@ func TestEnrichLookupResult_DoesNotCacheErrors(t *testing.T) {
 		CacheOutputUSDPer1M: decimal.RequireFromString("0.25"),
 	}
 
-	if _, err := enrichLookupResult(context.Background(), in); err == nil {
-		t.Fatal("first enrichLookupResult() err = nil, want error")
+	first, err := enrichLookupResult(context.Background(), in)
+	if err != nil {
+		t.Fatalf("first enrichLookupResult() err = %v", err)
 	}
-	if _, err := enrichLookupResult(context.Background(), in); err == nil {
-		t.Fatal("second enrichLookupResult() err = nil, want error")
+	second, err := enrichLookupResult(context.Background(), in)
+	if err != nil {
+		t.Fatalf("second enrichLookupResult() err = %v", err)
+	}
+	if first.HighContextPricing != nil || second.HighContextPricing != nil {
+		t.Fatal("expected no high_context_pricing when both lookups fail")
 	}
 	if got := atomic.LoadInt32(&fetchCount); got != 4 {
 		t.Fatalf("fetch count = %d, want 4", got)
