@@ -342,14 +342,17 @@ func TestEnrichLookupResult_OpenAIOfficialHighContextPricing(t *testing.T) {
 	}
 }
 
-func TestEnrichLookupResult_OpenAIFailureDoesNotFallback(t *testing.T) {
+func TestEnrichLookupResult_OpenAIStructuralFailureDoesNotFallback(t *testing.T) {
 	oldFetch := fetchURLFunc
 	t.Cleanup(func() { fetchURLFunc = oldFetch })
 	resetHighContextLookupCache()
 	t.Cleanup(resetHighContextLookupCache)
 	fetchURLFunc = func(ctx context.Context, client *http.Client, url string) (string, error) {
-		if strings.HasPrefix(url, "https://developers.openai.com/") {
-			return "", errors.New("official docs unavailable")
+		switch url {
+		case "https://developers.openai.com/api/docs/pricing/":
+			return `<table><tr><td>gpt-4o</td></tr></table>`, nil
+		case "https://developers.openai.com/api/docs/guides/latest-model/":
+			return `Requests above 272K tokens is automatically processed at standard rates.`, nil
 		}
 		t.Fatalf("unexpected fallback url: %s", url)
 		return "", nil
@@ -445,6 +448,9 @@ func TestEnrichLookupResult_DoesNotCacheErrors(t *testing.T) {
 		if strings.HasPrefix(url, "https://developers.openai.com/") {
 			return "", errors.New("official docs unavailable")
 		}
+		if strings.Contains(url, "openrouter.ai/openai/gpt-5.4/pricing") {
+			return "", errors.New("openrouter pricing unavailable")
+		}
 		t.Fatalf("unexpected url: %s", url)
 		return "", nil
 	}
@@ -465,6 +471,95 @@ func TestEnrichLookupResult_DoesNotCacheErrors(t *testing.T) {
 	}
 	if _, err := enrichLookupResult(context.Background(), in); err == nil {
 		t.Fatal("second enrichLookupResult() err = nil, want error")
+	}
+	if got := atomic.LoadInt32(&fetchCount); got != 4 {
+		t.Fatalf("fetch count = %d, want 4", got)
+	}
+}
+
+func TestEnrichLookupResult_OpenAISoftFailureFallsBackToOpenRouter(t *testing.T) {
+	oldFetch := fetchURLFunc
+	t.Cleanup(func() { fetchURLFunc = oldFetch })
+	resetHighContextLookupCache()
+	t.Cleanup(resetHighContextLookupCache)
+
+	var openRouterFetches int32
+	fetchURLFunc = func(ctx context.Context, client *http.Client, url string) (string, error) {
+		if strings.HasPrefix(url, "https://developers.openai.com/") {
+			return "", errors.New("temporary upstream outage")
+		}
+		if !strings.Contains(url, "openrouter.ai/openai/gpt-5.4/pricing") {
+			t.Fatalf("unexpected url: %s", url)
+		}
+		atomic.AddInt32(&openRouterFetches, 1)
+		return `{"pricing_json":{"openai_responses:high_context_threshold":"272000","openai_responses:prompt_tokens_high_context":"5e-6","openai_responses:completion_tokens_high_context":"22.5e-6","openai_responses:cached_prompt_tokens_high_context":"0.5e-6"}}`, nil
+	}
+
+	res, err := enrichLookupResult(context.Background(), LookupResult{
+		Source:              "models.dev",
+		SourceDetail:        "models.dev",
+		OwnedBy:             "openai",
+		ModelID:             "gpt-5.4",
+		InputUSDPer1M:       decimal.RequireFromString("2.5"),
+		OutputUSDPer1M:      decimal.RequireFromString("15"),
+		CacheInputUSDPer1M:  decimal.RequireFromString("0.25"),
+		CacheOutputUSDPer1M: decimal.RequireFromString("0.25"),
+	})
+	if err != nil {
+		t.Fatalf("enrichLookupResult() err = %v", err)
+	}
+	if res.HighContextPricing == nil {
+		t.Fatal("expected fallback high_context_pricing")
+	}
+	if res.SourceDetail != "openrouter_pricing_page" {
+		t.Fatalf("source_detail=%q, want openrouter_pricing_page", res.SourceDetail)
+	}
+	if got := atomic.LoadInt32(&openRouterFetches); got != 1 {
+		t.Fatalf("openrouter fetch count = %d, want 1", got)
+	}
+}
+
+func TestEnrichLookupResult_DoesNotCacheEmptyResults(t *testing.T) {
+	oldFetch := fetchURLFunc
+	oldTTL := highContextLookupCacheTTL
+	t.Cleanup(func() {
+		fetchURLFunc = oldFetch
+		highContextLookupCacheTTL = oldTTL
+	})
+	resetHighContextLookupCache()
+	t.Cleanup(resetHighContextLookupCache)
+	highContextLookupCacheTTL = time.Minute
+
+	var fetchCount int32
+	fetchURLFunc = func(ctx context.Context, client *http.Client, url string) (string, error) {
+		atomic.AddInt32(&fetchCount, 1)
+		if !strings.Contains(url, "openrouter.ai/moonshotai/kimi-k2/pricing") {
+			t.Fatalf("unexpected url: %s", url)
+		}
+		return `{"pricing_json":{}}`, nil
+	}
+
+	in := LookupResult{
+		Source:              "models.dev",
+		SourceDetail:        "models.dev",
+		OwnedBy:             "moonshotai",
+		ModelID:             "moonshotai/kimi-k2",
+		InputUSDPer1M:       decimal.RequireFromString("0.55"),
+		OutputUSDPer1M:      decimal.RequireFromString("2.2"),
+		CacheInputUSDPer1M:  decimal.Zero,
+		CacheOutputUSDPer1M: decimal.Zero,
+	}
+
+	first, err := enrichLookupResult(context.Background(), in)
+	if err != nil {
+		t.Fatalf("first enrichLookupResult() err = %v", err)
+	}
+	second, err := enrichLookupResult(context.Background(), in)
+	if err != nil {
+		t.Fatalf("second enrichLookupResult() err = %v", err)
+	}
+	if first.HighContextPricing != nil || second.HighContextPricing != nil {
+		t.Fatal("expected no high_context_pricing")
 	}
 	if got := atomic.LoadInt32(&fetchCount); got != 2 {
 		t.Fatalf("fetch count = %d, want 2", got)

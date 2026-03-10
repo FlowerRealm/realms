@@ -3,6 +3,7 @@ package modellibrary
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"regexp"
@@ -32,6 +33,24 @@ type highContextLookupCacheEntry struct {
 	sourceDetail string
 }
 
+type softHighContextLookupError struct {
+	err error
+}
+
+func (e *softHighContextLookupError) Error() string {
+	if e == nil || e.err == nil {
+		return ""
+	}
+	return e.err.Error()
+}
+
+func (e *softHighContextLookupError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
 func enrichLookupResult(ctx context.Context, in LookupResult) (LookupResult, error) {
 	cachedEntry, ok := getCachedHighContextLookup(in)
 	if ok {
@@ -40,7 +59,18 @@ func enrichLookupResult(ctx context.Context, in LookupResult) (LookupResult, err
 
 	entry := highContextLookupCacheEntry{}
 	if hc, detail, err := lookupOpenAIHighContextPricing(ctx, in.ModelID, in); err != nil {
-		return in, err
+		var softErr *softHighContextLookupError
+		if !errors.As(err, &softErr) {
+			return in, err
+		}
+		if hc, detail, orErr := lookupOpenRouterHighContextPricing(ctx, in.ModelID, in); orErr != nil {
+			return in, errors.Join(err, orErr)
+		} else if hc != nil {
+			entry.pricing = cloneHighContextPricing(hc)
+			entry.sourceDetail = detail
+		} else {
+			return in, err
+		}
 	} else if hc != nil {
 		entry.pricing = cloneHighContextPricing(hc)
 		entry.sourceDetail = detail
@@ -51,7 +81,9 @@ func enrichLookupResult(ctx context.Context, in LookupResult) (LookupResult, err
 		entry.sourceDetail = detail
 	}
 
-	setCachedHighContextLookup(in, entry)
+	if entry.pricing != nil {
+		setCachedHighContextLookup(in, entry)
+	}
 	return applyHighContextLookupResult(in, entry), nil
 }
 
@@ -138,11 +170,11 @@ func lookupOpenAIHighContextPricing(ctx context.Context, modelID string, base Lo
 	}
 	body, err := fetchURLFunc(ctx, defaultModelLibraryHTTPClient, "https://developers.openai.com/api/docs/pricing/")
 	if err != nil {
-		return nil, "", err
+		return nil, "", wrapSoftHighContextLookupError("openai pricing docs unavailable", err)
 	}
 	guide, err := fetchURLFunc(ctx, defaultModelLibraryHTTPClient, "https://developers.openai.com/api/docs/guides/latest-model/")
 	if err != nil {
-		return nil, "", err
+		return nil, "", wrapSoftHighContextLookupError("openai latest-model guide unavailable", err)
 	}
 	policy := store.ManagedModelHighContextServiceTierPolicyInherit
 	if strings.Contains(guide, "above 272K tokens is automatically processed at standard rates") {
@@ -179,6 +211,13 @@ func lookupOpenAIHighContextPricing(ctx context.Context, modelID string, base Lo
 	default:
 		return nil, "", nil
 	}
+}
+
+func wrapSoftHighContextLookupError(msg string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &softHighContextLookupError{err: fmt.Errorf("%s: %w", msg, err)}
 }
 
 func lookupOpenRouterHighContextPricing(ctx context.Context, modelID string, base LookupResult) (*store.ManagedModelHighContextPricing, string, error) {
