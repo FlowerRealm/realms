@@ -127,8 +127,8 @@ func TestClassifyNonRetriableFailureScope(t *testing.T) {
 		status int
 		want   scheduler.FailureScope
 	}{
-		{name: "bad request stays request scoped", status: http.StatusBadRequest, want: scheduler.FailureScopeChannel},
-		{name: "unprocessable stays request scoped", status: http.StatusUnprocessableEntity, want: scheduler.FailureScopeChannel},
+		{name: "bad request stays request scoped", status: http.StatusBadRequest, want: scheduler.FailureScopeRequest},
+		{name: "unprocessable stays request scoped", status: http.StatusUnprocessableEntity, want: scheduler.FailureScopeRequest},
 		{name: "not found is endpoint scoped", status: http.StatusNotFound, want: scheduler.FailureScopeEndpoint},
 		{name: "method not allowed is endpoint scoped", status: http.StatusMethodNotAllowed, want: scheduler.FailureScopeEndpoint},
 		{name: "internal error is endpoint scoped", status: http.StatusInternalServerError, want: scheduler.FailureScopeEndpoint},
@@ -139,6 +139,28 @@ func TestClassifyNonRetriableFailureScope(t *testing.T) {
 				t.Fatalf("scope=%q want=%q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestReport_RequestScopedFailureSkipsChannelPenalty(t *testing.T) {
+	s := scheduler.New(&fakeStore{})
+	sel := scheduler.Selection{
+		ChannelID:      7,
+		EndpointID:     17,
+		CredentialType: scheduler.CredentialTypeOpenAI,
+		CredentialID:   99,
+		AutoBan:        true,
+	}
+	s.Report(sel, scheduler.Result{
+		Success:    false,
+		Retriable:  false,
+		StatusCode: http.StatusBadRequest,
+		ErrorClass: "upstream_status",
+		Scope:      scheduler.FailureScopeRequest,
+	})
+
+	if got := s.RuntimeChannelStats(sel.ChannelID); got.FailScore != 0 || got.BannedUntil != nil {
+		t.Fatalf("expected request-scoped failure not to punish channel, got=%+v", got)
 	}
 }
 

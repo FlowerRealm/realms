@@ -93,7 +93,12 @@ func (h *Handler) proxyFixedSelection(w http.ResponseWriter, r *http.Request, p 
 	resp, err := h.exec.Do(r.Context(), sel, r, body)
 	if err != nil {
 		if h.sched != nil {
-			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: true, ErrorClass: "network"})
+			h.sched.Report(sel, scheduler.Result{
+				Success:    false,
+				Retriable:  true,
+				ErrorClass: "network",
+				Scope:      scheduler.FailureScopeEndpoint,
+			})
 		}
 		h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, nil, 0, "network", time.Since(attemptStart))
 		http.Error(w, "上游不可用", http.StatusBadGateway)

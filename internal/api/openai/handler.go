@@ -1775,7 +1775,7 @@ func classifyNonRetriableFailureScope(statusCode int) scheduler.FailureScope {
 			return scheduler.FailureScopeEndpoint
 		}
 	}
-	return scheduler.FailureScopeChannel
+	return scheduler.FailureScopeRequest
 }
 
 func shouldRetrySameSelection(scope scheduler.FailureScope, statusCode int, errorClass string) bool {

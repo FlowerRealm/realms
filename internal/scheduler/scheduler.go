@@ -34,6 +34,7 @@ const (
 	FailureScopeCredential FailureScope = "credential"
 	FailureScopeEndpoint   FailureScope = "endpoint"
 	FailureScopeChannel    FailureScope = "channel"
+	FailureScopeRequest    FailureScope = "request"
 )
 
 type Selection struct {
