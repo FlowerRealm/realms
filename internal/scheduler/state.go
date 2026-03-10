@@ -26,9 +26,11 @@ type State struct {
 	tokens map[string][]tokenEvent
 
 	credentialCooldown map[string]time.Time
+	endpointCooldown   map[int64]time.Time
 
-	channelFails map[int64]int
-	credFails    map[string]int
+	endpointFails map[int64]int
+	channelFails  map[int64]int
+	credFails     map[string]int
 
 	channelBanUntil  map[int64]time.Time
 	channelBanStreak map[int64]int
@@ -43,6 +45,8 @@ func NewState() *State {
 		rpm:                    make(map[string][]time.Time),
 		tokens:                 make(map[string][]tokenEvent),
 		credentialCooldown:     make(map[string]time.Time),
+		endpointCooldown:       make(map[int64]time.Time),
+		endpointFails:          make(map[int64]int),
 		channelFails:           make(map[int64]int),
 		credFails:              make(map[string]int),
 		channelBanUntil:        make(map[int64]time.Time),
@@ -128,6 +132,68 @@ func (s *State) IsCredentialCooling(credentialKey string, now time.Time) bool {
 		return false
 	}
 	return true
+}
+
+func (s *State) SetEndpointCooling(endpointID int64, until time.Time) {
+	if endpointID == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.endpointCooldown[endpointID] = until
+}
+
+func (s *State) IsEndpointCooling(endpointID int64, now time.Time) bool {
+	if endpointID == 0 {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	until, ok := s.endpointCooldown[endpointID]
+	if !ok {
+		return false
+	}
+	if now.After(until) {
+		delete(s.endpointCooldown, endpointID)
+		return false
+	}
+	return true
+}
+
+func (s *State) ClearEndpointCooldown(endpointID int64) {
+	if endpointID == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.endpointCooldown, endpointID)
+}
+
+func (s *State) RecordEndpointResult(endpointID int64, success bool) {
+	if endpointID == 0 || success {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.endpointFails[endpointID]++
+}
+
+func (s *State) EndpointFailScore(endpointID int64) int {
+	if endpointID == 0 {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.endpointFails[endpointID]
+}
+
+func (s *State) ResetEndpointFailScore(endpointID int64) {
+	if endpointID == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.endpointFails, endpointID)
 }
 
 func (s *State) RecordChannelResult(channelID int64, success bool) {

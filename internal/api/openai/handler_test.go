@@ -841,6 +841,171 @@ func TestResponses_RetrySameSelectionOnNetworkErrorBeforeFailover(t *testing.T) 
 	}
 }
 
+func TestResponses_RetryThenFailoverToSiblingEndpointWithinChannel(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1, Priority: 100},
+				{ID: 12, ChannelID: 1, BaseURL: "https://b.example", Status: 1, Priority: 10},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+			12: {
+				{ID: 2, EndpointID: 12, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {
+				ID:       1,
+				PublicID: "gpt-5.2",
+				Status:   1,
+			},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	var calls []scheduler.Selection
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		calls = append(calls, sel)
+		if sel.EndpointID == 11 {
+			return nil, errors.New("temporary endpoint dial failure")
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{
+		ActorType: auth.ActorTypeToken,
+		UserID:    10,
+		Role:      store.UserRoleUser,
+		TokenID:   &tokenID,
+		Groups:    []string{store.DefaultGroupName},
+	}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(calls) != 3 {
+		t.Fatalf("expected 3 attempts (retry same endpoint, then sibling endpoint), got=%d", len(calls))
+	}
+	if calls[0].EndpointID != 11 || calls[1].EndpointID != 11 {
+		t.Fatalf("expected first two attempts on endpoint=11, got=%+v", calls)
+	}
+	if calls[2].EndpointID != 12 {
+		t.Fatalf("expected failover to sibling endpoint=12, got=%d", calls[2].EndpointID)
+	}
+	for _, call := range calls {
+		if call.ChannelID != 1 {
+			t.Fatalf("expected all attempts to stay on channel=1, got calls=%+v", calls)
+		}
+	}
+}
+
+func TestResponses_Retry502ThenFailoverToSiblingEndpointWithinChannel(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1, Priority: 100},
+				{ID: 12, ChannelID: 1, BaseURL: "https://b.example", Status: 1, Priority: 10},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+			12: {
+				{ID: 2, EndpointID: 12, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {
+				ID:       1,
+				PublicID: "gpt-5.2",
+				Status:   1,
+			},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	var calls []scheduler.Selection
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		calls = append(calls, sel)
+		if sel.EndpointID == 11 {
+			return &http.Response{
+				StatusCode: http.StatusBadGateway,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(bytes.NewReader([]byte(`{"error":{"message":"bad gateway"}}`))),
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{
+		ActorType: auth.ActorTypeToken,
+		UserID:    10,
+		Role:      store.UserRoleUser,
+		TokenID:   &tokenID,
+		Groups:    []string{store.DefaultGroupName},
+	}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(calls) != 3 {
+		t.Fatalf("expected 3 attempts (retry same endpoint on 502, then sibling endpoint), got=%d", len(calls))
+	}
+	if calls[0].EndpointID != 11 || calls[1].EndpointID != 11 {
+		t.Fatalf("expected first two attempts on endpoint=11, got=%+v", calls)
+	}
+	if calls[2].EndpointID != 12 {
+		t.Fatalf("expected failover to sibling endpoint=12, got=%d", calls[2].EndpointID)
+	}
+}
+
 func TestResponses_ChannelRequestPolicy_IsPerChannelAttempt(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
@@ -911,8 +1076,8 @@ func TestResponses_ChannelRequestPolicy_IsPerChannelAttempt(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
-	if len(calls) != 2 {
-		t.Fatalf("expected 2 attempts, got=%d", len(calls))
+	if len(calls) != 3 {
+		t.Fatalf("expected 3 attempts, got=%d", len(calls))
 	}
 
 	var first map[string]any
@@ -932,8 +1097,25 @@ func TestResponses_ChannelRequestPolicy_IsPerChannelAttempt(t *testing.T) {
 		t.Fatalf("expected safety_identifier to be removed on channel 2")
 	}
 
+	var retry map[string]any
+	if err := json.Unmarshal(bodies[1], &retry); err != nil {
+		t.Fatalf("unmarshal retry body: %v", err)
+	}
+	if retry["model"] != "m1-up2" {
+		t.Fatalf("unexpected retry model: %v", retry["model"])
+	}
+	if _, ok := retry["service_tier"]; ok {
+		t.Fatalf("expected retry service_tier to be removed on channel 2")
+	}
+	if _, ok := retry["store"]; ok {
+		t.Fatalf("expected retry store to be removed on channel 2")
+	}
+	if _, ok := retry["safety_identifier"]; ok {
+		t.Fatalf("expected retry safety_identifier to be removed on channel 2")
+	}
+
 	var second map[string]any
-	if err := json.Unmarshal(bodies[1], &second); err != nil {
+	if err := json.Unmarshal(bodies[2], &second); err != nil {
 		t.Fatalf("unmarshal second body: %v", err)
 	}
 	if second["model"] != "m1-up1" {
@@ -1018,8 +1200,8 @@ func TestResponses_ChannelParamOverride_IsPerChannelAttempt(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
-	if len(calls) != 2 {
-		t.Fatalf("expected 2 attempts, got=%d", len(calls))
+	if len(calls) != 3 {
+		t.Fatalf("expected 3 attempts, got=%d", len(calls))
 	}
 
 	var first map[string]any
@@ -1037,8 +1219,23 @@ func TestResponses_ChannelParamOverride_IsPerChannelAttempt(t *testing.T) {
 		t.Fatalf("expected store to be present on channel 2")
 	}
 
+	var retry map[string]any
+	if err := json.Unmarshal(bodies[1], &retry); err != nil {
+		t.Fatalf("unmarshal retry body: %v", err)
+	}
+	if retry["model"] != "m1-up2" {
+		t.Fatalf("unexpected retry model: %v", retry["model"])
+	}
+	metaRetry, _ := retry["metadata"].(map[string]any)
+	if metaRetry == nil || metaRetry["channel"] != "b" {
+		t.Fatalf("unexpected retry metadata: %+v", retry["metadata"])
+	}
+	if _, ok := retry["store"]; !ok {
+		t.Fatalf("expected retry store to be present on channel 2")
+	}
+
 	var second map[string]any
-	if err := json.Unmarshal(bodies[1], &second); err != nil {
+	if err := json.Unmarshal(bodies[2], &second); err != nil {
 		t.Fatalf("unmarshal second body: %v", err)
 	}
 	if second["model"] != "m1-up1" {
@@ -1247,8 +1444,8 @@ func TestResponses_ModelSuffixEffort_IsPerChannelAttempt(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
-	if len(bodies) != 2 {
-		t.Fatalf("expected 2 attempts, got=%d", len(bodies))
+	if len(bodies) != 3 {
+		t.Fatalf("expected 3 attempts, got=%d", len(bodies))
 	}
 
 	var first map[string]any
@@ -1262,8 +1459,19 @@ func TestResponses_ModelSuffixEffort_IsPerChannelAttempt(t *testing.T) {
 		t.Fatalf("expected reasoning to be absent when preserved, got=%v", first["reasoning"])
 	}
 
+	var retry map[string]any
+	if err := json.Unmarshal(bodies[1], &retry); err != nil {
+		t.Fatalf("unmarshal retry body: %v", err)
+	}
+	if retry["model"] != "o1-mini-high" {
+		t.Fatalf("expected retry preserved model=o1-mini-high, got=%v", retry["model"])
+	}
+	if _, ok := retry["reasoning"]; ok {
+		t.Fatalf("expected retry reasoning to be absent when preserved, got=%v", retry["reasoning"])
+	}
+
 	var second map[string]any
-	if err := json.Unmarshal(bodies[1], &second); err != nil {
+	if err := json.Unmarshal(bodies[2], &second); err != nil {
 		t.Fatalf("unmarshal second body: %v", err)
 	}
 	if second["model"] != "o1-mini" {
@@ -1341,8 +1549,8 @@ func TestResponses_ChannelBodyFilters_ArePerChannelAttempt(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
-	if len(bodies) != 2 {
-		t.Fatalf("expected 2 attempts, got=%d", len(bodies))
+	if len(bodies) != 3 {
+		t.Fatalf("expected 3 attempts, got=%d", len(bodies))
 	}
 
 	var first map[string]any
@@ -1363,8 +1571,26 @@ func TestResponses_ChannelBodyFilters_ArePerChannelAttempt(t *testing.T) {
 		t.Fatalf("expected metadata.trace to be removed on channel 2, got=%v", meta1["trace"])
 	}
 
+	var retry map[string]any
+	if err := json.Unmarshal(bodies[1], &retry); err != nil {
+		t.Fatalf("unmarshal retry body: %v", err)
+	}
+	if retry["model"] != "m1-up2" {
+		t.Fatalf("unexpected retry model: %v", retry["model"])
+	}
+	if _, ok := retry["extra"]; ok {
+		t.Fatalf("expected retry extra to be removed on channel 2")
+	}
+	metaRetry, _ := retry["metadata"].(map[string]any)
+	if metaRetry == nil || metaRetry["keep"] != "k" {
+		t.Fatalf("expected retry metadata.keep=k on channel 2, got=%v", retry["metadata"])
+	}
+	if _, ok := metaRetry["trace"]; ok {
+		t.Fatalf("expected retry metadata.trace to be removed on channel 2, got=%v", metaRetry["trace"])
+	}
+
 	var second map[string]any
-	if err := json.Unmarshal(bodies[1], &second); err != nil {
+	if err := json.Unmarshal(bodies[2], &second); err != nil {
 		t.Fatalf("unmarshal second body: %v", err)
 	}
 	if second["model"] != "m1-up1" {
