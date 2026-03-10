@@ -131,6 +131,9 @@ func scanManagedModelRow(scanner managedModelScanner) (ManagedModel, error) {
 	if err != nil {
 		return ManagedModel{}, err
 	}
+	if err := applyDefaultManagedModelPriorityPricing(&m); err != nil {
+		return ManagedModel{}, err
+	}
 	if err := validateManagedModelPriorityPricing(m.PriorityPricingEnabled, m.PriorityInputUSDPer1M, m.PriorityOutputUSDPer1M); err != nil {
 		return ManagedModel{}, err
 	}
@@ -477,6 +480,23 @@ func (s *Store) CreateManagedModel(ctx context.Context, in ManagedModelCreate) (
 	if inUSD.IsNegative() || outUSD.IsNegative() || cacheInUSD.IsNegative() || cacheOutUSD.IsNegative() {
 		return 0, errors.New("模型定价不合法")
 	}
+	tmp := ManagedModel{
+		PublicID:                   strings.TrimSpace(in.PublicID),
+		InputUSDPer1M:              inUSD,
+		OutputUSDPer1M:             outUSD,
+		CacheInputUSDPer1M:         cacheInUSD,
+		CacheOutputUSDPer1M:        cacheOutUSD,
+		PriorityPricingEnabled:     in.PriorityPricingEnabled,
+		PriorityInputUSDPer1M:      priorityInUSD,
+		PriorityOutputUSDPer1M:     priorityOutUSD,
+		PriorityCacheInputUSDPer1M: priorityCacheInUSD,
+	}
+	if err := applyDefaultManagedModelPriorityPricing(&tmp); err != nil {
+		return 0, err
+	}
+	priorityInUSD = tmp.PriorityInputUSDPer1M
+	priorityOutUSD = tmp.PriorityOutputUSDPer1M
+	priorityCacheInUSD = tmp.PriorityCacheInputUSDPer1M
 	if err := validateManagedModelPriorityPricing(in.PriorityPricingEnabled, priorityInUSD, priorityOutUSD); err != nil {
 		return 0, err
 	}
@@ -533,6 +553,23 @@ func (s *Store) UpdateManagedModel(ctx context.Context, in ManagedModelUpdate) e
 	if inUSD.IsNegative() || outUSD.IsNegative() || cacheInUSD.IsNegative() || cacheOutUSD.IsNegative() {
 		return errors.New("模型定价不合法")
 	}
+	tmp := ManagedModel{
+		PublicID:                   strings.TrimSpace(in.PublicID),
+		InputUSDPer1M:              inUSD,
+		OutputUSDPer1M:             outUSD,
+		CacheInputUSDPer1M:         cacheInUSD,
+		CacheOutputUSDPer1M:        cacheOutUSD,
+		PriorityPricingEnabled:     in.PriorityPricingEnabled,
+		PriorityInputUSDPer1M:      priorityInUSD,
+		PriorityOutputUSDPer1M:     priorityOutUSD,
+		PriorityCacheInputUSDPer1M: priorityCacheInUSD,
+	}
+	if err := applyDefaultManagedModelPriorityPricing(&tmp); err != nil {
+		return err
+	}
+	priorityInUSD = tmp.PriorityInputUSDPer1M
+	priorityOutUSD = tmp.PriorityOutputUSDPer1M
+	priorityCacheInUSD = tmp.PriorityCacheInputUSDPer1M
 	if err := validateManagedModelPriorityPricing(in.PriorityPricingEnabled, priorityInUSD, priorityOutUSD); err != nil {
 		return err
 	}
@@ -804,6 +841,21 @@ INSERT INTO managed_models(
 			if it.PriorityCacheInputUSDPer1M != nil {
 				priorityCacheInUSD = it.PriorityCacheInputUSDPer1M
 			}
+			tmp := ManagedModel{
+				InputUSDPer1M:              it.InputUSDPer1M,
+				OutputUSDPer1M:             it.OutputUSDPer1M,
+				CacheInputUSDPer1M:         it.CacheInputUSDPer1M,
+				PriorityPricingEnabled:     priorityEnabled,
+				PriorityInputUSDPer1M:      priorityInUSD,
+				PriorityOutputUSDPer1M:     priorityOutUSD,
+				PriorityCacheInputUSDPer1M: priorityCacheInUSD,
+			}
+			if err := applyDefaultManagedModelPriorityPricing(&tmp); err != nil {
+				return UpsertManagedModelPricingResult{}, err
+			}
+			priorityInUSD = tmp.PriorityInputUSDPer1M
+			priorityOutUSD = tmp.PriorityOutputUSDPer1M
+			priorityCacheInUSD = tmp.PriorityCacheInputUSDPer1M
 			if err := validateManagedModelPriorityPricing(priorityEnabled, priorityInUSD, priorityOutUSD); err != nil {
 				return UpsertManagedModelPricingResult{}, err
 			}
@@ -840,6 +892,21 @@ INSERT INTO managed_models(
 		if it.PriorityPricingEnabled != nil {
 			priorityEnabled = *it.PriorityPricingEnabled
 		}
+		tmp := ManagedModel{
+			InputUSDPer1M:              it.InputUSDPer1M,
+			OutputUSDPer1M:             it.OutputUSDPer1M,
+			CacheInputUSDPer1M:         it.CacheInputUSDPer1M,
+			PriorityPricingEnabled:     priorityEnabled,
+			PriorityInputUSDPer1M:      it.PriorityInputUSDPer1M,
+			PriorityOutputUSDPer1M:     it.PriorityOutputUSDPer1M,
+			PriorityCacheInputUSDPer1M: it.PriorityCacheInputUSDPer1M,
+		}
+		if err := applyDefaultManagedModelPriorityPricing(&tmp); err != nil {
+			return UpsertManagedModelPricingResult{}, err
+		}
+		it.PriorityInputUSDPer1M = tmp.PriorityInputUSDPer1M
+		it.PriorityOutputUSDPer1M = tmp.PriorityOutputUSDPer1M
+		it.PriorityCacheInputUSDPer1M = tmp.PriorityCacheInputUSDPer1M
 		if err := validateManagedModelPriorityPricing(priorityEnabled, it.PriorityInputUSDPer1M, it.PriorityOutputUSDPer1M); err != nil {
 			return UpsertManagedModelPricingResult{}, err
 		}

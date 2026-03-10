@@ -9,6 +9,7 @@ export function GenericSuggestInput<T>(props: {
   value: string;
   disabled?: boolean;
   placeholder?: string;
+  inputClassName?: string;
   minWidth?: number;
   maxWidth?: number;
   zIndex?: number;
@@ -17,6 +18,7 @@ export function GenericSuggestInput<T>(props: {
   onChange: (value: string) => void;
   onSelect: (item: T) => void;
   fetchItems: (q: string) => Promise<T[]>;
+  localItems?: (q: string, fetchedItems: T[]) => T[];
   getItemKey: (item: T) => string | number;
   renderItem: (item: T) => ReactNode;
   emptyText: string;
@@ -26,6 +28,7 @@ export function GenericSuggestInput<T>(props: {
     value,
     disabled,
     placeholder,
+    inputClassName,
     minWidth,
     maxWidth,
     zIndex,
@@ -34,6 +37,7 @@ export function GenericSuggestInput<T>(props: {
     onChange,
     onSelect,
     fetchItems,
+    localItems,
     getItemKey,
     renderItem,
     emptyText,
@@ -48,7 +52,20 @@ export function GenericSuggestInput<T>(props: {
   const reqSeqRef = useRef(0);
 
   const q = useMemo(() => (value || '').trim(), [value]);
-  const open = focused && q.length > 0 && (loading || err !== '' || items.length > 0);
+  const mergedItems = useMemo(() => {
+    const out: T[] = [];
+    const seen = new Set<string>();
+    const append = (item: T) => {
+      const key = String(getItemKey(item));
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(item);
+    };
+    for (const item of localItems?.(q, items) || []) append(item);
+    for (const item of items) append(item);
+    return out;
+  }, [getItemKey, items, localItems, q]);
+  const open = focused && q.length > 0 && (loading || err !== '' || mergedItems.length > 0);
   const { present, phase } = usePresence(open, 160);
   const panelStyle = useAnchoredPopover({
     open: present,
@@ -102,7 +119,7 @@ export function GenericSuggestInput<T>(props: {
         ref={inputRef}
         id={id}
         type="text"
-        className="form-control"
+        className={`form-control${inputClassName ? ` ${inputClassName}` : ''}`}
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value || '')}
@@ -129,9 +146,9 @@ export function GenericSuggestInput<T>(props: {
           >
             {err ? <div className="text-danger small px-2 py-1">{err}</div> : null}
             {loading ? <div className="text-muted small px-2 py-1">加载中…</div> : null}
-            {!loading && !err && items.length === 0 ? <div className="text-muted small px-2 py-1">{emptyText}</div> : null}
+            {!loading && !err && mergedItems.length === 0 ? <div className="text-muted small px-2 py-1">{emptyText}</div> : null}
             <div className="list-group list-group-flush">
-              {items.map((it) => (
+              {mergedItems.map((it) => (
                 <button
                   key={getItemKey(it)}
                   type="button"
@@ -151,4 +168,3 @@ export function GenericSuggestInput<T>(props: {
     </>
   );
 }
-
