@@ -1781,7 +1781,7 @@ func classifyStreamFailureScope(errorClass string) scheduler.FailureScope {
 
 func isRetriableStreamFailure(errorClass string) bool {
 	switch strings.TrimSpace(errorClass) {
-	case "stream_idle_timeout", "stream_read_error":
+	case "stream_idle_timeout", "stream_read_error", "stream_first_byte_timeout":
 		return true
 	default:
 		return false

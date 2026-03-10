@@ -145,6 +145,26 @@ func TestClassifyNonRetriableFailureScope(t *testing.T) {
 	}
 }
 
+func TestIsRetriableStreamFailure(t *testing.T) {
+	cases := []struct {
+		name       string
+		errorClass string
+		want       bool
+	}{
+		{name: "idle timeout is retriable", errorClass: "stream_idle_timeout", want: true},
+		{name: "read error is retriable", errorClass: "stream_read_error", want: true},
+		{name: "first byte timeout is retriable", errorClass: "stream_first_byte_timeout", want: true},
+		{name: "client disconnect is not retriable", errorClass: "client_disconnect", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isRetriableStreamFailure(tc.errorClass); got != tc.want {
+				t.Fatalf("retriable=%v want=%v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestReport_RequestScopedFailureSkipsChannelPenalty(t *testing.T) {
 	s := scheduler.New(&fakeStore{})
 	sel := scheduler.Selection{
