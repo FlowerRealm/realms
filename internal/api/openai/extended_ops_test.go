@@ -482,6 +482,74 @@ func TestResponses_ExtendedOps_OwnershipAndDeleteCleanup(t *testing.T) {
 	}
 }
 
+func TestResponseRetrieve_Upstream5xxCoolsFixedEndpoint(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1, Priority: 100},
+				{ID: 12, ChannelID: 1, BaseURL: "https://b.example", Status: 1, Priority: 10},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+			},
+			12: {
+				{ID: 121, EndpointID: 12, Status: 1},
+			},
+		},
+	}
+
+	refs := newMemObjectRefs()
+	selJSON, _ := json.Marshal(scheduler.Selection{
+		ChannelID:      1,
+		ChannelType:    store.UpstreamTypeOpenAICompatible,
+		EndpointID:     11,
+		BaseURL:        "https://a.example",
+		CredentialType: scheduler.CredentialTypeOpenAI,
+		CredentialID:   111,
+	})
+	_ = refs.UpsertOpenAIObjectRef(context.Background(), store.OpenAIObjectRef{
+		ObjectType:    openAIObjectTypeResponse,
+		ObjectID:      "resp_999",
+		UserID:        10,
+		TokenID:       123,
+		SelectionJSON: string(selJSON),
+	})
+
+	sched := scheduler.New(fs)
+	doer := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusBadGateway,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"error":{"message":"upstream down"}}`))),
+		}, nil
+	})
+	h := NewHandler(nil, nil, sched, doer, nil, nil, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/v1/responses/resp_999", nil)
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.ResponseRetrieve), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	nextSel, err := sched.SelectWithConstraints(context.Background(), 10, "", scheduler.Constraints{RequireChannelID: 1})
+	if err != nil {
+		t.Fatalf("Select err: %v", err)
+	}
+	if nextSel.EndpointID != 12 {
+		t.Fatalf("expected endpoint=12 after fixed endpoint 5xx cooldown, got=%d", nextSel.EndpointID)
+	}
+}
+
 func TestChatCompletionsList_FiltersByLocalRefsAndForcesOwnerMetadataQuery(t *testing.T) {
 	refs := newMemObjectRefs()
 	selJSON, _ := json.Marshal(scheduler.Selection{
@@ -555,6 +623,74 @@ func TestChatCompletionsList_FiltersByLocalRefsAndForcesOwnerMetadataQuery(t *te
 	}
 	if strings.TrimSpace(stringFromAny(out["last_id"])) != "chatcmpl-allow" {
 		t.Fatalf("unexpected last_id: %#v", out["last_id"])
+	}
+}
+
+func TestChatCompletionsList_Upstream5xxCoolsFixedEndpoint(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1, Priority: 100},
+				{ID: 12, ChannelID: 1, BaseURL: "https://b.example", Status: 1, Priority: 10},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+			},
+			12: {
+				{ID: 121, EndpointID: 12, Status: 1},
+			},
+		},
+	}
+
+	refs := newMemObjectRefs()
+	selJSON, _ := json.Marshal(scheduler.Selection{
+		ChannelID:      1,
+		ChannelType:    store.UpstreamTypeOpenAICompatible,
+		EndpointID:     11,
+		BaseURL:        "https://a.example",
+		CredentialType: scheduler.CredentialTypeOpenAI,
+		CredentialID:   111,
+	})
+	_ = refs.UpsertOpenAIObjectRef(context.Background(), store.OpenAIObjectRef{
+		ObjectType:    openAIObjectTypeChatCompletion,
+		ObjectID:      "chatcmpl-allow",
+		UserID:        10,
+		TokenID:       123,
+		SelectionJSON: string(selJSON),
+	})
+
+	sched := scheduler.New(fs)
+	doer := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusServiceUnavailable,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"error":{"message":"temporarily unavailable"}}`))),
+		}, nil
+	})
+	h := NewHandler(nil, nil, sched, doer, nil, nil, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/v1/chat/completions", nil)
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.ChatCompletionsList), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	nextSel, err := sched.SelectWithConstraints(context.Background(), 10, "", scheduler.Constraints{RequireChannelID: 1})
+	if err != nil {
+		t.Fatalf("Select err: %v", err)
+	}
+	if nextSel.EndpointID != 12 {
+		t.Fatalf("expected endpoint=12 after list fixed endpoint 5xx cooldown, got=%d", nextSel.EndpointID)
 	}
 }
 

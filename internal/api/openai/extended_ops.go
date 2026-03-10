@@ -87,6 +87,25 @@ func wantsEventStream(r *http.Request) bool {
 	}
 }
 
+func fixedSelectionStatusResult(statusCode int) scheduler.Result {
+	if statusCode >= 500 {
+		return scheduler.Result{
+			Success:    false,
+			Retriable:  true,
+			StatusCode: statusCode,
+			ErrorClass: "upstream_status",
+			Scope:      scheduler.FailureScopeEndpoint,
+		}
+	}
+	return scheduler.Result{
+		Success:    false,
+		Retriable:  false,
+		StatusCode: statusCode,
+		ErrorClass: "upstream_status",
+		Scope:      classifyNonRetriableFailureScope(statusCode),
+	}
+}
+
 func (h *Handler) proxyFixedSelection(w http.ResponseWriter, r *http.Request, p auth.Principal, sel scheduler.Selection, body []byte) int {
 	attemptStart := time.Now()
 
@@ -187,13 +206,7 @@ func (h *Handler) proxyFixedSelection(w http.ResponseWriter, r *http.Request, p 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			h.sched.Report(sel, scheduler.Result{Success: true})
 		} else {
-			h.sched.Report(sel, scheduler.Result{
-				Success:    false,
-				Retriable:  false,
-				StatusCode: resp.StatusCode,
-				ErrorClass: "upstream_status",
-				Scope:      classifyNonRetriableFailureScope(resp.StatusCode),
-			})
+			h.sched.Report(sel, fixedSelectionStatusResult(resp.StatusCode))
 		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -387,13 +400,7 @@ func (h *Handler) ChatCompletionsList(w http.ResponseWriter, r *http.Request) {
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			h.sched.Report(sel, scheduler.Result{Success: true})
 		} else {
-			h.sched.Report(sel, scheduler.Result{
-				Success:    false,
-				Retriable:  false,
-				StatusCode: resp.StatusCode,
-				ErrorClass: "upstream_status",
-				Scope:      classifyNonRetriableFailureScope(resp.StatusCode),
-			})
+			h.sched.Report(sel, fixedSelectionStatusResult(resp.StatusCode))
 		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
