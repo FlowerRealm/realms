@@ -585,3 +585,56 @@ func TestEnrichLookupResult_CachesEmptyResultsWithShortTTL(t *testing.T) {
 		t.Fatalf("fetch count = %d, want 1", got)
 	}
 }
+
+func TestEnrichLookupResult_DoesNotNegativeCacheWhenOfficialLookupFails(t *testing.T) {
+	oldFetch := fetchURLFunc
+	oldTTL := highContextLookupCacheTTL
+	oldNegativeTTL := highContextLookupNegativeCacheTTL
+	t.Cleanup(func() {
+		fetchURLFunc = oldFetch
+		highContextLookupCacheTTL = oldTTL
+		highContextLookupNegativeCacheTTL = oldNegativeTTL
+	})
+	resetHighContextLookupCache()
+	t.Cleanup(resetHighContextLookupCache)
+	highContextLookupCacheTTL = time.Minute
+	highContextLookupNegativeCacheTTL = time.Minute
+
+	var fetchCount int32
+	fetchURLFunc = func(ctx context.Context, client *http.Client, url string) (string, error) {
+		atomic.AddInt32(&fetchCount, 1)
+		if strings.HasPrefix(url, "https://developers.openai.com/") {
+			return "", errors.New("official docs unavailable")
+		}
+		if !strings.Contains(url, "openrouter.ai/openai/gpt-5.4/pricing") {
+			t.Fatalf("unexpected url: %s", url)
+		}
+		return `{"pricing_json":{}}`, nil
+	}
+
+	in := LookupResult{
+		Source:              "models.dev",
+		SourceDetail:        "models.dev",
+		OwnedBy:             "openai",
+		ModelID:             "gpt-5.4",
+		InputUSDPer1M:       decimal.RequireFromString("2.5"),
+		OutputUSDPer1M:      decimal.RequireFromString("15"),
+		CacheInputUSDPer1M:  decimal.RequireFromString("0.25"),
+		CacheOutputUSDPer1M: decimal.RequireFromString("0.25"),
+	}
+
+	first, err := enrichLookupResult(context.Background(), in)
+	if err != nil {
+		t.Fatalf("first enrichLookupResult() err = %v", err)
+	}
+	second, err := enrichLookupResult(context.Background(), in)
+	if err != nil {
+		t.Fatalf("second enrichLookupResult() err = %v", err)
+	}
+	if first.HighContextPricing != nil || second.HighContextPricing != nil {
+		t.Fatal("expected no high_context_pricing")
+	}
+	if got := atomic.LoadInt32(&fetchCount); got != 4 {
+		t.Fatalf("fetch count = %d, want 4", got)
+	}
+}

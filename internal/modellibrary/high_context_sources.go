@@ -40,14 +40,18 @@ func enrichLookupResult(ctx context.Context, in LookupResult) (LookupResult, err
 	}
 
 	entry := highContextLookupCacheEntry{}
-	if hc, _, err := lookupOpenAIHighContextPricing(ctx, in.ModelID, in); err == nil && hc != nil {
-		entry.pricing = cloneHighContextPricing(hc)
-	} else if hc != nil {
-		entry.pricing = cloneHighContextPricing(hc)
+	openAIHC, _, openAIErr := lookupOpenAIHighContextPricing(ctx, in.ModelID, in)
+	openAINoHighContext := openAIErr == nil && openAIHC == nil
+	if openAIErr == nil && openAIHC != nil {
+		entry.pricing = cloneHighContextPricing(openAIHC)
+	} else if openAIHC != nil {
+		entry.pricing = cloneHighContextPricing(openAIHC)
 	} else {
-		if hc, _, err := lookupOpenRouterHighContextPricing(ctx, in.ModelID, in); err == nil && hc != nil {
-			entry.pricing = cloneHighContextPricing(hc)
-		} else if err == nil {
+		openRouterHC, _, openRouterErr := lookupOpenRouterHighContextPricing(ctx, in.ModelID, in)
+		openRouterNoHighContext := openRouterErr == nil && openRouterHC == nil
+		if openRouterErr == nil && openRouterHC != nil {
+			entry.pricing = cloneHighContextPricing(openRouterHC)
+		} else if openAINoHighContext && openRouterNoHighContext {
 			entry.noHighContext = true
 		}
 	}
