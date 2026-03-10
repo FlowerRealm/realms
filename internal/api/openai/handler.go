@@ -1139,10 +1139,9 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			h.sched.Report(sel, scheduler.Result{Success: true})
 			h.rememberCodexLastSuccessRoute(r, sel)
 		} else {
-			retriable := pumpRes.ErrorClass == "stream_idle_timeout" || pumpRes.ErrorClass == "stream_read_error"
 			h.sched.Report(sel, scheduler.Result{
 				Success:    false,
-				Retriable:  retriable,
+				Retriable:  isRetriableStreamFailure(pumpRes.ErrorClass),
 				StatusCode: resp.StatusCode,
 				ErrorClass: pumpRes.ErrorClass,
 				Scope:      classifyStreamFailureScope(pumpRes.ErrorClass),
@@ -1777,6 +1776,15 @@ func classifyStreamFailureScope(errorClass string) scheduler.FailureScope {
 		return scheduler.FailureScopeEndpoint
 	default:
 		return scheduler.FailureScopeChannel
+	}
+}
+
+func isRetriableStreamFailure(errorClass string) bool {
+	switch strings.TrimSpace(errorClass) {
+	case "stream_idle_timeout", "stream_read_error":
+		return true
+	default:
+		return false
 	}
 }
 

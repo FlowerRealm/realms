@@ -167,7 +167,7 @@ func (h *Handler) proxyFixedSelection(w http.ResponseWriter, r *http.Request, p 
 			} else {
 				h.sched.Report(sel, scheduler.Result{
 					Success:    false,
-					Retriable:  false,
+					Retriable:  isRetriableStreamFailure(pumpRes.ErrorClass),
 					StatusCode: resp.StatusCode,
 					ErrorClass: pumpRes.ErrorClass,
 					Scope:      classifyStreamFailureScope(pumpRes.ErrorClass),

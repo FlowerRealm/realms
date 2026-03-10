@@ -550,6 +550,81 @@ func TestResponseRetrieve_Upstream5xxCoolsFixedEndpoint(t *testing.T) {
 	}
 }
 
+func TestResponseRetrieve_StreamIdleTimeoutCoolsFixedEndpoint(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1, Priority: 100},
+				{ID: 12, ChannelID: 1, BaseURL: "https://b.example", Status: 1, Priority: 10},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+			},
+			12: {
+				{ID: 121, EndpointID: 12, Status: 1},
+			},
+		},
+	}
+
+	refs := newMemObjectRefs()
+	selJSON, _ := json.Marshal(scheduler.Selection{
+		ChannelID:      1,
+		ChannelType:    store.UpstreamTypeOpenAICompatible,
+		EndpointID:     11,
+		BaseURL:        "https://a.example",
+		CredentialType: scheduler.CredentialTypeOpenAI,
+		CredentialID:   111,
+	})
+	_ = refs.UpsertOpenAIObjectRef(context.Background(), store.OpenAIObjectRef{
+		ObjectType:    openAIObjectTypeResponse,
+		ObjectID:      "resp_stream",
+		UserID:        10,
+		TokenID:       123,
+		SelectionJSON: string(selJSON),
+	})
+
+	pr, pw := io.Pipe()
+	defer pw.Close()
+
+	sched := scheduler.New(fs)
+	h := NewHandler(nil, nil, sched, DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       pr,
+		}, nil
+	}), nil, nil, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{
+		MaxLineBytes:     256 << 10,
+		InitialLineBytes: 64 << 10,
+		IdleTimeout:      20 * time.Millisecond,
+	}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/v1/responses/resp_stream", nil)
+	req.Header.Set("Accept", "text/event-stream")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.ResponseRetrieve), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	nextSel, err := sched.SelectWithConstraints(context.Background(), 10, "", scheduler.Constraints{RequireChannelID: 1})
+	if err != nil {
+		t.Fatalf("Select err: %v", err)
+	}
+	if nextSel.EndpointID != 12 {
+		t.Fatalf("expected endpoint=12 after fixed endpoint stream idle timeout cooldown, got=%d", nextSel.EndpointID)
+	}
+}
+
 func TestChatCompletionsList_FiltersByLocalRefsAndForcesOwnerMetadataQuery(t *testing.T) {
 	refs := newMemObjectRefs()
 	selJSON, _ := json.Marshal(scheduler.Selection{
