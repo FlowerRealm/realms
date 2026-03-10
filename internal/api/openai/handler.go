@@ -668,6 +668,8 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 				bindingCredentialPinned = false
 				cons.RequireChannelID = 0
 				cons.RequireCredentialKey = ""
+				// sticky 精确 credential 失效后，先退化为“保留原 channel，允许同 channel 内接管”，
+				// 只有该 channel 整体不可继续时才顺序转移到后续 channel。
 				cons.StartChannelID = boundRoute.channelID
 				router = scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
 				continue
@@ -706,6 +708,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			bindingCredentialPinned = false
 			cons.RequireChannelID = 0
 			cons.RequireCredentialKey = ""
+			// 运行期调用失败后的 sticky 降级语义与上面一致：先留在原 channel 内接管，再决定是否继续往后转移。
 			cons.StartChannelID = boundRoute.channelID
 			router = scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
 			continue

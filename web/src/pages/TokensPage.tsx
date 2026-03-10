@@ -1031,9 +1031,9 @@ export function TokensPage() {
 		                <span className="font-monospace">
 		                  {(tokenGroupsData?.effective_bindings || []).map((b) => b.channel_group_name).filter((x) => x).join(' → ') || '-'}
 		                </span>
-	              </span>
+              </span>
               <span className="text-muted">
-                按顺序尝试可用渠道；本会话成功后停留在当前渠道，失败再继续往后转移。
+                按顺序尝试可用渠道；本会话成功后停留在当前渠道。若当前渠道内仍有可用 key/账号，会先在同渠道接管；仅当前渠道整体不可用时才继续往后转移。
               </span>
             </div>
 

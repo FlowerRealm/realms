@@ -103,9 +103,11 @@ type Constraints struct {
 	AllowChannelIDs      map[int64]struct{}
 	// SequentialChannelFailover 用于用户侧 API key 的顺序转移：
 	// 候选 channel 按绑定顺序从前往后尝试，失败后只向后推进，不做 ring/回绕/运行时重排。
+	// 这里的“失败”定义在 channel 层：只有当前 channel 已无法选出任何可用 credential/account，
+	// 才继续尝试后续 channel；同 channel 内部允许 credential/account 接管。
 	SequentialChannelFailover bool
 	// StartChannelID 表示“本次顺序转移”的当前起点。
-	// 命中后先尝试该 channel；若失败，则继续尝试它后面的 channel。
+	// 命中后先尝试该 channel；若该 channel 整体不可继续，才继续尝试它后面的 channel。
 	StartChannelID int64
 }
 

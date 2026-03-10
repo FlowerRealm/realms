@@ -2264,6 +2264,103 @@ func TestResponses_CodexSession_BindingPersistsCredentialAcrossHandlerInstances(
 	}
 }
 
+func TestResponses_CodexSession_FallsBackWithinSameChannelBeforeMovingForward(t *testing.T) {
+	routeKey := "rk_same_channel_takeover"
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+			2: {
+				{ID: 22, ChannelID: 2, BaseURL: "https://b.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+				{ID: 112, EndpointID: 11, Status: 1},
+			},
+			22: {
+				{ID: 222, EndpointID: 22, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+				{ID: 2, ChannelID: 2, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	schedSeed := scheduler.New(fs)
+	if err := fs.UpsertSessionBindingPayload(
+		context.Background(),
+		10,
+		schedSeed.RouteKeyHash(routeKey),
+		`{"kind":"codex_route_v1","channel_id":1,"credential_key":"openai_compatible:111"}`,
+		time.Now().Add(30*time.Minute),
+	); err != nil {
+		t.Fatalf("seed sticky binding err: %v", err)
+	}
+
+	var calls []scheduler.Selection
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		calls = append(calls, sel)
+		if sel.ChannelID == 1 && sel.CredentialID == 111 {
+			return &http.Response{
+				StatusCode: http.StatusPaymentRequired,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(bytes.NewReader([]byte(`{"error":{"message":"insufficient"}}`))),
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses",
+		bytes.NewReader([]byte(fmt.Sprintf(`{"model":"gpt-5.2","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":false,"prompt_cache_key":%q}`, routeKey))))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(calls) != 2 {
+		t.Fatalf("expected pinned credential failure then same-channel takeover, got=%d calls=%+v", len(calls), calls)
+	}
+	if calls[0].ChannelID != 1 || calls[0].CredentialID != 111 {
+		t.Fatalf("expected first attempt on sticky channel/credential 1/111, got=%d/%d", calls[0].ChannelID, calls[0].CredentialID)
+	}
+	if calls[1].ChannelID != 1 || calls[1].CredentialID != 112 {
+		t.Fatalf("expected second attempt to stay on channel 1 and takeover credential 112, got=%d/%d", calls[1].ChannelID, calls[1].CredentialID)
+	}
+	for _, call := range calls {
+		if call.ChannelID == 2 {
+			t.Fatalf("expected no forward failover while channel 1 still had usable credential, calls=%+v", calls)
+		}
+	}
+	if got := rr.Header().Get("X-Realms-Codex-Sticky-Cleared"); got != "" {
+		t.Fatalf("expected sticky channel to remain active during same-channel takeover, got header=%q", got)
+	}
+}
+
 func TestResponses_CodexSession_ClearsStaleStartBindingBeforeRestartingFromHead(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
