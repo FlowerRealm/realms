@@ -936,7 +936,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 					Retriable:  false,
 					StatusCode: resp.StatusCode,
 					ErrorClass: "upstream_status",
-					Scope:      scheduler.FailureScopeEndpoint,
+					Scope:      classifyNonRetriableFailureScope(resp.StatusCode),
 				})
 			}
 			h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, "upstream_status", time.Since(attemptStart))
@@ -1764,6 +1764,18 @@ func classifyStreamFailureScope(errorClass string) scheduler.FailureScope {
 	default:
 		return scheduler.FailureScopeChannel
 	}
+}
+
+func classifyNonRetriableFailureScope(statusCode int) scheduler.FailureScope {
+	switch statusCode {
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		return scheduler.FailureScopeEndpoint
+	default:
+		if statusCode >= 500 {
+			return scheduler.FailureScopeEndpoint
+		}
+	}
+	return scheduler.FailureScopeChannel
 }
 
 func shouldRetrySameSelection(scope scheduler.FailureScope, statusCode int, errorClass string) bool {

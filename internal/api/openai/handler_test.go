@@ -121,6 +121,27 @@ func TestExtractUsageTokens_FindsNestedUsage(t *testing.T) {
 	}
 }
 
+func TestClassifyNonRetriableFailureScope(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		want   scheduler.FailureScope
+	}{
+		{name: "bad request stays request scoped", status: http.StatusBadRequest, want: scheduler.FailureScopeChannel},
+		{name: "unprocessable stays request scoped", status: http.StatusUnprocessableEntity, want: scheduler.FailureScopeChannel},
+		{name: "not found is endpoint scoped", status: http.StatusNotFound, want: scheduler.FailureScopeEndpoint},
+		{name: "method not allowed is endpoint scoped", status: http.StatusMethodNotAllowed, want: scheduler.FailureScopeEndpoint},
+		{name: "internal error is endpoint scoped", status: http.StatusInternalServerError, want: scheduler.FailureScopeEndpoint},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyNonRetriableFailureScope(tc.status); got != tc.want {
+				t.Fatalf("scope=%q want=%q", got, tc.want)
+			}
+		})
+	}
+}
+
 func (d *fakeDoer) Do(_ context.Context, sel scheduler.Selection, _ *http.Request, body []byte) (*http.Response, error) {
 	d.calls = append(d.calls, sel)
 	d.bodies = append(d.bodies, body)

@@ -187,7 +187,7 @@ func (h *Handler) proxyFixedSelection(w http.ResponseWriter, r *http.Request, p 
 				Retriable:  false,
 				StatusCode: resp.StatusCode,
 				ErrorClass: "upstream_status",
-				Scope:      scheduler.FailureScopeEndpoint,
+				Scope:      classifyNonRetriableFailureScope(resp.StatusCode),
 			})
 		}
 	}
@@ -387,7 +387,7 @@ func (h *Handler) ChatCompletionsList(w http.ResponseWriter, r *http.Request) {
 				Retriable:  false,
 				StatusCode: resp.StatusCode,
 				ErrorClass: "upstream_status",
-				Scope:      scheduler.FailureScopeEndpoint,
+				Scope:      classifyNonRetriableFailureScope(resp.StatusCode),
 			})
 		}
 	}
