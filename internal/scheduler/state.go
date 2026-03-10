@@ -28,9 +28,8 @@ type State struct {
 	credentialCooldown map[string]time.Time
 	endpointCooldown   map[int64]time.Time
 
-	endpointFails map[int64]int
-	channelFails  map[int64]int
-	credFails     map[string]int
+	channelFails map[int64]int
+	credFails    map[string]int
 
 	channelBanUntil  map[int64]time.Time
 	channelBanStreak map[int64]int
@@ -46,7 +45,6 @@ func NewState() *State {
 		tokens:                 make(map[string][]tokenEvent),
 		credentialCooldown:     make(map[string]time.Time),
 		endpointCooldown:       make(map[int64]time.Time),
-		endpointFails:          make(map[int64]int),
 		channelFails:           make(map[int64]int),
 		credFails:              make(map[string]int),
 		channelBanUntil:        make(map[int64]time.Time),
@@ -167,33 +165,6 @@ func (s *State) ClearEndpointCooldown(endpointID int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.endpointCooldown, endpointID)
-}
-
-func (s *State) RecordEndpointResult(endpointID int64, success bool) {
-	if endpointID == 0 || success {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.endpointFails[endpointID]++
-}
-
-func (s *State) EndpointFailScore(endpointID int64) int {
-	if endpointID == 0 {
-		return 0
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.endpointFails[endpointID]
-}
-
-func (s *State) ResetEndpointFailScore(endpointID int64) {
-	if endpointID == 0 {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.endpointFails, endpointID)
 }
 
 func (s *State) RecordChannelResult(channelID int64, success bool) {

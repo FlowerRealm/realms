@@ -407,11 +407,6 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 			eps = append(eps, e)
 		}
 		sort.SliceStable(eps, func(i, j int) bool {
-			fi := s.state.EndpointFailScore(eps[i].ID)
-			fj := s.state.EndpointFailScore(eps[j].ID)
-			if fi != fj {
-				return fi < fj
-			}
 			if eps[i].Priority != eps[j].Priority {
 				return eps[i].Priority > eps[j].Priority
 			}
@@ -762,7 +757,6 @@ func (s *Scheduler) Report(sel Selection, res Result) {
 	s.state.ClearChannelProbe(sel.ChannelID)
 	if res.Success {
 		s.state.ClearEndpointCooldown(sel.EndpointID)
-		s.state.ResetEndpointFailScore(sel.EndpointID)
 		s.state.RecordChannelResult(sel.ChannelID, true)
 		s.state.RecordCredentialResult(sel.CredentialKey(), true)
 		s.state.ClearChannelBan(sel.ChannelID)
@@ -771,9 +765,6 @@ func (s *Scheduler) Report(sel Selection, res Result) {
 		return
 	}
 	s.state.RecordCredentialResult(sel.CredentialKey(), false)
-	if scope == FailureScopeEndpoint || scope == FailureScopeChannel {
-		s.state.RecordEndpointResult(sel.EndpointID, false)
-	}
 	if scope == FailureScopeChannel {
 		s.state.RecordChannelResult(sel.ChannelID, false)
 	}

@@ -307,7 +307,6 @@ func TestReport_CredentialScopedFailureSkipsEndpointAndChannelPenalty(t *testing
 	s.state.mu.Lock()
 	credCooling, credOK := s.state.credentialCooldown[sel.CredentialKey()]
 	_, endpointCooling := s.state.endpointCooldown[sel.EndpointID]
-	endpointFails := s.state.endpointFails[sel.EndpointID]
 	channelFails := s.state.channelFails[sel.ChannelID]
 	_, channelBanned := s.state.channelBanUntil[sel.ChannelID]
 	s.state.mu.Unlock()
@@ -317,9 +316,6 @@ func TestReport_CredentialScopedFailureSkipsEndpointAndChannelPenalty(t *testing
 	}
 	if endpointCooling {
 		t.Fatalf("expected endpoint cooldown to be skipped for credential failure")
-	}
-	if endpointFails != 0 {
-		t.Fatalf("expected endpoint fail score to stay 0, got=%d", endpointFails)
 	}
 	if channelFails != 0 {
 		t.Fatalf("expected channel fail score to stay 0, got=%d", channelFails)
