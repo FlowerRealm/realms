@@ -127,6 +127,8 @@ func TestClassifyNonRetriableFailureScope(t *testing.T) {
 		status int
 		want   scheduler.FailureScope
 	}{
+		{name: "unauthorized is credential scoped", status: http.StatusUnauthorized, want: scheduler.FailureScopeCredential},
+		{name: "forbidden is credential scoped", status: http.StatusForbidden, want: scheduler.FailureScopeCredential},
 		{name: "bad request stays request scoped", status: http.StatusBadRequest, want: scheduler.FailureScopeRequest},
 		{name: "unprocessable stays request scoped", status: http.StatusUnprocessableEntity, want: scheduler.FailureScopeRequest},
 		{name: "not found is endpoint scoped", status: http.StatusNotFound, want: scheduler.FailureScopeEndpoint},

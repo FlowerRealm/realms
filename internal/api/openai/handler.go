@@ -1768,6 +1768,8 @@ func classifyStreamFailureScope(errorClass string) scheduler.FailureScope {
 
 func classifyNonRetriableFailureScope(statusCode int) scheduler.FailureScope {
 	switch statusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return scheduler.FailureScopeCredential
 	case http.StatusNotFound, http.StatusMethodNotAllowed:
 		return scheduler.FailureScopeEndpoint
 	default:
