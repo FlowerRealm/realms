@@ -2361,6 +2361,83 @@ func TestResponses_CodexSession_FallsBackWithinSameChannelBeforeMovingForward(t 
 	}
 }
 
+func TestResponses_SequentialFailoverAlsoAppliesWithoutStickySession(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			2: {
+				{ID: 21, ChannelID: 2, BaseURL: "https://b.example", Status: 1},
+			},
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			21: {
+				{ID: 2, EndpointID: 21, Status: 1},
+			},
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"m1": {ID: 1, PublicID: "m1", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"m1": {
+				{ID: 1, ChannelID: 2, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "m1-up2", Status: 1},
+				{ID: 2, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "m1-up1", Status: 1},
+			},
+		},
+	}
+
+	var calls []scheduler.Selection
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		calls = append(calls, sel)
+		if sel.ChannelID == 2 {
+			return &http.Response{
+				StatusCode: http.StatusBadGateway,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(bytes.NewReader([]byte(`{"error":{"message":"upstream down"}}`))),
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(calls) != 2 {
+		t.Fatalf("expected sequential failover across channels for non-sticky request, got=%d calls=%+v", len(calls), calls)
+	}
+	if calls[0].ChannelID != 2 || calls[1].ChannelID != 1 {
+		t.Fatalf("expected failover order 2 -> 1, got calls=%+v", calls)
+	}
+	if payload, ok, err := fs.GetSessionBindingPayload(context.Background(), 10, sched.RouteKeyHash(""), time.Now()); err != nil {
+		t.Fatalf("unexpected sticky payload lookup err: %v", err)
+	} else if ok || payload != "" {
+		t.Fatalf("expected non-sticky request not to persist session binding, ok=%v payload=%q", ok, payload)
+	}
+}
+
 func TestResponses_CodexSession_ClearsStaleStartBindingBeforeRestartingFromHead(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{

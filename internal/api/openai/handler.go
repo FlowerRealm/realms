@@ -334,6 +334,8 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	cons.AllowGroups = allowSet
 	cons.AllowGroupOrder = ags.Order
+	// 用户侧 token 的上游选择语义就是“按绑定顺序做 channel 级 failover”；
+	// sticky 仅用于记住有状态会话应从哪个 channel/credential 继续，而不是决定是否启用顺序转移。
 	cons.SequentialChannelFailover = true
 
 	var rewriteBody func(sel scheduler.Selection) ([]byte, error)
