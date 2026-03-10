@@ -20,6 +20,7 @@ var defaultModelLibraryHTTPClient = &http.Client{Timeout: 10 * time.Second}
 var fetchURLFunc = fetchURL
 
 var highContextLookupCacheTTL = 10 * time.Minute
+var highContextLookupNegativeCacheTTL = 1 * time.Minute
 
 var (
 	highContextLookupCacheMu sync.Mutex
@@ -27,8 +28,9 @@ var (
 )
 
 type highContextLookupCacheEntry struct {
-	cachedAt time.Time
-	pricing  *store.ManagedModelHighContextPricing
+	cachedAt      time.Time
+	pricing       *store.ManagedModelHighContextPricing
+	noHighContext bool
 }
 
 func enrichLookupResult(ctx context.Context, in LookupResult) (LookupResult, error) {
@@ -45,10 +47,12 @@ func enrichLookupResult(ctx context.Context, in LookupResult) (LookupResult, err
 	} else {
 		if hc, _, err := lookupOpenRouterHighContextPricing(ctx, in.ModelID, in); err == nil && hc != nil {
 			entry.pricing = cloneHighContextPricing(hc)
+		} else if err == nil {
+			entry.noHighContext = true
 		}
 	}
 
-	if entry.pricing != nil {
+	if entry.pricing != nil || entry.noHighContext {
 		setCachedHighContextLookup(in, entry)
 	}
 	return applyHighContextLookupResult(in, entry), nil
@@ -73,7 +77,11 @@ func getCachedHighContextLookup(in LookupResult) (highContextLookupCacheEntry, b
 	if !ok {
 		return highContextLookupCacheEntry{}, false
 	}
-	if now.Sub(entry.cachedAt) > highContextLookupCacheTTL {
+	ttl := highContextLookupCacheTTL
+	if entry.pricing == nil && entry.noHighContext {
+		ttl = highContextLookupNegativeCacheTTL
+	}
+	if now.Sub(entry.cachedAt) > ttl {
 		delete(highContextLookupCache, key)
 		return highContextLookupCacheEntry{}, false
 	}

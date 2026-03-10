@@ -536,16 +536,19 @@ func TestEnrichLookupResult_OpenAISoftFailureFallsBackToOpenRouter(t *testing.T)
 	}
 }
 
-func TestEnrichLookupResult_DoesNotCacheEmptyResults(t *testing.T) {
+func TestEnrichLookupResult_CachesEmptyResultsWithShortTTL(t *testing.T) {
 	oldFetch := fetchURLFunc
 	oldTTL := highContextLookupCacheTTL
+	oldNegativeTTL := highContextLookupNegativeCacheTTL
 	t.Cleanup(func() {
 		fetchURLFunc = oldFetch
 		highContextLookupCacheTTL = oldTTL
+		highContextLookupNegativeCacheTTL = oldNegativeTTL
 	})
 	resetHighContextLookupCache()
 	t.Cleanup(resetHighContextLookupCache)
 	highContextLookupCacheTTL = time.Minute
+	highContextLookupNegativeCacheTTL = time.Minute
 
 	var fetchCount int32
 	fetchURLFunc = func(ctx context.Context, client *http.Client, url string) (string, error) {
@@ -578,7 +581,7 @@ func TestEnrichLookupResult_DoesNotCacheEmptyResults(t *testing.T) {
 	if first.HighContextPricing != nil || second.HighContextPricing != nil {
 		t.Fatal("expected no high_context_pricing")
 	}
-	if got := atomic.LoadInt32(&fetchCount); got != 2 {
-		t.Fatalf("fetch count = %d, want 2", got)
+	if got := atomic.LoadInt32(&fetchCount); got != 1 {
+		t.Fatalf("fetch count = %d, want 1", got)
 	}
 }
