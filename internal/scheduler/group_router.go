@@ -35,6 +35,13 @@ type GroupRouter struct {
 	lastSelectedStreak    int
 }
 
+func (r *GroupRouter) ExcludeChannel(channelID int64) {
+	if r == nil || channelID <= 0 {
+		return
+	}
+	r.excludedChannels[channelID] = struct{}{}
+}
+
 type groupCursor struct {
 	group store.ChannelGroup
 

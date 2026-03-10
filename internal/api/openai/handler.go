@@ -637,7 +637,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			if h.finalizeIfCanceled(r, usageID, nil, reqStart, stream, reqBytes) {
 				return
 			}
-			if msg := serviceTierSelectionBadRequestMessage(err); msg != "" {
+			if msg := serviceTierSelectionBadRequestMessage(err); msg != "" && !isFastModeSelectionError(err) {
 				h.voidQuotaBestEffort(usageID)
 				http.Error(w, msg, http.StatusBadRequest)
 				h.finalizeUsageEvent(r, usageID, nil, http.StatusBadRequest, "service_tier", msg, time.Since(reqStart), 0, stream, reqBytes, 0)
@@ -661,8 +661,23 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		lastSel = &selCopy
 		rewritten, err := rewriteBody(sel)
 		if err != nil {
+			if isFastModeSelectionError(err) {
+				router.ExcludeChannel(sel.ChannelID)
+				switches++
+				if h.failoverExhausted(loopStart, switches) {
+					break
+				}
+				if !h.waitBackoffWithinRetryElapsed(r.Context(), loopStart, backoff) {
+					if h.finalizeIfCanceled(r, usageID, lastSel, reqStart, stream, reqBytes) {
+						return
+					}
+					break
+				}
+				backoff = h.nextBackoff(backoff)
+				continue
+			}
 			h.voidQuotaBestEffort(usageID)
-			if msg := serviceTierSelectionBadRequestMessage(err); msg != "" {
+			if msg := serviceTierSelectionBadRequestMessage(err); msg != "" && !isFastModeSelectionError(err) {
 				cw := &countingResponseWriter{ResponseWriter: w}
 				http.Error(cw, msg, http.StatusBadRequest)
 				h.finalizeUsageEvent(r, usageID, &sel, http.StatusBadRequest, "service_tier", msg, time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
