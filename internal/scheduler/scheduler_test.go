@@ -325,6 +325,35 @@ func TestReport_CredentialScopedFailureSkipsEndpointAndChannelPenalty(t *testing
 	}
 }
 
+func TestReport_RequestScopedFailureSkipsCredentialPenalty(t *testing.T) {
+	s := New(&fakeStore{})
+	sel := Selection{
+		ChannelID:      7,
+		EndpointID:     17,
+		CredentialType: CredentialTypeOpenAI,
+		CredentialID:   99,
+	}
+	s.Report(sel, Result{
+		Success:    false,
+		Retriable:  false,
+		StatusCode: http.StatusBadRequest,
+		ErrorClass: "upstream_status",
+		Scope:      FailureScopeRequest,
+	})
+
+	s.state.mu.Lock()
+	credFails := s.state.credFails[sel.CredentialKey()]
+	channelFails := s.state.channelFails[sel.ChannelID]
+	s.state.mu.Unlock()
+
+	if credFails != 0 {
+		t.Fatalf("expected request-scoped failure not to increment credential fails, got=%d", credFails)
+	}
+	if channelFails != 0 {
+		t.Fatalf("expected request-scoped failure not to increment channel fails, got=%d", channelFails)
+	}
+}
+
 func TestState_IsChannelBanned_ExpiredMarksProbeDue(t *testing.T) {
 	st := NewState()
 	now := time.Now()

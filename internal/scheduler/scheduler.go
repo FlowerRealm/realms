@@ -765,7 +765,9 @@ func (s *Scheduler) Report(sel Selection, res Result) {
 		s.touchCredentialLastUsed(sel)
 		return
 	}
-	s.state.RecordCredentialResult(sel.CredentialKey(), false)
+	if scope != FailureScopeRequest {
+		s.state.RecordCredentialResult(sel.CredentialKey(), false)
+	}
 	if scope == FailureScopeChannel {
 		s.state.RecordChannelResult(sel.ChannelID, false)
 	}
