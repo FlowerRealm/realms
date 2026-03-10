@@ -15,16 +15,16 @@ var (
 )
 
 type ManagedModelPricing struct {
-	ServiceTier         string
-	PricingKind         string
-	EffectiveServiceTier string
-	HighContextApplied  bool
-	HighContextThresholdTokens int64
+	ServiceTier                   string
+	PricingKind                   string
+	EffectiveServiceTier          string
+	HighContextApplied            bool
+	HighContextThresholdTokens    int64
 	HighContextTriggerInputTokens int64
-	InputUSDPer1M       decimal.Decimal
-	OutputUSDPer1M      decimal.Decimal
-	CacheInputUSDPer1M  decimal.Decimal
-	CacheOutputUSDPer1M decimal.Decimal
+	InputUSDPer1M                 decimal.Decimal
+	OutputUSDPer1M                decimal.Decimal
+	CacheInputUSDPer1M            decimal.Decimal
+	CacheOutputUSDPer1M           decimal.Decimal
 }
 
 func NormalizeServiceTier(raw string) string {
@@ -53,18 +53,39 @@ func IsPriorityServiceTier(raw string) bool {
 func ResolveManagedModelPricing(m ManagedModel, serviceTier string, inputTokensTotal *int64) (ManagedModelPricing, error) {
 	requestedTier := NormalizeServiceTier(serviceTier)
 	pricing := ManagedModelPricing{
-		ServiceTier:          requestedTier,
-		PricingKind:          "base",
-		EffectiveServiceTier: requestedTier,
-		InputUSDPer1M:        m.InputUSDPer1M.Truncate(USDScale),
-		OutputUSDPer1M:       m.OutputUSDPer1M.Truncate(USDScale),
-		CacheInputUSDPer1M:   m.CacheInputUSDPer1M.Truncate(USDScale),
-		CacheOutputUSDPer1M:  m.CacheOutputUSDPer1M.Truncate(USDScale),
+		ServiceTier:                requestedTier,
+		PricingKind:                "base",
+		EffectiveServiceTier:       requestedTier,
+		InputUSDPer1M:              m.InputUSDPer1M.Truncate(USDScale),
+		OutputUSDPer1M:             m.OutputUSDPer1M.Truncate(USDScale),
+		CacheInputUSDPer1M:         m.CacheInputUSDPer1M.Truncate(USDScale),
+		CacheOutputUSDPer1M:        m.CacheOutputUSDPer1M.Truncate(USDScale),
+		HighContextThresholdTokens: 0,
 	}
+
+	triggered := false
+	var totalInput int64
+	hc := m.HighContextPricing
+	if inputTokensTotal != nil && *inputTokensTotal > 0 {
+		totalInput = *inputTokensTotal
+	}
+	if hc != nil {
+		pricing.HighContextThresholdTokens = hc.ThresholdInputTokens
+		pricing.HighContextTriggerInputTokens = totalInput
+		if totalInput > hc.ThresholdInputTokens {
+			triggered = true
+		}
+	}
+	forceStandardTriggered := triggered && hc != nil && hc.ServiceTierPolicy == ManagedModelHighContextServiceTierPolicyForceStandard
+
 	switch requestedTier {
 	case "", "default", "auto", "flex":
 		pricing.EffectiveServiceTier = requestedTier
 	case "priority":
+		if forceStandardTriggered {
+			pricing.EffectiveServiceTier = "default"
+			break
+		}
 		if !m.PriorityPricingEnabled {
 			return ManagedModelPricing{}, ErrManagedModelServiceTierUnsupported
 		}
@@ -80,30 +101,16 @@ func ResolveManagedModelPricing(m ManagedModel, serviceTier string, inputTokensT
 	default:
 		pricing.EffectiveServiceTier = requestedTier
 	}
-
-	triggered := false
-	var totalInput int64
-	if inputTokensTotal != nil && *inputTokensTotal > 0 {
-		totalInput = *inputTokensTotal
-	}
-	if m.HighContextPricing != nil {
-		pricing.HighContextThresholdTokens = m.HighContextPricing.ThresholdInputTokens
-		pricing.HighContextTriggerInputTokens = totalInput
-		if totalInput > m.HighContextPricing.ThresholdInputTokens {
-			triggered = true
-		}
-	}
 	if !triggered {
 		return pricing, nil
 	}
 
-	hc := m.HighContextPricing
 	if hc == nil {
 		return pricing, nil
 	}
 	pricing.HighContextApplied = true
 	pricing.PricingKind = "high_context"
-	if hc.ServiceTierPolicy == ManagedModelHighContextServiceTierPolicyForceStandard {
+	if forceStandardTriggered {
 		pricing.EffectiveServiceTier = "default"
 		pricing.CacheInputUSDPer1M = m.CacheInputUSDPer1M.Truncate(USDScale)
 		pricing.CacheOutputUSDPer1M = m.CacheOutputUSDPer1M.Truncate(USDScale)

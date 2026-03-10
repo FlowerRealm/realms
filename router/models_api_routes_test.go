@@ -171,6 +171,68 @@ func TestUserModelsDetail_UsesMainGroupSubgroupsAndBasePricing(t *testing.T) {
 	}
 }
 
+func TestAdminUpdateManagedModel_PreservesHighContextPricingWhenOmitted(t *testing.T) {
+	st, cleanup := newTestSQLiteStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	ownedBy := "openai"
+	id, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
+		PublicID:            "gpt-5.4",
+		GroupName:           "default",
+		OwnedBy:             &ownedBy,
+		InputUSDPer1M:       decimal.RequireFromString("2.5"),
+		OutputUSDPer1M:      decimal.RequireFromString("15"),
+		CacheInputUSDPer1M:  decimal.RequireFromString("0.25"),
+		CacheOutputUSDPer1M: decimal.RequireFromString("0.25"),
+		HighContextPricing: &store.ManagedModelHighContextPricing{
+			ThresholdInputTokens: 272000,
+			AppliesTo:            store.ManagedModelHighContextAppliesToFullRequest,
+			ServiceTierPolicy:    store.ManagedModelHighContextServiceTierPolicyForceStandard,
+			InputUSDPer1M:        decimal.RequireFromString("5"),
+			OutputUSDPer1M:       decimal.RequireFromString("22.5"),
+		},
+		Status: 1,
+	})
+	if err != nil {
+		t.Fatalf("CreateManagedModel: %v", err)
+	}
+
+	engine, sessionCookie, userID := setupRootSession(t, st)
+	body, _ := json.Marshal(map[string]any{
+		"id":                       id,
+		"public_id":                "gpt-5.4",
+		"group_name":               "default",
+		"owned_by":                 "openai",
+		"input_usd_per_1m":         2.5,
+		"output_usd_per_1m":        15,
+		"cache_input_usd_per_1m":   0.25,
+		"cache_output_usd_per_1m":  0.25,
+		"priority_pricing_enabled": false,
+		"status":                   1,
+	})
+	req := httptest.NewRequest(http.MethodPut, "http://example.com/api/models/", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Cookie", sessionCookie)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	got, err := st.GetManagedModelByID(ctx, id)
+	if err != nil {
+		t.Fatalf("GetManagedModelByID: %v", err)
+	}
+	if got.HighContextPricing == nil {
+		t.Fatal("expected high_context_pricing to be preserved")
+	}
+	if !got.HighContextPricing.InputUSDPer1M.Equal(decimal.RequireFromString("5")) {
+		t.Fatalf("high_context input=%s, want 5", got.HighContextPricing.InputUSDPer1M)
+	}
+}
+
 func TestAdminSelectableManagedModelIDs_OnlyEnabledSorted(t *testing.T) {
 	st, cleanup := newTestSQLiteStore(t)
 	defer cleanup()

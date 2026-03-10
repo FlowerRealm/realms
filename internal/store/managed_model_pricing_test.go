@@ -193,3 +193,37 @@ func TestResolveManagedModelPricingHighContextForceStandardOverridesPriorityTier
 		t.Fatalf("cache_output=%s, want 0.1", pricing.CacheOutputUSDPer1M)
 	}
 }
+
+func TestResolveManagedModelPricingHighContextForceStandardSkipsPriorityValidation(t *testing.T) {
+	inputTokens := int64(300000)
+	m := ManagedModel{
+		InputUSDPer1M:       testDecimal("1"),
+		OutputUSDPer1M:      testDecimal("2"),
+		CacheInputUSDPer1M:  testDecimal("0.25"),
+		CacheOutputUSDPer1M: testDecimal("0.1"),
+		HighContextPricing: &ManagedModelHighContextPricing{
+			ThresholdInputTokens: 272000,
+			AppliesTo:            ManagedModelHighContextAppliesToFullRequest,
+			ServiceTierPolicy:    ManagedModelHighContextServiceTierPolicyForceStandard,
+			InputUSDPer1M:        testDecimal("5"),
+			OutputUSDPer1M:       testDecimal("22.5"),
+		},
+	}
+
+	pricing, err := ResolveManagedModelPricing(m, "fast", &inputTokens)
+	if err != nil {
+		t.Fatalf("ResolveManagedModelPricing: %v", err)
+	}
+	if pricing.ServiceTier != "priority" {
+		t.Fatalf("service_tier=%q, want priority", pricing.ServiceTier)
+	}
+	if pricing.EffectiveServiceTier != "default" {
+		t.Fatalf("effective_service_tier=%q, want default", pricing.EffectiveServiceTier)
+	}
+	if pricing.PricingKind != "high_context" {
+		t.Fatalf("pricing_kind=%q, want high_context", pricing.PricingKind)
+	}
+	if !pricing.InputUSDPer1M.Equal(testDecimal("5")) {
+		t.Fatalf("input=%s, want 5", pricing.InputUSDPer1M)
+	}
+}
