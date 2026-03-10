@@ -1762,7 +1762,7 @@ func classifyRetriableFailureScope(statusCode int, codexErr codexOAuthUpstreamEr
 	case http.StatusRequestTimeout, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 		return scheduler.FailureScopeEndpoint
 	case http.StatusNotFound, http.StatusMethodNotAllowed:
-		return scheduler.FailureScopeEndpoint
+		return scheduler.FailureScopeChannel
 	default:
 		if statusCode >= 500 {
 			return scheduler.FailureScopeEndpoint
@@ -1785,7 +1785,7 @@ func classifyNonRetriableFailureScope(statusCode int) scheduler.FailureScope {
 	case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden:
 		return scheduler.FailureScopeCredential
 	case http.StatusNotFound, http.StatusMethodNotAllowed:
-		return scheduler.FailureScopeEndpoint
+		return scheduler.FailureScopeChannel
 	default:
 		if statusCode >= 500 {
 			return scheduler.FailureScopeEndpoint

@@ -132,8 +132,8 @@ func TestClassifyNonRetriableFailureScope(t *testing.T) {
 		{name: "forbidden is credential scoped", status: http.StatusForbidden, want: scheduler.FailureScopeCredential},
 		{name: "bad request stays request scoped", status: http.StatusBadRequest, want: scheduler.FailureScopeRequest},
 		{name: "unprocessable stays request scoped", status: http.StatusUnprocessableEntity, want: scheduler.FailureScopeRequest},
-		{name: "not found is endpoint scoped", status: http.StatusNotFound, want: scheduler.FailureScopeEndpoint},
-		{name: "method not allowed is endpoint scoped", status: http.StatusMethodNotAllowed, want: scheduler.FailureScopeEndpoint},
+		{name: "not found is channel scoped", status: http.StatusNotFound, want: scheduler.FailureScopeChannel},
+		{name: "method not allowed is channel scoped", status: http.StatusMethodNotAllowed, want: scheduler.FailureScopeChannel},
 		{name: "internal error is endpoint scoped", status: http.StatusInternalServerError, want: scheduler.FailureScopeEndpoint},
 	}
 	for _, tc := range cases {
@@ -1049,6 +1049,92 @@ func TestResponses_Retry502ThenFailoverToSiblingEndpointWithinChannel(t *testing
 	}
 	if calls[2].EndpointID != 12 {
 		t.Fatalf("expected failover to sibling endpoint=12, got=%d", calls[2].EndpointID)
+	}
+}
+
+func TestResponses_404FailoverSkipsSiblingEndpointAndSwitchesChannel(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 100},
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 10},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			2: {
+				{ID: 21, ChannelID: 2, BaseURL: "https://bad-1.example", Status: 1, Priority: 100},
+				{ID: 22, ChannelID: 2, BaseURL: "https://bad-2.example", Status: 1, Priority: 10},
+			},
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://good.example", Status: 1, Priority: 100},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			21: {
+				{ID: 21, EndpointID: 21, Status: 1},
+			},
+			22: {
+				{ID: 22, EndpointID: 22, Status: 1},
+			},
+			11: {
+				{ID: 11, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 2, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+				{ID: 2, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	var calls []scheduler.Selection
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		calls = append(calls, sel)
+		if sel.ChannelID == 2 {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(bytes.NewReader([]byte(`{"error":{"message":"route missing"}}`))),
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{
+		ActorType: auth.ActorTypeToken,
+		UserID:    10,
+		Role:      store.UserRoleUser,
+		TokenID:   &tokenID,
+		Groups:    []string{store.DefaultGroupName},
+	}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(calls) != 2 {
+		t.Fatalf("expected direct channel failover after 404, got=%d", len(calls))
+	}
+	if calls[0].ChannelID != 2 || calls[0].EndpointID != 21 {
+		t.Fatalf("unexpected first call: %+v", calls[0])
+	}
+	if calls[1].ChannelID != 1 || calls[1].EndpointID != 11 {
+		t.Fatalf("expected second call on fallback channel endpoint=11, got=%+v", calls[1])
 	}
 }
 
