@@ -238,9 +238,6 @@ export function ModelsAdminPage() {
           cache_input_usd_per_1m: v.cache_input_usd_per_1m,
           cache_output_usd_per_1m: v.cache_output_usd_per_1m,
           priority_pricing_enabled: v.priority_pricing_enabled,
-          priority_input_usd_per_1m: null,
-          priority_output_usd_per_1m: null,
-          priority_cache_input_usd_per_1m: null,
           status: v.status,
         };
         const res = await updateManagedModelAdmin(nextModel);
