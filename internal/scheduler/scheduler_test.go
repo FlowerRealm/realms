@@ -242,6 +242,30 @@ func TestSelectWithConstraints_RequireCredentialKey_CoolingFailsSelection(t *tes
 	}
 }
 
+func TestSelectWithConstraints_RequireChannelID_StatusFilteredReturnsConstrainedUnavailable(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 0},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+	if _, err := s.SelectWithConstraints(context.Background(), 10, "", Constraints{
+		RequireChannelID: 1,
+	}); !errors.Is(err, ErrRequiredChannelUnavailable) {
+		t.Fatalf("expected ErrRequiredChannelUnavailable when required channel is filtered out, got=%v", err)
+	}
+}
+
 func TestState_IsChannelBanned_ExpiredMarksProbeDue(t *testing.T) {
 	st := NewState()
 	now := time.Now()

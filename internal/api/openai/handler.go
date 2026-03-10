@@ -666,12 +666,27 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 				router = scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
 				continue
 			}
-			if bindingCredentialPinned && errors.Is(err, scheduler.ErrRequiredCredentialUnavailable) {
+			if bindingActive && errors.Is(err, scheduler.ErrRequiredChannelUnavailable) {
+				h.clearCodexStickyBindingBestEffort(r.Context(), p.UserID, stickyRouteKeyHash)
+				bindingActive = false
+				bindingCredentialPinned = false
+				cons.StartChannelID = 0
+				cons.RequireChannelID = 0
+				cons.RequireCredentialKey = ""
+				w.Header().Set("X-Realms-Codex-Sticky-Cleared", "1")
+				w.Header().Set("X-Realms-Codex-Prev-Channel", strconv.FormatInt(boundRoute.channelID, 10))
+				if strings.TrimSpace(boundRoute.credentialKey) != "" {
+					w.Header().Set("X-Realms-Codex-Prev-Credential", boundRoute.credentialKey)
+				}
+				router = scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
+				continue
+			}
+			if bindingCredentialPinned && errors.Is(err, scheduler.ErrConstrainedSelectionUnavailable) {
 				bindingCredentialPinned = false
 				cons.RequireChannelID = 0
 				cons.RequireCredentialKey = ""
 				// sticky 精确 credential 失效后，先退化为“保留原 channel，允许同 channel 内接管”，
-				// 只有该 channel 整体不可继续时才顺序转移到后续 channel。
+				// 仅对“channel 仍在、但 pinned credential 已不可用”做此降级。
 				cons.StartChannelID = boundRoute.channelID
 				router = scheduler.NewGroupRouter(h.groups, h.sched, p.UserID, stickyRouteKeyHash, cons)
 				continue

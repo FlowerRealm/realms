@@ -116,6 +116,8 @@ type Options struct {
 }
 
 var ErrRequiredCredentialUnavailable = errors.New("required credential unavailable")
+var ErrRequiredChannelUnavailable = errors.New("required channel unavailable")
+var ErrConstrainedSelectionUnavailable = errors.New("constrained selection unavailable")
 
 type UpstreamStore interface {
 	ListUpstreamChannels(ctx context.Context) ([]store.UpstreamChannel, error)
@@ -358,6 +360,12 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 		if cons.RequireFastMode {
 			return Selection{}, ErrFastModeUnsupported
 		}
+		if cons.RequireChannelID != 0 || strings.TrimSpace(cons.RequireCredentialKey) != "" {
+			if cons.RequireChannelID != 0 {
+				return Selection{}, errors.Join(ErrConstrainedSelectionUnavailable, ErrRequiredChannelUnavailable)
+			}
+			return Selection{}, errors.Join(ErrConstrainedSelectionUnavailable, ErrRequiredCredentialUnavailable)
+		}
 		return Selection{}, errors.New("未配置可用上游 channel")
 	}
 
@@ -432,7 +440,10 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 		}
 	}
 	if strings.TrimSpace(cons.RequireCredentialKey) != "" {
-		return Selection{}, ErrRequiredCredentialUnavailable
+		return Selection{}, errors.Join(ErrConstrainedSelectionUnavailable, ErrRequiredCredentialUnavailable)
+	}
+	if cons.RequireChannelID != 0 {
+		return Selection{}, errors.Join(ErrConstrainedSelectionUnavailable, ErrRequiredChannelUnavailable)
 	}
 	return Selection{}, errors.New("未找到可用上游 credential/account")
 }
