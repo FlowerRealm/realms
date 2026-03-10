@@ -427,3 +427,46 @@ func TestEnrichLookupResult_HighContextCacheHit(t *testing.T) {
 		t.Fatalf("fetch count = %d, want 2", got)
 	}
 }
+
+func TestEnrichLookupResult_DoesNotCacheErrors(t *testing.T) {
+	oldFetch := fetchURLFunc
+	oldTTL := highContextLookupCacheTTL
+	t.Cleanup(func() {
+		fetchURLFunc = oldFetch
+		highContextLookupCacheTTL = oldTTL
+	})
+	resetHighContextLookupCache()
+	t.Cleanup(resetHighContextLookupCache)
+	highContextLookupCacheTTL = time.Minute
+
+	var fetchCount int32
+	fetchURLFunc = func(ctx context.Context, client *http.Client, url string) (string, error) {
+		atomic.AddInt32(&fetchCount, 1)
+		if strings.HasPrefix(url, "https://developers.openai.com/") {
+			return "", errors.New("official docs unavailable")
+		}
+		t.Fatalf("unexpected url: %s", url)
+		return "", nil
+	}
+
+	in := LookupResult{
+		Source:              "models.dev",
+		SourceDetail:        "models.dev",
+		OwnedBy:             "openai",
+		ModelID:             "gpt-5.4",
+		InputUSDPer1M:       decimal.RequireFromString("2.5"),
+		OutputUSDPer1M:      decimal.RequireFromString("15"),
+		CacheInputUSDPer1M:  decimal.RequireFromString("0.25"),
+		CacheOutputUSDPer1M: decimal.RequireFromString("0.25"),
+	}
+
+	if _, err := enrichLookupResult(context.Background(), in); err == nil {
+		t.Fatal("first enrichLookupResult() err = nil, want error")
+	}
+	if _, err := enrichLookupResult(context.Background(), in); err == nil {
+		t.Fatal("second enrichLookupResult() err = nil, want error")
+	}
+	if got := atomic.LoadInt32(&fetchCount); got != 2 {
+		t.Fatalf("fetch count = %d, want 2", got)
+	}
+}

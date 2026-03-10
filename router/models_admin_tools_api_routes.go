@@ -25,15 +25,15 @@ type modelLibraryLookupRequest struct {
 }
 
 type modelLibraryLookupResult struct {
-	OwnedBy             string `json:"owned_by"`
-	InputUSDPer1M       string `json:"input_usd_per_1m"`
-	OutputUSDPer1M      string `json:"output_usd_per_1m"`
-	CacheInputUSDPer1M  string `json:"cache_input_usd_per_1m"`
-	CacheOutputUSDPer1M string `json:"cache_output_usd_per_1m"`
-	Source              string `json:"source"`
-	SourceDetail        string `json:"source_detail"`
+	OwnedBy             string                                `json:"owned_by"`
+	InputUSDPer1M       string                                `json:"input_usd_per_1m"`
+	OutputUSDPer1M      string                                `json:"output_usd_per_1m"`
+	CacheInputUSDPer1M  string                                `json:"cache_input_usd_per_1m"`
+	CacheOutputUSDPer1M string                                `json:"cache_output_usd_per_1m"`
+	Source              string                                `json:"source"`
+	SourceDetail        string                                `json:"source_detail"`
 	HighContextPricing  *store.ManagedModelHighContextPricing `json:"high_context_pricing,omitempty"`
-	IconURL             string `json:"icon_url"`
+	IconURL             string                                `json:"icon_url"`
 }
 
 func adminModelLibraryLookupHandler(opts Options) gin.HandlerFunc {
@@ -382,11 +382,11 @@ func parseHighContextPricingFromMap(m map[string]any) (*store.ManagedModelHighCo
 	if !ok || threshold <= 0 {
 		return nil, errors.New("high_context_pricing.threshold_input_tokens 不合法")
 	}
-	inputUSD, err := parseDecimalFieldOptional(m, "input_usd_per_1m")
+	inputUSD, err := parseDecimalFieldRequired(m, "input_usd_per_1m")
 	if err != nil {
 		return nil, errors.New("high_context_pricing.input_usd_per_1m 不合法")
 	}
-	outputUSD, err := parseDecimalFieldOptional(m, "output_usd_per_1m")
+	outputUSD, err := parseDecimalFieldRequired(m, "output_usd_per_1m")
 	if err != nil {
 		return nil, errors.New("high_context_pricing.output_usd_per_1m 不合法")
 	}
@@ -409,6 +409,21 @@ func parseHighContextPricingFromMap(m map[string]any) (*store.ManagedModelHighCo
 		Source:               pickString(m, "source"),
 		SourceDetail:         pickString(m, "source_detail"),
 	}, nil
+}
+
+func parseDecimalFieldRequired(m map[string]any, key string) (decimal.Decimal, error) {
+	if m == nil {
+		return decimal.Zero, fmt.Errorf("missing")
+	}
+	raw, ok := m[key]
+	if !ok || raw == nil {
+		return decimal.Zero, fmt.Errorf("missing")
+	}
+	d, ok := parseDecimalAny(raw)
+	if !ok {
+		return decimal.Zero, fmt.Errorf("invalid")
+	}
+	return d, nil
 }
 
 func parseInt64Any(raw any) (int64, bool) {

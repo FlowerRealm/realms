@@ -30,30 +30,29 @@ type highContextLookupCacheEntry struct {
 	cachedAt     time.Time
 	pricing      *store.ManagedModelHighContextPricing
 	sourceDetail string
-	err          error
 }
 
 func enrichLookupResult(ctx context.Context, in LookupResult) (LookupResult, error) {
 	cachedEntry, ok := getCachedHighContextLookup(in)
 	if ok {
-		return applyHighContextLookupResult(in, cachedEntry), cachedEntry.err
+		return applyHighContextLookupResult(in, cachedEntry), nil
 	}
 
 	entry := highContextLookupCacheEntry{}
 	if hc, detail, err := lookupOpenAIHighContextPricing(ctx, in.ModelID, in); err != nil {
-		entry.err = err
+		return in, err
 	} else if hc != nil {
 		entry.pricing = cloneHighContextPricing(hc)
 		entry.sourceDetail = detail
 	} else if hc, detail, err := lookupOpenRouterHighContextPricing(ctx, in.ModelID, in); err != nil {
-		entry.err = err
+		return in, err
 	} else if hc != nil {
 		entry.pricing = cloneHighContextPricing(hc)
 		entry.sourceDetail = detail
 	}
 
 	setCachedHighContextLookup(in, entry)
-	return applyHighContextLookupResult(in, entry), entry.err
+	return applyHighContextLookupResult(in, entry), nil
 }
 
 func applyHighContextLookupResult(in LookupResult, entry highContextLookupCacheEntry) LookupResult {
