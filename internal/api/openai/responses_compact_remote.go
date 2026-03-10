@@ -280,6 +280,7 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 		_ = h.quota.Void(bookCtx, usageID)
 	}
 	bestFailure := proxyFailureInfo{}
+	lastForwardedModel := modelPtr
 	for _, groupName := range ags.Order {
 		targetGroup := strings.TrimSpace(groupName)
 		if targetGroup == "" {
@@ -298,6 +299,7 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		lastForwardedModel = forwardedModel
 
 		resp, err := h.compactGateway.ForwardResponsesCompact(r.Context(), r, forwardBody, middleware.GetRequestID(r.Context()), upstream.CompactGatewayRequestOptions{
 			TargetGroup:  targetGroup,
@@ -437,5 +439,5 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 	if failResp.SkipMonitoring {
 		finalClass = ""
 	}
-	h.finalizeUsageEventWithModelCheck(r, usageID, nil, failResp.Status, finalClass, failResp.UsageMessage, time.Since(reqStart), 0, false, reqBytes, cw.bytes, modelPtr, nil)
+	h.finalizeUsageEventWithModelCheck(r, usageID, nil, failResp.Status, finalClass, failResp.UsageMessage, time.Since(reqStart), 0, false, reqBytes, cw.bytes, lastForwardedModel, nil)
 }
