@@ -12,6 +12,7 @@ import (
 )
 
 var errGroupExhausted = errors.New("group exhausted")
+var ErrSequentialStartMissing = errors.New("sequential start missing")
 
 type ChannelGroupStore interface {
 	GetChannelGroupByName(ctx context.Context, name string) (store.ChannelGroup, error)
@@ -33,6 +34,16 @@ type GroupRouter struct {
 
 	lastSelectedChannelID int64
 	lastSelectedStreak    int
+
+	sequentialStartChannelID int64
+	sequentialStartExclusive bool
+}
+
+func (r *GroupRouter) ExcludeChannel(channelID int64) {
+	if r == nil || channelID <= 0 {
+		return
+	}
+	r.excludedChannels[channelID] = struct{}{}
 }
 
 type groupCursor struct {
@@ -44,14 +55,15 @@ type groupCursor struct {
 
 func NewGroupRouter(st ChannelGroupStore, sched *Scheduler, userID int64, routeKeyHash string, cons Constraints) *GroupRouter {
 	return &GroupRouter{
-		st:               st,
-		sched:            sched,
-		userID:           userID,
-		routeKeyHash:     routeKeyHash,
-		cons:             cons,
-		cursors:          make(map[int64]*groupCursor),
-		activePath:       make(map[int64]struct{}),
-		excludedChannels: make(map[int64]struct{}),
+		st:                       st,
+		sched:                    sched,
+		userID:                   userID,
+		routeKeyHash:             routeKeyHash,
+		cons:                     cons,
+		cursors:                  make(map[int64]*groupCursor),
+		activePath:               make(map[int64]struct{}),
+		excludedChannels:         make(map[int64]struct{}),
+		sequentialStartChannelID: cons.StartChannelID,
 	}
 }
 
@@ -60,9 +72,14 @@ func (r *GroupRouter) Next(ctx context.Context) (Selection, error) {
 		return Selection{}, errors.New("group router 未配置")
 	}
 
-	// 强约束：当上层要求固定 channel 时，直接交给调度器做可用性过滤与 credential 选择，
-	// 避免 group router 在候选集遍历时覆盖 RequireChannelID。
+	// 强约束：当上层要求固定 channel 时，直接交给调度器做可用性过滤与 credential 选择。
+	// 这是有意保留“同 channel 内 credential/account 接管”的入口，避免 group router 在候选集遍历时覆盖 RequireChannelID。
 	if r.cons.RequireChannelID != 0 || strings.TrimSpace(r.cons.RequireCredentialKey) != "" {
+		if r.cons.RequireChannelID != 0 {
+			if _, excluded := r.excludedChannels[r.cons.RequireChannelID]; excluded {
+				return Selection{}, errGroupExhausted
+			}
+		}
 		return r.sched.SelectWithConstraints(ctx, r.userID, r.routeKeyHash, r.cons)
 	}
 
@@ -89,6 +106,9 @@ func (r *GroupRouter) Next(ctx context.Context) (Selection, error) {
 }
 
 func (r *GroupRouter) nextFromOrderedGroups(ctx context.Context) (Selection, error) {
+	if r.cons.SequentialChannelFailover {
+		return r.nextFromOrderedGroupsSequential(ctx)
+	}
 	if r.st == nil {
 		return Selection{}, errGroupExhausted
 	}
@@ -166,6 +186,211 @@ func (r *GroupRouter) nextFromOrderedGroups(ctx context.Context) (Selection, err
 		return Selection{}, ErrFastModeUnsupported
 	}
 	return Selection{}, errGroupExhausted
+}
+
+type orderedGroupCandidate struct {
+	channelCandidate
+	RouteGroup string
+}
+
+func (r *GroupRouter) nextFromOrderedGroupsSequential(ctx context.Context) (Selection, error) {
+	if r.st == nil || r.sched == nil {
+		return Selection{}, errGroupExhausted
+	}
+	now := time.Now()
+	if r.sched.state != nil {
+		r.sched.state.SweepExpiredChannelBans(now)
+	}
+
+	ordered, err := r.orderedSequentialCandidates(ctx)
+	if err != nil {
+		return Selection{}, err
+	}
+	if len(ordered) == 0 {
+		if r.cons.RequireFastMode {
+			return Selection{}, ErrFastModeUnsupported
+		}
+		return Selection{}, errGroupExhausted
+	}
+
+	startIdx := 0
+	if r.sequentialStartChannelID > 0 {
+		idx := -1
+		for i, cand := range ordered {
+			if cand.ChannelID == r.sequentialStartChannelID {
+				idx = i
+				break
+			}
+		}
+		if idx >= 0 {
+			startIdx = idx
+			if r.sequentialStartExclusive {
+				startIdx++
+			}
+		} else {
+			return Selection{}, ErrSequentialStartMissing
+		}
+	}
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	if startIdx >= len(ordered) {
+		if r.cons.RequireFastMode {
+			return Selection{}, ErrFastModeUnsupported
+		}
+		return Selection{}, errGroupExhausted
+	}
+
+	fastModeUnsupported := false
+	hasNonFastModeFailure := false
+	bestBannedID := int64(0)
+	bestBannedUntil := time.Time{}
+	bestBannedRouteGroup := ""
+	for _, cand := range ordered[startIdx:] {
+		if _, excluded := r.excludedChannels[cand.ChannelID]; excluded {
+			continue
+		}
+		if r.sched.state != nil && r.sched.state.IsChannelBanned(cand.ChannelID, now) {
+			if until, ok := r.sched.state.ChannelBanUntil(cand.ChannelID, now); ok {
+				if bestBannedID == 0 || until.Before(bestBannedUntil) {
+					bestBannedID = cand.ChannelID
+					bestBannedUntil = until
+					bestBannedRouteGroup = cand.RouteGroup
+				}
+			}
+			continue
+		}
+		cons := r.cons
+		cons.RequireChannelID = cand.ChannelID
+		sel, err := r.sched.SelectWithConstraints(ctx, r.userID, r.routeKeyHash, cons)
+		if err != nil {
+			if errors.Is(err, ErrFastModeUnsupported) {
+				fastModeUnsupported = true
+			} else {
+				hasNonFastModeFailure = true
+			}
+			continue
+		}
+		r.sequentialStartChannelID = cand.ChannelID
+		r.sequentialStartExclusive = false
+		sel.RouteGroup = cand.RouteGroup
+		return sel, nil
+	}
+	if bestBannedID != 0 {
+		cons := r.cons
+		cons.RequireChannelID = bestBannedID
+		sel, err := r.sched.SelectWithConstraintsAllowBannedRequiredChannel(ctx, r.userID, r.routeKeyHash, cons)
+		if err == nil {
+			r.sequentialStartChannelID = bestBannedID
+			r.sequentialStartExclusive = false
+			sel.RouteGroup = bestBannedRouteGroup
+			return sel, nil
+		}
+	}
+	if fastModeUnsupported && !hasNonFastModeFailure {
+		return Selection{}, ErrFastModeUnsupported
+	}
+	return Selection{}, errGroupExhausted
+}
+
+func (r *GroupRouter) orderedSequentialCandidates(ctx context.Context) ([]orderedGroupCandidate, error) {
+	if r.st == nil {
+		return nil, nil
+	}
+	seen := make(map[int64]struct{})
+	out := make([]orderedGroupCandidate, 0, len(r.cons.AllowGroupOrder))
+	for _, raw := range r.cons.AllowGroupOrder {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		g, err := r.st.GetChannelGroupByName(ctx, name)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			return nil, err
+		}
+		if g.Status != 1 {
+			continue
+		}
+		if err := r.appendSequentialCandidatesFromGroup(ctx, g.ID, name, seen, &out); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (r *GroupRouter) appendSequentialCandidatesFromGroup(ctx context.Context, groupID int64, routeGroup string, seen map[int64]struct{}, out *[]orderedGroupCandidate) error {
+	if groupID == 0 {
+		return nil
+	}
+	if _, ok := r.activePath[groupID]; ok {
+		return nil
+	}
+	r.activePath[groupID] = struct{}{}
+	defer delete(r.activePath, groupID)
+
+	c, err := r.cursorForGroup(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	if c.group.Status != 1 {
+		return nil
+	}
+	if err := r.loadMembers(ctx, c); err != nil {
+		return err
+	}
+
+	members := append([]store.ChannelGroupMemberDetail(nil), c.members...)
+	sort.SliceStable(members, func(i, j int) bool {
+		if members[i].Promotion != members[j].Promotion {
+			return members[i].Promotion
+		}
+		if members[i].Priority != members[j].Priority {
+			return members[i].Priority > members[j].Priority
+		}
+		return members[i].MemberID > members[j].MemberID
+	})
+
+	for _, m := range members {
+		if m.MemberGroupID != nil && m.MemberChannelID != nil {
+			continue
+		}
+		if m.MemberGroupID == nil && m.MemberChannelID == nil {
+			continue
+		}
+		if m.MemberGroupID != nil {
+			if !r.groupAllowed(m.MemberGroupName) {
+				continue
+			}
+			if err := r.appendSequentialCandidatesFromGroup(ctx, *m.MemberGroupID, routeGroup, seen, out); err != nil {
+				return err
+			}
+			continue
+		}
+		chID := *m.MemberChannelID
+		if chID <= 0 {
+			continue
+		}
+		if _, ok := seen[chID]; ok {
+			continue
+		}
+		if !r.channelAllowed(m.MemberChannelType, m.MemberChannelGroups, chID) {
+			continue
+		}
+		seen[chID] = struct{}{}
+		*out = append(*out, orderedGroupCandidate{
+			channelCandidate: channelCandidate{
+				ChannelID:     chID,
+				SourceGroupID: groupID,
+				Priority:      m.Priority,
+				Promotion:     m.Promotion,
+			},
+			RouteGroup: routeGroup,
+		})
+	}
+	return nil
 }
 
 func (r *GroupRouter) earliestBannedCandidateInGroup(ctx context.Context, groupID int64, now time.Time) (int64, time.Time, bool, error) {

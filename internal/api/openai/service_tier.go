@@ -163,6 +163,10 @@ func serviceTierSelectionBadRequestMessage(err error) string {
 	return ""
 }
 
+func isFastModeSelectionError(err error) bool {
+	return errors.Is(err, scheduler.ErrFastModeUnsupported) || errors.Is(err, errSelectedChannelFastModeUnsupported)
+}
+
 func reserveBadRequestMessage(err error) string {
 	if err == nil {
 		return ""

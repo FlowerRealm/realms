@@ -44,6 +44,19 @@ func TestShouldEnableStickyRouting_PromptCacheKey(t *testing.T) {
 	}
 }
 
+func TestShouldEnableStickyRouting_CompactBodySessionID(t *testing.T) {
+	r := httptest.NewRequest("POST", "http://example.com/v1/responses/compact", nil)
+
+	payload := map[string]any{
+		"model":      "gpt-5.2",
+		"input":      "hi",
+		"session_id": "sess_compact_123",
+	}
+	if !shouldEnableStickyRouting(payload, r, "payload") {
+		t.Fatalf("expected sticky routing to be enabled for compact body session_id")
+	}
+}
+
 func TestShouldEnableStickyRouting_DerivedIsDisabled(t *testing.T) {
 	r := httptest.NewRequest("POST", "http://example.com/v1/responses", nil)
 	r.Header.Set("User-Agent", "codex_exec/0.106.0 (Ubuntu 24.4.0; x86_64) xterm-256color")

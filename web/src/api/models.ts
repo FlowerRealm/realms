@@ -56,7 +56,7 @@ type PageInfo<T> = {
   items: T[];
 };
 
-type ModelLibraryLookupResult = {
+export type ModelLibraryLookupResult = {
   owned_by: string;
   input_usd_per_1m: string;
   output_usd_per_1m: string;
@@ -65,6 +65,13 @@ type ModelLibraryLookupResult = {
   source: string;
   source_detail: string;
   high_context_pricing?: ManagedModelHighContextPricing | null;
+  icon_url: string;
+};
+
+export type ModelLibrarySuggestResult = {
+  id: string;
+  name: string;
+  owned_by: string;
   icon_url: string;
 };
 
@@ -111,6 +118,13 @@ export async function deleteManagedModelAdmin(id: number) {
 
 export async function lookupModelFromLibraryAdmin(modelID: string) {
   const res = await api.post<APIResponse<ModelLibraryLookupResult>>('/api/models/library-lookup', { model_id: modelID });
+  return res.data;
+}
+
+export async function getModelLibrarySuggestAdmin(q: string, limit = 20) {
+  const res = await api.get<APIResponse<ModelLibrarySuggestResult[]>>('/api/models/library-suggest', {
+    params: { q, limit },
+  });
   return res.data;
 }
 

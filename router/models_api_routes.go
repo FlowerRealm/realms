@@ -79,6 +79,7 @@ func setModelAPIRoutes(r gin.IRoutes, opts Options) {
 	{
 		models.GET("/", adminListManagedModelsHandler(opts))
 		models.GET("/selectable", adminListSelectableManagedModelIDsHandler(opts))
+		models.GET("/library-suggest", adminModelLibrarySuggestHandler(opts))
 		models.GET("/:model_id", adminGetManagedModelHandler(opts))
 		models.POST("/", adminCreateManagedModelHandler(opts))
 		models.POST("/library-lookup", adminModelLibraryLookupHandler(opts))

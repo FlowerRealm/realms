@@ -14,6 +14,7 @@ import { LoginPage } from './pages/LoginPage';
 import { ModelsPage } from './pages/ModelsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { PayPage } from './pages/PayPage';
+import { RankingPage } from './pages/RankingPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { SubscriptionPage } from './pages/SubscriptionPage';
 import { TicketDetailPage } from './pages/TicketDetailPage';
@@ -68,6 +69,7 @@ export function App() {
         <Route path="/tokens" element={<TokensPage />} />
         <Route path="/tokens/created" element={<TokenCreatedPage />} />
         <Route path="/models" element={<ModelsPage />} />
+        <Route path="/ranking" element={<RankingPage />} />
         <Route path="/usage" element={<UsagePage />} />
         <Route path="/account" element={<AccountPage />} />
         <Route path="/subscription" element={<SubscriptionPage />} />

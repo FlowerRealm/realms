@@ -75,6 +75,11 @@ export function AppLayout() {
               </NavLink>
             </li>
           )}
+          <li>
+            <NavLink to="/ranking" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`} onClick={closeSidebar}>
+              <span className="material-symbols-rounded">leaderboard</span> 排行榜
+            </NavLink>
+          </li>
           {features?.billing_disabled ? null : (
             <>
               <li>

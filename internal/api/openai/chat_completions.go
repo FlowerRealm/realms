@@ -89,6 +89,8 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 	}
 	cons.AllowGroups = allowSet
 	cons.AllowGroupOrder = ags.Order
+	// 用户侧 token 默认按绑定顺序做 channel 级 failover；sticky 只影响“从哪里继续”，不决定是否启用该语义。
+	cons.SequentialChannelFailover = true
 
 	if wantStore {
 		ownerTag := realmsOwnerTagForUser(p.UserID)
@@ -373,7 +375,7 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 			if h.finalizeIfCanceled(r, usageID, nil, reqStart, stream, reqBytes) {
 				return
 			}
-			if msg := serviceTierSelectionBadRequestMessage(err); msg != "" {
+			if msg := serviceTierSelectionBadRequestMessage(err); msg != "" && !isFastModeSelectionError(err) {
 				if usageID != 0 && h.quota != nil {
 					bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					_ = h.quota.Void(bookCtx, usageID)
@@ -387,12 +389,27 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 		}
 		rewritten, err := rewriteBody(sel)
 		if err != nil {
+			if isFastModeSelectionError(err) {
+				router.ExcludeChannel(sel.ChannelID)
+				switches++
+				if h.failoverExhausted(loopStart, switches) {
+					break
+				}
+				if !h.waitBackoffWithinRetryElapsed(r.Context(), loopStart, backoff) {
+					if h.finalizeIfCanceled(r, usageID, nil, reqStart, stream, reqBytes) {
+						return
+					}
+					break
+				}
+				backoff = h.nextBackoff(backoff)
+				continue
+			}
 			if usageID != 0 && h.quota != nil {
 				bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				_ = h.quota.Void(bookCtx, usageID)
 				cancel()
 			}
-			if msg := serviceTierSelectionBadRequestMessage(err); msg != "" {
+			if msg := serviceTierSelectionBadRequestMessage(err); msg != "" && !isFastModeSelectionError(err) {
 				cw := &countingResponseWriter{ResponseWriter: w}
 				http.Error(cw, msg, http.StatusBadRequest)
 				h.finalizeUsageEvent(r, usageID, &sel, http.StatusBadRequest, "service_tier", msg, time.Since(reqStart), 0, stream, reqBytes, cw.bytes)

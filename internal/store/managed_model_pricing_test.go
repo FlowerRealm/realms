@@ -62,14 +62,29 @@ func TestResolveManagedModelPricingPriorityUnsupported(t *testing.T) {
 	}
 }
 
-func TestResolveManagedModelPricingPriorityMissingRequiredPrices(t *testing.T) {
-	m := ManagedModel{PriorityPricingEnabled: true}
-	_, err := ResolveManagedModelPricing(m, "priority", nil)
-	if err == nil {
-		t.Fatal("expected error")
+func TestResolveManagedModelPricingPriorityAutoDerived(t *testing.T) {
+	m := ManagedModel{
+		InputUSDPer1M:          testDecimal("1"),
+		OutputUSDPer1M:         testDecimal("2"),
+		CacheInputUSDPer1M:     testDecimal("0.5"),
+		CacheOutputUSDPer1M:    testDecimal("0.25"),
+		PriorityPricingEnabled: true,
 	}
-	if err != ErrManagedModelPriorityPricingMissing {
-		t.Fatalf("err=%v, want %v", err, ErrManagedModelPriorityPricingMissing)
+	pricing, err := ResolveManagedModelPricing(m, "priority", nil)
+	if err != nil {
+		t.Fatalf("ResolveManagedModelPricing: %v", err)
+	}
+	if !pricing.InputUSDPer1M.Equal(testDecimal("2")) {
+		t.Fatalf("input=%s, want 2", pricing.InputUSDPer1M)
+	}
+	if !pricing.OutputUSDPer1M.Equal(testDecimal("4")) {
+		t.Fatalf("output=%s, want 4", pricing.OutputUSDPer1M)
+	}
+	if !pricing.CacheInputUSDPer1M.Equal(testDecimal("1")) {
+		t.Fatalf("cache_input=%s, want 1", pricing.CacheInputUSDPer1M)
+	}
+	if !pricing.CacheOutputUSDPer1M.Equal(testDecimal("0.25")) {
+		t.Fatalf("cache_output=%s, want 0.25", pricing.CacheOutputUSDPer1M)
 	}
 }
 

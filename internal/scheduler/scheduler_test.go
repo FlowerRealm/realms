@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"testing"
@@ -236,8 +237,32 @@ func TestSelectWithConstraints_RequireCredentialKey_CoolingFailsSelection(t *tes
 	if _, err := s.SelectWithConstraints(context.Background(), 10, "", Constraints{
 		RequireChannelID:     1,
 		RequireCredentialKey: key,
-	}); err == nil {
-		t.Fatalf("expected selection to fail when required credential is cooling")
+	}); !errors.Is(err, ErrRequiredCredentialUnavailable) {
+		t.Fatalf("expected ErrRequiredCredentialUnavailable when required credential is cooling, got=%v", err)
+	}
+}
+
+func TestSelectWithConstraints_RequireChannelID_StatusFilteredReturnsConstrainedUnavailable(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 0},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+	if _, err := s.SelectWithConstraints(context.Background(), 10, "", Constraints{
+		RequireChannelID: 1,
+	}); !errors.Is(err, ErrRequiredChannelUnavailable) {
+		t.Fatalf("expected ErrRequiredChannelUnavailable when required channel is filtered out, got=%v", err)
 	}
 }
 

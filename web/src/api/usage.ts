@@ -79,6 +79,21 @@ export type UsageTimeSeriesPoint = {
   tokens_per_second: number;
 };
 
+export type UsageLeaderboardUser = {
+  rank: number;
+  display_name: string;
+  committed_usd: string;
+  reserved_usd: string;
+  is_current_user: boolean;
+};
+
+type UsageLeaderboardResponse = {
+  window: '1d' | '7d' | '1mo';
+  since: string;
+  until: string;
+  users: UsageLeaderboardUser[];
+};
+
 type UsageTimeSeriesResponse = {
   time_zone?: string;
   start: string;
@@ -142,6 +157,17 @@ export async function getUsageTimeSeries(start?: string, end?: string, granulari
       granularity: granularity || undefined,
       token_id: tokenID || undefined,
       all_time: allTime ? true : undefined,
+      tz: browserTimeZone(),
+    },
+  });
+  return res.data;
+}
+
+export async function getUsageLeaderboard(window: '1d' | '7d' | '1mo', limit = 100) {
+  const res = await api.get<APIResponse<UsageLeaderboardResponse>>('/api/usage/leaderboard', {
+    params: {
+      window,
+      limit,
       tz: browserTimeZone(),
     },
   });
