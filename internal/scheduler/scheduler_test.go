@@ -241,6 +241,41 @@ func TestSelectWithConstraints_RequireCredentialKey_CoolingFailsSelection(t *tes
 	}
 }
 
+func TestSelectWithConstraints_RequireCredentialKey_AllowsEndpointInCooldown(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 222, EndpointID: 11, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+	s.state.SetEndpointCooling(11, time.Now().Add(10*time.Minute))
+	wantKey := fmt.Sprintf("%s:%d", CredentialTypeOpenAI, 222)
+
+	sel, err := s.SelectWithConstraints(context.Background(), 10, "", Constraints{
+		RequireChannelID:     1,
+		RequireCredentialKey: wantKey,
+	})
+	if err != nil {
+		t.Fatalf("Select err: %v", err)
+	}
+	if sel.EndpointID != 11 {
+		t.Fatalf("expected endpoint=11, got=%d", sel.EndpointID)
+	}
+	if sel.CredentialKey() != wantKey {
+		t.Fatalf("expected credential=%q, got=%q", wantKey, sel.CredentialKey())
+	}
+}
+
 func TestSelect_PrefersHealthyEndpointWithinChannel(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{

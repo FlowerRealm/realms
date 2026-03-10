@@ -315,6 +315,7 @@ func (s *Scheduler) SelectWithConstraintsAllowBannedRequiredChannel(ctx context.
 
 func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, routeKeyHash string, cons Constraints, allowBannedRequiredChannel bool) (Selection, error) {
 	now := time.Now()
+	requirePinnedSelection := strings.TrimSpace(cons.RequireCredentialKey) != ""
 
 	// 1) 选择 channel：promotion > affinity > priority > fallback
 	channels, err := s.st.ListUpstreamChannels(ctx)
@@ -402,7 +403,7 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 			if e.Status != 1 {
 				continue
 			}
-			if s.state.IsEndpointCooling(e.ID, now) {
+			if !requirePinnedSelection && s.state.IsEndpointCooling(e.ID, now) {
 				continue
 			}
 			eps = append(eps, e)
