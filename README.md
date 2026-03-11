@@ -30,6 +30,8 @@ make dev
 
 前端默认构建到 `web/dist`，后端默认监听 `127.0.0.1:8080`。
 
+如果本地开发需要固定连接另一套数据库，不要直接复用 `REALMS_DB_DSN` 去和 Docker Compose 抢同一个目标。请改用 `.env` 里的 `REALMS_DB_DSN_DEV` / `REALMS_DB_DRIVER_DEV` / `REALMS_SQLITE_PATH_DEV`，它们只在 `REALMS_ENV=dev`（例如 `make dev`）时生效。
+
 ## 认证模型
 
 ### Web 管理面

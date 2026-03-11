@@ -59,6 +59,54 @@ func TestLoad_EnvOverridesDBDriver(t *testing.T) {
 	}
 }
 
+func TestLoad_DevDBEnvOverridesBaseDBSettings(t *testing.T) {
+	t.Setenv("REALMS_ENV", "dev")
+	t.Setenv("REALMS_DB_DRIVER", "mysql")
+	t.Setenv("REALMS_DB_DSN", "user:pass@tcp(127.0.0.1:3306)/wrong?parseTime=true")
+	t.Setenv("REALMS_SQLITE_PATH", "./data/wrong.db?_busy_timeout=30000")
+	t.Setenv("REALMS_DB_DRIVER_DEV", "sqlite")
+	t.Setenv("REALMS_DB_DSN_DEV", "")
+	t.Setenv("REALMS_SQLITE_PATH_DEV", "./data/dev.db?_busy_timeout=30000")
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	if cfg.DB.Driver != "sqlite" {
+		t.Fatalf("expected dev db.driver=sqlite, got %q", cfg.DB.Driver)
+	}
+	if cfg.DB.SQLitePath != "./data/dev.db?_busy_timeout=30000" {
+		t.Fatalf("expected dev sqlite_path override, got %q", cfg.DB.SQLitePath)
+	}
+	if cfg.DB.DSN != "user:pass@tcp(127.0.0.1:3306)/wrong?parseTime=true" {
+		t.Fatalf("expected base dsn to remain when REALMS_DB_DSN_DEV is empty, got %q", cfg.DB.DSN)
+	}
+}
+
+func TestLoad_NonDevIgnoresDevDBOverrides(t *testing.T) {
+	t.Setenv("REALMS_ENV", "prod")
+	t.Setenv("REALMS_DB_DRIVER", "mysql")
+	t.Setenv("REALMS_DB_DSN", "user:pass@tcp(127.0.0.1:3306)/realms?parseTime=true")
+	t.Setenv("REALMS_SQLITE_PATH", "./data/base.db?_busy_timeout=30000")
+	t.Setenv("REALMS_DB_DRIVER_DEV", "sqlite")
+	t.Setenv("REALMS_DB_DSN_DEV", "user:pass@tcp(127.0.0.1:23306)/dev?parseTime=true")
+	t.Setenv("REALMS_SQLITE_PATH_DEV", "./data/dev.db?_busy_timeout=30000")
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	if cfg.DB.Driver != "mysql" {
+		t.Fatalf("expected prod db.driver=mysql, got %q", cfg.DB.Driver)
+	}
+	if cfg.DB.DSN != "user:pass@tcp(127.0.0.1:3306)/realms?parseTime=true" {
+		t.Fatalf("expected prod dsn unchanged, got %q", cfg.DB.DSN)
+	}
+	if cfg.DB.SQLitePath != "./data/base.db?_busy_timeout=30000" {
+		t.Fatalf("expected prod sqlite_path unchanged, got %q", cfg.DB.SQLitePath)
+	}
+}
+
 func TestLoad_Mode_Removed(t *testing.T) {
 	t.Setenv("REALMS_MODE", "personal")
 

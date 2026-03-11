@@ -502,6 +502,17 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("REALMS_SQLITE_PATH"); v != "" {
 		cfg.DB.SQLitePath = v
 	}
+	if strings.EqualFold(strings.TrimSpace(cfg.Env), "dev") {
+		if v := os.Getenv("REALMS_DB_DRIVER_DEV"); v != "" {
+			cfg.DB.Driver = v
+		}
+		if v := os.Getenv("REALMS_DB_DSN_DEV"); v != "" {
+			cfg.DB.DSN = v
+		}
+		if v := os.Getenv("REALMS_SQLITE_PATH_DEV"); v != "" {
+			cfg.DB.SQLitePath = v
+		}
+	}
 	if v := os.Getenv("REALMS_DB_MIGRATION_LOCK_NAME"); v != "" {
 		cfg.DB.MigrationLockName = v
 	}
