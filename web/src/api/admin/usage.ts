@@ -58,6 +58,7 @@ export type AdminUsageEvent = {
   error: string;
   error_class: string;
   error_message: string;
+  model_mismatch: boolean;
 };
 
 export type AdminUsagePage = {
@@ -95,6 +96,13 @@ type AdminUsageTimeSeriesResponse = {
 export type UsageEventDetail = {
   event_id: number;
   pricing_breakdown?: UsageEventPricingBreakdown;
+  model_check?: UsageEventModelCheck;
+};
+
+export type UsageEventModelCheck = {
+  forwarded_model?: string | null;
+  upstream_response_model?: string | null;
+  mismatch: boolean;
 };
 
 export type UsageEventPricingBreakdown = {

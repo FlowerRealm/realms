@@ -68,6 +68,9 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 		if err := ensureSQLiteUsageEventsServiceTierColumn(db); err != nil {
 			return err
 		}
+		if err := ensureSQLiteUsageEventsModelCheckColumns(db); err != nil {
+			return err
+		}
 		if err := ensureSQLiteSessionBindingsTable(db); err != nil {
 			return err
 		}
@@ -137,6 +140,9 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 		return err
 	}
 	if err := ensureSQLiteUsageEventsServiceTierColumn(db); err != nil {
+		return err
+	}
+	if err := ensureSQLiteUsageEventsModelCheckColumns(db); err != nil {
 		return err
 	}
 	if err := ensureSQLiteSubscriptionPlansPriceMultiplierColumn(db); err != nil {

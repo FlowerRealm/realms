@@ -187,6 +187,121 @@ func TestAdminUsagePage_EventIncludesFirstTokenLatencyAndTokensPerSecond(t *test
 	}
 }
 
+func TestAdminUsagePage_ExposesModelCheck(t *testing.T) {
+	st, closeDB := newTestSQLiteStore(t)
+	defer closeDB()
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	userID, err := st.CreateUser(ctx, "root-model@example.com", "rootmodel", pwHash, store.UserRoleRoot)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	tokenID, _, err := st.CreateUserToken(ctx, userID, nil, "tok_admin_model_check")
+	if err != nil {
+		t.Fatalf("CreateUserToken: %v", err)
+	}
+
+	usageID, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
+		RequestID:        "req_admin_model_check_1",
+		UserID:           userID,
+		TokenID:          tokenID,
+		Model:            adminUsageOptionalString("alias"),
+		ReservedUSD:      decimal.Zero,
+		ReserveExpiresAt: time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("ReserveUsage: %v", err)
+	}
+	if err := st.CommitUsage(ctx, store.CommitUsageInput{
+		UsageEventID: usageID,
+		CommittedUSD: decimal.Zero,
+	}); err != nil {
+		t.Fatalf("CommitUsage: %v", err)
+	}
+
+	if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
+		UsageEventID:          usageID,
+		Endpoint:              "/v1/responses",
+		Method:                "POST",
+		StatusCode:            200,
+		ForwardedModel:        adminUsageOptionalString("gpt-5.2"),
+		UpstreamResponseModel: adminUsageOptionalString("gpt-5.2-mini"),
+	}); err != nil {
+		t.Fatalf("FinalizeUsageEvent: %v", err)
+	}
+
+	engine, cookieName := newTestEngine(t, st)
+	sessionCookie := loginCookie(t, engine, cookieName, "root-model@example.com", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("admin usage status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var listResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Events []struct {
+				ID            int64 `json:"id"`
+				ModelMismatch bool  `json:"model_mismatch"`
+			} `json:"events"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("json.Unmarshal admin usage: %v", err)
+	}
+	if !listResp.Success {
+		t.Fatalf("admin usage expected success, got message=%q", listResp.Message)
+	}
+	if len(listResp.Data.Events) != 1 || !listResp.Data.Events[0].ModelMismatch {
+		t.Fatalf("expected model_mismatch=true, got=%+v", listResp.Data.Events)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage/events/"+strconv.FormatInt(usageID, 10)+"/detail", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("admin detail status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var detailResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			ModelCheck struct {
+				ForwardedModel        string `json:"forwarded_model"`
+				UpstreamResponseModel string `json:"upstream_response_model"`
+				Mismatch              bool   `json:"mismatch"`
+			} `json:"model_check"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &detailResp); err != nil {
+		t.Fatalf("json.Unmarshal admin detail: %v", err)
+	}
+	if !detailResp.Success {
+		t.Fatalf("admin detail expected success, got message=%q", detailResp.Message)
+	}
+	if detailResp.Data.ModelCheck.ForwardedModel != "gpt-5.2" || detailResp.Data.ModelCheck.UpstreamResponseModel != "gpt-5.2-mini" || !detailResp.Data.ModelCheck.Mismatch {
+		t.Fatalf("unexpected model_check=%+v", detailResp.Data.ModelCheck)
+	}
+}
+
+func adminUsageOptionalString(v string) *string {
+	return &v
+}
+
 func TestAdminUsagePage_WindowAndTimeseries_IgnoreNonCommittedRows(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"

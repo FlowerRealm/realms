@@ -74,6 +74,7 @@ type adminUsageEventView struct {
 	Error               string `json:"error"`
 	ErrorClass          string `json:"error_class"`
 	ErrorMessage        string `json:"error_message"`
+	ModelMismatch       bool   `json:"model_mismatch"`
 }
 
 type adminUsagePageResponse struct {
@@ -750,6 +751,7 @@ func adminUsagePageHandler(opts Options) gin.HandlerFunc {
 				Error:               errText,
 				ErrorClass:          errClass,
 				ErrorMessage:        errMsg,
+				ModelMismatch:       usageEventModelMismatch(e.ForwardedModel, e.UpstreamResponseModel),
 			})
 		}
 
@@ -819,6 +821,7 @@ func adminUsageEventDetailHandler(opts Options) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": usageEventDetailAPIResponse{
 			EventID:          id,
 			PricingBreakdown: &pricingBreakdown,
+			ModelCheck:       buildUsageEventModelCheck(ev),
 		}})
 	}
 }

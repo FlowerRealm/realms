@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tidwall/gjson"
+
 	"realms/internal/auth"
 	"realms/internal/middleware"
 	"realms/internal/obs"
@@ -223,6 +225,10 @@ func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) finalizeClientDisconnect(r *http.Request, usageID int64, sel *scheduler.Selection, reqStart time.Time, stream bool, reqBytes int64) {
+	h.finalizeClientDisconnectWithModelCheck(r, usageID, sel, reqStart, stream, reqBytes, nil)
+}
+
+func (h *Handler) finalizeClientDisconnectWithModelCheck(r *http.Request, usageID int64, sel *scheduler.Selection, reqStart time.Time, stream bool, reqBytes int64, forwardedModel *string) {
 	if r == nil {
 		return
 	}
@@ -231,17 +237,21 @@ func (h *Handler) finalizeClientDisconnect(r *http.Request, usageID int64, sel *
 		defer cancel()
 		_ = h.quota.Void(bookCtx, usageID)
 	}
-	h.finalizeUsageEvent(r, usageID, sel, 0, "client_disconnect", "", time.Since(reqStart), 0, stream, reqBytes, 0)
+	h.finalizeUsageEventWithModelCheck(r, usageID, sel, 0, "client_disconnect", "", time.Since(reqStart), 0, stream, reqBytes, 0, forwardedModel, nil)
 }
 
 func (h *Handler) finalizeIfCanceled(r *http.Request, usageID int64, sel *scheduler.Selection, reqStart time.Time, stream bool, reqBytes int64) bool {
+	return h.finalizeIfCanceledWithModelCheck(r, usageID, sel, reqStart, stream, reqBytes, nil)
+}
+
+func (h *Handler) finalizeIfCanceledWithModelCheck(r *http.Request, usageID int64, sel *scheduler.Selection, reqStart time.Time, stream bool, reqBytes int64, forwardedModel *string) bool {
 	if r == nil {
 		return false
 	}
 	if r.Context().Err() == nil {
 		return false
 	}
-	h.finalizeClientDisconnect(r, usageID, sel, reqStart, stream, reqBytes)
+	h.finalizeClientDisconnectWithModelCheck(r, usageID, sel, reqStart, stream, reqBytes, forwardedModel)
 	return true
 }
 
@@ -762,7 +772,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), usageID, reqStart, reqBytes, loopStart, 2, &bestFailure) {
+		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), extractTopLevelModel(rewritten), usageID, reqStart, reqBytes, loopStart, 2, &bestFailure) {
 			return
 		}
 		if bindingCredentialPinned {
@@ -888,19 +898,19 @@ func upstreamUnavailableUsageMessage(best proxyFailureInfo) string {
 	return "上游不可用；最后一次失败: " + detail
 }
 
-func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p auth.Principal, sel scheduler.Selection, body []byte, wantStream bool, model *string, usageID int64, reqStart time.Time, reqBytes int64, loopStart time.Time, retries int, bestFailure *proxyFailureInfo) bool {
+func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p auth.Principal, sel scheduler.Selection, body []byte, wantStream bool, model *string, forwardedModel *string, usageID int64, reqStart time.Time, reqBytes int64, loopStart time.Time, retries int, bestFailure *proxyFailureInfo) bool {
 	retries = h.sameSelectionRetries(retries)
 	backoff := h.initialBackoff()
 	for i := 0; i < retries; i++ {
 		releaseCred, err := h.acquireCredentialSlot(r.Context(), sel)
 		if err != nil {
-			if h.finalizeIfCanceled(r, usageID, &sel, reqStart, wantStream, reqBytes) {
+			if h.finalizeIfCanceledWithModelCheck(r, usageID, &sel, reqStart, wantStream, reqBytes, forwardedModel) {
 				return true
 			}
 			recordProxyFailure(bestFailure, classifyConcurrencyAcquireFailure(err))
 			return false
 		}
-		decision, failure := h.proxyOnce(w, r, sel, body, wantStream, model, p, usageID, reqStart, reqBytes)
+		decision, failure := h.proxyOnce(w, r, sel, body, wantStream, model, forwardedModel, p, usageID, reqStart, reqBytes)
 		if releaseCred != nil {
 			releaseCred()
 		}
@@ -913,7 +923,7 @@ func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p aut
 		case proxyAttemptRetrySameSelection:
 			if i+1 < retries {
 				if !h.waitBackoffWithinRetryElapsed(r.Context(), loopStart, backoff) {
-					if h.finalizeIfCanceled(r, usageID, &sel, reqStart, wantStream, reqBytes) {
+					if h.finalizeIfCanceledWithModelCheck(r, usageID, &sel, reqStart, wantStream, reqBytes, forwardedModel) {
 						return true
 					}
 					h.reportProxyFailure(sel, failure)
@@ -936,7 +946,7 @@ func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p aut
 	return false
 }
 
-func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel scheduler.Selection, body []byte, wantStream bool, model *string, p auth.Principal, usageID int64, reqStart time.Time, reqBytes int64) (proxyAttemptDecision, proxyFailureInfo) {
+func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel scheduler.Selection, body []byte, wantStream bool, model *string, forwardedModel *string, p auth.Principal, usageID int64, reqStart time.Time, reqBytes int64) (proxyAttemptDecision, proxyFailureInfo) {
 	attemptStart := time.Now()
 	serviceTier := requestedServiceTierFromJSONBytes(body)
 	var resp *http.Response
@@ -944,7 +954,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		var err error
 		resp, err = h.exec.Do(r.Context(), sel, r, body)
 		if err != nil {
-			if h.finalizeIfCanceled(r, usageID, &sel, reqStart, wantStream, reqBytes) {
+			if h.finalizeIfCanceledWithModelCheck(r, usageID, &sel, reqStart, wantStream, reqBytes, forwardedModel) {
 				return proxyAttemptDone, proxyFailureInfo{}
 			}
 			h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, 0, "network", time.Since(attemptStart))
@@ -976,7 +986,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 					cw := &countingResponseWriter{ResponseWriter: w}
 					writeOpenAIError(cw, http.StatusConflict, "session_reset_required", "上游返回续链错误（invalid encrypted_content）：该会话的 compaction 上下文无法复用。为避免静默丢上下文，服务端不会自动重置续链；请重启会话/新开对话后重试。")
 					h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, http.StatusConflict, "session_reset_required", "session_reset_required", time.Since(attemptStart), wantStream || isSSE)
-					h.finalizeUsageEvent(r, usageID, &sel, http.StatusConflict, "session_reset_required", "session_reset_required", time.Since(reqStart), 0, wantStream || isSSE, reqBytes, cw.bytes)
+					h.finalizeUsageEventWithModelCheck(r, usageID, &sel, http.StatusConflict, "session_reset_required", "session_reset_required", time.Since(reqStart), 0, wantStream || isSSE, reqBytes, cw.bytes, forwardedModel, nil)
 					return proxyAttemptDone, proxyFailureInfo{}
 				}
 			}
@@ -1058,7 +1068,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 				defer cancel()
 				_ = h.quota.Void(bookCtx, usageID)
 			}
-			h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "upstream_status", failMsg, time.Since(reqStart), 0, wantStream || isSSE, reqBytes, respBytes)
+			h.finalizeUsageEventWithModelCheck(r, usageID, &sel, resp.StatusCode, "upstream_status", failMsg, time.Since(reqStart), 0, wantStream || isSSE, reqBytes, respBytes, forwardedModel, nil)
 			return proxyAttemptDone, proxyFailureInfo{}
 		}
 		break
@@ -1100,6 +1110,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			acc              usageAcc
 			responseRouteKey string
 			createdObjectID  string
+			responseModel    *string
 		)
 
 		cw := &countingResponseWriter{ResponseWriter: w}
@@ -1134,6 +1145,9 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 					if firstTokenLatencyMS < 0 {
 						firstTokenLatencyMS = 0
 					}
+				}
+				if responseModel == nil {
+					responseModel = extractTopLevelModelFromString(data)
 				}
 				// 避免对每个 delta 事件反复 JSON 解析：仅在疑似包含 usage 时尝试。
 				if !strings.Contains(data, "usage") && !strings.Contains(data, "input_tokens") && !strings.Contains(data, "prompt_tokens") {
@@ -1236,7 +1250,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		if pumpRes.ErrorClass != "" && pumpRes.ErrorClass != "client_disconnect" && pumpRes.ErrorClass != "stream_max_duration" {
 			h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, resp.StatusCode, pumpRes.ErrorClass, "", time.Since(attemptStart), true)
 		}
-		h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, pumpRes.ErrorClass, "", time.Since(reqStart), firstTokenLatencyMS, true, reqBytes, cw.bytes)
+		h.finalizeUsageEventWithModelCheck(r, usageID, &sel, resp.StatusCode, pumpRes.ErrorClass, "", time.Since(reqStart), firstTokenLatencyMS, true, reqBytes, cw.bytes, forwardedModel, responseModel)
 		return proxyAttemptDone, proxyFailureInfo{}
 	}
 
@@ -1268,12 +1282,13 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		}
 		h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, "proxy_copy", time.Since(attemptStart))
 		h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, resp.StatusCode, "proxy_copy", copyErr.Error(), time.Since(attemptStart), false)
-		h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "proxy_copy", "", time.Since(reqStart), 0, false, reqBytes, respBytes)
+		h.finalizeUsageEventWithModelCheck(r, usageID, &sel, resp.StatusCode, "proxy_copy", "", time.Since(reqStart), 0, false, reqBytes, respBytes, forwardedModel, nil)
 		return proxyAttemptDone, proxyFailureInfo{}
 	}
 
 	var (
 		inTok, outTok, cachedInTok, cachedOutTok *int64
+		responseModel                            *string
 	)
 	if !capBuf.exceeded {
 		bodyBytes := capBuf.buf.Bytes()
@@ -1291,6 +1306,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			}
 		}
 		inTok, outTok, cachedInTok, cachedOutTok = extractUsageTokens(bodyBytes)
+		responseModel = extractTopLevelModel(bodyBytes)
 	}
 
 	if usageID != 0 && h.quota != nil {
@@ -1328,7 +1344,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		h.sched.Report(sel, scheduler.Result{Success: true})
 	}
 	h.rememberCodexLastSuccessRoute(r, sel)
-	h.finalizeUsageEvent(r, usageID, &sel, resp.StatusCode, "", "", time.Since(reqStart), 0, false, reqBytes, respBytes)
+	h.finalizeUsageEventWithModelCheck(r, usageID, &sel, resp.StatusCode, "", "", time.Since(reqStart), 0, false, reqBytes, respBytes, forwardedModel, responseModel)
 	return proxyAttemptDone, proxyFailureInfo{}
 }
 
@@ -1402,6 +1418,10 @@ func (h *Handler) maybeLogProxyFailure(ctx context.Context, r *http.Request, p a
 }
 
 func (h *Handler) finalizeUsageEvent(r *http.Request, usageID int64, sel *scheduler.Selection, status int, class string, msg string, latency time.Duration, firstTokenLatencyMS int, stream bool, reqBytes, respBytes int64) {
+	h.finalizeUsageEventWithModelCheck(r, usageID, sel, status, class, msg, latency, firstTokenLatencyMS, stream, reqBytes, respBytes, nil, nil)
+}
+
+func (h *Handler) finalizeUsageEventWithModelCheck(r *http.Request, usageID int64, sel *scheduler.Selection, status int, class string, msg string, latency time.Duration, firstTokenLatencyMS int, stream bool, reqBytes, respBytes int64, forwardedModel *string, upstreamResponseModel *string) {
 	if usageID == 0 || h.usage == nil {
 		return
 	}
@@ -1446,20 +1466,22 @@ func (h *Handler) finalizeUsageEvent(r *http.Request, usageID int64, sel *schedu
 	}
 
 	_ = h.usage.FinalizeUsageEvent(bookCtx, store.FinalizeUsageEventInput{
-		UsageEventID:        usageID,
-		Endpoint:            ep,
-		Method:              method,
-		StatusCode:          status,
-		LatencyMS:           int(latency.Milliseconds()),
-		FirstTokenLatencyMS: firstTokenLatencyMS,
-		ErrorClass:          classPtr,
-		ErrorMessage:        msgPtr,
-		UpstreamChannelID:   upstreamChannelID,
-		UpstreamEndpointID:  upstreamEndpointID,
-		UpstreamCredID:      upstreamCredID,
-		IsStream:            stream,
-		RequestBytes:        reqBytes,
-		ResponseBytes:       respBytes,
+		UsageEventID:          usageID,
+		Endpoint:              ep,
+		Method:                method,
+		StatusCode:            status,
+		LatencyMS:             int(latency.Milliseconds()),
+		FirstTokenLatencyMS:   firstTokenLatencyMS,
+		ErrorClass:            classPtr,
+		ErrorMessage:          msgPtr,
+		ForwardedModel:        forwardedModel,
+		UpstreamResponseModel: upstreamResponseModel,
+		UpstreamChannelID:     upstreamChannelID,
+		UpstreamEndpointID:    upstreamEndpointID,
+		UpstreamCredID:        upstreamCredID,
+		IsStream:              stream,
+		RequestBytes:          reqBytes,
+		ResponseBytes:         respBytes,
 	})
 }
 
@@ -2267,6 +2289,31 @@ func optionalString(s string) *string {
 	}
 	ss := s
 	return &ss
+}
+
+func extractTopLevelModel(body []byte) *string {
+	if len(body) == 0 {
+		return nil
+	}
+	model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	if model == "" {
+		model = strings.TrimSpace(gjson.GetBytes(body, "response.model").String())
+	}
+	if model == "" {
+		return nil
+	}
+	return optionalString(model)
+}
+
+func extractTopLevelModelFromString(body string) *string {
+	model := strings.TrimSpace(gjson.Get(body, "model").String())
+	if model == "" {
+		model = strings.TrimSpace(gjson.Get(body, "response.model").String())
+	}
+	if model == "" {
+		return nil
+	}
+	return optionalString(model)
 }
 
 func extractUsageTokens(body []byte) (*int64, *int64, *int64, *int64) {

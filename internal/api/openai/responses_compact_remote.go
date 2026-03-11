@@ -14,6 +14,7 @@ import (
 	"realms/internal/auth"
 	"realms/internal/middleware"
 	"realms/internal/quota"
+	"realms/internal/store"
 	"realms/internal/upstream"
 )
 
@@ -93,6 +94,49 @@ func compactRouteKeyHash(payload map[string]any, r *http.Request, routeKeySource
 
 type routeKeyHasher interface {
 	RouteKeyHash(routeKey string) string
+}
+
+func compactBindingMatchesGroup(channelGroups string, targetGroup string) bool {
+	targetGroup = strings.TrimSpace(targetGroup)
+	if targetGroup == "" {
+		return false
+	}
+	channelGroups = strings.TrimSpace(channelGroups)
+	if channelGroups == "" {
+		return targetGroup == store.DefaultGroupName
+	}
+	for _, groupName := range strings.Split(channelGroups, ",") {
+		if strings.TrimSpace(groupName) == targetGroup {
+			return true
+		}
+	}
+	return false
+}
+
+func compactResolveUpstreamModel(bindings []store.ChannelModelBinding, targetGroup string) string {
+	targetGroup = strings.TrimSpace(targetGroup)
+	if targetGroup == "" || len(bindings) == 0 {
+		return ""
+	}
+
+	groupModel := ""
+	for _, binding := range bindings {
+		upstreamModel := strings.TrimSpace(binding.UpstreamModel)
+		if upstreamModel == "" {
+			continue
+		}
+		if !compactBindingMatchesGroup(binding.ChannelGroups, targetGroup) {
+			continue
+		}
+		if groupModel == "" {
+			groupModel = upstreamModel
+			continue
+		}
+		if groupModel != upstreamModel {
+			return ""
+		}
+	}
+	return groupModel
 }
 
 func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
@@ -193,6 +237,11 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 
 	usageID := int64(0)
 	modelPtr := optionalString(reqModel)
+	bindings, err := h.models.ListEnabledChannelModelBindingsByPublicID(r.Context(), reqModel)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadGateway, "api_error", "查询模型绑定失败")
+		return
+	}
 	if !freeMode && h.quota != nil {
 		res, err := h.quota.Reserve(r.Context(), quota.ReserveInput{
 			RequestID:       middleware.GetRequestID(r.Context()),
@@ -230,12 +279,28 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 		_ = h.quota.Void(bookCtx, usageID)
 	}
 	bestFailure := proxyFailureInfo{}
+	lastForwardedModel := modelPtr
 	for _, groupName := range ags.Order {
 		targetGroup := strings.TrimSpace(groupName)
 		if targetGroup == "" {
 			continue
 		}
-		resp, err := h.compactGateway.ForwardResponsesCompact(r.Context(), r, body, middleware.GetRequestID(r.Context()), upstream.CompactGatewayRequestOptions{
+		forwardedModel := modelPtr
+		forwardBody := body
+		if upstreamModel := compactResolveUpstreamModel(bindings, targetGroup); upstreamModel != "" {
+			forwardedModel = optionalString(upstreamModel)
+			if upstreamModel != reqModel {
+				out := clonePayload(payload)
+				out["model"] = upstreamModel
+				rewritten, marshalErr := json.Marshal(out)
+				if marshalErr == nil {
+					forwardBody = rewritten
+				}
+			}
+		}
+		lastForwardedModel = forwardedModel
+
+		resp, err := h.compactGateway.ForwardResponsesCompact(r.Context(), r, forwardBody, middleware.GetRequestID(r.Context()), upstream.CompactGatewayRequestOptions{
 			TargetGroup:  targetGroup,
 			RouteKeyHash: routeKeyHash,
 		})
@@ -243,7 +308,7 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 			if errors.Is(err, context.Canceled) || errors.Is(r.Context().Err(), context.Canceled) {
 				voidUsage()
 				writeOpenAIError(w, 499, "api_error", "Client disconnected before upstream completed")
-				h.finalizeUsageEvent(r, usageID, nil, 499, "client_disconnect", "client_disconnect", time.Since(reqStart), 0, false, reqBytes, 0)
+				h.finalizeUsageEventWithModelCheck(r, usageID, nil, 499, "client_disconnect", "client_disconnect", time.Since(reqStart), 0, false, reqBytes, 0, forwardedModel, nil)
 				return
 			}
 			if errors.Is(r.Context().Err(), context.DeadlineExceeded) {
@@ -253,7 +318,7 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 					timeoutMs = 0
 				}
 				writeOpenAIError(w, http.StatusGatewayTimeout, "upstream_error", "Upstream timeout after "+strconv.FormatInt(timeoutMs, 10)+"ms")
-				h.finalizeUsageEvent(r, usageID, nil, http.StatusGatewayTimeout, "upstream_timeout", "upstream_timeout", time.Since(reqStart), 0, false, reqBytes, 0)
+				h.finalizeUsageEventWithModelCheck(r, usageID, nil, http.StatusGatewayTimeout, "upstream_timeout", "upstream_timeout", time.Since(reqStart), 0, false, reqBytes, 0, forwardedModel, nil)
 				return
 			}
 			if errors.Is(err, context.DeadlineExceeded) {
@@ -316,7 +381,7 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 				msg = summarizeUpstreamErrorBody(capBuf.buf.Bytes())
 			}
 			h.maybeLogProxyFailure(r.Context(), r, p, nil, modelPtr, resp.StatusCode, "upstream_status", msg, time.Since(reqStart), false)
-			h.finalizeUsageEvent(r, usageID, nil, resp.StatusCode, "upstream_status", msg, time.Since(reqStart), 0, false, reqBytes, respBytes)
+			h.finalizeUsageEventWithModelCheck(r, usageID, nil, resp.StatusCode, "upstream_status", msg, time.Since(reqStart), 0, false, reqBytes, respBytes, forwardedModel, nil)
 			return
 		}
 
@@ -333,13 +398,15 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 		if copyErr != nil {
 			voidUsage()
 			h.maybeLogProxyFailure(r.Context(), r, p, nil, modelPtr, resp.StatusCode, "proxy_copy", copyErr.Error(), time.Since(reqStart), false)
-			h.finalizeUsageEvent(r, usageID, nil, resp.StatusCode, "proxy_copy", "", time.Since(reqStart), 0, false, reqBytes, respBytes)
+			h.finalizeUsageEventWithModelCheck(r, usageID, nil, resp.StatusCode, "proxy_copy", "", time.Since(reqStart), 0, false, reqBytes, respBytes, forwardedModel, nil)
 			return
 		}
 
 		var inTok, outTok, cachedInTok, cachedOutTok *int64
+		var responseModel *string
 		if !capBuf.exceeded {
 			inTok, outTok, cachedInTok, cachedOutTok = extractUsageTokens(capBuf.buf.Bytes())
+			responseModel = extractTopLevelModel(capBuf.buf.Bytes())
 		}
 		if usageID != 0 && h.quota != nil {
 			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -356,7 +423,7 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 
-		h.finalizeUsageEvent(r, usageID, nil, resp.StatusCode, "", "", time.Since(reqStart), 0, false, reqBytes, respBytes)
+		h.finalizeUsageEventWithModelCheck(r, usageID, nil, resp.StatusCode, "", "", time.Since(reqStart), 0, false, reqBytes, respBytes, forwardedModel, responseModel)
 		return
 	}
 
@@ -371,5 +438,5 @@ func (h *Handler) ResponsesCompact(w http.ResponseWriter, r *http.Request) {
 	if failResp.SkipMonitoring {
 		finalClass = ""
 	}
-	h.finalizeUsageEvent(r, usageID, nil, failResp.Status, finalClass, failResp.UsageMessage, time.Since(reqStart), 0, false, reqBytes, cw.bytes)
+	h.finalizeUsageEventWithModelCheck(r, usageID, nil, failResp.Status, finalClass, failResp.UsageMessage, time.Since(reqStart), 0, false, reqBytes, cw.bytes, lastForwardedModel, nil)
 }

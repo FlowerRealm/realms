@@ -1095,7 +1095,9 @@ export function UsageAdminPage() {
                         </tr>
                       </thead>
                       <tbody className="small">
-                        {events.map((e) => (
+                        {events.map((e) => {
+                          const modelCheck = detailByEventID[e.id]?.model_check;
+                          return (
                           <>
                             <tr
                               key={e.id}
@@ -1190,6 +1192,11 @@ export function UsageAdminPage() {
                                     {serviceTierBadgeLabel(e.service_tier)}
                                   </div>
                                 ) : null}
+                                {e.model_mismatch ? (
+                                  <div className="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill px-2 scale-90 mt-1">
+                                    MODEL
+                                  </div>
+                                ) : null}
                                 {e.error ? (
                                   <div
                                     className="text-danger smaller mt-1"
@@ -1279,6 +1286,44 @@ export function UsageAdminPage() {
                                             )}
                                           </div>
                                         </div>
+                                        {modelCheck ? (
+                                          <>
+                                            <div className="col-12 col-lg-4">
+                                              <div className="text-muted smaller">
+                                                转发模型
+                                              </div>
+                                              <div className="font-monospace text-break">
+                                                {modelCheck.forwarded_model ||
+                                                  "-"}
+                                              </div>
+                                            </div>
+                                            <div className="col-12 col-lg-4">
+                                              <div className="text-muted smaller">
+                                                上游返回模型
+                                              </div>
+                                              <div className="font-monospace text-break">
+                                                {modelCheck.upstream_response_model ||
+                                                  "-"}
+                                              </div>
+                                            </div>
+                                            <div className="col-12 col-lg-4">
+                                              <div className="text-muted smaller">
+                                                模型一致性
+                                              </div>
+                                              <div
+                                                className={
+                                                  modelCheck.mismatch
+                                                    ? "text-danger fw-bold"
+                                                    : "text-success fw-bold"
+                                                }
+                                              >
+                                                {modelCheck.mismatch
+                                                  ? "不一致"
+                                                  : "一致"}
+                                              </div>
+                                            </div>
+                                          </>
+                                        ) : null}
 
                                         {detailByEventID[e.id]
                                           ?.pricing_breakdown ? (
@@ -1418,7 +1463,7 @@ export function UsageAdminPage() {
                               </tr>
                             ) : null}
                           </>
-                        ))}
+                        )})}
                         {events.length === 0 ? (
                           <tr>
                             <td

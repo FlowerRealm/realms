@@ -264,6 +264,8 @@ CREATE TABLE IF NOT EXISTS `usage_events` (
   `upstream_credential_id` INTEGER NULL,
   `state` TEXT NOT NULL,
   `model` TEXT NULL,
+  `forwarded_model` TEXT NULL,
+  `upstream_response_model` TEXT NULL,
   `service_tier` TEXT NULL,
   `input_tokens` INTEGER NULL,
   `cached_input_tokens` INTEGER NULL,
