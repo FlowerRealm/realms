@@ -51,19 +51,8 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 	}
 	*c = Config(raw)
 
-	if hasYAMLKey(value, "compact_gateway") {
-		return nil
-	}
-	for i := 0; i+1 < len(value.Content); i += 2 {
-		if strings.TrimSpace(value.Content[i].Value) != "sub2api" {
-			continue
-		}
-		var legacy CompactGatewayConfig
-		if err := value.Content[i+1].Decode(&legacy); err != nil {
-			return err
-		}
-		c.CompactGateway = legacy
-		return nil
+	if hasYAMLKey(value, "sub2api") {
+		return errors.New("sub2api 已移除；请改用 compact_gateway")
 	}
 	return nil
 }
@@ -214,9 +203,25 @@ func LoadFromEnv() (Config, error) {
 	if v := strings.TrimSpace(os.Getenv("REALMS_MODE")); v != "" {
 		return Config{}, fmt.Errorf("REALMS_MODE 已移除（检测到 %q）；请删除该配置并使用统一模式启动", v)
 	}
+	if err := rejectRemovedEnv("REALMS_SUB2API_BASE_URL", "REALMS_COMPACT_GATEWAY_BASE_URL"); err != nil {
+		return Config{}, err
+	}
+	if err := rejectRemovedEnv("REALMS_SUB2API_GATEWAY_KEY", "REALMS_COMPACT_GATEWAY_KEY"); err != nil {
+		return Config{}, err
+	}
+	if err := rejectRemovedEnv("REALMS_SUB2API_TIMEOUT_MS", "REALMS_COMPACT_GATEWAY_TIMEOUT_MS"); err != nil {
+		return Config{}, err
+	}
 	cfg := defaultConfig()
 	applyEnvOverrides(&cfg)
 	return normalizeAndValidate(cfg)
+}
+
+func rejectRemovedEnv(legacyName string, replacementName string) error {
+	if strings.TrimSpace(os.Getenv(legacyName)) == "" {
+		return nil
+	}
+	return fmt.Errorf("%s 已移除；请改用 %s", legacyName, replacementName)
 }
 
 func normalizeAndValidate(cfg Config) (Config, error) {
@@ -578,19 +583,11 @@ func applyEnvOverrides(cfg *Config) {
 
 	if v := os.Getenv("REALMS_COMPACT_GATEWAY_BASE_URL"); v != "" {
 		cfg.CompactGateway.BaseURL = v
-	} else if v := os.Getenv("REALMS_SUB2API_BASE_URL"); v != "" {
-		cfg.CompactGateway.BaseURL = v
 	}
 	if v := os.Getenv("REALMS_COMPACT_GATEWAY_KEY"); v != "" {
 		cfg.CompactGateway.GatewayKey = v
-	} else if v := os.Getenv("REALMS_SUB2API_GATEWAY_KEY"); v != "" {
-		cfg.CompactGateway.GatewayKey = v
 	}
 	if v := os.Getenv("REALMS_COMPACT_GATEWAY_TIMEOUT_MS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.CompactGateway.TimeoutMS = n
-		}
-	} else if v := os.Getenv("REALMS_SUB2API_TIMEOUT_MS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.CompactGateway.TimeoutMS = n
 		}
