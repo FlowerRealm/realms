@@ -772,8 +772,15 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), extractTopLevelModel(rewritten), usageID, reqStart, reqBytes, loopStart, 2, &bestFailure) {
+		selectionRetries := 2
+		if shouldPreferSequentialChannelSwitch(cons, bindingCredentialPinned) {
+			selectionRetries = 1
+		}
+		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), extractTopLevelModel(rewritten), usageID, reqStart, reqBytes, loopStart, selectionRetries, &bestFailure) {
 			return
+		}
+		if shouldPreferSequentialChannelSwitch(cons, bindingCredentialPinned) {
+			router.ExcludeChannel(sel.ChannelID)
 		}
 		if bindingCredentialPinned {
 			bindingCredentialPinned = false
@@ -1927,6 +1934,13 @@ func shouldRetrySameSelection(scope scheduler.FailureScope, statusCode int, erro
 		}
 	}
 	return false
+}
+
+func shouldPreferSequentialChannelSwitch(cons scheduler.Constraints, bindingCredentialPinned bool) bool {
+	if bindingCredentialPinned || !cons.SequentialChannelFailover {
+		return false
+	}
+	return len(cons.AllowChannelIDs) > 1
 }
 
 func resetStatusCode(status int, statusCodeMapping string) int {
