@@ -60,11 +60,17 @@ export OPENAI_API_KEY="sk_..."
 - `REALMS_PUBLIC_BASE_URL`
 - `REALMS_CORS_ALLOW_ORIGINS`
 - `REALMS_ADMIN_API_KEY`
+- `REALMS_COMPACT_GATEWAY_BASE_URL`
+- `REALMS_COMPACT_GATEWAY_KEY`
+- `REALMS_COMPACT_GATEWAY_TIMEOUT_MS`
 - `FRONTEND_DIST_DIR`
 - `FRONTEND_BASE_URL`
+
+`/v1/responses/compact` 仅通过 `compact gateway` 转发到远程上游；如果需要启用这条链路，请配置 `REALMS_COMPACT_GATEWAY_*`。旧的 `REALMS_SUB2API_*` 已移除，继续使用会在启动时直接报错。
 
 ## 重要变更
 
 - `REALMS_MODE` 已移除；设置该变量会直接报错
+- `REALMS_SUB2API_*` 已移除；请改用 `REALMS_COMPACT_GATEWAY_*`
 - `cmd/realms-app`、`make app-dev`、`make app-dist`、`make app-set-key` 已删除
 - `web/dist-personal`、`npm --prefix web run build:personal` 与 personal embed 产物已删除
