@@ -112,6 +112,11 @@ export type UsageEventPricingBreakdown = {
   model_public_id?: string;
   model_found: boolean;
   service_tier?: string;
+  pricing_kind?: string;
+  high_context_applied: boolean;
+  high_context_threshold_tokens: number;
+  high_context_trigger_input_tokens: number;
+  effective_service_tier?: string;
 
   input_tokens_total: number;
   input_tokens_cached: number;

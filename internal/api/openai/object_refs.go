@@ -110,6 +110,27 @@ func (h *Handler) recordOpenAIObjectRef(ctx context.Context, objectType string, 
 	})
 }
 
+func (h *Handler) resolveFixedRouteSelection(ctx context.Context, userID int64, sel scheduler.Selection) scheduler.Selection {
+	if h == nil || h.sched == nil {
+		return sel
+	}
+	if sel.ChannelID <= 0 || sel.EndpointID <= 0 {
+		return sel
+	}
+	if !h.sched.IsEndpointCooling(sel.EndpointID) {
+		return sel
+	}
+	cons := scheduler.Constraints{
+		RequireChannelID:   sel.ChannelID,
+		RequireChannelType: sel.ChannelType,
+	}
+	next, err := h.sched.SelectWithConstraints(ctx, userID, "", cons)
+	if err != nil || next.EndpointID <= 0 {
+		return sel
+	}
+	return next
+}
+
 func (h *Handler) ownedSelection(ctx context.Context, p auth.Principal, objectType string, objectID string) (scheduler.Selection, bool) {
 	if h == nil || h.refs == nil {
 		return scheduler.Selection{}, false
@@ -125,7 +146,7 @@ func (h *Handler) ownedSelection(ctx context.Context, p auth.Principal, objectTy
 	if err := json.Unmarshal([]byte(ref.SelectionJSON), &sel); err != nil {
 		return scheduler.Selection{}, false
 	}
-	return sel, true
+	return h.resolveFixedRouteSelection(ctx, p.UserID, sel), true
 }
 
 func writeNotFound(w http.ResponseWriter) {

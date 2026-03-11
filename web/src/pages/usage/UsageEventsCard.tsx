@@ -244,6 +244,23 @@ export function UsageEventsCard({
                                     </div>
                                   </>
                                 ) : null}
+                                <div className="col-12 col-lg-4">
+                                  <div className="text-muted smaller">生效定价</div>
+                                  <div className="font-monospace">
+                                    {detailByEventID[e.id]?.pricing_breakdown?.pricing_kind || 'base'}
+                                    {detailByEventID[e.id]?.pricing_breakdown?.effective_service_tier
+                                      ? ` / ${serviceTierText(detailByEventID[e.id]?.pricing_breakdown?.effective_service_tier)}`
+                                      : ''}
+                                  </div>
+                                </div>
+                                <div className="col-12 col-lg-4">
+                                  <div className="text-muted smaller">高上下文触发</div>
+                                  <div className="font-monospace">
+                                    {detailByEventID[e.id]?.pricing_breakdown?.high_context_applied
+                                      ? `是（${formatIntComma(detailByEventID[e.id]?.pricing_breakdown?.high_context_trigger_input_tokens || 0)} > ${formatIntComma(detailByEventID[e.id]?.pricing_breakdown?.high_context_threshold_tokens || 0)}）`
+                                      : '否'}
+                                  </div>
+                                </div>
 
                                 {detailByEventID[e.id]?.pricing_breakdown ? (
                                   <div className="col-12">
@@ -258,6 +275,11 @@ export function UsageEventsCard({
                                           （{costSourceLabel(detailByEventID[e.id]?.pricing_breakdown?.cost_source || '')}费用: {formatUSD(detailByEventID[e.id]?.pricing_breakdown?.cost_source_usd || '0')}；倍率: 支付×{formatDecimalPlain(detailByEventID[e.id]?.pricing_breakdown?.payment_multiplier || '1')} × 渠道组({detailByEventID[e.id]?.pricing_breakdown?.group_name || 'default'})×{formatDecimalPlain(detailByEventID[e.id]?.pricing_breakdown?.group_multiplier || '1')}）
                                         </span>
                                       </div>
+                                      {detailByEventID[e.id]?.pricing_breakdown?.high_context_applied ? (
+                                        <div className="mt-1 text-muted smaller">
+                                          说明：本次输入 tokens 超过高上下文阈值，因此整单按高上下文价格结算，而不是只对超出阈值的部分加价。
+                                        </div>
+                                      ) : null}
                                     </div>
                                   </div>
                                 ) : null}

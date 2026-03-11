@@ -307,6 +307,72 @@ func TestExtractUsageTokens_FindsNestedUsage(t *testing.T) {
 	}
 }
 
+func TestClassifyNonRetriableFailureScope(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		want   scheduler.FailureScope
+	}{
+		{name: "unauthorized is credential scoped", status: http.StatusUnauthorized, want: scheduler.FailureScopeCredential},
+		{name: "payment required is credential scoped", status: http.StatusPaymentRequired, want: scheduler.FailureScopeCredential},
+		{name: "forbidden is credential scoped", status: http.StatusForbidden, want: scheduler.FailureScopeCredential},
+		{name: "bad request stays request scoped", status: http.StatusBadRequest, want: scheduler.FailureScopeRequest},
+		{name: "unprocessable stays request scoped", status: http.StatusUnprocessableEntity, want: scheduler.FailureScopeRequest},
+		{name: "not found is channel scoped", status: http.StatusNotFound, want: scheduler.FailureScopeChannel},
+		{name: "method not allowed is channel scoped", status: http.StatusMethodNotAllowed, want: scheduler.FailureScopeChannel},
+		{name: "internal error is endpoint scoped", status: http.StatusInternalServerError, want: scheduler.FailureScopeEndpoint},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyNonRetriableFailureScope(tc.status); got != tc.want {
+				t.Fatalf("scope=%q want=%q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsRetriableStreamFailure(t *testing.T) {
+	cases := []struct {
+		name       string
+		errorClass string
+		want       bool
+	}{
+		{name: "idle timeout is retriable", errorClass: "stream_idle_timeout", want: true},
+		{name: "read error is retriable", errorClass: "stream_read_error", want: true},
+		{name: "first byte timeout is retriable", errorClass: "stream_first_byte_timeout", want: true},
+		{name: "client disconnect is not retriable", errorClass: "client_disconnect", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isRetriableStreamFailure(tc.errorClass); got != tc.want {
+				t.Fatalf("retriable=%v want=%v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestReport_RequestScopedFailureSkipsChannelPenalty(t *testing.T) {
+	s := scheduler.New(&fakeStore{})
+	sel := scheduler.Selection{
+		ChannelID:      7,
+		EndpointID:     17,
+		CredentialType: scheduler.CredentialTypeOpenAI,
+		CredentialID:   99,
+		AutoBan:        true,
+	}
+	s.Report(sel, scheduler.Result{
+		Success:    false,
+		Retriable:  false,
+		StatusCode: http.StatusBadRequest,
+		ErrorClass: "upstream_status",
+		Scope:      scheduler.FailureScopeRequest,
+	})
+
+	if got := s.RuntimeChannelStats(sel.ChannelID); got.FailScore != 0 || got.BannedUntil != nil {
+		t.Fatalf("expected request-scoped failure not to punish channel, got=%+v", got)
+	}
+}
+
 func (d *fakeDoer) Do(_ context.Context, sel scheduler.Selection, _ *http.Request, body []byte) (*http.Response, error) {
 	d.calls = append(d.calls, sel)
 	d.bodies = append(d.bodies, body)
@@ -1031,6 +1097,257 @@ func TestResponses_RetrySameSelectionOnNetworkErrorBeforeFailover(t *testing.T) 
 	}
 }
 
+func TestResponses_RetryThenFailoverToSiblingEndpointWithinChannel(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1, Priority: 100},
+				{ID: 12, ChannelID: 1, BaseURL: "https://b.example", Status: 1, Priority: 10},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+			12: {
+				{ID: 2, EndpointID: 12, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {
+				ID:       1,
+				PublicID: "gpt-5.2",
+				Status:   1,
+			},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	var calls []scheduler.Selection
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		calls = append(calls, sel)
+		if sel.EndpointID == 11 {
+			return nil, errors.New("temporary endpoint dial failure")
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{
+		ActorType: auth.ActorTypeToken,
+		UserID:    10,
+		Role:      store.UserRoleUser,
+		TokenID:   &tokenID,
+		Groups:    []string{store.DefaultGroupName},
+	}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(calls) != 3 {
+		t.Fatalf("expected 3 attempts (retry same endpoint, then sibling endpoint), got=%d", len(calls))
+	}
+	if calls[0].EndpointID != 11 || calls[1].EndpointID != 11 {
+		t.Fatalf("expected first two attempts on endpoint=11, got=%+v", calls)
+	}
+	if calls[2].EndpointID != 12 {
+		t.Fatalf("expected failover to sibling endpoint=12, got=%d", calls[2].EndpointID)
+	}
+	for _, call := range calls {
+		if call.ChannelID != 1 {
+			t.Fatalf("expected all attempts to stay on channel=1, got calls=%+v", calls)
+		}
+	}
+}
+
+func TestResponses_Retry502ThenFailoverToSiblingEndpointWithinChannel(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1, Priority: 100},
+				{ID: 12, ChannelID: 1, BaseURL: "https://b.example", Status: 1, Priority: 10},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+			12: {
+				{ID: 2, EndpointID: 12, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {
+				ID:       1,
+				PublicID: "gpt-5.2",
+				Status:   1,
+			},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	var calls []scheduler.Selection
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		calls = append(calls, sel)
+		if sel.EndpointID == 11 {
+			return &http.Response{
+				StatusCode: http.StatusBadGateway,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(bytes.NewReader([]byte(`{"error":{"message":"bad gateway"}}`))),
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{
+		ActorType: auth.ActorTypeToken,
+		UserID:    10,
+		Role:      store.UserRoleUser,
+		TokenID:   &tokenID,
+		Groups:    []string{store.DefaultGroupName},
+	}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(calls) != 3 {
+		t.Fatalf("expected 3 attempts (retry same endpoint on 502, then sibling endpoint), got=%d", len(calls))
+	}
+	if calls[0].EndpointID != 11 || calls[1].EndpointID != 11 {
+		t.Fatalf("expected first two attempts on endpoint=11, got=%+v", calls)
+	}
+	if calls[2].EndpointID != 12 {
+		t.Fatalf("expected failover to sibling endpoint=12, got=%d", calls[2].EndpointID)
+	}
+}
+
+func TestResponses_404FailoverSkipsSiblingEndpointAndSwitchesChannel(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 100},
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 10},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			2: {
+				{ID: 21, ChannelID: 2, BaseURL: "https://bad-1.example", Status: 1, Priority: 100},
+				{ID: 22, ChannelID: 2, BaseURL: "https://bad-2.example", Status: 1, Priority: 10},
+			},
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://good.example", Status: 1, Priority: 100},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			21: {
+				{ID: 21, EndpointID: 21, Status: 1},
+			},
+			22: {
+				{ID: 22, EndpointID: 22, Status: 1},
+			},
+			11: {
+				{ID: 11, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 2, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+				{ID: 2, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	var calls []scheduler.Selection
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		calls = append(calls, sel)
+		if sel.ChannelID == 2 {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(bytes.NewReader([]byte(`{"error":{"message":"route missing"}}`))),
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5.2","input":"hi","stream":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{
+		ActorType: auth.ActorTypeToken,
+		UserID:    10,
+		Role:      store.UserRoleUser,
+		TokenID:   &tokenID,
+		Groups:    []string{store.DefaultGroupName},
+	}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(calls) != 2 {
+		t.Fatalf("expected direct channel failover after 404, got=%d", len(calls))
+	}
+	if calls[0].ChannelID != 2 || calls[0].EndpointID != 21 {
+		t.Fatalf("unexpected first call: %+v", calls[0])
+	}
+	if calls[1].ChannelID != 1 || calls[1].EndpointID != 11 {
+		t.Fatalf("expected second call on fallback channel endpoint=11, got=%+v", calls[1])
+	}
+}
+
 func TestResponses_ChannelRequestPolicy_IsPerChannelAttempt(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
@@ -1101,8 +1418,8 @@ func TestResponses_ChannelRequestPolicy_IsPerChannelAttempt(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
-	if len(calls) != 2 {
-		t.Fatalf("expected 2 attempts, got=%d", len(calls))
+	if len(calls) != 3 {
+		t.Fatalf("expected 3 attempts, got=%d", len(calls))
 	}
 
 	var first map[string]any
@@ -1122,8 +1439,25 @@ func TestResponses_ChannelRequestPolicy_IsPerChannelAttempt(t *testing.T) {
 		t.Fatalf("expected safety_identifier to be removed on channel 2")
 	}
 
+	var retry map[string]any
+	if err := json.Unmarshal(bodies[1], &retry); err != nil {
+		t.Fatalf("unmarshal retry body: %v", err)
+	}
+	if retry["model"] != "m1-up2" {
+		t.Fatalf("unexpected retry model: %v", retry["model"])
+	}
+	if _, ok := retry["service_tier"]; ok {
+		t.Fatalf("expected retry service_tier to be removed on channel 2")
+	}
+	if _, ok := retry["store"]; ok {
+		t.Fatalf("expected retry store to be removed on channel 2")
+	}
+	if _, ok := retry["safety_identifier"]; ok {
+		t.Fatalf("expected retry safety_identifier to be removed on channel 2")
+	}
+
 	var second map[string]any
-	if err := json.Unmarshal(bodies[1], &second); err != nil {
+	if err := json.Unmarshal(bodies[2], &second); err != nil {
 		t.Fatalf("unmarshal second body: %v", err)
 	}
 	if second["model"] != "m1-up1" {
@@ -1208,8 +1542,8 @@ func TestResponses_ChannelParamOverride_IsPerChannelAttempt(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
-	if len(calls) != 2 {
-		t.Fatalf("expected 2 attempts, got=%d", len(calls))
+	if len(calls) != 3 {
+		t.Fatalf("expected 3 attempts, got=%d", len(calls))
 	}
 
 	var first map[string]any
@@ -1227,8 +1561,23 @@ func TestResponses_ChannelParamOverride_IsPerChannelAttempt(t *testing.T) {
 		t.Fatalf("expected store to be present on channel 2")
 	}
 
+	var retry map[string]any
+	if err := json.Unmarshal(bodies[1], &retry); err != nil {
+		t.Fatalf("unmarshal retry body: %v", err)
+	}
+	if retry["model"] != "m1-up2" {
+		t.Fatalf("unexpected retry model: %v", retry["model"])
+	}
+	metaRetry, _ := retry["metadata"].(map[string]any)
+	if metaRetry == nil || metaRetry["channel"] != "b" {
+		t.Fatalf("unexpected retry metadata: %+v", retry["metadata"])
+	}
+	if _, ok := retry["store"]; !ok {
+		t.Fatalf("expected retry store to be present on channel 2")
+	}
+
 	var second map[string]any
-	if err := json.Unmarshal(bodies[1], &second); err != nil {
+	if err := json.Unmarshal(bodies[2], &second); err != nil {
 		t.Fatalf("unmarshal second body: %v", err)
 	}
 	if second["model"] != "m1-up1" {
@@ -1437,8 +1786,8 @@ func TestResponses_ModelSuffixEffort_IsPerChannelAttempt(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
-	if len(bodies) != 2 {
-		t.Fatalf("expected 2 attempts, got=%d", len(bodies))
+	if len(bodies) != 3 {
+		t.Fatalf("expected 3 attempts, got=%d", len(bodies))
 	}
 
 	var first map[string]any
@@ -1452,8 +1801,19 @@ func TestResponses_ModelSuffixEffort_IsPerChannelAttempt(t *testing.T) {
 		t.Fatalf("expected reasoning to be absent when preserved, got=%v", first["reasoning"])
 	}
 
+	var retry map[string]any
+	if err := json.Unmarshal(bodies[1], &retry); err != nil {
+		t.Fatalf("unmarshal retry body: %v", err)
+	}
+	if retry["model"] != "o1-mini-high" {
+		t.Fatalf("expected retry preserved model=o1-mini-high, got=%v", retry["model"])
+	}
+	if _, ok := retry["reasoning"]; ok {
+		t.Fatalf("expected retry reasoning to be absent when preserved, got=%v", retry["reasoning"])
+	}
+
 	var second map[string]any
-	if err := json.Unmarshal(bodies[1], &second); err != nil {
+	if err := json.Unmarshal(bodies[2], &second); err != nil {
 		t.Fatalf("unmarshal second body: %v", err)
 	}
 	if second["model"] != "o1-mini" {
@@ -1531,8 +1891,8 @@ func TestResponses_ChannelBodyFilters_ArePerChannelAttempt(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
 	}
-	if len(bodies) != 2 {
-		t.Fatalf("expected 2 attempts, got=%d", len(bodies))
+	if len(bodies) != 3 {
+		t.Fatalf("expected 3 attempts, got=%d", len(bodies))
 	}
 
 	var first map[string]any
@@ -1553,8 +1913,26 @@ func TestResponses_ChannelBodyFilters_ArePerChannelAttempt(t *testing.T) {
 		t.Fatalf("expected metadata.trace to be removed on channel 2, got=%v", meta1["trace"])
 	}
 
+	var retry map[string]any
+	if err := json.Unmarshal(bodies[1], &retry); err != nil {
+		t.Fatalf("unmarshal retry body: %v", err)
+	}
+	if retry["model"] != "m1-up2" {
+		t.Fatalf("unexpected retry model: %v", retry["model"])
+	}
+	if _, ok := retry["extra"]; ok {
+		t.Fatalf("expected retry extra to be removed on channel 2")
+	}
+	metaRetry, _ := retry["metadata"].(map[string]any)
+	if metaRetry == nil || metaRetry["keep"] != "k" {
+		t.Fatalf("expected retry metadata.keep=k on channel 2, got=%v", retry["metadata"])
+	}
+	if _, ok := metaRetry["trace"]; ok {
+		t.Fatalf("expected retry metadata.trace to be removed on channel 2, got=%v", metaRetry["trace"])
+	}
+
 	var second map[string]any
-	if err := json.Unmarshal(bodies[1], &second); err != nil {
+	if err := json.Unmarshal(bodies[2], &second); err != nil {
 		t.Fatalf("unmarshal second body: %v", err)
 	}
 	if second["model"] != "m1-up1" {
@@ -2232,6 +2610,127 @@ func TestResponses_CodexSession_ClearSticky_NoUserText_KeepsCompaction(t *testin
 	}
 }
 
+func TestResponses_CodexSession_FastModeUnsupportedClearsStickyAndSwitchesChannel(t *testing.T) {
+	decimalPtr := func(v string) *decimal.Decimal {
+		d, err := decimal.NewFromString(v)
+		if err != nil {
+			t.Fatalf("decimal parse: %v", err)
+		}
+		return &d
+	}
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, AllowServiceTier: true, FastMode: false},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 0, AllowServiceTier: true, FastMode: true},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+			2: {
+				{ID: 22, ChannelID: 2, BaseURL: "https://b.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+			},
+			22: {
+				{ID: 222, EndpointID: 22, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {
+				ID:                     1,
+				PublicID:               "gpt-5.2",
+				GroupName:              store.DefaultGroupName,
+				InputUSDPer1M:          decimal.NewFromInt(1),
+				OutputUSDPer1M:         decimal.NewFromInt(1),
+				CacheInputUSDPer1M:     decimal.Zero,
+				CacheOutputUSDPer1M:    decimal.Zero,
+				PriorityPricingEnabled: true,
+				PriorityInputUSDPer1M:  decimalPtr("2"),
+				PriorityOutputUSDPer1M: decimalPtr("3"),
+				Status:                 1,
+			},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+				{ID: 2, ChannelID: 2, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	var secondSel scheduler.Selection
+	var secondBody []byte
+	callCount := 0
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, body []byte) (*http.Response, error) {
+		callCount++
+		if callCount == 2 {
+			secondSel = sel
+			secondBody = append([]byte(nil), body...)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+	h.SetGatewayPolicy(GatewayPolicy{MaxFailoverSwitches: 2})
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+
+	req1 := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses",
+		bytes.NewReader([]byte(`{"model":"gpt-5.2","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":false,"prompt_cache_key":"rk_fast_mode"}`)))
+	req1.Header.Set("Content-Type", "application/json")
+	req1 = req1.WithContext(auth.WithPrincipal(req1.Context(), p))
+	rr1 := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr1, req1)
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr1.Code, rr1.Body.String())
+	}
+
+	fs.channels = []store.UpstreamChannel{
+		{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, AllowServiceTier: true, FastMode: false},
+		{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, AllowServiceTier: true, FastMode: true},
+	}
+
+	req2 := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses",
+		bytes.NewReader([]byte(`{"model":"gpt-5.2","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}],"stream":false,"prompt_cache_key":"rk_fast_mode","service_tier":"fast"}`)))
+	req2.Header.Set("Content-Type", "application/json")
+	req2 = req2.WithContext(auth.WithPrincipal(req2.Context(), p))
+	rr2 := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got=%d body=%s", rr2.Code, rr2.Body.String())
+	}
+	if got := rr2.Header().Get("X-Realms-Codex-Sticky-Cleared"); got != "1" {
+		t.Fatalf("expected sticky cleared header, got=%q", got)
+	}
+	if secondSel.ChannelID != 2 {
+		t.Fatalf("expected switch to fast-mode channel 2, got=%d", secondSel.ChannelID)
+	}
+	if got := gjson.GetBytes(secondBody, "service_tier").String(); got != "priority" {
+		t.Fatalf("expected forwarded service_tier=priority, got=%q body=%s", got, string(secondBody))
+	}
+	payload, ok, err := fs.GetSessionBindingPayload(context.Background(), 10, sched.RouteKeyHash("rk_fast_mode"), time.Now())
+	if err != nil || !ok {
+		t.Fatalf("expected session binding to exist after switch, ok=%v err=%v", ok, err)
+	}
+	route, parsed := parseCodexStickyBindingPayload(payload, time.Now())
+	if !parsed {
+		t.Fatalf("expected binding payload to parse, payload=%s", payload)
+	}
+	if route.channelID != 2 {
+		t.Fatalf("expected binding to move to channel 2, got=%d payload=%s", route.channelID, payload)
+	}
+}
+
 func TestResponses_CodexSession_BindingPersistsAcrossHandlerInstances(t *testing.T) {
 	sha256Hex := func(s string) string {
 		sum := sha256.Sum256([]byte(s))
@@ -2335,6 +2834,456 @@ func TestResponses_CodexSession_BindingPersistsAcrossHandlerInstances(t *testing
 	}
 	if doer2.calls[0].ChannelID != 2 {
 		t.Fatalf("expected stored binding to force channel 2, got=%d", doer2.calls[0].ChannelID)
+	}
+}
+
+func TestResponses_CodexSession_BindingPersistsCredentialAcrossHandlerInstances(t *testing.T) {
+	sha256Hex := func(s string) string {
+		sum := sha256.Sum256([]byte(s))
+		return hex.EncodeToString(sum[:])
+	}
+	rendezvousScore64 := func(routeKeyHash, kind string, id int64) uint64 {
+		key := routeKeyHash + ":" + kind + ":" + strconv.FormatInt(id, 10)
+		sum := sha256.Sum256([]byte(key))
+		return binary.BigEndian.Uint64(sum[:8])
+	}
+
+	routeKey := ""
+	for i := 0; i < 2000; i++ {
+		candidate := fmt.Sprintf("rk_test_cred_%d", i)
+		rkh := sha256Hex(candidate)
+		if rendezvousScore64(rkh, string(scheduler.CredentialTypeOpenAI), 112) > rendezvousScore64(rkh, string(scheduler.CredentialTypeOpenAI), 111) {
+			routeKey = candidate
+			break
+		}
+	}
+	if routeKey == "" {
+		t.Fatalf("failed to find a routeKey that prefers credential 112")
+	}
+
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	doer1 := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+
+	sched1 := scheduler.New(fs)
+	h1 := NewHandler(fs, fs, sched1, doer1, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+
+	req1 := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses",
+		bytes.NewReader([]byte(fmt.Sprintf(`{"model":"gpt-5.2","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":false,"prompt_cache_key":%q}`, routeKey))))
+	req1.Header.Set("Content-Type", "application/json")
+	req1 = req1.WithContext(auth.WithPrincipal(req1.Context(), p))
+	rr1 := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h1.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr1, req1)
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr1.Code, rr1.Body.String())
+	}
+
+	payload, ok, err := fs.GetSessionBindingPayload(context.Background(), 10, sched1.RouteKeyHash(routeKey), time.Now())
+	if err != nil || !ok {
+		t.Fatalf("expected session binding after first request, ok=%v err=%v", ok, err)
+	}
+	route, parsed := parseCodexStickyBindingPayload(payload, time.Now())
+	if !parsed {
+		t.Fatalf("expected sticky payload to parse, payload=%s", payload)
+	}
+	if route.channelID != 1 {
+		t.Fatalf("expected sticky channel=1, got=%d payload=%s", route.channelID, payload)
+	}
+	if got := route.credentialKey; got != "openai_compatible:111" {
+		t.Fatalf("expected sticky credential openai_compatible:111, got=%q payload=%s", got, payload)
+	}
+
+	fs.creds[11] = []store.OpenAICompatibleCredential{
+		{ID: 111, EndpointID: 11, Status: 1},
+		{ID: 112, EndpointID: 11, Status: 1},
+	}
+
+	doer2 := &okDoer{}
+	sched2 := scheduler.New(fs)
+	h2 := NewHandler(fs, fs, sched2, doer2, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+
+	req2 := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses",
+		bytes.NewReader([]byte(fmt.Sprintf(`{"model":"gpt-5.2","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}],"stream":false,"prompt_cache_key":%q}`, routeKey))))
+	req2.Header.Set("Content-Type", "application/json")
+	req2 = req2.WithContext(auth.WithPrincipal(req2.Context(), p))
+	rr2 := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h2.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr2.Code, rr2.Body.String())
+	}
+	if len(doer2.calls) != 1 {
+		t.Fatalf("expected 1 upstream call, got=%d", len(doer2.calls))
+	}
+	if doer2.calls[0].ChannelID != 1 {
+		t.Fatalf("expected stored binding to keep channel 1, got=%d", doer2.calls[0].ChannelID)
+	}
+	if doer2.calls[0].CredentialKey() != "openai_compatible:111" {
+		t.Fatalf("expected stored binding to keep credential openai_compatible:111, got=%q", doer2.calls[0].CredentialKey())
+	}
+}
+
+func TestResponses_CodexSession_FallsBackWithinSameChannelBeforeMovingForward(t *testing.T) {
+	routeKey := "rk_same_channel_takeover"
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+			2: {
+				{ID: 22, ChannelID: 2, BaseURL: "https://b.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+				{ID: 112, EndpointID: 11, Status: 1},
+			},
+			22: {
+				{ID: 222, EndpointID: 22, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+				{ID: 2, ChannelID: 2, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	schedSeed := scheduler.New(fs)
+	if err := fs.UpsertSessionBindingPayload(
+		context.Background(),
+		10,
+		schedSeed.RouteKeyHash(routeKey),
+		`{"kind":"codex_route_v1","channel_id":1,"credential_key":"openai_compatible:111"}`,
+		time.Now().Add(30*time.Minute),
+	); err != nil {
+		t.Fatalf("seed sticky binding err: %v", err)
+	}
+
+	var calls []scheduler.Selection
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		calls = append(calls, sel)
+		if sel.ChannelID == 1 && sel.CredentialID == 111 {
+			return &http.Response{
+				StatusCode: http.StatusPaymentRequired,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(bytes.NewReader([]byte(`{"error":{"message":"insufficient"}}`))),
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses",
+		bytes.NewReader([]byte(fmt.Sprintf(`{"model":"gpt-5.2","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":false,"prompt_cache_key":%q}`, routeKey))))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(calls) != 2 {
+		t.Fatalf("expected pinned credential failure then same-channel takeover, got=%d calls=%+v", len(calls), calls)
+	}
+	if calls[0].ChannelID != 1 || calls[0].CredentialID != 111 {
+		t.Fatalf("expected first attempt on sticky channel/credential 1/111, got=%d/%d", calls[0].ChannelID, calls[0].CredentialID)
+	}
+	if calls[1].ChannelID != 1 || calls[1].CredentialID != 112 {
+		t.Fatalf("expected second attempt to stay on channel 1 and takeover credential 112, got=%d/%d", calls[1].ChannelID, calls[1].CredentialID)
+	}
+	for _, call := range calls {
+		if call.ChannelID == 2 {
+			t.Fatalf("expected no forward failover while channel 1 still had usable credential, calls=%+v", calls)
+		}
+	}
+	if got := rr.Header().Get("X-Realms-Codex-Sticky-Cleared"); got != "" {
+		t.Fatalf("expected sticky channel to remain active during same-channel takeover, got header=%q", got)
+	}
+}
+
+func TestResponses_CodexSession_DoesNotRelaxPinnedCredentialOnSchedulerError(t *testing.T) {
+	routeKey := "rk_scheduler_error"
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+				{ID: 112, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	schedSeed := scheduler.New(fs)
+	if err := fs.UpsertSessionBindingPayload(
+		context.Background(),
+		10,
+		schedSeed.RouteKeyHash(routeKey),
+		`{"kind":"codex_route_v1","channel_id":1,"credential_key":"openai_compatible:111"}`,
+		time.Now().Add(30*time.Minute),
+	); err != nil {
+		t.Fatalf("seed sticky binding err: %v", err)
+	}
+
+	fs.endpoints = map[int64][]store.UpstreamEndpoint{
+		1: nil,
+	}
+
+	var calls []scheduler.Selection
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		calls = append(calls, sel)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses",
+		bytes.NewReader([]byte(fmt.Sprintf(`{"model":"gpt-5.2","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":false,"prompt_cache_key":%q}`, routeKey))))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("expected scheduler error to surface as upstream unavailable, got=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(calls) != 0 {
+		t.Fatalf("expected no upstream call when scheduler cannot build a selection, got calls=%+v", calls)
+	}
+}
+
+func TestResponses_SequentialFailoverAlsoAppliesWithoutStickySession(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			2: {
+				{ID: 21, ChannelID: 2, BaseURL: "https://b.example", Status: 1},
+			},
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			21: {
+				{ID: 2, EndpointID: 21, Status: 1},
+			},
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"m1": {ID: 1, PublicID: "m1", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"m1": {
+				{ID: 1, ChannelID: 2, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "m1-up2", Status: 1},
+				{ID: 2, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "m1-up1", Status: 1},
+			},
+		},
+	}
+
+	var calls []scheduler.Selection
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		calls = append(calls, sel)
+		if sel.ChannelID == 2 {
+			return &http.Response{
+				StatusCode: http.StatusBadGateway,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(bytes.NewReader([]byte(`{"error":{"message":"upstream down"}}`))),
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(calls) != 2 {
+		t.Fatalf("expected sequential failover across channels for non-sticky request, got=%d calls=%+v", len(calls), calls)
+	}
+	if calls[0].ChannelID != 2 || calls[1].ChannelID != 1 {
+		t.Fatalf("expected failover order 2 -> 1, got calls=%+v", calls)
+	}
+	if payload, ok, err := fs.GetSessionBindingPayload(context.Background(), 10, sched.RouteKeyHash(""), time.Now()); err != nil {
+		t.Fatalf("unexpected sticky payload lookup err: %v", err)
+	} else if ok || payload != "" {
+		t.Fatalf("expected non-sticky request not to persist session binding, ok=%v payload=%q", ok, payload)
+	}
+}
+
+func TestResponses_CodexSession_ClearsStaleStartBindingBeforeRestartingFromHead(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 0},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+			2: {
+				{ID: 22, ChannelID: 2, BaseURL: "https://b.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+			},
+			22: {
+				{ID: 222, EndpointID: 22, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"gpt-5.2": {ID: 1, PublicID: "gpt-5.2", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"gpt-5.2": {
+				{ID: 1, ChannelID: 2, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+				{ID: 2, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+			},
+		},
+	}
+
+	doer1 := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+	sched1 := scheduler.New(fs)
+	h1 := NewHandler(fs, fs, sched1, doer1, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+
+	req1 := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses",
+		bytes.NewReader([]byte(`{"model":"gpt-5.2","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":false,"prompt_cache_key":"rk_stale_start"}`)))
+	req1.Header.Set("Content-Type", "application/json")
+	req1 = req1.WithContext(auth.WithPrincipal(req1.Context(), p))
+	rr1 := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h1.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr1, req1)
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr1.Code, rr1.Body.String())
+	}
+
+	fs.channels = []store.UpstreamChannel{
+		{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+	}
+	fs.bindings["gpt-5.2"] = []store.ChannelModelBinding{
+		{ID: 2, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "gpt-5.2", UpstreamModel: "gpt-5.2", Status: 1},
+	}
+
+	doer2 := &okDoer{}
+	sched2 := scheduler.New(fs)
+	h2 := NewHandler(fs, fs, sched2, doer2, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+
+	req2 := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses",
+		bytes.NewReader([]byte(`{"model":"gpt-5.2","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}],"stream":false,"prompt_cache_key":"rk_stale_start"}`)))
+	req2.Header.Set("Content-Type", "application/json")
+	req2 = req2.WithContext(auth.WithPrincipal(req2.Context(), p))
+	rr2 := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h2.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr2.Code, rr2.Body.String())
+	}
+	if got := rr2.Header().Get("X-Realms-Codex-Sticky-Cleared"); got != "1" {
+		t.Fatalf("expected stale sticky header cleared, got=%q", got)
+	}
+	if len(doer2.calls) != 1 {
+		t.Fatalf("expected 1 upstream call, got=%d", len(doer2.calls))
+	}
+	if doer2.calls[0].ChannelID != 1 {
+		t.Fatalf("expected restart from head to channel 1, got=%d", doer2.calls[0].ChannelID)
 	}
 }
 
@@ -3665,7 +4614,7 @@ func TestResponses_ContextCanceledDuringRouterNext_FinalizesAsClientDisconnect(t
 	}
 }
 
-func TestResponses_FastModeUnsupportedReturnsBadRequest(t *testing.T) {
+func TestResponses_FastModeUnsupportedFallsBackToExhaustedResponse(t *testing.T) {
 	decimalPtr := func(v string) *decimal.Decimal {
 		d, err := decimal.NewFromString(v)
 		if err != nil {
@@ -3719,11 +4668,11 @@ func TestResponses_FastModeUnsupportedReturnsBadRequest(t *testing.T) {
 	rr := httptest.NewRecorder()
 	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got=%d body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got=%d body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(strings.ToLower(rr.Body.String()), "fast mode") && !strings.Contains(rr.Body.String(), "Fast mode") {
-		t.Fatalf("expected fast mode error, got=%s", rr.Body.String())
+	if !strings.Contains(rr.Body.String(), `"upstream_error"`) {
+		t.Fatalf("expected upstream_error body, got=%s", rr.Body.String())
 	}
 	if len(q.reserveCalls) != 1 {
 		t.Fatalf("expected reserve called once, got=%d", len(q.reserveCalls))
@@ -3736,6 +4685,91 @@ func TestResponses_FastModeUnsupportedReturnsBadRequest(t *testing.T) {
 	}
 	if len(q.commitCalls) != 0 {
 		t.Fatalf("expected commit not called, got=%d", len(q.commitCalls))
+	}
+}
+
+func TestResponses_FastModeUnsupportedFailoversToFastModeChannel(t *testing.T) {
+	decimalPtr := func(v string) *decimal.Decimal {
+		d, err := decimal.NewFromString(v)
+		if err != nil {
+			t.Fatalf("decimal parse: %v", err)
+		}
+		return &d
+	}
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, AllowServiceTier: true, FastMode: false, Groups: store.DefaultGroupName, Priority: 10},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, AllowServiceTier: true, FastMode: true, Groups: store.DefaultGroupName, Priority: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1}},
+			2: {{ID: 22, ChannelID: 2, BaseURL: "https://b.example", Status: 1}},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {{ID: 1, EndpointID: 11, Status: 1}},
+			22: {{ID: 2, EndpointID: 22, Status: 1}},
+		},
+		models: map[string]store.ManagedModel{
+			"m1": {
+				ID:                     1,
+				PublicID:               "m1",
+				GroupName:              store.DefaultGroupName,
+				InputUSDPer1M:          decimal.NewFromInt(1),
+				OutputUSDPer1M:         decimal.NewFromInt(1),
+				CacheInputUSDPer1M:     decimal.Zero,
+				CacheOutputUSDPer1M:    decimal.Zero,
+				PriorityPricingEnabled: true,
+				PriorityInputUSDPer1M:  decimalPtr("2"),
+				PriorityOutputUSDPer1M: decimalPtr("3"),
+				Status:                 1,
+			},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"m1": {
+				{ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "m1-up1", Status: 1},
+				{ChannelID: 2, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "m1-up2", Status: 1},
+			},
+		},
+	}
+	var calls []scheduler.Selection
+	var bodies [][]byte
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, body []byte) (*http.Response, error) {
+		calls = append(calls, sel)
+		bodies = append(bodies, append([]byte(nil), body...))
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+		}, nil
+	})
+	q := &fakeQuota{}
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, q, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{MaxLineBytes: 256 << 10, InitialLineBytes: 64 << 10}, nil)
+	h.SetGatewayPolicy(GatewayPolicy{MaxFailoverSwitches: 2})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi","service_tier":"fast"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 upstream call after failover selection, got=%d", len(calls))
+	}
+	if calls[0].ChannelID != 2 {
+		t.Fatalf("expected fast-mode channel 2, got=%d", calls[0].ChannelID)
+	}
+	if got := gjson.GetBytes(bodies[0], "service_tier").String(); got != "priority" {
+		t.Fatalf("expected forwarded service_tier=priority, got=%q body=%s", got, string(bodies[0]))
+	}
+	if len(q.voidCalls) != 0 {
+		t.Fatalf("expected no quota void, got=%d", len(q.voidCalls))
 	}
 }
 

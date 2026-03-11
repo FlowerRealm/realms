@@ -36,8 +36,11 @@ type codexLastSuccessRoute struct {
 }
 
 func (r codexLastSuccessRoute) differs(sel scheduler.Selection) bool {
-	if r.channelID <= 0 || strings.TrimSpace(r.credentialKey) == "" {
+	if r.channelID <= 0 {
 		return false
+	}
+	if strings.TrimSpace(r.credentialKey) == "" {
+		return r.channelID != sel.ChannelID
 	}
 	return r.channelID != sel.ChannelID || r.credentialKey != sel.CredentialKey()
 }
@@ -111,9 +114,6 @@ func (c *codexSessionRouteCache) Set(key string, sel scheduler.Selection, expire
 	}
 
 	credKey := sel.CredentialKey()
-	if strings.TrimSpace(credKey) == "" {
-		return
-	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -129,7 +129,7 @@ func (c *codexSessionRouteCache) SetRoute(key string, route codexLastSuccessRout
 	if c == nil || strings.TrimSpace(key) == "" {
 		return
 	}
-	if route.channelID <= 0 || strings.TrimSpace(route.credentialKey) == "" || route.expiresAt.IsZero() {
+	if route.channelID <= 0 || route.expiresAt.IsZero() {
 		return
 	}
 	c.mu.Lock()

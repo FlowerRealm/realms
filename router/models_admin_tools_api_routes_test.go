@@ -67,6 +67,68 @@ func TestParsePricingImportJSON_PriorityFieldsOptional(t *testing.T) {
 	}
 }
 
+func TestParsePricingImportJSON_HighContextPricing(t *testing.T) {
+	parsed, err := parsePricingImportJSON([]byte(`{
+		"gpt-5.4": {
+			"input_usd_per_1m": 2.5,
+			"output_usd_per_1m": 15,
+			"cache_input_usd_per_1m": 0.25,
+			"cache_output_usd_per_1m": 0.25,
+			"high_context_pricing": {
+				"threshold_input_tokens": 272000,
+				"service_tier_policy": "force_standard",
+				"input_usd_per_1m": 5,
+				"output_usd_per_1m": 22.5,
+				"cache_input_usd_per_1m": 0.5,
+				"source": "openai_official"
+			}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("parsePricingImportJSON: %v", err)
+	}
+	if len(parsed.items) != 1 {
+		t.Fatalf("items=%d, want 1", len(parsed.items))
+	}
+	hc := parsed.items[0].HighContextPricing
+	if !parsed.items[0].HighContextPricingSpecified || hc == nil {
+		t.Fatalf("high_context_pricing not parsed: %+v", parsed.items[0])
+	}
+	if hc.ThresholdInputTokens != 272000 {
+		t.Fatalf("threshold=%d, want 272000", hc.ThresholdInputTokens)
+	}
+	if hc.ServiceTierPolicy != "force_standard" {
+		t.Fatalf("service_tier_policy=%q", hc.ServiceTierPolicy)
+	}
+	if !hc.InputUSDPer1M.Equal(mustDecimal(t, "5")) {
+		t.Fatalf("high_context input=%s, want 5", hc.InputUSDPer1M)
+	}
+}
+
+func TestParsePricingImportJSON_HighContextPricingRequiresInputOutput(t *testing.T) {
+	parsed, err := parsePricingImportJSON([]byte(`{
+		"gpt-5.4": {
+			"input_usd_per_1m": 2.5,
+			"output_usd_per_1m": 15,
+			"cache_input_usd_per_1m": 0.25,
+			"cache_output_usd_per_1m": 0.25,
+			"high_context_pricing": {
+				"threshold_input_tokens": 272000,
+				"output_usd_per_1m": 22.5
+			}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("parsePricingImportJSON: %v", err)
+	}
+	if len(parsed.items) != 0 {
+		t.Fatalf("items=%d, want 0", len(parsed.items))
+	}
+	if got := parsed.failed["gpt-5.4"]; got != "high_context_pricing.input_usd_per_1m 不合法" {
+		t.Fatalf("failed reason=%q", got)
+	}
+}
+
 func TestUpsertManagedModelPricing_DoesNotClearPriorityFieldsWhenOmitted(t *testing.T) {
 	st, cleanup := newTestSQLiteStore(t)
 	defer cleanup()

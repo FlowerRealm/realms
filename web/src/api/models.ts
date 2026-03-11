@@ -1,6 +1,18 @@
 import { api } from './client';
 import type { APIResponse } from './types';
 
+export type ManagedModelHighContextPricing = {
+  threshold_input_tokens: number;
+  applies_to: string;
+  service_tier_policy: string;
+  input_usd_per_1m: string;
+  output_usd_per_1m: string;
+  cache_input_usd_per_1m?: string | null;
+  cache_output_usd_per_1m?: string | null;
+  source?: string;
+  source_detail?: string;
+};
+
 export type ManagedModel = {
   id: number;
   public_id: string;
@@ -14,6 +26,7 @@ export type ManagedModel = {
   priority_input_usd_per_1m?: string | null;
   priority_output_usd_per_1m?: string | null;
   priority_cache_input_usd_per_1m?: string | null;
+  high_context_pricing?: ManagedModelHighContextPricing | null;
   status: number;
   icon_url?: string | null;
 };
@@ -31,6 +44,7 @@ export type UserManagedModel = {
   priority_input_usd_per_1m?: string | null;
   priority_output_usd_per_1m?: string | null;
   priority_cache_input_usd_per_1m?: string | null;
+  high_context_pricing?: ManagedModelHighContextPricing | null;
   status: number;
   icon_url?: string | null;
 };
@@ -49,6 +63,8 @@ export type ModelLibraryLookupResult = {
   cache_input_usd_per_1m: string;
   cache_output_usd_per_1m: string;
   source: string;
+  source_detail: string;
+  high_context_pricing?: ManagedModelHighContextPricing | null;
   icon_url: string;
 };
 

@@ -127,7 +127,7 @@ func validateManagedModelServiceTier(mm store.ManagedModel, serviceTier *string)
 	if serviceTier == nil {
 		return nil
 	}
-	_, err := store.ResolveManagedModelPricing(mm, *serviceTier)
+	_, err := store.ResolveManagedModelPricing(mm, *serviceTier, nil)
 	return err
 }
 
@@ -161,6 +161,10 @@ func serviceTierSelectionBadRequestMessage(err error) string {
 		return err.Error()
 	}
 	return ""
+}
+
+func isFastModeSelectionError(err error) bool {
+	return errors.Is(err, scheduler.ErrFastModeUnsupported) || errors.Is(err, errSelectedChannelFastModeUnsupported)
 }
 
 func reserveBadRequestMessage(err error) string {

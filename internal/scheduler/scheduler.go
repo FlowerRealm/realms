@@ -28,6 +28,15 @@ const (
 	CredentialTypeAnthropic CredentialType = "anthropic"
 )
 
+type FailureScope string
+
+const (
+	FailureScopeCredential FailureScope = "credential"
+	FailureScopeEndpoint   FailureScope = "endpoint"
+	FailureScopeChannel    FailureScope = "channel"
+	FailureScopeRequest    FailureScope = "request"
+)
+
 type Selection struct {
 	ChannelID     int64
 	ChannelType   string
@@ -70,6 +79,7 @@ type Result struct {
 	Retriable  bool
 	StatusCode int
 	ErrorClass string
+	Scope      FailureScope
 	// CooldownUntil 用于上层传入精确的冷却截止时间（例如上游返回 resets_at）。
 	// 为空时按调度器默认策略计算。
 	CooldownUntil *time.Time
@@ -101,11 +111,23 @@ type Constraints struct {
 	AllowGroups          map[string]struct{}
 	AllowGroupOrder      []string
 	AllowChannelIDs      map[int64]struct{}
+	// SequentialChannelFailover 用于用户侧 API key 的顺序转移：
+	// 候选 channel 按绑定顺序从前往后尝试，失败后只向后推进，不做 ring/回绕/运行时重排。
+	// 这里的“失败”定义在 channel 层：只有当前 channel 已无法选出任何可用 credential/account，
+	// 才继续尝试后续 channel；同 channel 内部允许 credential/account 接管。
+	SequentialChannelFailover bool
+	// StartChannelID 表示“本次顺序转移”的当前起点。
+	// 命中后先尝试该 channel；若该 channel 整体不可继续，才继续尝试它后面的 channel。
+	StartChannelID int64
 }
 
 type Options struct {
 	DisableCodexOAuth bool
 }
+
+var ErrRequiredCredentialUnavailable = errors.New("required credential unavailable")
+var ErrRequiredChannelUnavailable = errors.New("required channel unavailable")
+var ErrConstrainedSelectionUnavailable = errors.New("constrained selection unavailable")
 
 type UpstreamStore interface {
 	ListUpstreamChannels(ctx context.Context) ([]store.UpstreamChannel, error)
@@ -305,6 +327,7 @@ func (s *Scheduler) SelectWithConstraintsAllowBannedRequiredChannel(ctx context.
 
 func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, routeKeyHash string, cons Constraints, allowBannedRequiredChannel bool) (Selection, error) {
 	now := time.Now()
+	requirePinnedSelection := strings.TrimSpace(cons.RequireCredentialKey) != ""
 
 	// 1) 选择 channel：promotion > affinity > priority > fallback
 	channels, err := s.st.ListUpstreamChannels(ctx)
@@ -347,6 +370,12 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 	if len(candidates) == 0 {
 		if cons.RequireFastMode {
 			return Selection{}, ErrFastModeUnsupported
+		}
+		if cons.RequireChannelID != 0 || strings.TrimSpace(cons.RequireCredentialKey) != "" {
+			if cons.RequireChannelID != 0 {
+				return Selection{}, errors.Join(ErrConstrainedSelectionUnavailable, ErrRequiredChannelUnavailable)
+			}
+			return Selection{}, errors.Join(ErrConstrainedSelectionUnavailable, ErrRequiredCredentialUnavailable)
 		}
 		return Selection{}, errors.New("未配置可用上游 channel")
 	}
@@ -392,6 +421,9 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 			if e.Status != 1 {
 				continue
 			}
+			if !requirePinnedSelection && s.state.IsEndpointCooling(e.ID, now) {
+				continue
+			}
 			eps = append(eps, e)
 		}
 		sort.SliceStable(eps, func(i, j int) bool {
@@ -420,6 +452,12 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 		if claimedProbe {
 			s.state.ReleaseChannelProbeClaim(ch.ID)
 		}
+	}
+	if strings.TrimSpace(cons.RequireCredentialKey) != "" {
+		return Selection{}, errors.Join(ErrConstrainedSelectionUnavailable, ErrRequiredCredentialUnavailable)
+	}
+	if cons.RequireChannelID != 0 {
+		return Selection{}, errors.Join(ErrConstrainedSelectionUnavailable, ErrRequiredChannelUnavailable)
 	}
 	return Selection{}, errors.New("未找到可用上游 credential/account")
 }
@@ -738,8 +776,13 @@ func channelInAnyGroup(groups string, allowed map[string]struct{}) bool {
 
 func (s *Scheduler) Report(sel Selection, res Result) {
 	now := time.Now()
+	scope := res.Scope
+	if scope == "" {
+		scope = FailureScopeChannel
+	}
 	s.state.ClearChannelProbe(sel.ChannelID)
 	if res.Success {
+		s.state.ClearEndpointCooldown(sel.EndpointID)
 		s.state.RecordChannelResult(sel.ChannelID, true)
 		s.state.RecordCredentialResult(sel.CredentialKey(), true)
 		s.state.ClearChannelBan(sel.ChannelID)
@@ -747,8 +790,12 @@ func (s *Scheduler) Report(sel Selection, res Result) {
 		s.touchCredentialLastUsed(sel)
 		return
 	}
-	s.state.RecordChannelResult(sel.ChannelID, false)
-	s.state.RecordCredentialResult(sel.CredentialKey(), false)
+	if scope != FailureScopeRequest {
+		s.state.RecordCredentialResult(sel.CredentialKey(), false)
+	}
+	if scope == FailureScopeChannel {
+		s.state.RecordChannelResult(sel.ChannelID, false)
+	}
 	if res.Retriable {
 		cooldown := s.cooldownBase
 		if res.StatusCode == http.StatusTooManyRequests {
@@ -758,9 +805,19 @@ func (s *Scheduler) Report(sel Selection, res Result) {
 		if res.CooldownUntil != nil && res.CooldownUntil.After(cooldownUntil) {
 			cooldownUntil = *res.CooldownUntil
 		}
-		s.state.SetCredentialCooling(sel.CredentialKey(), cooldownUntil)
+		switch scope {
+		case FailureScopeCredential:
+			s.state.SetCredentialCooling(sel.CredentialKey(), cooldownUntil)
+		case FailureScopeEndpoint:
+			s.state.SetEndpointCooling(sel.EndpointID, cooldownUntil)
+		case FailureScopeChannel:
+			s.state.SetEndpointCooling(sel.EndpointID, cooldownUntil)
+			s.state.SetCredentialCooling(sel.CredentialKey(), cooldownUntil)
+		default:
+			s.state.SetCredentialCooling(sel.CredentialKey(), cooldownUntil)
+		}
 		// usage_limit_reached / rate_limit_exceeded / credential invalid 属于账号级耗尽/限流/不可用，不应牵连整个 channel。
-		if sel.AutoBan && res.ErrorClass != "upstream_exhausted" && res.ErrorClass != "upstream_throttled" && res.ErrorClass != "upstream_credential_invalid" {
+		if scope == FailureScopeChannel && sel.AutoBan && res.ErrorClass != "upstream_exhausted" && res.ErrorClass != "upstream_throttled" && res.ErrorClass != "upstream_credential_invalid" {
 			if shouldBanChannelImmediately(res) {
 				s.state.BanChannelImmediate(sel.ChannelID, now, cooldown)
 			} else {
@@ -768,6 +825,13 @@ func (s *Scheduler) Report(sel Selection, res Result) {
 			}
 		}
 	}
+}
+
+func (s *Scheduler) IsEndpointCooling(endpointID int64) bool {
+	if s == nil || s.state == nil {
+		return false
+	}
+	return s.state.IsEndpointCooling(endpointID, time.Now())
 }
 
 func codexLastUsedBefore(a, b *time.Time) bool {
@@ -800,6 +864,9 @@ func (s *Scheduler) touchCredentialLastUsed(sel Selection) {
 }
 
 func shouldBanChannelImmediately(res Result) bool {
+	if res.Scope != "" && res.Scope != FailureScopeChannel {
+		return false
+	}
 	// 不对“凭据层”失败做立即封禁：优先让同渠道其他 key/账号接管。
 	switch res.StatusCode {
 	case http.StatusTooManyRequests, http.StatusUnauthorized, http.StatusForbidden, http.StatusPaymentRequired:
