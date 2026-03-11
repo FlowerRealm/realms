@@ -818,6 +818,7 @@ type proxyFailureInfo struct {
 	StatusCode int
 	Message    string
 	Body       []byte
+	Result     *scheduler.Result
 }
 
 func (fi proxyFailureInfo) score() int {
@@ -853,6 +854,13 @@ func cloneProxyFailureBody(body []byte) []byte {
 		body = body[:failoverErrorBodyMaxBytes]
 	}
 	return append([]byte(nil), body...)
+}
+
+func (h *Handler) reportProxyFailure(sel scheduler.Selection, failure proxyFailureInfo) {
+	if h == nil || h.sched == nil || !failure.Valid || failure.Result == nil {
+		return
+	}
+	h.sched.Report(sel, *failure.Result)
 }
 
 func formatProxyFailureDetail(fi proxyFailureInfo) string {
@@ -908,15 +916,19 @@ func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p aut
 					if h.finalizeIfCanceled(r, usageID, &sel, reqStart, wantStream, reqBytes) {
 						return true
 					}
+					h.reportProxyFailure(sel, failure)
 					return false
 				}
 				backoff = h.nextBackoff(backoff)
 				continue
 			}
+			h.reportProxyFailure(sel, failure)
 			return false
 		case proxyAttemptFailover:
+			h.reportProxyFailure(sel, failure)
 			return false
 		default:
+			h.reportProxyFailure(sel, failure)
 			return false
 		}
 		// 当下游已经开始写回（SSE/非流式）时，proxyOnce 会返回 proxyAttemptDone；这里仅处理“未写回的失败”。
@@ -935,12 +947,18 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			if h.finalizeIfCanceled(r, usageID, &sel, reqStart, wantStream, reqBytes) {
 				return proxyAttemptDone, proxyFailureInfo{}
 			}
-			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: true, ErrorClass: "network"})
 			h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, 0, "network", time.Since(attemptStart))
+			res := scheduler.Result{
+				Success:    false,
+				Retriable:  true,
+				ErrorClass: "network",
+				Scope:      scheduler.FailureScopeEndpoint,
+			}
 			return proxyAttemptRetrySameSelection, proxyFailureInfo{
 				Valid:   true,
 				Class:   "network",
 				Message: trimSummary(err.Error()),
+				Result:  &res,
 			}
 		}
 
@@ -967,6 +985,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			codexErr := classifyCodexOAuthUpstreamError(sel, resp.StatusCode, bodyBytes)
 			retriable := isRetriableStatus(resp.StatusCode) || codexErr.retriable()
 			errorClass := "upstream_status"
+			scope := classifyRetriableFailureScope(resp.StatusCode, codexErr)
 			var cooldownUntil *time.Time
 			if codexErr.Kind != codexOAuthErrNone {
 				if cls := codexErr.errorClass(); cls != "" {
@@ -988,25 +1007,37 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 				if strings.TrimSpace(failMsg) == "" {
 					failMsg = strings.TrimSpace(resp.Status)
 				}
-				h.sched.Report(sel, scheduler.Result{
+				res := scheduler.Result{
 					Success:       false,
 					Retriable:     true,
 					StatusCode:    resp.StatusCode,
 					ErrorClass:    errorClass,
+					Scope:         scope,
 					CooldownUntil: cooldownUntil,
-				})
+				}
 				h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, errorClass, time.Since(attemptStart))
-				return proxyAttemptFailover, proxyFailureInfo{
+				decision := proxyAttemptFailover
+				if shouldRetrySameSelection(scope, resp.StatusCode, errorClass) {
+					decision = proxyAttemptRetrySameSelection
+				}
+				return decision, proxyFailureInfo{
 					Valid:      true,
 					Class:      errorClass,
 					StatusCode: resp.StatusCode,
 					Message:    failMsg,
 					Body:       bodyBytes,
+					Result:     &res,
 				}
 			}
 
 			if h.sched != nil {
-				h.sched.Report(sel, scheduler.Result{Success: false, Retriable: false, StatusCode: resp.StatusCode, ErrorClass: "upstream_status"})
+				h.sched.Report(sel, scheduler.Result{
+					Success:    false,
+					Retriable:  false,
+					StatusCode: resp.StatusCode,
+					ErrorClass: "upstream_status",
+					Scope:      classifyNonRetriableFailureScope(resp.StatusCode),
+				})
 			}
 			h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, "upstream_status", time.Since(attemptStart))
 			cw := &countingResponseWriter{ResponseWriter: w}
@@ -1194,8 +1225,13 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			h.sched.Report(sel, scheduler.Result{Success: true})
 			h.rememberCodexLastSuccessRoute(r, sel)
 		} else {
-			retriable := pumpRes.ErrorClass == "stream_idle_timeout" || pumpRes.ErrorClass == "stream_read_error"
-			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: retriable, StatusCode: resp.StatusCode, ErrorClass: pumpRes.ErrorClass})
+			h.sched.Report(sel, scheduler.Result{
+				Success:    false,
+				Retriable:  isRetriableStreamFailure(pumpRes.ErrorClass),
+				StatusCode: resp.StatusCode,
+				ErrorClass: pumpRes.ErrorClass,
+				Scope:      classifyStreamFailureScope(pumpRes.ErrorClass),
+			})
 		}
 		if pumpRes.ErrorClass != "" && pumpRes.ErrorClass != "client_disconnect" && pumpRes.ErrorClass != "stream_max_duration" {
 			h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, resp.StatusCode, pumpRes.ErrorClass, "", time.Since(attemptStart), true)
@@ -1217,7 +1253,13 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 	respBytes := cw.bytes
 	if copyErr != nil {
 		if h.sched != nil {
-			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: false, StatusCode: resp.StatusCode, ErrorClass: "proxy_copy"})
+			h.sched.Report(sel, scheduler.Result{
+				Success:    false,
+				Retriable:  false,
+				StatusCode: resp.StatusCode,
+				ErrorClass: "proxy_copy",
+				Scope:      scheduler.FailureScopeEndpoint,
+			})
 		}
 		if usageID != 0 && h.quota != nil {
 			bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1793,6 +1835,76 @@ func isRetriableStatus(code int) bool {
 		}
 		return false
 	}
+}
+
+func classifyRetriableFailureScope(statusCode int, codexErr codexOAuthUpstreamErr) scheduler.FailureScope {
+	if codexErr.Kind != codexOAuthErrNone {
+		return scheduler.FailureScopeCredential
+	}
+	switch statusCode {
+	case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden, http.StatusTooManyRequests:
+		return scheduler.FailureScopeCredential
+	case http.StatusRequestTimeout, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return scheduler.FailureScopeEndpoint
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		return scheduler.FailureScopeChannel
+	default:
+		if statusCode >= 500 {
+			return scheduler.FailureScopeEndpoint
+		}
+	}
+	return scheduler.FailureScopeChannel
+}
+
+func classifyStreamFailureScope(errorClass string) scheduler.FailureScope {
+	switch strings.TrimSpace(errorClass) {
+	case "stream_idle_timeout", "stream_read_error", "stream_first_byte_timeout", "read_upstream", "network":
+		return scheduler.FailureScopeEndpoint
+	default:
+		return scheduler.FailureScopeChannel
+	}
+}
+
+func isRetriableStreamFailure(errorClass string) bool {
+	switch strings.TrimSpace(errorClass) {
+	case "stream_idle_timeout", "stream_read_error", "stream_first_byte_timeout":
+		return true
+	default:
+		return false
+	}
+}
+
+func classifyNonRetriableFailureScope(statusCode int) scheduler.FailureScope {
+	switch statusCode {
+	case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden:
+		return scheduler.FailureScopeCredential
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		return scheduler.FailureScopeChannel
+	default:
+		if statusCode >= 500 {
+			return scheduler.FailureScopeEndpoint
+		}
+	}
+	return scheduler.FailureScopeRequest
+}
+
+func shouldRetrySameSelection(scope scheduler.FailureScope, statusCode int, errorClass string) bool {
+	if scope != scheduler.FailureScopeEndpoint {
+		return false
+	}
+	switch strings.TrimSpace(errorClass) {
+	case "network", "read_upstream", "stream_idle_timeout", "stream_read_error", "stream_first_byte_timeout":
+		return true
+	}
+	switch statusCode {
+	case http.StatusRequestTimeout, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		if statusCode >= 500 {
+			return true
+		}
+	}
+	return false
 }
 
 func resetStatusCode(status int, statusCodeMapping string) int {

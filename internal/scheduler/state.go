@@ -26,6 +26,7 @@ type State struct {
 	tokens map[string][]tokenEvent
 
 	credentialCooldown map[string]time.Time
+	endpointCooldown   map[int64]time.Time
 
 	channelFails map[int64]int
 	credFails    map[string]int
@@ -43,6 +44,7 @@ func NewState() *State {
 		rpm:                    make(map[string][]time.Time),
 		tokens:                 make(map[string][]tokenEvent),
 		credentialCooldown:     make(map[string]time.Time),
+		endpointCooldown:       make(map[int64]time.Time),
 		channelFails:           make(map[int64]int),
 		credFails:              make(map[string]int),
 		channelBanUntil:        make(map[int64]time.Time),
@@ -128,6 +130,41 @@ func (s *State) IsCredentialCooling(credentialKey string, now time.Time) bool {
 		return false
 	}
 	return true
+}
+
+func (s *State) SetEndpointCooling(endpointID int64, until time.Time) {
+	if endpointID == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.endpointCooldown[endpointID] = until
+}
+
+func (s *State) IsEndpointCooling(endpointID int64, now time.Time) bool {
+	if endpointID == 0 {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	until, ok := s.endpointCooldown[endpointID]
+	if !ok {
+		return false
+	}
+	if now.After(until) {
+		delete(s.endpointCooldown, endpointID)
+		return false
+	}
+	return true
+}
+
+func (s *State) ClearEndpointCooldown(endpointID int64) {
+	if endpointID == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.endpointCooldown, endpointID)
 }
 
 func (s *State) RecordChannelResult(channelID int64, success bool) {

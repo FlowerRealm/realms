@@ -266,6 +266,154 @@ func TestSelectWithConstraints_RequireChannelID_StatusFilteredReturnsConstrained
 	}
 }
 
+func TestSelectWithConstraints_RequireCredentialKey_AllowsEndpointInCooldown(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 222, EndpointID: 11, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+	s.state.SetEndpointCooling(11, time.Now().Add(10*time.Minute))
+	wantKey := fmt.Sprintf("%s:%d", CredentialTypeOpenAI, 222)
+
+	sel, err := s.SelectWithConstraints(context.Background(), 10, "", Constraints{
+		RequireChannelID:     1,
+		RequireCredentialKey: wantKey,
+	})
+	if err != nil {
+		t.Fatalf("Select err: %v", err)
+	}
+	if sel.EndpointID != 11 {
+		t.Fatalf("expected endpoint=11, got=%d", sel.EndpointID)
+	}
+	if sel.CredentialKey() != wantKey {
+		t.Fatalf("expected credential=%q, got=%q", wantKey, sel.CredentialKey())
+	}
+}
+
+func TestSelect_PrefersHealthyEndpointWithinChannel(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1, Priority: 100},
+				{ID: 12, ChannelID: 1, BaseURL: "https://b.example", Status: 1, Priority: 10},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+			},
+			12: {
+				{ID: 121, EndpointID: 12, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+	s.Report(Selection{
+		ChannelID:      1,
+		EndpointID:     11,
+		CredentialType: CredentialTypeOpenAI,
+		CredentialID:   111,
+	}, Result{
+		Success:    false,
+		Retriable:  true,
+		ErrorClass: "network",
+		Scope:      FailureScopeEndpoint,
+	})
+
+	sel, err := s.SelectWithConstraints(context.Background(), 10, "", Constraints{
+		RequireChannelID: 1,
+	})
+	if err != nil {
+		t.Fatalf("Select err: %v", err)
+	}
+	if sel.EndpointID != 12 {
+		t.Fatalf("expected endpoint=12 after endpoint cooldown, got=%d", sel.EndpointID)
+	}
+}
+
+func TestReport_CredentialScopedFailureSkipsEndpointAndChannelPenalty(t *testing.T) {
+	s := New(&fakeStore{})
+	s.cooldownBase = 200 * time.Millisecond
+
+	sel := Selection{
+		ChannelID:      7,
+		EndpointID:     17,
+		CredentialType: CredentialTypeCodex,
+		CredentialID:   99,
+		AutoBan:        true,
+	}
+	s.Report(sel, Result{
+		Success:    false,
+		Retriable:  true,
+		StatusCode: http.StatusTooManyRequests,
+		ErrorClass: "upstream_exhausted",
+		Scope:      FailureScopeCredential,
+	})
+
+	s.state.mu.Lock()
+	credCooling, credOK := s.state.credentialCooldown[sel.CredentialKey()]
+	_, endpointCooling := s.state.endpointCooldown[sel.EndpointID]
+	channelFails := s.state.channelFails[sel.ChannelID]
+	_, channelBanned := s.state.channelBanUntil[sel.ChannelID]
+	s.state.mu.Unlock()
+
+	if !credOK || credCooling.IsZero() {
+		t.Fatalf("expected credential cooldown to be set")
+	}
+	if endpointCooling {
+		t.Fatalf("expected endpoint cooldown to be skipped for credential failure")
+	}
+	if channelFails != 0 {
+		t.Fatalf("expected channel fail score to stay 0, got=%d", channelFails)
+	}
+	if channelBanned {
+		t.Fatalf("expected channel ban to be skipped for credential failure")
+	}
+}
+
+func TestReport_RequestScopedFailureSkipsCredentialPenalty(t *testing.T) {
+	s := New(&fakeStore{})
+	sel := Selection{
+		ChannelID:      7,
+		EndpointID:     17,
+		CredentialType: CredentialTypeOpenAI,
+		CredentialID:   99,
+	}
+	s.Report(sel, Result{
+		Success:    false,
+		Retriable:  false,
+		StatusCode: http.StatusBadRequest,
+		ErrorClass: "upstream_status",
+		Scope:      FailureScopeRequest,
+	})
+
+	s.state.mu.Lock()
+	credFails := s.state.credFails[sel.CredentialKey()]
+	channelFails := s.state.channelFails[sel.ChannelID]
+	s.state.mu.Unlock()
+
+	if credFails != 0 {
+		t.Fatalf("expected request-scoped failure not to increment credential fails, got=%d", credFails)
+	}
+	if channelFails != 0 {
+		t.Fatalf("expected request-scoped failure not to increment channel fails, got=%d", channelFails)
+	}
+}
+
 func TestState_IsChannelBanned_ExpiredMarksProbeDue(t *testing.T) {
 	st := NewState()
 	now := time.Now()

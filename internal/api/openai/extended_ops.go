@@ -87,13 +87,37 @@ func wantsEventStream(r *http.Request) bool {
 	}
 }
 
+func fixedSelectionStatusResult(statusCode int) scheduler.Result {
+	if statusCode >= 500 {
+		return scheduler.Result{
+			Success:    false,
+			Retriable:  true,
+			StatusCode: statusCode,
+			ErrorClass: "upstream_status",
+			Scope:      scheduler.FailureScopeEndpoint,
+		}
+	}
+	return scheduler.Result{
+		Success:    false,
+		Retriable:  false,
+		StatusCode: statusCode,
+		ErrorClass: "upstream_status",
+		Scope:      classifyNonRetriableFailureScope(statusCode),
+	}
+}
+
 func (h *Handler) proxyFixedSelection(w http.ResponseWriter, r *http.Request, p auth.Principal, sel scheduler.Selection, body []byte) int {
 	attemptStart := time.Now()
 
 	resp, err := h.exec.Do(r.Context(), sel, r, body)
 	if err != nil {
 		if h.sched != nil {
-			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: true, ErrorClass: "network"})
+			h.sched.Report(sel, scheduler.Result{
+				Success:    false,
+				Retriable:  true,
+				ErrorClass: "network",
+				Scope:      scheduler.FailureScopeEndpoint,
+			})
 		}
 		h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, nil, 0, "network", time.Since(attemptStart))
 		http.Error(w, "上游不可用", http.StatusBadGateway)
@@ -141,7 +165,13 @@ func (h *Handler) proxyFixedSelection(w http.ResponseWriter, r *http.Request, p 
 			if pumpRes.ErrorClass == "" || pumpRes.ErrorClass == "client_disconnect" || pumpRes.ErrorClass == "stream_max_duration" {
 				h.sched.Report(sel, scheduler.Result{Success: resp.StatusCode >= 200 && resp.StatusCode < 300})
 			} else {
-				h.sched.Report(sel, scheduler.Result{Success: false, Retriable: false, StatusCode: resp.StatusCode, ErrorClass: pumpRes.ErrorClass})
+				h.sched.Report(sel, scheduler.Result{
+					Success:    false,
+					Retriable:  isRetriableStreamFailure(pumpRes.ErrorClass),
+					StatusCode: resp.StatusCode,
+					ErrorClass: pumpRes.ErrorClass,
+					Scope:      classifyStreamFailureScope(pumpRes.ErrorClass),
+				})
 			}
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -155,7 +185,12 @@ func (h *Handler) proxyFixedSelection(w http.ResponseWriter, r *http.Request, p 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		if h.sched != nil {
-			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: true, ErrorClass: "read_upstream"})
+			h.sched.Report(sel, scheduler.Result{
+				Success:    false,
+				Retriable:  true,
+				ErrorClass: "read_upstream",
+				Scope:      scheduler.FailureScopeEndpoint,
+			})
 		}
 		h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, nil, 0, "read_upstream", time.Since(attemptStart))
 		http.Error(w, "读取上游响应失败", http.StatusBadGateway)
@@ -171,7 +206,7 @@ func (h *Handler) proxyFixedSelection(w http.ResponseWriter, r *http.Request, p 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			h.sched.Report(sel, scheduler.Result{Success: true})
 		} else {
-			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: false, StatusCode: resp.StatusCode, ErrorClass: "upstream_status"})
+			h.sched.Report(sel, fixedSelectionStatusResult(resp.StatusCode))
 		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -312,6 +347,7 @@ func (h *Handler) ChatCompletionsList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "解析对象归属失败", http.StatusBadGateway)
 		return
 	}
+	sel = h.resolveFixedRouteSelection(ctx, p.UserID, sel)
 
 	upReq := r.Clone(ctx)
 	q := upReq.URL.Query()
@@ -329,7 +365,12 @@ func (h *Handler) ChatCompletionsList(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.exec.Do(ctx, sel, upReq, nil)
 	if err != nil {
 		if h.sched != nil {
-			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: true, ErrorClass: "network"})
+			h.sched.Report(sel, scheduler.Result{
+				Success:    false,
+				Retriable:  true,
+				ErrorClass: "network",
+				Scope:      scheduler.FailureScopeEndpoint,
+			})
 		}
 		h.auditUpstreamError(ctx, r.URL.Path, p, &sel, nil, 0, "network", time.Since(attemptStart))
 		http.Error(w, "上游不可用", http.StatusBadGateway)
@@ -340,7 +381,12 @@ func (h *Handler) ChatCompletionsList(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		if h.sched != nil {
-			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: true, ErrorClass: "read_upstream"})
+			h.sched.Report(sel, scheduler.Result{
+				Success:    false,
+				Retriable:  true,
+				ErrorClass: "read_upstream",
+				Scope:      scheduler.FailureScopeEndpoint,
+			})
 		}
 		h.auditUpstreamError(ctx, r.URL.Path, p, &sel, nil, 0, "read_upstream", time.Since(attemptStart))
 		http.Error(w, "读取上游响应失败", http.StatusBadGateway)
@@ -355,7 +401,7 @@ func (h *Handler) ChatCompletionsList(w http.ResponseWriter, r *http.Request) {
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			h.sched.Report(sel, scheduler.Result{Success: true})
 		} else {
-			h.sched.Report(sel, scheduler.Result{Success: false, Retriable: false, StatusCode: resp.StatusCode, ErrorClass: "upstream_status"})
+			h.sched.Report(sel, fixedSelectionStatusResult(resp.StatusCode))
 		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
