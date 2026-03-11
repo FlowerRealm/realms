@@ -2103,6 +2103,9 @@ func extractTopLevelModel(body []byte) *string {
 	}
 	model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 	if model == "" {
+		model = strings.TrimSpace(gjson.GetBytes(body, "response.model").String())
+	}
+	if model == "" {
 		return nil
 	}
 	return optionalString(model)
@@ -2110,6 +2113,9 @@ func extractTopLevelModel(body []byte) *string {
 
 func extractTopLevelModelFromString(body string) *string {
 	model := strings.TrimSpace(gjson.Get(body, "model").String())
+	if model == "" {
+		model = strings.TrimSpace(gjson.Get(body, "response.model").String())
+	}
 	if model == "" {
 		return nil
 	}
