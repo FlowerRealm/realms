@@ -71,6 +71,7 @@ func userLoginHandler(opts Options) gin.HandlerFunc {
 		}
 
 		sess := sessions.Default(c)
+		applySessionCookieOptions(sess, c.Request)
 		sess.Set("id", u.ID)
 		sess.Set("username", u.Username)
 		sess.Set("role", u.Role)
@@ -177,6 +178,7 @@ func userRegisterHandler(opts Options) gin.HandlerFunc {
 		}
 
 		sess := sessions.Default(c)
+		applySessionCookieOptions(sess, c.Request)
 		sess.Set("id", userID)
 		sess.Set("username", username)
 		sess.Set("role", role)
@@ -206,6 +208,7 @@ func userRegisterHandler(opts Options) gin.HandlerFunc {
 func userLogoutHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sess := sessions.Default(c)
+		applySessionCookieOptions(sess, c.Request)
 		sess.Clear()
 		if err := sess.Save(); err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无法清理会话，请重试"})

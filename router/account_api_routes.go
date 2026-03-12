@@ -103,6 +103,7 @@ func accountUpdateEmailHandler(opts Options) gin.HandlerFunc {
 		}
 
 		sess := sessions.Default(c)
+		applySessionCookieOptions(sess, c.Request)
 		sess.Clear()
 		_ = sess.Save()
 		c.JSON(http.StatusOK, gin.H{
@@ -161,6 +162,7 @@ func accountUpdatePasswordHandler(opts Options) gin.HandlerFunc {
 		}
 
 		sess := sessions.Default(c)
+		applySessionCookieOptions(sess, c.Request)
 		sess.Clear()
 		_ = sess.Save()
 		c.JSON(http.StatusOK, gin.H{

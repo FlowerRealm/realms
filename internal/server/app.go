@@ -167,7 +167,6 @@ func NewApp(opts AppOptions) (*App, error) {
 		Path:     "/",
 		MaxAge:   2592000, // 30 days
 		HttpOnly: true,
-		Secure:   opts.Config.Env != "dev",
 		SameSite: http.SameSiteStrictMode,
 	})
 	engine.Use(sessions.Sessions(sessionCookieName, sessionStore))
