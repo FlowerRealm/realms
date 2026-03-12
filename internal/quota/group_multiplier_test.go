@@ -128,6 +128,27 @@ func TestGroupMultiplierForRouteGroup_InvalidPathFallsBackToDefault(t *testing.T
 	}
 }
 
+func TestGroupMultiplierForRouteGroup_UnrelatedPathFallsBackToDefault(t *testing.T) {
+	st := newQuotaTestStore(t)
+	ctx := context.Background()
+
+	if _, err := st.CreateChannelGroup(ctx, "parent", nil, 1, decimal.RequireFromString("1.2")); err != nil {
+		t.Fatalf("CreateChannelGroup(parent): %v", err)
+	}
+	if _, err := st.CreateChannelGroup(ctx, "child", nil, 1, decimal.RequireFromString("1.5")); err != nil {
+		t.Fatalf("CreateChannelGroup(child): %v", err)
+	}
+
+	routeGroup := "parent/child"
+	mult, groupName := groupMultiplierForRouteGroup(ctx, st, &routeGroup)
+	if got, want := mult.StringFixed(6), "1.000000"; got != want {
+		t.Fatalf("unrelated route group multiplier mismatch: got=%s want=%s", got, want)
+	}
+	if groupName != nil {
+		t.Fatalf("expected unrelated route group name to be cleared, got=%q", *groupName)
+	}
+}
+
 func TestSubscriptionProviderReserveCommit_MultipliesPlanAndRouteGroup(t *testing.T) {
 	st := newQuotaTestStore(t)
 	ctx := context.Background()

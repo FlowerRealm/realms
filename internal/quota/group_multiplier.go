@@ -64,12 +64,20 @@ func groupMultiplierForRouteGroup(ctx context.Context, st *store.Store, routeGro
 	}
 
 	mult := store.DefaultGroupPriceMultiplier
+	var parentID int64
 	for _, seg := range splitRouteGroupPath(path) {
 		g, err := st.GetChannelGroupByName(ctx, seg)
 		if err != nil || g.Status != 1 {
 			return store.DefaultGroupPriceMultiplier, nil
 		}
+		if parentID > 0 {
+			ok, err := groupContainsChildGroup(ctx, st, parentID, g.ID)
+			if err != nil || !ok {
+				return store.DefaultGroupPriceMultiplier, nil
+			}
+		}
 		mult = normalizeMultiplier(mult.Mul(normalizeMultiplier(g.PriceMultiplier)))
+		parentID = g.ID
 	}
 	return mult, pathPtr
 }
@@ -110,6 +118,22 @@ func splitRouteGroupPath(raw string) []string {
 		out = append(out, part)
 	}
 	return out
+}
+
+func groupContainsChildGroup(ctx context.Context, st channelGroupLookup, parentGroupID int64, childGroupID int64) (bool, error) {
+	if st == nil || parentGroupID <= 0 || childGroupID <= 0 {
+		return false, nil
+	}
+	members, err := st.ListChannelGroupMembers(ctx, parentGroupID)
+	if err != nil {
+		return false, err
+	}
+	for _, m := range members {
+		if m.MemberGroupID != nil && *m.MemberGroupID == childGroupID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func maxReachableRouteGroupMultiplier(ctx context.Context, st channelGroupLookup, groupNames []string) (decimal.Decimal, error) {
