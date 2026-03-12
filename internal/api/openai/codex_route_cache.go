@@ -32,6 +32,7 @@ func getCodexStickyRouteKeyHash(ctx context.Context) string {
 type codexLastSuccessRoute struct {
 	channelID     int64
 	credentialKey string
+	routeGroup    string
 	expiresAt     time.Time
 }
 
@@ -121,6 +122,7 @@ func (c *codexSessionRouteCache) Set(key string, sel scheduler.Selection, expire
 	c.data[key] = codexLastSuccessRoute{
 		channelID:     sel.ChannelID,
 		credentialKey: credKey,
+		routeGroup:    strings.TrimSpace(sel.RouteGroup),
 		expiresAt:     expiresAt,
 	}
 }

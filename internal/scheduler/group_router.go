@@ -13,7 +13,6 @@ import (
 
 var errGroupExhausted = errors.New("group exhausted")
 var ErrSequentialStartMissing = errors.New("sequential start missing")
-var errAmbiguousRouteGroup = errors.New("ambiguous route group")
 
 type ChannelGroupStore interface {
 	GetChannelGroupByName(ctx context.Context, name string) (store.ChannelGroup, error)
@@ -110,9 +109,6 @@ func (r *GroupRouter) Next(ctx context.Context) (Selection, error) {
 		}
 		routeGroup, ok, routeErr := r.routeGroupForSelectedChannel(ctx, sel.ChannelID)
 		if routeErr != nil {
-			if errors.Is(routeErr, errAmbiguousRouteGroup) {
-				return Selection{}, routeScopeError(r.cons)
-			}
 			return Selection{}, routeErr
 		}
 		if len(r.cons.AllowGroupOrder) > 0 && !ok {
@@ -448,6 +444,9 @@ func (r *GroupRouter) appendSequentialCandidatesFromGroup(ctx context.Context, g
 			continue
 		}
 		if m.MemberGroupID != nil {
+			if c.group.Name == store.DefaultGroupName && !r.groupAllowed(m.MemberGroupName) {
+				continue
+			}
 			if err := r.appendSequentialCandidatesFromGroup(ctx, *m.MemberGroupID, path, seen, out); err != nil {
 				return err
 			}
@@ -780,6 +779,9 @@ func (r *GroupRouter) collectCandidatesWithPath(ctx context.Context, groupID int
 		}
 
 		if m.MemberGroupID != nil {
+			if c.group.Name == store.DefaultGroupName && !r.groupAllowed(m.MemberGroupName) {
+				continue
+			}
 			if m.MemberGroupName != nil {
 				name := strings.TrimSpace(*m.MemberGroupName)
 				if name != "" && path.contains(name) {
@@ -878,17 +880,23 @@ func (r *GroupRouter) routeGroupForSelectedChannel(ctx context.Context, channelI
 	if len(paths) == 0 {
 		return "", false, nil
 	}
-	if len(paths) > 1 {
-		return "", false, errAmbiguousRouteGroup
+	hint := normalizeRouteGroup(r.cons.RouteGroupHint)
+	if hint != "" {
+		for _, path := range paths {
+			if path == hint {
+				return hint, true, nil
+			}
+		}
 	}
-	return normalizeRouteGroup(paths[0]), true, nil
+	return paths[0], true, nil
 }
 
 func (r *GroupRouter) routeGroupsForSelectedChannel(ctx context.Context, channelID int64) ([]string, error) {
 	if r == nil || channelID <= 0 || r.st == nil {
 		return nil, nil
 	}
-	paths := make(map[string]struct{})
+	paths := make([]string, 0, 4)
+	seen := make(map[string]struct{})
 	for _, raw := range r.cons.AllowGroupOrder {
 		name := strings.TrimSpace(raw)
 		if name == "" {
@@ -904,22 +912,14 @@ func (r *GroupRouter) routeGroupsForSelectedChannel(ctx context.Context, channel
 		if g.Status != 1 {
 			continue
 		}
-		if err := r.collectRouteGroupsForChannel(ctx, g.ID, nil, channelID, paths); err != nil {
+		if err := r.collectRouteGroupsForChannel(ctx, g.ID, nil, channelID, &paths, seen); err != nil {
 			return nil, err
 		}
 	}
-	if len(paths) == 0 {
-		return nil, nil
-	}
-	out := make([]string, 0, len(paths))
-	for path := range paths {
-		out = append(out, normalizeRouteGroup(path))
-	}
-	sort.Strings(out)
-	return out, nil
+	return paths, nil
 }
 
-func (r *GroupRouter) collectRouteGroupsForChannel(ctx context.Context, groupID int64, path routeGroupPath, channelID int64, out map[string]struct{}) error {
+func (r *GroupRouter) collectRouteGroupsForChannel(ctx context.Context, groupID int64, path routeGroupPath, channelID int64, out *[]string, seen map[string]struct{}) error {
 	if groupID == 0 || channelID <= 0 {
 		return nil
 	}
@@ -949,13 +949,16 @@ func (r *GroupRouter) collectRouteGroupsForChannel(ctx context.Context, groupID 
 			continue
 		}
 		if m.MemberGroupID != nil {
+			if c.group.Name == store.DefaultGroupName && !r.groupAllowed(m.MemberGroupName) {
+				continue
+			}
 			if m.MemberGroupName != nil {
 				name := strings.TrimSpace(*m.MemberGroupName)
 				if name != "" && path.contains(name) {
 					continue
 				}
 			}
-			if err := r.collectRouteGroupsForChannel(ctx, *m.MemberGroupID, path, channelID, out); err != nil {
+			if err := r.collectRouteGroupsForChannel(ctx, *m.MemberGroupID, path, channelID, out, seen); err != nil {
 				return err
 			}
 			continue
@@ -966,7 +969,15 @@ func (r *GroupRouter) collectRouteGroupsForChannel(ctx context.Context, groupID 
 		if !r.channelAllowed(m.MemberChannelType, m.MemberChannelGroups, channelID) {
 			continue
 		}
-		out[path.String()] = struct{}{}
+		pathStr := normalizeRouteGroup(path.String())
+		if pathStr == "" {
+			continue
+		}
+		if _, ok := seen[pathStr]; ok {
+			continue
+		}
+		seen[pathStr] = struct{}{}
+		*out = append(*out, pathStr)
 	}
 	return nil
 }
