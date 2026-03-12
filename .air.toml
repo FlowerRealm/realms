@@ -6,7 +6,7 @@ tmp_dir = ".tmp/air"
   cmd = "go build -tags embed_web -o ./.tmp/air/realms ./cmd/realms"
   entrypoint = ["./.tmp/air/realms"]
 
-  include_ext = ["go", "html", "sql", "env"]
+  include_ext = ["go", "html", "sql", "env", "js", "css"]
   exclude_dir = [".git", ".tmp", "vendor", "helloagents", "dist", "site", "web/node_modules"]
   exclude_regex = ["_test\\.go"]
 
