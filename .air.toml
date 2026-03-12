@@ -3,7 +3,7 @@ tmp_dir = ".tmp/air"
 
 [build]
   pre_cmd = ["mkdir -p ./.tmp/air"]
-  cmd = "go build -o ./.tmp/air/realms ./cmd/realms"
+  cmd = "go build -tags embed_web -o ./.tmp/air/realms ./cmd/realms"
   entrypoint = ["./.tmp/air/realms"]
 
   include_ext = ["go", "html", "sql", "env"]

@@ -28,7 +28,7 @@ make tools
 make dev
 ```
 
-前端默认构建到 `web/dist`，后端默认监听 `127.0.0.1:8080`。
+前端构建产物默认输出到 `web/dist`，并在构建镜像时嵌入后端二进制；后端默认监听 `127.0.0.1:8080`。
 
 ## 认证模型
 
@@ -55,14 +55,20 @@ export OPENAI_API_KEY="sk_..."
 - `REALMS_DB_DRIVER`
 - `REALMS_DB_DSN`
 - `REALMS_SQLITE_PATH`
-- `REALMS_PUBLIC_BASE_URL`
-- `REALMS_CORS_ALLOW_ORIGINS`
+- `SESSION_SECRET`
 - `REALMS_ADMIN_API_KEY`
-- `FRONTEND_DIST_DIR`
-- `FRONTEND_BASE_URL`
+- `REALMS_SUBSCRIPTION_ORDER_WEBHOOK_SECRET`
+- `REALMS_COMPACT_GATEWAY_BASE_URL`
+- `REALMS_COMPACT_GATEWAY_KEY`
+- `REALMS_CHANNEL_TEST_CLI_RUNNER_URL`
+
+其余开关型配置已经迁移到数据库运行时设置，请在管理后台修改。
 
 ## 重要变更
 
 - `REALMS_MODE` 已移除；设置该变量会直接报错
+- `REALMS_ALLOW_OPEN_REGISTRATION` 已移除；注册开关改为运行时设置，首个 root 创建后会自动关闭公开注册
+- `FRONTEND_DIST_DIR` 与 `FRONTEND_BASE_URL` 已移除；部署只保留嵌入式同源前端
+- `REALMS_PUBLIC_BASE_URL`、`REALMS_CORS_ALLOW_ORIGINS`、`REALMS_DISABLE_SECURE_COOKIES`、`REALMS_TRUST_PROXY_HEADERS` 等旧启动期 env 已移除
 - `cmd/realms-app`、`make app-dev`、`make app-dist`、`make app-set-key` 已删除
 - `web/dist-personal`、`npm --prefix web run build:personal` 与 personal embed 产物已删除

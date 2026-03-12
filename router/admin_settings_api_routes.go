@@ -96,43 +96,12 @@ var startupConfigKeys = []string{
 	"REALMS_DB_DRIVER",
 	"REALMS_SQLITE_PATH",
 	"REALMS_ADDR",
-	"REALMS_PUBLIC_BASE_URL",
-	"REALMS_CORS_ALLOW_ORIGINS",
 	"SESSION_SECRET",
-	"FRONTEND_DIST_DIR",
-	"FRONTEND_BASE_URL",
-	"REALMS_ALLOW_OPEN_REGISTRATION",
-	"REALMS_DISABLE_SECURE_COOKIES",
-	"REALMS_TRUST_PROXY_HEADERS",
-	"REALMS_TRUSTED_PROXY_CIDRS",
+	"REALMS_ADMIN_API_KEY",
 	"REALMS_SUBSCRIPTION_ORDER_WEBHOOK_SECRET",
-	"REALMS_DEBUG_PROXY_LOG_ENABLE",
-	"REALMS_DEBUG_PROXY_LOG_DIR",
-	"REALMS_BILLING_ENABLE_PAY_AS_YOU_GO",
-	"REALMS_BILLING_MIN_TOPUP_CNY",
-	"REALMS_BILLING_CREDIT_USD_PER_CNY",
-	"REALMS_SMTP_SERVER",
-	"REALMS_SMTP_PORT",
-	"REALMS_SMTP_SSL_ENABLED",
-	"REALMS_SMTP_ACCOUNT",
-	"REALMS_SMTP_FROM",
-	"REALMS_SMTP_TOKEN",
-	"REALMS_EMAIL_VERIFICATION_ENABLE",
-	"REALMS_TICKETS_ATTACHMENTS_DIR",
-	"REALMS_APP_SETTINGS_DEFAULTS_SITE_BASE_URL",
-	"REALMS_APP_SETTINGS_DEFAULTS_ADMIN_TIME_ZONE",
-	"REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_WEB_ANNOUNCEMENTS",
-	"REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_WEB_TOKENS",
-	"REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_WEB_USAGE",
-	"REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_MODELS",
-	"REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_BILLING",
-	"REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_TICKETS",
-	"REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_ADMIN_CHANNELS",
-	"REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_ADMIN_CHANNEL_GROUPS",
-	"REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_ADMIN_USERS",
-	"REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_ADMIN_USAGE",
-	"REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_ADMIN_ANNOUNCEMENTS",
-	"REALMS_BUILD_TAGS",
+	"REALMS_COMPACT_GATEWAY_BASE_URL",
+	"REALMS_COMPACT_GATEWAY_KEY",
+	"REALMS_CHANNEL_TEST_CLI_RUNNER_URL",
 }
 
 type adminSettingsResponse struct {
@@ -145,6 +114,9 @@ type adminSettingsResponse struct {
 	SiteBaseURLOverride  bool   `json:"site_base_url_override"`
 	SiteBaseURLEffective string `json:"site_base_url_effective"`
 	SiteBaseURLInvalid   bool   `json:"site_base_url_invalid"`
+
+	AllowOpenRegistration         bool `json:"allow_open_registration"`
+	AllowOpenRegistrationOverride bool `json:"allow_open_registration_override"`
 
 	AdminTimeZone          string `json:"admin_time_zone"`
 	AdminTimeZoneOverride  bool   `json:"admin_time_zone_override"`
@@ -178,8 +150,9 @@ type adminSettingsResponse struct {
 }
 
 type adminSettingsUpdateRequest struct {
-	SiteBaseURL   string `json:"site_base_url"`
-	AdminTimeZone string `json:"admin_time_zone"`
+	SiteBaseURL            string `json:"site_base_url"`
+	AllowOpenRegistration  bool   `json:"allow_open_registration"`
+	AdminTimeZone          string `json:"admin_time_zone"`
 
 	EmailVerificationEnabled bool `json:"email_verification_enable"`
 
@@ -215,10 +188,7 @@ func adminSettingsGetHandler(opts Options) gin.HandlerFunc {
 
 		fs := opts.Store.FeatureStateEffective(ctx)
 
-		siteBaseURL := strings.TrimSpace(opts.PublicBaseURLDefault)
-		if siteBaseURL == "" {
-			siteBaseURL = strings.TrimRight(strings.TrimSpace(opts.FrontendBaseURL), "/")
-		}
+		siteBaseURL := ""
 		siteBaseURLOK := false
 		siteBaseURLInvalid := false
 		siteBaseURLRaw, ok, err := opts.Store.GetStringAppSetting(ctx, store.SettingSiteBaseURL)
@@ -234,6 +204,20 @@ func adminSettingsGetHandler(opts Options) gin.HandlerFunc {
 			} else {
 				siteBaseURLInvalid = true
 			}
+		}
+
+		allowRegistration, allowRegistrationOK, err := opts.Store.GetBoolAppSetting(ctx, store.SettingAllowOpenRegistration)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询配置失败"})
+			return
+		}
+		if !allowRegistrationOK {
+			userCount, err := opts.Store.CountUsers(ctx)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询配置失败"})
+				return
+			}
+			allowRegistration = userCount == 0
 		}
 
 		adminTZ := strings.TrimSpace(opts.AdminTimeZoneDefault)
@@ -379,44 +363,41 @@ func adminSettingsGetHandler(opts Options) gin.HandlerFunc {
 		billingEffective.CreditUSDPerCNY = billingEffective.CreditUSDPerCNY.Truncate(store.USDScale)
 
 		resp := adminSettingsResponse{
-			Mode:              "business",
-			Features:          fs,
-			FeatureBanGroups:  featureBanGroups(fs),
-			StartupConfigKeys: startupConfigKeys,
-
-			SiteBaseURL:          siteBaseURL,
-			SiteBaseURLOverride:  siteBaseURLOK,
-			SiteBaseURLEffective: uiBaseURLFromRequest(ctx, opts, c.Request),
-			SiteBaseURLInvalid:   siteBaseURLInvalid,
-
-			AdminTimeZone:          adminTZ,
-			AdminTimeZoneOverride:  adminTZOverride,
-			AdminTimeZoneEffective: adminTZEffective,
-			AdminTimeZoneInvalid:   adminTZInvalid,
-
-			EmailVerificationEnabled:  emailVerif,
-			EmailVerificationOverride: ok,
-
-			SMTPServer:             smtpEffective.SMTPServer,
-			SMTPServerOverride:     smtpServerOK,
-			SMTPPort:               smtpEffective.SMTPPort,
-			SMTPPortOverride:       smtpPortOK,
-			SMTPSSLEnabled:         smtpEffective.SMTPSSLEnabled,
-			SMTPSSLEnabledOverride: smtpSSLOK,
-			SMTPAccount:            smtpEffective.SMTPAccount,
-			SMTPAccountOverride:    smtpAccountOK,
-			SMTPFrom:               smtpEffective.SMTPFrom,
-			SMTPFromOverride:       smtpFromOK,
-			SMTPTokenSet:           strings.TrimSpace(smtpEffective.SMTPToken) != "",
-			SMTPTokenOverride:      smtpTokenOK,
-
-			BillingEnablePayAsYouGo:             billingEffective.EnablePayAsYouGo,
-			BillingEnablePayAsYouGoOverride:     billingEnableOK,
-			BillingMinTopupCNY:                  formatCNYFixed(billingEffective.MinTopupCNY),
-			BillingMinTopupCNYOverride:          minTopupOK,
-			BillingCreditUSDPerCNY:              formatUSDPlain(billingEffective.CreditUSDPerCNY),
-			BillingCreditUSDPerCNYOverride:      creditRatioOK,
-			BillingPaygoPriceMultiplier:         formatDecimalPlain(paygoMult, store.PriceMultiplierScale),
+			Mode:                          "business",
+			Features:                      fs,
+			FeatureBanGroups:              featureBanGroups(fs),
+			StartupConfigKeys:             startupConfigKeys,
+			SiteBaseURL:                   siteBaseURL,
+			SiteBaseURLOverride:           siteBaseURLOK,
+			SiteBaseURLEffective:          uiBaseURLFromRequest(ctx, opts, c.Request),
+			SiteBaseURLInvalid:            siteBaseURLInvalid,
+			AllowOpenRegistration:         allowRegistration,
+			AllowOpenRegistrationOverride: allowRegistrationOK,
+			AdminTimeZone:                 adminTZ,
+			AdminTimeZoneOverride:         adminTZOverride,
+			AdminTimeZoneEffective:        adminTZEffective,
+			AdminTimeZoneInvalid:          adminTZInvalid,
+			EmailVerificationEnabled:      emailVerif,
+			EmailVerificationOverride:     ok,
+			SMTPServer:                    smtpEffective.SMTPServer,
+			SMTPServerOverride:            smtpServerOK,
+			SMTPPort:                      smtpEffective.SMTPPort,
+			SMTPPortOverride:              smtpPortOK,
+			SMTPSSLEnabled:                smtpEffective.SMTPSSLEnabled,
+			SMTPSSLEnabledOverride:        smtpSSLOK,
+			SMTPAccount:                   smtpEffective.SMTPAccount,
+			SMTPAccountOverride:           smtpAccountOK,
+			SMTPFrom:                      smtpEffective.SMTPFrom,
+			SMTPFromOverride:              smtpFromOK,
+			SMTPTokenSet:                  strings.TrimSpace(smtpEffective.SMTPToken) != "",
+			SMTPTokenOverride:             smtpTokenOK,
+			BillingEnablePayAsYouGo:       billingEffective.EnablePayAsYouGo,
+			BillingEnablePayAsYouGoOverride: billingEnableOK,
+			BillingMinTopupCNY:            formatCNYFixed(billingEffective.MinTopupCNY),
+			BillingMinTopupCNYOverride:    minTopupOK,
+			BillingCreditUSDPerCNY:        formatUSDPlain(billingEffective.CreditUSDPerCNY),
+			BillingCreditUSDPerCNYOverride: creditRatioOK,
+			BillingPaygoPriceMultiplier:   formatDecimalPlain(paygoMult, store.PriceMultiplierScale),
 			BillingPaygoPriceMultiplierOverride: paygoMultOK,
 		}
 
@@ -434,6 +415,7 @@ func adminSettingsResetHandler(opts Options) gin.HandlerFunc {
 
 		if err := opts.Store.DeleteAppSettings(ctx,
 			store.SettingSiteBaseURL,
+			store.SettingAllowOpenRegistration,
 			store.SettingAdminTimeZone,
 			store.SettingEmailVerificationEnable,
 			store.SettingSMTPServer,
@@ -461,7 +443,7 @@ func adminSettingsResetHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "恢复默认失败"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已恢复为配置文件默认"})
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "已恢复为系统默认"})
 	}
 }
 
@@ -486,13 +468,17 @@ func adminSettingsUpdateHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "站点地址不合法：" + err.Error()})
 			return
 		}
-		publicBaseURL := strings.TrimSpace(opts.PublicBaseURLDefault)
-		if siteBaseURL == "" || (publicBaseURL != "" && siteBaseURL == publicBaseURL) {
+		if siteBaseURL == "" {
 			if err := opts.Store.DeleteAppSetting(ctx, store.SettingSiteBaseURL); err != nil {
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
 				return
 			}
 		} else if err := opts.Store.UpsertStringAppSetting(ctx, store.SettingSiteBaseURL, siteBaseURL); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
+			return
+		}
+
+		if err := opts.Store.UpsertBoolAppSetting(ctx, store.SettingAllowOpenRegistration, req.AllowOpenRegistration); err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "保存失败"})
 			return
 		}

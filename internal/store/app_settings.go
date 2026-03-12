@@ -12,7 +12,10 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-const SettingEmailVerificationEnable = "email_verification_enable"
+const (
+	SettingAllowOpenRegistration   = "allow_open_registration"
+	SettingEmailVerificationEnable = "email_verification_enable"
+)
 
 const (
 	SettingFeatureDisableWebAnnouncements = "feature_disable_web_announcements"

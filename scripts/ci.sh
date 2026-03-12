@@ -104,10 +104,9 @@ addr="${REALMS_E2E_BASE_URL#http://}"
 addr="${addr#https://}"
 addr="${addr%%/*}"
 export REALMS_E2E_ADDR="${addr:-127.0.0.1:18181}"
-export REALMS_E2E_FRONTEND_DIST_DIR="${ROOT_DIR}/web/dist"
 
-log "start: go run ./cmd/realms-e2e (${REALMS_E2E_BASE_URL})"
-go run ./cmd/realms-e2e >"${WEB_SMOKE_LOG}" 2>&1 &
+log "start: go run -tags embed_web ./cmd/realms-e2e (${REALMS_E2E_BASE_URL})"
+go run -tags embed_web ./cmd/realms-e2e >"${WEB_SMOKE_LOG}" 2>&1 &
 WEB_SMOKE_PID="$!"
 
 wait_healthz() {

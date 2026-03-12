@@ -22,6 +22,27 @@ func emailVerificationEnabled(ctx context.Context, opts Options) (bool, error) {
 	return enabled, nil
 }
 
+func allowOpenRegistration(ctx context.Context, opts Options) (bool, error) {
+	if opts.Store == nil {
+		return true, nil
+	}
+	count, err := opts.Store.CountUsers(ctx)
+	if err != nil {
+		return false, err
+	}
+	if count == 0 {
+		return true, nil
+	}
+	v, ok, err := opts.Store.GetBoolAppSetting(ctx, store.SettingAllowOpenRegistration)
+	if err != nil {
+		return false, err
+	}
+	if ok {
+		return v, nil
+	}
+	return false, nil
+}
+
 func smtpConfigEffective(ctx context.Context, opts Options) (config.SMTPConfig, error) {
 	out := opts.SMTPDefault
 	if out.SMTPPort == 0 {

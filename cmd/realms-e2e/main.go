@@ -127,7 +127,6 @@ func main() {
 	addr := envOr("REALMS_E2E_ADDR", defaultAddr)
 	workDir := strings.TrimSpace(os.Getenv("REALMS_E2E_WORKDIR"))
 	dbPath := strings.TrimSpace(os.Getenv("REALMS_E2E_DB_PATH"))
-	frontendDistDir := strings.TrimSpace(os.Getenv("REALMS_E2E_FRONTEND_DIST_DIR"))
 
 	if workDir == "" {
 		dir, err := os.MkdirTemp("", "realms-e2e-*")
@@ -145,17 +144,14 @@ func main() {
 	os.Setenv("REALMS_ADDR", addr)
 	os.Setenv("REALMS_DB_DRIVER", "sqlite")
 	os.Setenv("REALMS_SQLITE_PATH", ensureSQLiteQuery(dbPath))
-	os.Setenv("REALMS_TICKETS_ATTACHMENTS_DIR", filepath.Join(workDir, "tickets"))
-
-	if frontendDistDir != "" {
-		os.Setenv("FRONTEND_DIST_DIR", frontendDistDir)
-	}
+	_ = os.MkdirAll(filepath.Join(workDir, "tickets"), 0o755)
 
 	cfg, err := config.LoadFromEnv()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "加载配置失败:", err)
 		os.Exit(1)
 	}
+	cfg.Tickets.AttachmentsDir = filepath.Join(workDir, "tickets")
 
 	logger := obs.NewLogger(cfg.Env)
 	slog.SetDefault(logger)

@@ -22,7 +22,6 @@ import (
 
 	openaiapi "realms/internal/api/openai"
 	"realms/internal/auth"
-	"realms/internal/codexoauth"
 	"realms/internal/config"
 	rlmcrypto "realms/internal/crypto"
 	"realms/internal/quota"
@@ -81,8 +80,8 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 	router.SetRouter(engine, router.Options{
 		Store:                           st,
 		AdminAPIKeyHash:                 adminAPIKeyHash,
-		AllowOpenRegistration:           cfg.Security.AllowOpenRegistration,
 		EmailVerificationEnabledDefault: cfg.EmailVerif.Enable,
+		AdminTimeZoneDefault:            cfg.AppSettingsDefaults.AdminTimeZone,
 		BillingDefault:                  cfg.Billing,
 		SMTPDefault:                     cfg.SMTP,
 		TicketStorage:                   ticketStorage,
@@ -617,32 +616,6 @@ func TestQuotaProviderForConfig(t *testing.T) {
 		}
 		if ev.ReservedUSD.String() != "0" {
 			t.Fatalf("reserved_usd mismatch: got %s want %s", ev.ReservedUSD.String(), "0")
-		}
-	})
-}
-
-func TestCodexOAuthRedirectURI(t *testing.T) {
-	t.Run("default_uses_codex_cli_redirect", func(t *testing.T) {
-		got := codexOAuthRedirectURI(":8080")
-		if got != codexoauth.DefaultRedirectURI {
-			t.Fatalf("codexOAuthRedirectURI = %q, want %q", got, codexoauth.DefaultRedirectURI)
-		}
-	})
-
-	t.Run("prefer_realms_env_override", func(t *testing.T) {
-		t.Setenv("REALMS_CODEX_OAUTH_REDIRECT_URI", "https://example.com/auth/callback")
-		got := codexOAuthRedirectURI(":8080")
-		if got != "https://example.com/auth/callback" {
-			t.Fatalf("codexOAuthRedirectURI = %q, want %q", got, "https://example.com/auth/callback")
-		}
-	})
-
-	t.Run("fallback_legacy_env_override", func(t *testing.T) {
-		t.Setenv("REALMS_CODEX_OAUTH_REDIRECT_URI", "")
-		t.Setenv("CODEX_OAUTH_REDIRECT_URI", "http://localhost:8080/auth/callback")
-		got := codexOAuthRedirectURI(":8080")
-		if got != "http://localhost:8080/auth/callback" {
-			t.Fatalf("codexOAuthRedirectURI = %q, want %q", got, "http://localhost:8080/auth/callback")
 		}
 	})
 }

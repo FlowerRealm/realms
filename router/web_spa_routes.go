@@ -3,31 +3,39 @@ package router
 import (
 	"io/fs"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/gin-contrib/gzip"
-	"github.com/gin-contrib/static"
 	"github.com/gin-gonic/gin"
 )
 
-func setWebSPARoutes(r *gin.Engine, opts Options) {
-	frontendBaseURL := strings.TrimRight(strings.TrimSpace(opts.FrontendBaseURL), "/")
-	if frontendBaseURL != "" {
-		r.NoRoute(func(c *gin.Context) {
-			c.Redirect(http.StatusMovedPermanently, frontendBaseURL+c.Request.RequestURI)
-		})
-		return
+func serveEmbeddedSPA(frontendFS fs.FS) gin.HandlerFunc {
+	fileServer := http.FileServer(http.FS(frontendFS))
+	return func(c *gin.Context) {
+		if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+			c.Next()
+			return
+		}
+		p := strings.TrimSpace(c.Request.URL.Path)
+		if p == "" || p == "/" || strings.HasSuffix(p, "/") {
+			c.Next()
+			return
+		}
+		if _, err := fs.Stat(frontendFS, strings.TrimPrefix(p, "/")); err != nil {
+			c.Next()
+			return
+		}
+		fileServer.ServeHTTP(c.Writer, c.Request)
+		c.Abort()
 	}
+}
 
+func setWebSPARoutes(r *gin.Engine, opts Options) {
 	// Align new-api: apply gzip only for static/SPAs (registered after API routes).
 	r.Use(gzip.Gzip(gzip.DefaultCompression))
 
 	if opts.FrontendFS != nil {
-		r.Use(static.Serve("/", &embedFileSystem{FileSystem: http.FS(opts.FrontendFS)}))
-	} else if distDir := strings.TrimSpace(opts.FrontendDistDir); distDir != "" {
-		r.Use(static.Serve("/", &hideRootFileSystem{ServeFileSystem: static.LocalFile(distDir, false)}))
+		r.Use(serveEmbeddedSPA(opts.FrontendFS))
 	}
 
 	fallbackIndexPage := defaultIndexPage()
@@ -56,50 +64,7 @@ func resolveSPAIndexPage(opts Options, fallback []byte) []byte {
 			return b
 		}
 	}
-	distDir := strings.TrimSpace(opts.FrontendDistDir)
-	if distDir != "" {
-		p := filepath.Join(distDir, "index.html")
-		if b, err := os.ReadFile(p); err == nil && len(b) > 0 {
-			return b
-		}
-	}
 	return fallback
-}
-
-// embedFileSystem is a minimal static.ServeFileSystem wrapper for embed.FS sub folders.
-// Credit: gin-contrib/static issue #19 pattern.
-type embedFileSystem struct {
-	http.FileSystem
-}
-
-func (e *embedFileSystem) Exists(prefix string, p string) bool {
-	_, err := e.Open(p)
-	return err == nil
-}
-
-func (e *embedFileSystem) Open(name string) (http.File, error) {
-	if name == "/" {
-		return nil, os.ErrNotExist
-	}
-	return e.FileSystem.Open(name)
-}
-
-type hideRootFileSystem struct {
-	static.ServeFileSystem
-}
-
-func (h *hideRootFileSystem) Exists(prefix string, p string) bool {
-	if strings.TrimSpace(p) == "" || p == "/" {
-		return false
-	}
-	return h.ServeFileSystem.Exists(prefix, p)
-}
-
-func (h *hideRootFileSystem) Open(name string) (http.File, error) {
-	if name == "/" {
-		return nil, os.ErrNotExist
-	}
-	return h.ServeFileSystem.Open(name)
 }
 
 func isAPIPrefix(p string) bool {
@@ -136,7 +101,7 @@ func defaultIndexPage() []byte {
     <div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px;">
       <h1 style="margin: 0 0 12px;">Realms</h1>
       <p style="margin: 0 0 12px;">前端构建产物未发现。</p>
-      <p style="margin: 0;">请先构建前端（或设置 <code>FRONTEND_DIST_DIR</code>），再重新启动后端。</p>
+      <p style="margin: 0;">请先构建并嵌入前端产物，再重新启动后端。</p>
     </div>
   </body>
 </html>`)

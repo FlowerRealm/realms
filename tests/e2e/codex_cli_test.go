@@ -218,7 +218,6 @@ func main() {
 	appCfg.DB.Driver = "sqlite"
 	appCfg.DB.DSN = ""
 	appCfg.DB.SQLitePath = dbPath
-	appCfg.Security.AllowOpenRegistration = false
 
 	app, err := server.NewApp(server.AppOptions{
 		Config:  appCfg,
@@ -564,7 +563,6 @@ func runCodexE2E(t *testing.T, e2eCfg codexE2EConfig) {
 	appCfg.DB.Driver = "sqlite"
 	appCfg.DB.DSN = ""
 	appCfg.DB.SQLitePath = dbPath
-	appCfg.Security.AllowOpenRegistration = false
 
 	app, err := server.NewApp(server.AppOptions{
 		Config:  appCfg,

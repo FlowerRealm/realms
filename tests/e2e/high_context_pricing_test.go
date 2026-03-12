@@ -283,7 +283,6 @@ func newHighContextFixture(t *testing.T, model string, inputTokens int64, output
 	appCfg.DB.Driver = "sqlite"
 	appCfg.DB.DSN = ""
 	appCfg.DB.SQLitePath = dbPath
-	appCfg.Security.AllowOpenRegistration = false
 	appCfg.Billing.EnablePayAsYouGo = true
 
 	app, err := server.NewApp(server.AppOptions{

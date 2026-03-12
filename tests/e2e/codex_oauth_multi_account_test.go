@@ -185,7 +185,6 @@ func TestCodexOAuth_MultiAccount_UsageLimitMarksBalanceAndFailover_E2E(t *testin
 	appCfg.DB.Driver = "sqlite"
 	appCfg.DB.DSN = ""
 	appCfg.DB.SQLitePath = dbPath
-	appCfg.Security.AllowOpenRegistration = false
 	appCfg.Billing.EnablePayAsYouGo = true
 
 	app, err := server.NewApp(server.AppOptions{
@@ -426,7 +425,6 @@ func TestCodexOAuth_MultiAccount_InvalidTokenDisablesAndFailover_E2E(t *testing.
 	appCfg.DB.Driver = "sqlite"
 	appCfg.DB.DSN = ""
 	appCfg.DB.SQLitePath = dbPath
-	appCfg.Security.AllowOpenRegistration = false
 	appCfg.Billing.EnablePayAsYouGo = true
 
 	app, err := server.NewApp(server.AppOptions{

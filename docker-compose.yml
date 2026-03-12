@@ -28,8 +28,6 @@ services:
     environment:
       REALMS_ENV: ${REALMS_ENV:-prod}
       REALMS_DB_DSN: ${REALMS_DB_DSN_DOCKER:-root:root@tcp(mysql:3306)/realms?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci&time_zone=%27%2B00%3A00%27}
-      REALMS_ALLOW_OPEN_REGISTRATION: ${REALMS_ALLOW_OPEN_REGISTRATION:-true}
-      REALMS_DISABLE_SECURE_COOKIES: ${REALMS_DISABLE_SECURE_COOKIES:-true}
       REALMS_CHANNEL_TEST_CLI_RUNNER_URL: "http://cli-runner:3100"
     ports:
       # 仅本机监听：对外统一走 Nginx(443) 反代

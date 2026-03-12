@@ -82,26 +82,10 @@ func TestLoad_AdminAPIKeyEnvOverride(t *testing.T) {
 	}
 }
 
-func TestLoad_GatewayAndRedisDefaults(t *testing.T) {
+func TestLoad_RuntimeDefaultsStayAvailable(t *testing.T) {
 	t.Setenv("REALMS_DB_DRIVER", "")
 	t.Setenv("REALMS_DB_DSN", "")
 	t.Setenv("REALMS_SQLITE_PATH", "")
-
-	t.Setenv("REALMS_REDIS_ADDR", "")
-	t.Setenv("REALMS_REDIS_PASSWORD", "")
-	t.Setenv("REALMS_REDIS_DB", "")
-	t.Setenv("REALMS_REDIS_KEY_PREFIX", "")
-
-	t.Setenv("REALMS_GATEWAY_MAX_RETRY_ATTEMPTS", "")
-	t.Setenv("REALMS_GATEWAY_RETRY_BASE_DELAY_MS", "")
-	t.Setenv("REALMS_GATEWAY_RETRY_MAX_DELAY_MS", "")
-	t.Setenv("REALMS_GATEWAY_MAX_RETRY_ELAPSED_MS", "")
-	t.Setenv("REALMS_GATEWAY_MAX_FAILOVER_SWITCHES", "")
-	t.Setenv("REALMS_GATEWAY_USER_MAX_CONCURRENCY", "")
-	t.Setenv("REALMS_GATEWAY_CREDENTIAL_MAX_CONCURRENCY", "")
-	t.Setenv("REALMS_GATEWAY_WAIT_TIMEOUT_MS", "")
-	t.Setenv("REALMS_GATEWAY_WAIT_QUEUE_EXTRA_SLOTS", "")
-	t.Setenv("REALMS_GATEWAY_ENABLE_ERROR_PASSTHROUGH", "")
 
 	cfg, err := config.LoadFromEnv()
 	if err != nil {
@@ -136,7 +120,7 @@ func TestLoad_GatewayAndRedisDefaults(t *testing.T) {
 	}
 }
 
-func TestLoad_GatewayAndRedisEnvOverrides(t *testing.T) {
+func TestLoad_RemovedGatewayAndRedisEnvIgnored(t *testing.T) {
 	t.Setenv("REALMS_DB_DRIVER", "")
 	t.Setenv("REALMS_DB_DSN", "")
 	t.Setenv("REALMS_SQLITE_PATH", "")
@@ -161,51 +145,26 @@ func TestLoad_GatewayAndRedisEnvOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFromEnv: %v", err)
 	}
-	if cfg.Redis.Addr != "127.0.0.1:6380" || cfg.Redis.Password != "secret" || cfg.Redis.DB != 2 || cfg.Redis.KeyPrefix != "rt" {
-		t.Fatalf("unexpected redis config: %+v", cfg.Redis)
+	if cfg.Redis.Addr != "" || cfg.Redis.Password != "" || cfg.Redis.DB != 0 || cfg.Redis.KeyPrefix != "realms" {
+		t.Fatalf("expected removed redis env to be ignored, got %+v", cfg.Redis)
 	}
-	if cfg.Gateway.MaxRetryAttempts != 9 ||
-		cfg.Gateway.RetryBaseDelayMS != 120 ||
-		cfg.Gateway.RetryMaxDelayMS != 980 ||
-		cfg.Gateway.MaxRetryElapsedMS != 12000 ||
-		cfg.Gateway.MaxFailoverSwitches != 11 ||
-		cfg.Gateway.UserMaxConcurrency != 3 ||
-		cfg.Gateway.CredentialMaxConcurrency != 7 ||
-		cfg.Gateway.WaitTimeoutMS != 1500 ||
-		cfg.Gateway.WaitQueueExtraSlots != 13 ||
-		cfg.Gateway.EnableErrorPassthrough {
-		t.Fatalf("unexpected gateway config: %+v", cfg.Gateway)
-	}
-}
-
-func TestLoad_GatewayZeroEnvOverridesPreserved(t *testing.T) {
-	t.Setenv("REALMS_DB_DRIVER", "")
-	t.Setenv("REALMS_DB_DSN", "")
-	t.Setenv("REALMS_SQLITE_PATH", "")
-
-	t.Setenv("REALMS_GATEWAY_MAX_RETRY_ATTEMPTS", "0")
-	t.Setenv("REALMS_GATEWAY_RETRY_BASE_DELAY_MS", "0")
-	t.Setenv("REALMS_GATEWAY_RETRY_MAX_DELAY_MS", "0")
-	t.Setenv("REALMS_GATEWAY_MAX_RETRY_ELAPSED_MS", "0")
-	t.Setenv("REALMS_GATEWAY_MAX_FAILOVER_SWITCHES", "0")
-
-	cfg, err := config.LoadFromEnv()
-	if err != nil {
-		t.Fatalf("LoadFromEnv: %v", err)
-	}
-	if cfg.Gateway.MaxRetryAttempts != 0 ||
-		cfg.Gateway.RetryBaseDelayMS != 0 ||
-		cfg.Gateway.RetryMaxDelayMS != 0 ||
-		cfg.Gateway.MaxRetryElapsedMS != 0 ||
-		cfg.Gateway.MaxFailoverSwitches != 0 {
-		t.Fatalf("expected explicit gateway zeros to be preserved, got %+v", cfg.Gateway)
+	if cfg.Gateway.MaxRetryAttempts != 5 ||
+		cfg.Gateway.RetryBaseDelayMS != 300 ||
+		cfg.Gateway.RetryMaxDelayMS != 3000 ||
+		cfg.Gateway.MaxRetryElapsedMS != 10000 ||
+		cfg.Gateway.MaxFailoverSwitches != 8 ||
+		cfg.Gateway.UserMaxConcurrency != 0 ||
+		cfg.Gateway.CredentialMaxConcurrency != 0 ||
+		cfg.Gateway.WaitTimeoutMS != 30000 ||
+		cfg.Gateway.WaitQueueExtraSlots != 20 ||
+		!cfg.Gateway.EnableErrorPassthrough {
+		t.Fatalf("expected removed gateway env to be ignored, got %+v", cfg.Gateway)
 	}
 }
 
-func TestLoad_CompactGatewayLegacyEnvFallback(t *testing.T) {
+func TestLoad_CompactGatewayLegacyEnvIgnored(t *testing.T) {
 	t.Setenv("REALMS_COMPACT_GATEWAY_BASE_URL", "")
 	t.Setenv("REALMS_COMPACT_GATEWAY_KEY", "")
-	t.Setenv("REALMS_COMPACT_GATEWAY_TIMEOUT_MS", "")
 	t.Setenv("REALMS_SUB2API_BASE_URL", "https://legacy-gateway.example.com")
 	t.Setenv("REALMS_SUB2API_GATEWAY_KEY", "legacy-key")
 	t.Setenv("REALMS_SUB2API_TIMEOUT_MS", "4321")
@@ -214,24 +173,20 @@ func TestLoad_CompactGatewayLegacyEnvFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFromEnv: %v", err)
 	}
-	if cfg.CompactGateway.BaseURL != "https://legacy-gateway.example.com" {
-		t.Fatalf("expected legacy base url, got %q", cfg.CompactGateway.BaseURL)
+	if cfg.CompactGateway.BaseURL != "" {
+		t.Fatalf("expected legacy base url to be ignored, got %q", cfg.CompactGateway.BaseURL)
 	}
-	if cfg.CompactGateway.GatewayKey != "legacy-key" {
-		t.Fatalf("expected legacy gateway key, got %q", cfg.CompactGateway.GatewayKey)
-	}
-	if cfg.CompactGateway.TimeoutMS != 4321 {
-		t.Fatalf("expected legacy timeout, got %d", cfg.CompactGateway.TimeoutMS)
+	if cfg.CompactGateway.GatewayKey != "" {
+		t.Fatalf("expected legacy gateway key to be ignored, got %q", cfg.CompactGateway.GatewayKey)
 	}
 }
 
-func TestLoad_CompactGatewayNewEnvOverridesLegacy(t *testing.T) {
+func TestLoad_CompactGatewayUsesOnlyNewEnv(t *testing.T) {
 	t.Setenv("REALMS_SUB2API_BASE_URL", "https://legacy-gateway.example.com")
 	t.Setenv("REALMS_SUB2API_GATEWAY_KEY", "legacy-key")
 	t.Setenv("REALMS_SUB2API_TIMEOUT_MS", "4321")
 	t.Setenv("REALMS_COMPACT_GATEWAY_BASE_URL", "https://new-gateway.example.com")
 	t.Setenv("REALMS_COMPACT_GATEWAY_KEY", "new-key")
-	t.Setenv("REALMS_COMPACT_GATEWAY_TIMEOUT_MS", "9876")
 
 	cfg, err := config.LoadFromEnv()
 	if err != nil {
@@ -242,9 +197,6 @@ func TestLoad_CompactGatewayNewEnvOverridesLegacy(t *testing.T) {
 	}
 	if cfg.CompactGateway.GatewayKey != "new-key" {
 		t.Fatalf("expected new gateway key to win, got %q", cfg.CompactGateway.GatewayKey)
-	}
-	if cfg.CompactGateway.TimeoutMS != 9876 {
-		t.Fatalf("expected new timeout to win, got %d", cfg.CompactGateway.TimeoutMS)
 	}
 }
 
@@ -254,7 +206,6 @@ func TestConfigYAML_AllowsLegacySub2APIKey(t *testing.T) {
 sub2api:
   base_url: https://legacy-gateway.example.com
   gateway_key: legacy-key
-  timeout_ms: 4321
 `), &cfg)
 	if err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
@@ -265,9 +216,6 @@ sub2api:
 	if cfg.CompactGateway.GatewayKey != "legacy-key" {
 		t.Fatalf("expected legacy gateway key, got %q", cfg.CompactGateway.GatewayKey)
 	}
-	if cfg.CompactGateway.TimeoutMS != 4321 {
-		t.Fatalf("expected legacy timeout, got %d", cfg.CompactGateway.TimeoutMS)
-	}
 }
 
 func TestConfigYAML_NewCompactGatewayKeyOverridesLegacy(t *testing.T) {
@@ -276,11 +224,9 @@ func TestConfigYAML_NewCompactGatewayKeyOverridesLegacy(t *testing.T) {
 sub2api:
   base_url: https://legacy-gateway.example.com
   gateway_key: legacy-key
-  timeout_ms: 4321
 compact_gateway:
   base_url: https://new-gateway.example.com
   gateway_key: new-key
-  timeout_ms: 9876
 `), &cfg)
 	if err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
@@ -290,8 +236,5 @@ compact_gateway:
 	}
 	if cfg.CompactGateway.GatewayKey != "new-key" {
 		t.Fatalf("expected new gateway key to win, got %q", cfg.CompactGateway.GatewayKey)
-	}
-	if cfg.CompactGateway.TimeoutMS != 9876 {
-		t.Fatalf("expected new timeout to win, got %d", cfg.CompactGateway.TimeoutMS)
 	}
 }

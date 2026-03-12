@@ -153,7 +153,6 @@ func TestCLIChannelTest_E2E(t *testing.T) {
 	appCfg.DB.Driver = "sqlite"
 	appCfg.DB.DSN = ""
 	appCfg.DB.SQLitePath = dbPath
-	appCfg.Security.AllowOpenRegistration = false
 	appCfg.ChannelTestCLIRunnerURL = fakeRunner.URL
 
 	app, err := server.NewApp(server.AppOptions{
@@ -385,7 +384,6 @@ func TestCLIChannelTest_RealUpstream_E2E(t *testing.T) {
 	appCfg.DB.Driver = "sqlite"
 	appCfg.DB.DSN = ""
 	appCfg.DB.SQLitePath = dbPath
-	appCfg.Security.AllowOpenRegistration = false
 	appCfg.ChannelTestCLIRunnerURL = cliRunnerURL
 
 	app, err := server.NewApp(server.AppOptions{

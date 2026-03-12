@@ -76,6 +76,9 @@ func (s *Store) CreateUser(ctx context.Context, email string, username string, p
 	if err != nil {
 		return 0, fmt.Errorf("获取用户 id 失败: %w", err)
 	}
+	if strings.TrimSpace(role) == UserRoleRoot {
+		_ = s.UpsertBoolAppSetting(ctx, SettingAllowOpenRegistration, false)
+	}
 	return id, nil
 }
 
