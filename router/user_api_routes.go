@@ -71,6 +71,7 @@ func userLoginHandler(opts Options) gin.HandlerFunc {
 		}
 
 		sess := sessions.Default(c)
+		applySessionCookieOptions(sess, c.Request)
 		sess.Set("id", u.ID)
 		sess.Set("username", u.Username)
 		sess.Set("role", u.Role)
@@ -97,12 +98,17 @@ func userLoginHandler(opts Options) gin.HandlerFunc {
 
 func userRegisterHandler(opts Options) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !opts.AllowOpenRegistration {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "当前环境未开放注册"})
-			return
-		}
 		if opts.Store == nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "store 未初始化"})
+			return
+		}
+		allowRegistration, err := allowOpenRegistration(c.Request.Context(), opts)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询注册配置失败"})
+			return
+		}
+		if !allowRegistration {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "当前环境未开放注册"})
 			return
 		}
 
@@ -172,6 +178,7 @@ func userRegisterHandler(opts Options) gin.HandlerFunc {
 		}
 
 		sess := sessions.Default(c)
+		applySessionCookieOptions(sess, c.Request)
 		sess.Set("id", userID)
 		sess.Set("username", username)
 		sess.Set("role", role)
@@ -201,6 +208,7 @@ func userRegisterHandler(opts Options) gin.HandlerFunc {
 func userLogoutHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sess := sessions.Default(c)
+		applySessionCookieOptions(sess, c.Request)
 		sess.Clear()
 		if err := sess.Save(); err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无法清理会话，请重试"})

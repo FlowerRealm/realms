@@ -22,7 +22,6 @@ import (
 
 	openaiapi "realms/internal/api/openai"
 	"realms/internal/auth"
-	"realms/internal/codexoauth"
 	"realms/internal/config"
 	rlmcrypto "realms/internal/crypto"
 	"realms/internal/quota"
@@ -81,8 +80,8 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 	router.SetRouter(engine, router.Options{
 		Store:                           st,
 		AdminAPIKeyHash:                 adminAPIKeyHash,
-		AllowOpenRegistration:           cfg.Security.AllowOpenRegistration,
 		EmailVerificationEnabledDefault: cfg.EmailVerif.Enable,
+		AdminTimeZoneDefault:            cfg.AppSettingsDefaults.AdminTimeZone,
 		BillingDefault:                  cfg.Billing,
 		SMTPDefault:                     cfg.SMTP,
 		TicketStorage:                   ticketStorage,
@@ -276,6 +275,57 @@ func TestBusinessMode_AdminAPIKey_InvalidKeyFallsBackToSession(t *testing.T) {
 			t.Fatalf("expected success=true, got %v", payload["success"])
 		}
 	})
+}
+
+func TestSessionCookieSecureFlagFollowsRequestScheme(t *testing.T) {
+	cfg := config.Config{
+		Mode: config.ModeBusiness,
+	}
+	app := newTestApp(t, cfg)
+	ctx := context.Background()
+
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	if _, err := app.store.CreateUser(ctx, "root@example.com", "root", pwHash, store.UserRoleRoot); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		targetURL  string
+		wantSecure bool
+	}{
+		{name: "http request", targetURL: "http://example.com/api/user/login", wantSecure: false},
+		{name: "https request", targetURL: "https://example.com/api/user/login", wantSecure: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tc.targetURL, strings.NewReader(`{"login":"root@example.com","password":"password123"}`))
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("login status=%d body=%s", rr.Code, rr.Body.String())
+			}
+
+			var sessionCookie *http.Cookie
+			for _, c := range rr.Result().Cookies() {
+				if c.Name == SessionCookieName {
+					sessionCookie = c
+					break
+				}
+			}
+			if sessionCookie == nil {
+				t.Fatalf("expected session cookie")
+			}
+			if sessionCookie.Secure != tc.wantSecure {
+				t.Fatalf("cookie secure=%v, want %v", sessionCookie.Secure, tc.wantSecure)
+			}
+		})
+	}
 }
 
 func TestBusinessMode_AdminAPIKey_SystemAuditPaths(t *testing.T) {
@@ -617,32 +667,6 @@ func TestQuotaProviderForConfig(t *testing.T) {
 		}
 		if ev.ReservedUSD.String() != "0" {
 			t.Fatalf("reserved_usd mismatch: got %s want %s", ev.ReservedUSD.String(), "0")
-		}
-	})
-}
-
-func TestCodexOAuthRedirectURI(t *testing.T) {
-	t.Run("default_uses_codex_cli_redirect", func(t *testing.T) {
-		got := codexOAuthRedirectURI(":8080")
-		if got != codexoauth.DefaultRedirectURI {
-			t.Fatalf("codexOAuthRedirectURI = %q, want %q", got, codexoauth.DefaultRedirectURI)
-		}
-	})
-
-	t.Run("prefer_realms_env_override", func(t *testing.T) {
-		t.Setenv("REALMS_CODEX_OAUTH_REDIRECT_URI", "https://example.com/auth/callback")
-		got := codexOAuthRedirectURI(":8080")
-		if got != "https://example.com/auth/callback" {
-			t.Fatalf("codexOAuthRedirectURI = %q, want %q", got, "https://example.com/auth/callback")
-		}
-	})
-
-	t.Run("fallback_legacy_env_override", func(t *testing.T) {
-		t.Setenv("REALMS_CODEX_OAUTH_REDIRECT_URI", "")
-		t.Setenv("CODEX_OAUTH_REDIRECT_URI", "http://localhost:8080/auth/callback")
-		got := codexOAuthRedirectURI(":8080")
-		if got != "http://localhost:8080/auth/callback" {
-			t.Fatalf("codexOAuthRedirectURI = %q, want %q", got, "http://localhost:8080/auth/callback")
 		}
 	})
 }

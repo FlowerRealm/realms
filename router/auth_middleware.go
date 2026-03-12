@@ -246,6 +246,7 @@ func clearSession(c *gin.Context) {
 		return
 	}
 	sess := sessions.Default(c)
+	applySessionCookieOptions(sess, c.Request)
 	sess.Clear()
 	_ = sess.Save()
 }

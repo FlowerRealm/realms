@@ -22,6 +22,7 @@ function initForm(s: AdminSettings): UpdateAdminSettingsRequest {
 
   return {
     site_base_url: s.site_base_url || '',
+    allow_open_registration: !!s.allow_open_registration,
     admin_time_zone: s.admin_time_zone || '',
 
     email_verification_enable: !!s.email_verification_enabled,
@@ -140,7 +141,7 @@ export function SettingsAdminPage() {
       <div className="d-flex justify-content-between align-items-center mb-4">
         <div>
           <h3 className="mb-1 fw-bold">系统设置</h3>
-          <p className="text-muted small mb-0">少量运行期配置（持久化到数据库，优先于启动期默认值）。</p>
+          <p className="text-muted small mb-0">少量运行期配置持久化到数据库；启动期只保留最少的必要环境变量。</p>
         </div>
         <AutoSaveIndicator status={autosave.status} blockedReason={autosave.blockedReason} error={autosave.error} onRetry={autosave.retry} className="small" />
       </div>
@@ -288,7 +289,7 @@ export function SettingsAdminPage() {
                       <div className="mb-3">
                         <label className="form-label fw-medium d-flex justify-content-between">
                           <span>Site Base URL</span>
-                          {settings.site_base_url_override ? <span className="badge bg-light text-dark border">界面覆盖</span> : null}
+                          {settings.site_base_url_override ? <span className="badge bg-light text-dark border">数据库覆盖</span> : <span className="badge bg-light text-dark border">请求推导</span>}
                         </label>
                         <input
                           className="form-control"
@@ -303,12 +304,40 @@ export function SettingsAdminPage() {
                       </div>
 
                       <div className="mb-3">
+                        <div className="d-flex align-items-center justify-content-between">
+                          <div>
+                            <label className="form-label fw-medium d-flex align-items-center gap-2 mb-1">
+                              <span>开放注册</span>
+                              {settings.allow_open_registration_override ? (
+                                <span className="badge bg-light text-dark border">数据库覆盖</span>
+                              ) : (
+                                <span className="badge bg-light text-dark border">系统默认</span>
+                              )}
+                            </label>
+                            <div className="form-text small text-muted">
+                              无用户时默认开放；创建首个 root 后默认关闭，可在这里重新开启。
+                            </div>
+                          </div>
+                          <div className="form-check form-switch ms-3">
+                            <input
+                              className="form-check-input"
+                              type="checkbox"
+                              role="switch"
+                              checked={form.allow_open_registration}
+                              onChange={(e) => setForm({ ...form, allow_open_registration: e.target.checked })}
+                              style={{ width: '3em', height: '1.5em' }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mb-3">
                         <label className="form-label fw-medium d-flex justify-content-between">
                           <span>系统时区（Timezone）</span>
                           {settings.admin_time_zone_override ? (
-                            <span className="badge bg-light text-dark border">界面覆盖</span>
+                            <span className="badge bg-light text-dark border">数据库覆盖</span>
                           ) : (
-                            <span className="badge bg-light text-dark border">默认值</span>
+                            <span className="badge bg-light text-dark border">系统默认</span>
                           )}
                         </label>
                         <TimeZoneInput value={form.admin_time_zone} onChange={(v) => setForm({ ...form, admin_time_zone: v })} className="form-control mb-2" />
@@ -324,10 +353,10 @@ export function SettingsAdminPage() {
                 <div className="col-12 col-lg-6">
                   <div className="card">
                     <div className="card-body">
-                      <h5 className="fw-semibold mb-3">启动期配置清单（只读）</h5>
-                      <div className="form-text small text-muted mb-3">
-                        以下配置项仅能通过环境变量（如 <code>.env</code> / <code>REALMS_*</code>）在启动前配置；修改后需要重启服务生效。
-                      </div>
+                        <h5 className="fw-semibold mb-3">启动期配置清单（只读）</h5>
+                        <div className="form-text small text-muted mb-3">
+                          以下配置项只属于启动期；需要通过环境变量配置，并在重启后生效。
+                        </div>
                       <div className="row g-2">
                         {settings.startup_config_keys.map((k) => (
                           <div key={k} className="col-md-6">
@@ -351,7 +380,7 @@ export function SettingsAdminPage() {
                         <h5 className="fw-semibold mb-1">邮箱验证码</h5>
                         <p className="text-muted small mb-0">
                           开启后注册页将要求验证码，并开放 <code>/api/email/verification/send</code>。
-                          {settings.email_verification_override ? <span className="badge bg-light text-dark border ms-2">界面覆盖</span> : <span className="badge bg-light text-dark border ms-2">启动默认</span>}
+                          {settings.email_verification_override ? <span className="badge bg-light text-dark border ms-2">数据库覆盖</span> : <span className="badge bg-light text-dark border ms-2">系统默认</span>}
                         </p>
                       </div>
                       <div className="form-check form-switch">
@@ -377,14 +406,14 @@ export function SettingsAdminPage() {
                         <div className="col-md-6">
                           <label className="form-label fw-medium d-flex justify-content-between">
                             <span>Host</span>
-                            {settings.smtp_server_override ? <span className="badge bg-light text-dark border">界面覆盖</span> : null}
+                            {settings.smtp_server_override ? <span className="badge bg-light text-dark border">数据库覆盖</span> : null}
                           </label>
                           <input className="form-control" value={form.smtp_server} onChange={(e) => setForm({ ...form, smtp_server: e.target.value })} placeholder="smtp.example.com" />
                         </div>
                         <div className="col-md-3">
                           <label className="form-label fw-medium d-flex justify-content-between">
                             <span>Port</span>
-                            {settings.smtp_port_override ? <span className="badge bg-light text-dark border">界面覆盖</span> : null}
+                            {settings.smtp_port_override ? <span className="badge bg-light text-dark border">数据库覆盖</span> : null}
                           </label>
                           <input
                             className="form-control"
@@ -397,7 +426,7 @@ export function SettingsAdminPage() {
                         <div className="col-md-3">
                           <label className="form-label fw-medium d-flex justify-content-between">
                             <span>SSL/TLS</span>
-                            {settings.smtp_ssl_enabled_override ? <span className="badge bg-light text-dark border">界面覆盖</span> : null}
+                            {settings.smtp_ssl_enabled_override ? <span className="badge bg-light text-dark border">数据库覆盖</span> : null}
                           </label>
                           <div className="form-check form-switch mt-2">
                             <input
@@ -413,14 +442,14 @@ export function SettingsAdminPage() {
                         <div className="col-md-6">
                           <label className="form-label fw-medium d-flex justify-content-between">
                             <span>Account</span>
-                            {settings.smtp_account_override ? <span className="badge bg-light text-dark border">界面覆盖</span> : null}
+                            {settings.smtp_account_override ? <span className="badge bg-light text-dark border">数据库覆盖</span> : null}
                           </label>
                           <input className="form-control" value={form.smtp_account} onChange={(e) => setForm({ ...form, smtp_account: e.target.value })} placeholder="noreply@example.com" />
                         </div>
                         <div className="col-md-6">
                           <label className="form-label fw-medium d-flex justify-content-between">
                             <span>From Address</span>
-                            {settings.smtp_from_override ? <span className="badge bg-light text-dark border">界面覆盖</span> : null}
+                            {settings.smtp_from_override ? <span className="badge bg-light text-dark border">数据库覆盖</span> : null}
                           </label>
                           <input className="form-control" value={form.smtp_from} onChange={(e) => setForm({ ...form, smtp_from: e.target.value })} placeholder="Name <addr@example.com>" />
                           <div className="form-text small text-muted">格式："Name &lt;addr@example.com&gt;"</div>
@@ -428,7 +457,7 @@ export function SettingsAdminPage() {
                         <div className="col-12">
                           <label className="form-label fw-medium d-flex justify-content-between">
                             <span>Password / Token</span>
-                            {settings.smtp_token_override ? <span className="badge bg-light text-dark border">界面覆盖</span> : null}
+                            {settings.smtp_token_override ? <span className="badge bg-light text-dark border">数据库覆盖</span> : null}
                           </label>
                           <input
                             className="form-control"
@@ -460,7 +489,7 @@ export function SettingsAdminPage() {
                         <div>
                           <div className="fw-medium">按量计费</div>
                           <div className="text-muted small">
-                            {settings.billing_enable_pay_as_you_go_override ? <span className="badge bg-light text-dark border me-2">界面覆盖</span> : null}
+                            {settings.billing_enable_pay_as_you_go_override ? <span className="badge bg-light text-dark border me-2">数据库覆盖</span> : null}
                             当前：<span className={boolBadge(form.billing_enable_pay_as_you_go)}>{form.billing_enable_pay_as_you_go ? '启用' : '禁用'}</span>
                           </div>
                         </div>
@@ -480,14 +509,14 @@ export function SettingsAdminPage() {
                         <div className="col-md-6">
                           <label className="form-label fw-medium d-flex justify-content-between">
                             <span>最低充值（CNY）</span>
-                            {settings.billing_min_topup_cny_override ? <span className="badge bg-light text-dark border">界面覆盖</span> : null}
+                            {settings.billing_min_topup_cny_override ? <span className="badge bg-light text-dark border">数据库覆盖</span> : null}
                           </label>
                           <input className="form-control" value={form.billing_min_topup_cny} onChange={(e) => setForm({ ...form, billing_min_topup_cny: e.target.value })} placeholder="10.00" />
                         </div>
                         <div className="col-md-6">
                           <label className="form-label fw-medium d-flex justify-content-between">
                             <span>充值汇率（USD / CNY）</span>
-                            {settings.billing_credit_usd_per_cny_override ? <span className="badge bg-light text-dark border">界面覆盖</span> : null}
+                            {settings.billing_credit_usd_per_cny_override ? <span className="badge bg-light text-dark border">数据库覆盖</span> : null}
                           </label>
                           <input
                             className="form-control"
@@ -499,7 +528,7 @@ export function SettingsAdminPage() {
                         <div className="col-md-6">
                           <label className="form-label fw-medium d-flex justify-content-between">
                             <span>按量计费倍率</span>
-                            {settings.billing_paygo_price_multiplier_override ? <span className="badge bg-light text-dark border">界面覆盖</span> : null}
+                            {settings.billing_paygo_price_multiplier_override ? <span className="badge bg-light text-dark border">数据库覆盖</span> : null}
                           </label>
                           <div className="input-group">
                             <span className="input-group-text">×</span>

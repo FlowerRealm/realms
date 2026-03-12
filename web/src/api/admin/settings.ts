@@ -8,7 +8,6 @@ export type FeatureBanItem = {
   disabled: boolean;
   override: boolean;
   editable: boolean;
-  forced_by_personal_mode: boolean;
   forced_by_build: boolean;
 };
 
@@ -26,6 +25,9 @@ export type AdminSettings = {
   site_base_url_override: boolean;
   site_base_url_effective: string;
   site_base_url_invalid: boolean;
+
+  allow_open_registration: boolean;
+  allow_open_registration_override: boolean;
 
   admin_time_zone: string;
   admin_time_zone_override: boolean;
@@ -60,6 +62,7 @@ export type AdminSettings = {
 
 export type UpdateAdminSettingsRequest = {
   site_base_url: string;
+  allow_open_registration: boolean;
   admin_time_zone: string;
 
   email_verification_enable: boolean;

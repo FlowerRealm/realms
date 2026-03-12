@@ -3,8 +3,7 @@
 ## 构建产物
 
 - 默认静态目录：`./web/dist`
-- 可通过 `FRONTEND_DIST_DIR` 覆盖
-- 可通过 `FRONTEND_BASE_URL` 使用外置前端
+- 生产部署仅支持嵌入式同源前端；构建镜像时会将 `web/dist` 嵌入后端二进制
 
 ## 本地构建
 

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -40,6 +39,8 @@ type Config struct {
 	// AppSettingsDefaults 提供管理后台"系统设置"（app_settings）的配置文件默认值。
 	// 仅当数据库未配置对应 app_settings 键时才会生效（app_settings 仍优先）。
 	AppSettingsDefaults AppSettingsDefaultsConfig `yaml:"app_settings_defaults"`
+
+	SessionSecret string `yaml:"session_secret"`
 }
 
 func (c *Config) UnmarshalYAML(value *yaml.Node) error {
@@ -97,14 +98,7 @@ type AppSettingsDefaultsConfig struct {
 }
 
 type ServerConfig struct {
-	Addr          string `yaml:"addr"`
-	PublicBaseURL string `yaml:"public_base_url"`
-
-	// CORSAllowOrigins 控制是否启用 CORS（浏览器跨域访问）。
-	// - 为空：禁用 CORS（默认）
-	// - "*": 允许任意 Origin（不启用 credentials）
-	// - 逗号分隔列表：精确匹配并回显 Origin（建议包含 scheme+host+port）
-	CORSAllowOrigins string `yaml:"cors_allow_origins"`
+	Addr string `yaml:"addr"`
 }
 
 type DBConfig struct {
@@ -122,6 +116,11 @@ type DBConfig struct {
 	// MigrationLockTimeoutSeconds 是 MySQL 启启动迁移等待锁的超时（秒）。
 	// - 0 表示不等待（立即失败）
 	MigrationLockTimeoutSeconds int `yaml:"migration_lock_timeout_seconds"`
+}
+
+type CompactGatewayConfig struct {
+	BaseURL    string `yaml:"base_url"`
+	GatewayKey string `yaml:"gateway_key"`
 }
 
 type RedisConfig struct {
@@ -147,19 +146,8 @@ type GatewayConfig struct {
 	EnableErrorPassthrough bool `yaml:"enable_error_passthrough"`
 }
 
-type CompactGatewayConfig struct {
-	BaseURL    string `yaml:"base_url"`
-	GatewayKey string `yaml:"gateway_key"`
-	TimeoutMS  int    `yaml:"timeout_ms"`
-}
-
 type SecurityConfig struct {
-	AllowOpenRegistration bool   `yaml:"allow_open_registration"`
-	DisableSecureCookies  bool   `yaml:"disable_secure_cookies"`
-	AdminAPIKey           string `yaml:"admin_api_key"`
-
-	TrustProxyHeaders bool     `yaml:"trust_proxy_headers"`
-	TrustedProxyCIDRs []string `yaml:"trusted_proxy_cidrs"`
+	AdminAPIKey string `yaml:"admin_api_key"`
 
 	// SubscriptionOrderWebhookSecret 用于支付回调等“系统侧”操作的简单鉴权。
 	// 为空表示禁用相关 webhook（避免未配置时被外部直接调用）。
@@ -203,25 +191,34 @@ func LoadFromEnv() (Config, error) {
 	if v := strings.TrimSpace(os.Getenv("REALMS_MODE")); v != "" {
 		return Config{}, fmt.Errorf("REALMS_MODE 已移除（检测到 %q）；请删除该配置并使用统一模式启动", v)
 	}
-	if err := rejectRemovedEnv("REALMS_SUB2API_BASE_URL", "REALMS_COMPACT_GATEWAY_BASE_URL"); err != nil {
-		return Config{}, err
-	}
-	if err := rejectRemovedEnv("REALMS_SUB2API_GATEWAY_KEY", "REALMS_COMPACT_GATEWAY_KEY"); err != nil {
-		return Config{}, err
-	}
-	if err := rejectRemovedEnv("REALMS_SUB2API_TIMEOUT_MS", "REALMS_COMPACT_GATEWAY_TIMEOUT_MS"); err != nil {
-		return Config{}, err
+	for _, removed := range []struct {
+		name    string
+		message string
+	}{
+		{
+			name:    "REALMS_SUB2API_BASE_URL",
+			message: "请改用 REALMS_COMPACT_GATEWAY_BASE_URL",
+		},
+		{
+			name:    "REALMS_SUB2API_GATEWAY_KEY",
+			message: "请改用 REALMS_COMPACT_GATEWAY_KEY",
+		},
+		{
+			name:    "REALMS_SUB2API_TIMEOUT_MS",
+			message: "请删除该配置；compact gateway 启动期超时覆盖已移除，当前固定为 300s",
+		},
+		{
+			name:    "REALMS_CODEX_SESSION_TTL_SECONDS",
+			message: "请删除该配置；Codex session TTL 启动期覆盖已移除，当前固定为 300 秒",
+		},
+	} {
+		if v := strings.TrimSpace(os.Getenv(removed.name)); v != "" {
+			return Config{}, fmt.Errorf("%s 已移除（检测到 %q）；%s", removed.name, v, removed.message)
+		}
 	}
 	cfg := defaultConfig()
 	applyEnvOverrides(&cfg)
 	return normalizeAndValidate(cfg)
-}
-
-func rejectRemovedEnv(legacyName string, replacementName string) error {
-	if strings.TrimSpace(os.Getenv(legacyName)) == "" {
-		return nil
-	}
-	return fmt.Errorf("%s 已移除；请改用 %s", legacyName, replacementName)
 }
 
 func normalizeAndValidate(cfg Config) (Config, error) {
@@ -231,15 +228,9 @@ func normalizeAndValidate(cfg Config) (Config, error) {
 	}
 	cfg.Mode = mode
 
-	publicBaseURL, err := NormalizeHTTPBaseURL(cfg.Server.PublicBaseURL, "server.public_base_url")
-	if err != nil {
-		return Config{}, err
-	}
-	cfg.Server.PublicBaseURL = publicBaseURL
 	if cfg.Server.Addr == "" {
 		return Config{}, errors.New("server.addr 不能为空")
 	}
-	cfg.Server.CORSAllowOrigins = strings.TrimSpace(cfg.Server.CORSAllowOrigins)
 
 	cfg.DB.Driver = strings.ToLower(strings.TrimSpace(cfg.DB.Driver))
 	cfg.DB.DSN = strings.TrimSpace(cfg.DB.DSN)
@@ -283,12 +274,6 @@ func normalizeAndValidate(cfg Config) (Config, error) {
 		cfg.CompactGateway.BaseURL = compactGatewayBaseURL
 	}
 	cfg.CompactGateway.GatewayKey = strings.TrimSpace(cfg.CompactGateway.GatewayKey)
-	if cfg.CompactGateway.TimeoutMS <= 0 {
-		cfg.CompactGateway.TimeoutMS = 300000
-	}
-	if cfg.CompactGateway.TimeoutMS < 1000 {
-		cfg.CompactGateway.TimeoutMS = 1000
-	}
 
 	cfg.Redis.Addr = strings.TrimSpace(cfg.Redis.Addr)
 	cfg.Redis.Password = strings.TrimSpace(cfg.Redis.Password)
@@ -328,6 +313,8 @@ func normalizeAndValidate(cfg Config) (Config, error) {
 		cfg.Gateway.WaitQueueExtraSlots = 0
 	}
 
+	cfg.Security.AdminAPIKey = strings.TrimSpace(cfg.Security.AdminAPIKey)
+	cfg.SessionSecret = strings.TrimSpace(cfg.SessionSecret)
 	cfg.Tickets.AttachmentsDir = strings.TrimSpace(cfg.Tickets.AttachmentsDir)
 	if cfg.Tickets.AttachmentsDir == "" {
 		cfg.Tickets.AttachmentsDir = "./data/tickets"
@@ -339,8 +326,6 @@ func normalizeAndValidate(cfg Config) (Config, error) {
 	if cfg.ChannelTestCLIConcurrency > 16 {
 		cfg.ChannelTestCLIConcurrency = 16
 	}
-
-	cfg.Security.AdminAPIKey = strings.TrimSpace(cfg.Security.AdminAPIKey)
 
 	cfg.AppSettingsDefaults.SiteBaseURL = strings.TrimSpace(cfg.AppSettingsDefaults.SiteBaseURL)
 	siteBaseURL, err := NormalizeHTTPBaseURL(cfg.AppSettingsDefaults.SiteBaseURL, "app_settings_defaults.site_base_url")
@@ -431,31 +416,6 @@ func defaultConfig() Config {
 		Server: ServerConfig{
 			Addr: ":8080",
 		},
-		CompactGateway: CompactGatewayConfig{
-			BaseURL:    "",
-			GatewayKey: "",
-			TimeoutMS:  300000,
-		},
-		Debug: DebugConfig{
-			ProxyLog: ProxyLogConfig{
-				Enable: false,
-				Dir:    "./out/proxy",
-			},
-		},
-		Billing: BillingConfig{
-			EnablePayAsYouGo: true,
-			MinTopupCNY:      decimal.NewFromInt(10),
-			CreditUSDPerCNY:  decimal.NewFromInt(14).Div(decimal.NewFromInt(100)),
-		},
-		Security: SecurityConfig{
-			AllowOpenRegistration: true,
-			TrustProxyHeaders:     false,
-		},
-		DB: DBConfig{
-			SQLitePath:                  "./data/realms.db?_busy_timeout=30000",
-			MigrationLockName:           "realms.schema_migrations",
-			MigrationLockTimeoutSeconds: 30,
-		},
 		Redis: RedisConfig{
 			KeyPrefix: "realms",
 		},
@@ -468,6 +428,21 @@ func defaultConfig() Config {
 			WaitTimeoutMS:          30000,
 			WaitQueueExtraSlots:    20,
 			EnableErrorPassthrough: true,
+		},
+		CompactGateway: CompactGatewayConfig{
+			BaseURL:    "",
+			GatewayKey: "",
+		},
+		Debug: DebugConfig{
+			ProxyLog: ProxyLogConfig{
+				Enable: false,
+				Dir:    "./out/proxy",
+			},
+		},
+		Billing: BillingConfig{
+			EnablePayAsYouGo: true,
+			MinTopupCNY:      decimal.NewFromInt(10),
+			CreditUSDPerCNY:  decimal.NewFromInt(14).Div(decimal.NewFromInt(100)),
 		},
 		SMTP: SMTPConfig{
 			SMTPPort: 587,
@@ -482,6 +457,11 @@ func defaultConfig() Config {
 		AppSettingsDefaults: AppSettingsDefaultsConfig{
 			AdminTimeZone: "Asia/Shanghai",
 		},
+		DB: DBConfig{
+			SQLitePath:                  "./data/realms.db?_busy_timeout=30000",
+			MigrationLockName:           "realms.schema_migrations",
+			MigrationLockTimeoutSeconds: 30,
+		},
 	}
 }
 
@@ -492,12 +472,6 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("REALMS_ADDR"); v != "" {
 		cfg.Server.Addr = v
 	}
-	if v := os.Getenv("REALMS_PUBLIC_BASE_URL"); v != "" {
-		cfg.Server.PublicBaseURL = v
-	}
-	if v := os.Getenv("REALMS_CORS_ALLOW_ORIGINS"); v != "" {
-		cfg.Server.CORSAllowOrigins = v
-	}
 	if v := os.Getenv("REALMS_DB_DRIVER"); v != "" {
 		cfg.DB.Driver = v
 	}
@@ -507,265 +481,23 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("REALMS_SQLITE_PATH"); v != "" {
 		cfg.DB.SQLitePath = v
 	}
-	if strings.EqualFold(strings.TrimSpace(cfg.Env), "dev") {
-		if v := os.Getenv("REALMS_DB_DRIVER_DEV"); v != "" {
-			cfg.DB.Driver = v
-		}
-		if v := os.Getenv("REALMS_DB_DSN_DEV"); v != "" {
-			cfg.DB.DSN = v
-		}
-		if v := os.Getenv("REALMS_SQLITE_PATH_DEV"); v != "" {
-			cfg.DB.SQLitePath = v
-		}
-	}
-	if v := os.Getenv("REALMS_DB_MIGRATION_LOCK_NAME"); v != "" {
-		cfg.DB.MigrationLockName = v
-	}
-	if v := os.Getenv("REALMS_DB_MIGRATION_LOCK_TIMEOUT_SECONDS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.DB.MigrationLockTimeoutSeconds = n
-		}
-	}
-	if v := os.Getenv("REALMS_REDIS_ADDR"); v != "" {
-		cfg.Redis.Addr = v
-	}
-	if v := os.Getenv("REALMS_REDIS_PASSWORD"); v != "" {
-		cfg.Redis.Password = v
-	}
-	if v := os.Getenv("REALMS_REDIS_DB"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Redis.DB = n
-		}
-	}
-	if v := os.Getenv("REALMS_REDIS_KEY_PREFIX"); v != "" {
-		cfg.Redis.KeyPrefix = v
-	}
-
-	if v := os.Getenv("REALMS_GATEWAY_MAX_RETRY_ATTEMPTS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Gateway.MaxRetryAttempts = n
-		}
-	}
-	if v := os.Getenv("REALMS_GATEWAY_RETRY_BASE_DELAY_MS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Gateway.RetryBaseDelayMS = n
-		}
-	}
-	if v := os.Getenv("REALMS_GATEWAY_RETRY_MAX_DELAY_MS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Gateway.RetryMaxDelayMS = n
-		}
-	}
-	if v := os.Getenv("REALMS_GATEWAY_MAX_RETRY_ELAPSED_MS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Gateway.MaxRetryElapsedMS = n
-		}
-	}
-	if v := os.Getenv("REALMS_GATEWAY_MAX_FAILOVER_SWITCHES"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Gateway.MaxFailoverSwitches = n
-		}
-	}
-	if v := os.Getenv("REALMS_GATEWAY_USER_MAX_CONCURRENCY"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Gateway.UserMaxConcurrency = n
-		}
-	}
-	if v := os.Getenv("REALMS_GATEWAY_CREDENTIAL_MAX_CONCURRENCY"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Gateway.CredentialMaxConcurrency = n
-		}
-	}
-	if v := os.Getenv("REALMS_GATEWAY_WAIT_TIMEOUT_MS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Gateway.WaitTimeoutMS = n
-		}
-	}
-	if v := os.Getenv("REALMS_GATEWAY_WAIT_QUEUE_EXTRA_SLOTS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Gateway.WaitQueueExtraSlots = n
-		}
-	}
-	if v := os.Getenv("REALMS_GATEWAY_ENABLE_ERROR_PASSTHROUGH"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.Gateway.EnableErrorPassthrough = b
-		}
-	}
-
 	if v := os.Getenv("REALMS_COMPACT_GATEWAY_BASE_URL"); v != "" {
 		cfg.CompactGateway.BaseURL = v
 	}
 	if v := os.Getenv("REALMS_COMPACT_GATEWAY_KEY"); v != "" {
 		cfg.CompactGateway.GatewayKey = v
 	}
-	if v := os.Getenv("REALMS_COMPACT_GATEWAY_TIMEOUT_MS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.CompactGateway.TimeoutMS = n
-		}
-	}
-	if v := os.Getenv("REALMS_ALLOW_OPEN_REGISTRATION"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.Security.AllowOpenRegistration = b
-		}
-	}
-	if v := os.Getenv("REALMS_DISABLE_SECURE_COOKIES"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.Security.DisableSecureCookies = b
-		}
-	}
 	if v := os.Getenv("REALMS_ADMIN_API_KEY"); v != "" {
 		cfg.Security.AdminAPIKey = v
-	}
-	if v := os.Getenv("REALMS_TRUST_PROXY_HEADERS"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.Security.TrustProxyHeaders = b
-		}
-	}
-	if v := os.Getenv("REALMS_TRUSTED_PROXY_CIDRS"); v != "" {
-		cfg.Security.TrustedProxyCIDRs = splitCSV(v)
 	}
 	if v := os.Getenv("REALMS_SUBSCRIPTION_ORDER_WEBHOOK_SECRET"); v != "" {
 		cfg.Security.SubscriptionOrderWebhookSecret = v
 	}
-
-	if v := os.Getenv("REALMS_DEBUG_PROXY_LOG_ENABLE"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.Debug.ProxyLog.Enable = b
-		}
-	}
-	if v := os.Getenv("REALMS_DEBUG_PROXY_LOG_DIR"); v != "" {
-		cfg.Debug.ProxyLog.Dir = v
-	}
-
-	if v := os.Getenv("REALMS_BILLING_ENABLE_PAY_AS_YOU_GO"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.Billing.EnablePayAsYouGo = b
-		}
-	}
-	if v := os.Getenv("REALMS_BILLING_MIN_TOPUP_CNY"); v != "" {
-		if d, err := parseDecimalNonNeg(v, 2); err == nil {
-			cfg.Billing.MinTopupCNY = d
-		}
-	}
-	if v := os.Getenv("REALMS_BILLING_CREDIT_USD_PER_CNY"); v != "" {
-		if d, err := parseDecimalNonNeg(v, 6); err == nil {
-			cfg.Billing.CreditUSDPerCNY = d
-		}
-	}
-
-	if v := os.Getenv("REALMS_SMTP_SERVER"); v != "" {
-		cfg.SMTP.SMTPServer = v
-	}
-	if v := os.Getenv("REALMS_SMTP_PORT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.SMTP.SMTPPort = n
-		}
-	}
-	if v := os.Getenv("REALMS_SMTP_SSL_ENABLED"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.SMTP.SMTPSSLEnabled = b
-		}
-	}
-	if v := os.Getenv("REALMS_SMTP_ACCOUNT"); v != "" {
-		cfg.SMTP.SMTPAccount = v
-	}
-	if v := os.Getenv("REALMS_SMTP_FROM"); v != "" {
-		cfg.SMTP.SMTPFrom = v
-	}
-	if v := os.Getenv("REALMS_SMTP_TOKEN"); v != "" {
-		cfg.SMTP.SMTPToken = v
-	}
-	if v := os.Getenv("REALMS_EMAIL_VERIFICATION_ENABLE"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.EmailVerif.Enable = b
-		}
-	}
-
-	if v := os.Getenv("REALMS_APP_SETTINGS_DEFAULTS_SITE_BASE_URL"); v != "" {
-		cfg.AppSettingsDefaults.SiteBaseURL = v
-	}
-	if v := os.Getenv("REALMS_APP_SETTINGS_DEFAULTS_ADMIN_TIME_ZONE"); v != "" {
-		cfg.AppSettingsDefaults.AdminTimeZone = v
-	}
-	if v := os.Getenv("REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_WEB_ANNOUNCEMENTS"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.AppSettingsDefaults.FeatureDisableWebAnnouncements = b
-		}
-	}
-	if v := os.Getenv("REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_WEB_TOKENS"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.AppSettingsDefaults.FeatureDisableWebTokens = b
-		}
-	}
-	if v := os.Getenv("REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_WEB_USAGE"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.AppSettingsDefaults.FeatureDisableWebUsage = b
-		}
-	}
-	if v := os.Getenv("REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_MODELS"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.AppSettingsDefaults.FeatureDisableModels = b
-		}
-	}
-	if v := os.Getenv("REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_BILLING"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.AppSettingsDefaults.FeatureDisableBilling = b
-		}
-	}
-	if v := os.Getenv("REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_TICKETS"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.AppSettingsDefaults.FeatureDisableTickets = b
-		}
-	}
-	if v := os.Getenv("REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_ADMIN_CHANNELS"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.AppSettingsDefaults.FeatureDisableAdminChannels = b
-		}
-	}
-	if v := os.Getenv("REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_ADMIN_CHANNEL_GROUPS"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.AppSettingsDefaults.FeatureDisableAdminChannelGroups = b
-		}
-	}
-	if v := os.Getenv("REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_ADMIN_USERS"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.AppSettingsDefaults.FeatureDisableAdminUsers = b
-		}
-	}
-	if v := os.Getenv("REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_ADMIN_USAGE"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.AppSettingsDefaults.FeatureDisableAdminUsage = b
-		}
-	}
-	if v := os.Getenv("REALMS_APP_SETTINGS_DEFAULTS_FEATURE_DISABLE_ADMIN_ANNOUNCEMENTS"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.AppSettingsDefaults.FeatureDisableAdminAnnouncements = b
-		}
-	}
-
-	if v := os.Getenv("REALMS_TICKETS_ATTACHMENTS_DIR"); v != "" {
-		cfg.Tickets.AttachmentsDir = v
+	if v := os.Getenv("SESSION_SECRET"); v != "" {
+		cfg.SessionSecret = v
 	}
 
 	if v := os.Getenv("REALMS_CHANNEL_TEST_CLI_RUNNER_URL"); v != "" {
 		cfg.ChannelTestCLIRunnerURL = v
 	}
-	if v := os.Getenv("REALMS_CHANNEL_TEST_CLI_CONCURRENCY"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			cfg.ChannelTestCLIConcurrency = n
-		}
-	}
-}
-
-func splitCSV(raw string) []string {
-	parts := strings.Split(raw, ",")
-	var out []string
-	for _, p := range parts {
-		s := strings.TrimSpace(p)
-		if s == "" {
-			continue
-		}
-		out = append(out, s)
-	}
-	return out
 }

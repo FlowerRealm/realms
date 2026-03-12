@@ -98,17 +98,13 @@ func NewApp(opts AppOptions) (*App, error) {
 	sched.SetGroupPointerStore(st)
 	exec := upstream.NewExecutor(st, opts.Config)
 
-	publicBaseURL := opts.Config.Server.PublicBaseURL
-	if strings.TrimSpace(opts.Config.AppSettingsDefaults.SiteBaseURL) != "" {
-		publicBaseURL = strings.TrimRight(strings.TrimSpace(opts.Config.AppSettingsDefaults.SiteBaseURL), "/")
-	}
 	sessionCookieName := SessionCookieName
-	sessionSecret := strings.TrimSpace(os.Getenv("SESSION_SECRET"))
+	sessionSecret := strings.TrimSpace(opts.Config.SessionSecret)
 	if sessionSecret == "" {
 		sessionSecret = randomSecret(32)
 	}
 
-	oauthFlow := codexoauth.NewFlow(st, sessionCookieName, sessionSecret, localBaseURL(opts.Config), codexOAuthRedirectURI(opts.Config.Server.Addr))
+	oauthFlow := codexoauth.NewFlow(st, sessionCookieName, sessionSecret, localBaseURL(opts.Config), codexoauth.DefaultRedirectURI)
 
 	ticketStorage := tickets.NewStorage(opts.Config.Tickets.AttachmentsDir)
 	proxyLog := proxylog.New(proxylog.Config{
@@ -119,7 +115,7 @@ func NewApp(opts AppOptions) (*App, error) {
 	compactGateway := upstream.NewCompactGatewayClient(
 		opts.Config.CompactGateway.BaseURL,
 		opts.Config.CompactGateway.GatewayKey,
-		time.Duration(opts.Config.CompactGateway.TimeoutMS)*time.Millisecond,
+		300*time.Second,
 	)
 	openaiHandler := openaiapi.NewHandler(st, st, sched, exec, proxyLog, st, qp, st, st, st, upstream.SSEPumpOptions{
 		InitialLineBytes: 64 << 10,
@@ -166,22 +162,15 @@ func NewApp(opts AppOptions) (*App, error) {
 	}
 	engine := gin.New()
 	engine.Use(gin.Recovery())
-	engine.Use(CORSMiddleware(opts.Config.Server.CORSAllowOrigins))
 	sessionStore := cookie.NewStore([]byte(sessionSecret))
 	sessionStore.Options(sessions.Options{
 		Path:     "/",
 		MaxAge:   2592000, // 30 days
 		HttpOnly: true,
-		Secure:   opts.Config.Env != "dev" && !opts.Config.Security.DisableSecureCookies,
 		SameSite: http.SameSiteStrictMode,
 	})
 	engine.Use(sessions.Sessions(sessionCookieName, sessionStore))
 
-	frontendBaseURL := strings.TrimSpace(os.Getenv("FRONTEND_BASE_URL"))
-	frontendDistDir := strings.TrimSpace(os.Getenv("FRONTEND_DIST_DIR"))
-	if frontendDistDir == "" {
-		frontendDistDir = "./web/dist"
-	}
 	frontendFS, frontendIndexPage := loadEmbeddedFrontend()
 
 	var adminAPIKeyHash []byte
@@ -192,37 +181,29 @@ func NewApp(opts AppOptions) (*App, error) {
 	router.SetRouter(engine, router.Options{
 		Store:                           st,
 		AdminAPIKeyHash:                 adminAPIKeyHash,
-		AllowOpenRegistration:           opts.Config.Security.AllowOpenRegistration,
 		EmailVerificationEnabledDefault: opts.Config.EmailVerif.Enable,
-		PublicBaseURLDefault:            publicBaseURL,
 		AdminTimeZoneDefault:            opts.Config.AppSettingsDefaults.AdminTimeZone,
 		BillingDefault:                  opts.Config.Billing,
 		SMTPDefault:                     opts.Config.SMTP,
 		TicketStorage:                   ticketStorage,
-		FrontendBaseURL:                 frontendBaseURL,
-		FrontendDistDir:                 frontendDistDir,
 		FrontendIndexPage:               frontendIndexPage,
 		FrontendFS:                      frontendFS,
 		OpenAI:                          openaiHandler,
 		Sched:                           sched,
 		ChannelTestCLIRunnerURL:         opts.Config.ChannelTestCLIRunnerURL,
 		ChannelTestCLIConcurrency:       opts.Config.ChannelTestCLIConcurrency,
-
 		CodexOAuthHandler: func() http.Handler {
 			if oauthFlow == nil {
 				return nil
 			}
 			return oauthFlow.Handler()
 		}(),
-
 		Healthz:       app.handleHealthz,
 		RealmsIconSVG: app.handleRealmsIconSVG,
 		FaviconICO:    app.handleFaviconICO,
-
 		SubscriptionOrderPaidWebhook:  app.handleSubscriptionOrderPaidWebhook,
 		StripeWebhookByPaymentChannel: app.handleStripeWebhookByPaymentChannel,
 		EPayNotifyByPaymentChannel:    app.handleEPayNotifyByPaymentChannel,
-
 		RefreshCodexQuotasByEndpoint: app.RefreshCodexQuotasByEndpoint,
 		RefreshCodexQuota:            app.RefreshCodexQuota,
 		StartCodexOAuth: func(ctx context.Context, endpointID int64, actorUserID int64) (string, error) {
@@ -314,12 +295,6 @@ func (a *App) Close() error {
 }
 
 func localBaseURL(cfg config.Config) string {
-	if strings.TrimSpace(cfg.AppSettingsDefaults.SiteBaseURL) != "" {
-		return strings.TrimRight(strings.TrimSpace(cfg.AppSettingsDefaults.SiteBaseURL), "/")
-	}
-	if strings.TrimSpace(cfg.Server.PublicBaseURL) != "" {
-		return strings.TrimRight(strings.TrimSpace(cfg.Server.PublicBaseURL), "/")
-	}
 	scheme := "http"
 	host := "localhost"
 	port := ""
@@ -335,17 +310,6 @@ func localBaseURL(cfg config.Config) string {
 		return scheme + "://" + host
 	}
 	return scheme + "://" + host + ":" + port
-}
-
-func codexOAuthRedirectURI(addr string) string {
-	if v := strings.TrimSpace(os.Getenv("REALMS_CODEX_OAUTH_REDIRECT_URI")); v != "" {
-		return v
-	}
-	if v := strings.TrimSpace(os.Getenv("CODEX_OAUTH_REDIRECT_URI")); v != "" {
-		return v
-	}
-	_ = addr
-	return codexoauth.DefaultRedirectURI
 }
 
 func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {
@@ -366,9 +330,18 @@ func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	dbOK := a.db.PingContext(ctx) == nil
 
 	emailVerifEnabled := a.cfg.EmailVerif.Enable
+	allowRegistration := true
 	if a.store != nil {
 		if v, ok, err := a.store.GetBoolAppSetting(ctx, store.SettingEmailVerificationEnable); err == nil && ok {
 			emailVerifEnabled = v
+		}
+		if users, err := a.store.CountUsers(ctx); err == nil {
+			if users > 0 {
+				allowRegistration = false
+				if v, ok, err := a.store.GetBoolAppSetting(ctx, store.SettingAllowOpenRegistration); err == nil && ok {
+					allowRegistration = v
+				}
+			}
 		}
 	}
 
@@ -378,7 +351,7 @@ func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {
 		Version:                  a.version.Version,
 		Date:                     a.version.Date,
 		DBOK:                     dbOK,
-		AllowOpenRegistration:    a.cfg.Security.AllowOpenRegistration,
+		AllowOpenRegistration:    allowRegistration,
 		EmailVerificationEnabled: emailVerifEnabled,
 	}
 

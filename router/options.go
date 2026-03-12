@@ -17,19 +17,14 @@ type Options struct {
 	Sched           *scheduler.Scheduler
 	AdminAPIKeyHash []byte
 
-	AllowOpenRegistration           bool
 	EmailVerificationEnabledDefault bool
-	PublicBaseURLDefault            string
 	AdminTimeZoneDefault            string
 
 	BillingDefault config.BillingConfig
 	SMTPDefault    config.SMTPConfig
 	TicketStorage  *tickets.Storage
 
-	// frontend-backend-separation (new-api-aligned)
-	FrontendBaseURL   string // optional; if set, non-API requests redirect to this base.
-	FrontendDistDir   string // optional; e.g. "./web/dist" for serving static assets.
-	FrontendIndexPage []byte // optional; when empty, SPA routes read dist/index.html at request time.
+	FrontendIndexPage []byte // optional; when empty, SPA routes use fallback index.
 	FrontendFS        fs.FS  // optional; when set, static assets are served from this FS (typically go:embed).
 
 	// ChannelTestCLIRunnerURL 为 CLI Runner 服务地址；非空时启用 CLI 渠道测试。

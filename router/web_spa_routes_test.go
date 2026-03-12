@@ -4,10 +4,9 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/gin-gonic/gin"
 )
@@ -44,27 +43,22 @@ func TestWebSPARoutes_APINoRouteWithGzip_NoClosedWriterError(t *testing.T) {
 	}
 }
 
-func TestWebSPARoutes_SPAFallbackLoadsLatestDistIndex(t *testing.T) {
+func TestWebSPARoutes_EmbeddedSPAAndFallback(t *testing.T) {
 	prevMode := gin.Mode()
 	gin.SetMode(gin.TestMode)
 	defer gin.SetMode(prevMode)
 
-	distDir := t.TempDir()
-	writeIndex := func(tag string) {
-		t.Helper()
-		p := filepath.Join(distDir, "index.html")
-		content := []byte("<!doctype html><html><body>INDEX-" + tag + "</body></html>")
-		if err := os.WriteFile(p, content, 0o644); err != nil {
-			t.Fatalf("write index: %v", err)
-		}
+	embedded := fstest.MapFS{
+		"index.html":     {Data: []byte("<!doctype html><html><body>INDEX-EMBED</body></html>")},
+		"assets/app.js":  {Data: []byte("console.log('ok')")},
+		"assets/app.css": {Data: []byte("body{color:black}")},
+		"favicon.ico":    {Data: []byte("ico")},
 	}
-
-	writeIndex("A")
 
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 	setWebSPARoutes(engine, Options{
-		FrontendDistDir: distDir,
+		FrontendFS: embedded,
 	})
 
 	assertIndex := func(path, marker string) {
@@ -80,17 +74,23 @@ func TestWebSPARoutes_SPAFallbackLoadsLatestDistIndex(t *testing.T) {
 		}
 	}
 
-	assertIndex("/login", "INDEX-A")
-	assertIndex("/admin/models", "INDEX-A")
-	req := httptest.NewRequest(http.MethodGet, "http://example.com/skills", nil)
+	assertIndex("/login", "INDEX-EMBED")
+	assertIndex("/admin/models", "INDEX-EMBED")
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/assets/app.js", nil)
 	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("path=/assets/app.js status=%d body=%q", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "console.log('ok')") {
+		t.Fatalf("expected embedded asset, got %q", rr.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/skills", nil)
+	rr = httptest.NewRecorder()
 	engine.ServeHTTP(rr, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("path=/skills status=%d body=%q", rr.Code, rr.Body.String())
 	}
-
-	writeIndex("B")
-
-	assertIndex("/login", "INDEX-B")
-	assertIndex("/admin/models", "INDEX-B")
 }

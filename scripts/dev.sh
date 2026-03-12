@@ -82,40 +82,35 @@ if [[ ! "${REALMS_DEV_CLI_RUNNER:-}" =~ ^(0|false|no|off|skip)$ ]]; then
 fi
 
 # dev 默认需要前端构建产物（web/dist）；否则后端静态资源会缺失
-FRONTEND_DIST_DIR="${FRONTEND_DIST_DIR:-./web/dist}"
-if [[ "${FRONTEND_DIST_DIR}" == "./web/dist" || "${FRONTEND_DIST_DIR}" == "web/dist" ]]; then
-  if ! command -v npm >/dev/null 2>&1; then
-    echo "未找到 npm，无法启动前端 watch。请先安装 Node.js/npm。" >&2
-    exit 1
-  fi
+if ! command -v npm >/dev/null 2>&1; then
+  echo "未找到 npm，无法启动前端 watch。请先安装 Node.js/npm。" >&2
+  exit 1
+fi
 
-  if [[ ! -d "./web/node_modules" ]]; then
-    echo ">> installing frontend deps (npm ci)"
-    npm --prefix "./web" ci
-  fi
+if [[ ! -d "./web/node_modules" ]]; then
+  echo ">> installing frontend deps (npm ci)"
+  npm --prefix "./web" ci
+fi
 
-  if [[ ! -d "./web/dist" ]] || ! compgen -G "./web/dist/*" >/dev/null; then
-    echo ">> building frontend (npm run build)"
-    npm --prefix "./web" run build
-  fi
+if [[ ! -d "./web/dist" ]] || ! compgen -G "./web/dist/*" >/dev/null; then
+  echo ">> building frontend (npm run build)"
+  npm --prefix "./web" run build
+fi
 
-  echo ">> starting frontend watch (npm run build -- --watch)"
-  if command -v setsid >/dev/null 2>&1; then
-    setsid npm --prefix "./web" run build -- --watch &
-    FRONTEND_WATCH_OWN_GROUP="true"
-  else
-    npm --prefix "./web" run build -- --watch &
-    FRONTEND_WATCH_OWN_GROUP="false"
-  fi
-  FRONTEND_WATCH_PID=$!
-  sleep 1
-  if ! kill -0 "${FRONTEND_WATCH_PID}" >/dev/null 2>&1; then
-    echo "前端 watch 启动失败，请检查 npm 输出。" >&2
-    wait "${FRONTEND_WATCH_PID}" || true
-    exit 1
-  fi
+echo ">> starting frontend watch (npm run build -- --watch)"
+if command -v setsid >/dev/null 2>&1; then
+  setsid npm --prefix "./web" run build -- --watch &
+  FRONTEND_WATCH_OWN_GROUP="true"
 else
-  echo "检测到 FRONTEND_DIST_DIR=${FRONTEND_DIST_DIR}（非 ./web/dist），跳过自动前端构建" >&2
+  npm --prefix "./web" run build -- --watch &
+  FRONTEND_WATCH_OWN_GROUP="false"
+fi
+FRONTEND_WATCH_PID=$!
+sleep 1
+if ! kill -0 "${FRONTEND_WATCH_PID}" >/dev/null 2>&1; then
+  echo "前端 watch 启动失败，请检查 npm 输出。" >&2
+  wait "${FRONTEND_WATCH_PID}" || true
+  exit 1
 fi
 
 # 本地开发：固定 8080

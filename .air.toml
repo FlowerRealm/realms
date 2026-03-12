@@ -3,11 +3,11 @@ tmp_dir = ".tmp/air"
 
 [build]
   pre_cmd = ["mkdir -p ./.tmp/air"]
-  cmd = "go build -o ./.tmp/air/realms ./cmd/realms"
+  cmd = "go build -tags embed_web -o ./.tmp/air/realms ./cmd/realms"
   entrypoint = ["./.tmp/air/realms"]
 
-  include_ext = ["go", "html", "sql", "env"]
-  exclude_dir = [".git", ".tmp", "vendor", "helloagents", "dist", "site", "web/dist", "web/node_modules"]
+  include_ext = ["go", "html", "sql", "env", "js", "css"]
+  exclude_dir = [".git", ".tmp", "vendor", "helloagents", "dist", "site", "web/node_modules"]
   exclude_regex = ["_test\\.go"]
 
   delay = 200

@@ -27,8 +27,9 @@ npm run build
 ```
 
 构建产物输出到 `web/dist`：
-- 同源部署：后端会从 `FRONTEND_DIST_DIR`（默认 `./web/dist`）提供静态资源，并对 `/login` 等路径回落到 `index.html`
+- 同源部署：后端会提供嵌入后的静态资源，并对 `/login` 等路径回落到 `index.html`
 - Docker：镜像构建期会先 `npm run build`，再用 `-tags embed_web` 将 `web/dist` embed 到二进制
+- 运行时不再支持通过环境变量切换磁盘目录或外置前端 URL
 
 ## 环境变量（可选）
 

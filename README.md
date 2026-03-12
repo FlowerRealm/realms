@@ -28,9 +28,7 @@ make tools
 make dev
 ```
 
-前端默认构建到 `web/dist`，后端默认监听 `127.0.0.1:8080`。
-
-如果本地开发需要固定连接另一套数据库，不要直接复用 `REALMS_DB_DSN` 去和 Docker Compose 抢同一个目标。请改用 `.env` 里的 `REALMS_DB_DSN_DEV` / `REALMS_DB_DRIVER_DEV` / `REALMS_SQLITE_PATH_DEV`，它们只在 `REALMS_ENV=dev`（例如 `make dev`）时生效。
+前端构建产物默认输出到 `web/dist`，并在构建镜像时嵌入后端二进制；后端默认监听 `127.0.0.1:8080`。`make dev` 会同时启动前端 `build --watch` 与后端 `air`，当前端重建 `web/dist` 后会自动触发后端重编译。
 
 ## 认证模型
 
@@ -57,20 +55,24 @@ export OPENAI_API_KEY="sk_..."
 - `REALMS_DB_DRIVER`
 - `REALMS_DB_DSN`
 - `REALMS_SQLITE_PATH`
-- `REALMS_PUBLIC_BASE_URL`
-- `REALMS_CORS_ALLOW_ORIGINS`
+- `SESSION_SECRET`
 - `REALMS_ADMIN_API_KEY`
+- `REALMS_SUBSCRIPTION_ORDER_WEBHOOK_SECRET`
 - `REALMS_COMPACT_GATEWAY_BASE_URL`
 - `REALMS_COMPACT_GATEWAY_KEY`
-- `REALMS_COMPACT_GATEWAY_TIMEOUT_MS`
-- `FRONTEND_DIST_DIR`
-- `FRONTEND_BASE_URL`
+- `REALMS_CHANNEL_TEST_CLI_RUNNER_URL`
+
+其余开关型配置已经迁移到数据库运行时设置，请在管理后台修改。
 
 `/v1/responses/compact` 仅通过 `compact gateway` 转发到远程上游；如果需要启用这条链路，请配置 `REALMS_COMPACT_GATEWAY_*`。旧的 `REALMS_SUB2API_*` 已移除，继续使用会在启动时直接报错。
 
 ## 重要变更
 
 - `REALMS_MODE` 已移除；设置该变量会直接报错
-- `REALMS_SUB2API_*` 已移除；请改用 `REALMS_COMPACT_GATEWAY_*`
+- `REALMS_ALLOW_OPEN_REGISTRATION` 已移除；注册开关改为运行时设置，首个 root 创建后会自动关闭公开注册
+- `FRONTEND_DIST_DIR` 与 `FRONTEND_BASE_URL` 已移除；部署只保留嵌入式同源前端
+- `REALMS_PUBLIC_BASE_URL`、`REALMS_CORS_ALLOW_ORIGINS`、`REALMS_DISABLE_SECURE_COOKIES`、`REALMS_TRUST_PROXY_HEADERS` 等旧启动期 env 已移除
+- `REALMS_SUB2API_BASE_URL` / `REALMS_SUB2API_GATEWAY_KEY` 已移除；请改用 `REALMS_COMPACT_GATEWAY_BASE_URL` / `REALMS_COMPACT_GATEWAY_KEY`
+- `REALMS_SUB2API_TIMEOUT_MS` 与 `REALMS_CODEX_SESSION_TTL_SECONDS` 已移除；检测到旧变量时服务会直接报错提示迁移
 - `cmd/realms-app`、`make app-dev`、`make app-dist`、`make app-set-key` 已删除
 - `web/dist-personal`、`npm --prefix web run build:personal` 与 personal embed 产物已删除

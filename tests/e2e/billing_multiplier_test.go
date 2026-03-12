@@ -307,7 +307,6 @@ func newMultiplierAppServer(t *testing.T, db *sql.DB, dbPath string, paygEnabled
 	appCfg.DB.Driver = "sqlite"
 	appCfg.DB.DSN = ""
 	appCfg.DB.SQLitePath = dbPath
-	appCfg.Security.AllowOpenRegistration = false
 	appCfg.Billing.EnablePayAsYouGo = paygEnabled
 
 	app, err := server.NewApp(server.AppOptions{

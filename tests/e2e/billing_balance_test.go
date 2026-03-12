@@ -156,7 +156,6 @@ func TestBilling_PaygBalanceDebitsByTokensPricing_E2E(t *testing.T) {
 	appCfg.DB.Driver = "sqlite"
 	appCfg.DB.DSN = ""
 	appCfg.DB.SQLitePath = dbPath
-	appCfg.Security.AllowOpenRegistration = false
 	appCfg.Billing.EnablePayAsYouGo = true
 
 	app, err := server.NewApp(server.AppOptions{

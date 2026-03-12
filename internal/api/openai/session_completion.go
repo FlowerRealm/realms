@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -362,13 +361,7 @@ func newCodexAutoSessionID() string {
 }
 
 func codexSessionTTL() time.Duration {
-	seconds := codexSessionTTLDefaultSeconds
-	if raw := strings.TrimSpace(os.Getenv("REALMS_CODEX_SESSION_TTL_SECONDS")); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
-			seconds = parsed
-		}
-	}
-	return time.Duration(seconds) * time.Second
+	return time.Duration(codexSessionTTLDefaultSeconds) * time.Second
 }
 
 func normalizeCodexSessionID(v string) string {

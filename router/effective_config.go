@@ -3,7 +3,6 @@ package router
 import (
 	"context"
 	"net/http"
-	"strings"
 
 	"github.com/shopspring/decimal"
 
@@ -41,9 +40,6 @@ func billingConfigEffective(ctx context.Context, opts Options) config.BillingCon
 }
 
 func uiBaseURLFromRequest(ctx context.Context, opts Options, r *http.Request) string {
-	if strings.TrimSpace(opts.FrontendBaseURL) != "" {
-		return strings.TrimRight(strings.TrimSpace(opts.FrontendBaseURL), "/")
-	}
 	if opts.Store != nil {
 		if v, ok, err := opts.Store.GetStringAppSetting(ctx, store.SettingSiteBaseURL); err == nil && ok {
 			if normalized, err := config.NormalizeHTTPBaseURL(v, "site_base_url"); err == nil && normalized != "" {
