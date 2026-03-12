@@ -794,10 +794,6 @@ func (r *GroupRouter) collectCandidatesWithPath(ctx context.Context, groupID int
 				out[chID] = cand
 				continue
 			}
-			if cand.Promotion == prev.Promotion && cand.Priority == prev.Priority && cand.RouteGroup > prev.RouteGroup {
-				out[chID] = cand
-				continue
-			}
 			continue
 		}
 		out[chID] = cand
