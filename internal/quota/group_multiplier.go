@@ -67,7 +67,7 @@ func groupMultiplierForRouteGroup(ctx context.Context, st *store.Store, routeGro
 	for _, seg := range splitRouteGroupPath(path) {
 		g, err := st.GetChannelGroupByName(ctx, seg)
 		if err != nil || g.Status != 1 {
-			continue
+			return store.DefaultGroupPriceMultiplier, nil
 		}
 		mult = normalizeMultiplier(mult.Mul(normalizeMultiplier(g.PriceMultiplier)))
 	}

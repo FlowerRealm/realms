@@ -13,6 +13,7 @@ import (
 
 var errGroupExhausted = errors.New("group exhausted")
 var ErrSequentialStartMissing = errors.New("sequential start missing")
+var errAmbiguousRouteGroup = errors.New("ambiguous route group")
 
 type ChannelGroupStore interface {
 	GetChannelGroupByName(ctx context.Context, name string) (store.ChannelGroup, error)
@@ -109,6 +110,9 @@ func (r *GroupRouter) Next(ctx context.Context) (Selection, error) {
 		}
 		routeGroup, ok, routeErr := r.routeGroupForSelectedChannel(ctx, sel.ChannelID)
 		if routeErr != nil {
+			if errors.Is(routeErr, errAmbiguousRouteGroup) {
+				return Selection{}, routeScopeError(r.cons)
+			}
 			return Selection{}, routeErr
 		}
 		if len(r.cons.AllowGroupOrder) > 0 && !ok {
@@ -867,10 +871,24 @@ func nextUnbannedInRing(ring []int64, startIdx int, isBanned func(channelID int6
 }
 
 func (r *GroupRouter) routeGroupForSelectedChannel(ctx context.Context, channelID int64) (string, bool, error) {
-	if r == nil || channelID <= 0 || r.st == nil {
+	paths, err := r.routeGroupsForSelectedChannel(ctx, channelID)
+	if err != nil {
+		return "", false, err
+	}
+	if len(paths) == 0 {
 		return "", false, nil
 	}
-	cands := make(map[int64]channelCandidate)
+	if len(paths) > 1 {
+		return "", false, errAmbiguousRouteGroup
+	}
+	return normalizeRouteGroup(paths[0]), true, nil
+}
+
+func (r *GroupRouter) routeGroupsForSelectedChannel(ctx context.Context, channelID int64) ([]string, error) {
+	if r == nil || channelID <= 0 || r.st == nil {
+		return nil, nil
+	}
+	paths := make(map[string]struct{})
 	for _, raw := range r.cons.AllowGroupOrder {
 		name := strings.TrimSpace(raw)
 		if name == "" {
@@ -881,20 +899,76 @@ func (r *GroupRouter) routeGroupForSelectedChannel(ctx context.Context, channelI
 			if errors.Is(err, sql.ErrNoRows) {
 				continue
 			}
-			return "", false, err
+			return nil, err
 		}
 		if g.Status != 1 {
 			continue
 		}
-		if err := r.collectCandidates(ctx, g.ID, cands); err != nil {
-			return "", false, err
+		if err := r.collectRouteGroupsForChannel(ctx, g.ID, nil, channelID, paths); err != nil {
+			return nil, err
 		}
 	}
-	cand, ok := cands[channelID]
-	if !ok {
-		return "", false, nil
+	if len(paths) == 0 {
+		return nil, nil
 	}
-	return normalizeRouteGroup(cand.RouteGroup), true, nil
+	out := make([]string, 0, len(paths))
+	for path := range paths {
+		out = append(out, normalizeRouteGroup(path))
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func (r *GroupRouter) collectRouteGroupsForChannel(ctx context.Context, groupID int64, path routeGroupPath, channelID int64, out map[string]struct{}) error {
+	if groupID == 0 || channelID <= 0 {
+		return nil
+	}
+	if _, ok := r.activePath[groupID]; ok {
+		return nil
+	}
+	r.activePath[groupID] = struct{}{}
+	defer delete(r.activePath, groupID)
+
+	c, err := r.cursorForGroup(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	if c.group.Status != 1 {
+		return nil
+	}
+	path = path.push(c.group.Name)
+	if err := r.loadMembers(ctx, c); err != nil {
+		return err
+	}
+
+	for _, m := range c.members {
+		if m.MemberGroupID != nil && m.MemberChannelID != nil {
+			continue
+		}
+		if m.MemberGroupID == nil && m.MemberChannelID == nil {
+			continue
+		}
+		if m.MemberGroupID != nil {
+			if m.MemberGroupName != nil {
+				name := strings.TrimSpace(*m.MemberGroupName)
+				if name != "" && path.contains(name) {
+					continue
+				}
+			}
+			if err := r.collectRouteGroupsForChannel(ctx, *m.MemberGroupID, path, channelID, out); err != nil {
+				return err
+			}
+			continue
+		}
+		if *m.MemberChannelID != channelID {
+			continue
+		}
+		if !r.channelAllowed(m.MemberChannelType, m.MemberChannelGroups, channelID) {
+			continue
+		}
+		out[path.String()] = struct{}{}
+	}
+	return nil
 }
 
 func sortCandidates(in map[int64]channelCandidate, isProbePending func(channelID int64) bool, failScore func(channelID int64) int) []channelCandidate {

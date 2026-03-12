@@ -110,6 +110,24 @@ func TestLoadUserGroupMultiplierSnapshot_UsesMaxReachableNestedPath(t *testing.T
 	}
 }
 
+func TestGroupMultiplierForRouteGroup_InvalidPathFallsBackToDefault(t *testing.T) {
+	st := newQuotaTestStore(t)
+	ctx := context.Background()
+
+	if _, err := st.CreateChannelGroup(ctx, "parent", nil, 1, decimal.RequireFromString("1.2")); err != nil {
+		t.Fatalf("CreateChannelGroup(parent): %v", err)
+	}
+
+	routeGroup := "parent/missing"
+	mult, groupName := groupMultiplierForRouteGroup(ctx, st, &routeGroup)
+	if got, want := mult.StringFixed(6), "1.000000"; got != want {
+		t.Fatalf("invalid route group multiplier mismatch: got=%s want=%s", got, want)
+	}
+	if groupName != nil {
+		t.Fatalf("expected invalid route group name to be cleared, got=%q", *groupName)
+	}
+}
+
 func TestSubscriptionProviderReserveCommit_MultipliesPlanAndRouteGroup(t *testing.T) {
 	st := newQuotaTestStore(t)
 	ctx := context.Background()
