@@ -52,19 +52,8 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 	}
 	*c = Config(raw)
 
-	if hasYAMLKey(value, "compact_gateway") {
-		return nil
-	}
-	for i := 0; i+1 < len(value.Content); i += 2 {
-		if strings.TrimSpace(value.Content[i].Value) != "sub2api" {
-			continue
-		}
-		var legacy CompactGatewayConfig
-		if err := value.Content[i+1].Decode(&legacy); err != nil {
-			return err
-		}
-		c.CompactGateway = legacy
-		return nil
+	if hasYAMLKey(value, "sub2api") {
+		return errors.New("sub2api 已移除；请改用 compact_gateway")
 	}
 	return nil
 }

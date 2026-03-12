@@ -64,6 +64,8 @@ export OPENAI_API_KEY="sk_..."
 
 其余开关型配置已经迁移到数据库运行时设置，请在管理后台修改。
 
+`/v1/responses/compact` 仅通过 `compact gateway` 转发到远程上游；如果需要启用这条链路，请配置 `REALMS_COMPACT_GATEWAY_*`。旧的 `REALMS_SUB2API_*` 已移除，继续使用会在启动时直接报错。
+
 ## 重要变更
 
 - `REALMS_MODE` 已移除；设置该变量会直接报错

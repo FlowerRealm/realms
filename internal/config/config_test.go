@@ -177,7 +177,6 @@ func TestLoad_CompactGatewayLegacyEnvRejected(t *testing.T) {
 func TestLoad_CompactGatewayUsesOnlyNewEnv(t *testing.T) {
 	t.Setenv("REALMS_COMPACT_GATEWAY_BASE_URL", "https://new-gateway.example.com")
 	t.Setenv("REALMS_COMPACT_GATEWAY_KEY", "new-key")
-
 	cfg, err := config.LoadFromEnv()
 	if err != nil {
 		t.Fatalf("LoadFromEnv: %v", err)
@@ -198,30 +197,24 @@ func TestLoad_CodexSessionTTLEnvRejected(t *testing.T) {
 	}
 }
 
-func TestConfigYAML_AllowsLegacySub2APIKey(t *testing.T) {
+func TestConfigYAML_RejectsLegacySub2APIKey(t *testing.T) {
 	var cfg config.Config
 	err := yaml.Unmarshal([]byte(`
 sub2api:
   base_url: https://legacy-gateway.example.com
   gateway_key: legacy-key
 `), &cfg)
-	if err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
+	if err == nil {
+		t.Fatalf("expected yaml.Unmarshal to fail")
 	}
-	if cfg.CompactGateway.BaseURL != "https://legacy-gateway.example.com" {
-		t.Fatalf("expected legacy base url, got %q", cfg.CompactGateway.BaseURL)
-	}
-	if cfg.CompactGateway.GatewayKey != "legacy-key" {
-		t.Fatalf("expected legacy gateway key, got %q", cfg.CompactGateway.GatewayKey)
+	if got := err.Error(); got != "sub2api 已移除；请改用 compact_gateway" {
+		t.Fatalf("expected legacy yaml error, got %q", got)
 	}
 }
 
-func TestConfigYAML_NewCompactGatewayKeyOverridesLegacy(t *testing.T) {
+func TestConfigYAML_AcceptsCompactGatewayKey(t *testing.T) {
 	var cfg config.Config
 	err := yaml.Unmarshal([]byte(`
-sub2api:
-  base_url: https://legacy-gateway.example.com
-  gateway_key: legacy-key
 compact_gateway:
   base_url: https://new-gateway.example.com
   gateway_key: new-key

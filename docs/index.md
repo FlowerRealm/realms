@@ -21,6 +21,8 @@ go run ./cmd/realms
 
 首次启动会自动执行内置迁移（SQLite）或迁移脚本（MySQL）。
 
+如果你要接 `POST /v1/responses/compact`，请在 `.env` 中配置 `REALMS_COMPACT_GATEWAY_BASE_URL`、`REALMS_COMPACT_GATEWAY_KEY`，可选再配 `REALMS_COMPACT_GATEWAY_TIMEOUT_MS`。旧的 `REALMS_SUB2API_*` 已移除。
+
 ## 启动前端（可选）
 
 开发模式（Vite dev server + proxy 到 8080）：
