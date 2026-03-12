@@ -67,6 +67,25 @@ func NewGroupRouter(st ChannelGroupStore, sched *Scheduler, userID int64, routeK
 	}
 }
 
+func (r *GroupRouter) constraintsForResolvedChannel(channelID int64) Constraints {
+	cons := r.cons
+	cons.RequireChannelID = channelID
+	if len(cons.AllowGroupOrder) > 0 {
+		cons.AllowGroups = nil
+	}
+	return cons
+}
+
+func routeScopeError(cons Constraints) error {
+	if strings.TrimSpace(cons.RequireCredentialKey) != "" {
+		return ErrConstrainedSelectionUnavailable
+	}
+	if cons.RequireChannelID != 0 {
+		return ErrRequiredChannelUnavailable
+	}
+	return errGroupExhausted
+}
+
 func (r *GroupRouter) Next(ctx context.Context) (Selection, error) {
 	if r.sched == nil {
 		return Selection{}, errors.New("group router 未配置")
@@ -80,13 +99,20 @@ func (r *GroupRouter) Next(ctx context.Context) (Selection, error) {
 				return Selection{}, errGroupExhausted
 			}
 		}
-		sel, err := r.sched.SelectWithConstraints(ctx, r.userID, r.routeKeyHash, r.cons)
+		cons := r.cons
+		if len(cons.AllowGroupOrder) > 0 {
+			cons.AllowGroups = nil
+		}
+		sel, err := r.sched.SelectWithConstraints(ctx, r.userID, r.routeKeyHash, cons)
 		if err != nil {
 			return Selection{}, err
 		}
 		routeGroup, ok, routeErr := r.routeGroupForSelectedChannel(ctx, sel.ChannelID)
 		if routeErr != nil {
 			return Selection{}, routeErr
+		}
+		if len(r.cons.AllowGroupOrder) > 0 && !ok {
+			return Selection{}, routeScopeError(r.cons)
 		}
 		if ok {
 			sel.RouteGroup = routeGroup
@@ -178,8 +204,7 @@ func (r *GroupRouter) nextFromOrderedGroups(ctx context.Context) (Selection, err
 	// 当所有 group 都 exhausted 且存在被 ban 的渠道时：选择“解禁时间最近”的渠道做一次尝试，
 	// 避免直接返回“上游不可用”导致无法恢复（或在短 ban 窗口内持续失败）。
 	if bestBannedID != 0 && bestBannedGroupID != 0 && r.sched != nil {
-		cons := r.cons
-		cons.RequireChannelID = bestBannedID
+		cons := r.constraintsForResolvedChannel(bestBannedID)
 		sel, err := r.sched.SelectWithConstraintsAllowBannedRequiredChannel(ctx, r.userID, r.routeKeyHash, cons)
 		if err == nil {
 			if bestBannedID == r.lastSelectedChannelID {
@@ -319,9 +344,7 @@ func (r *GroupRouter) nextFromOrderedGroupsSequential(ctx context.Context) (Sele
 			}
 			continue
 		}
-		cons := r.cons
-		cons.RequireChannelID = cand.ChannelID
-		cons.AllowGroups = nil
+		cons := r.constraintsForResolvedChannel(cand.ChannelID)
 		sel, err := r.sched.SelectWithConstraints(ctx, r.userID, r.routeKeyHash, cons)
 		if err != nil {
 			if errors.Is(err, ErrFastModeUnsupported) {
@@ -337,9 +360,7 @@ func (r *GroupRouter) nextFromOrderedGroupsSequential(ctx context.Context) (Sele
 		return sel, nil
 	}
 	if bestBannedID != 0 {
-		cons := r.cons
-		cons.RequireChannelID = bestBannedID
-		cons.AllowGroups = nil
+		cons := r.constraintsForResolvedChannel(bestBannedID)
 		sel, err := r.sched.SelectWithConstraintsAllowBannedRequiredChannel(ctx, r.userID, r.routeKeyHash, cons)
 		if err == nil {
 			r.sequentialStartChannelID = bestBannedID
@@ -596,9 +617,7 @@ func (r *GroupRouter) nextFromGroup(ctx context.Context, groupID int64) (Selecti
 					if r.sched.state.IsChannelBanned(chID, now) {
 						return Selection{}, false
 					}
-					cons := r.cons
-					cons.RequireChannelID = chID
-					cons.AllowGroups = nil
+					cons := r.constraintsForResolvedChannel(chID)
 					sel, err := r.sched.SelectWithConstraints(ctx, r.userID, r.routeKeyHash, cons)
 					if err != nil {
 						if errors.Is(err, ErrFastModeUnsupported) {
@@ -684,9 +703,7 @@ func (r *GroupRouter) nextFromGroup(ctx context.Context, groupID int64) (Selecti
 		if r.sched != nil && r.sched.state != nil && r.sched.state.IsChannelBanned(cand.ChannelID, now) {
 			continue
 		}
-		cons := r.cons
-		cons.RequireChannelID = cand.ChannelID
-		cons.AllowGroups = nil
+		cons := r.constraintsForResolvedChannel(cand.ChannelID)
 		sel, err := r.sched.SelectWithConstraints(ctx, r.userID, r.routeKeyHash, cons)
 		if err != nil {
 			if errors.Is(err, ErrFastModeUnsupported) {
