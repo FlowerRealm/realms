@@ -162,29 +162,19 @@ func TestLoad_RemovedGatewayAndRedisEnvIgnored(t *testing.T) {
 	}
 }
 
-func TestLoad_CompactGatewayLegacyEnvIgnored(t *testing.T) {
+func TestLoad_CompactGatewayLegacyEnvRejected(t *testing.T) {
 	t.Setenv("REALMS_COMPACT_GATEWAY_BASE_URL", "")
 	t.Setenv("REALMS_COMPACT_GATEWAY_KEY", "")
 	t.Setenv("REALMS_SUB2API_BASE_URL", "https://legacy-gateway.example.com")
 	t.Setenv("REALMS_SUB2API_GATEWAY_KEY", "legacy-key")
 	t.Setenv("REALMS_SUB2API_TIMEOUT_MS", "4321")
 
-	cfg, err := config.LoadFromEnv()
-	if err != nil {
-		t.Fatalf("LoadFromEnv: %v", err)
-	}
-	if cfg.CompactGateway.BaseURL != "" {
-		t.Fatalf("expected legacy base url to be ignored, got %q", cfg.CompactGateway.BaseURL)
-	}
-	if cfg.CompactGateway.GatewayKey != "" {
-		t.Fatalf("expected legacy gateway key to be ignored, got %q", cfg.CompactGateway.GatewayKey)
+	if _, err := config.LoadFromEnv(); err == nil {
+		t.Fatalf("expected legacy compact gateway env to be rejected")
 	}
 }
 
 func TestLoad_CompactGatewayUsesOnlyNewEnv(t *testing.T) {
-	t.Setenv("REALMS_SUB2API_BASE_URL", "https://legacy-gateway.example.com")
-	t.Setenv("REALMS_SUB2API_GATEWAY_KEY", "legacy-key")
-	t.Setenv("REALMS_SUB2API_TIMEOUT_MS", "4321")
 	t.Setenv("REALMS_COMPACT_GATEWAY_BASE_URL", "https://new-gateway.example.com")
 	t.Setenv("REALMS_COMPACT_GATEWAY_KEY", "new-key")
 
@@ -197,6 +187,14 @@ func TestLoad_CompactGatewayUsesOnlyNewEnv(t *testing.T) {
 	}
 	if cfg.CompactGateway.GatewayKey != "new-key" {
 		t.Fatalf("expected new gateway key to win, got %q", cfg.CompactGateway.GatewayKey)
+	}
+}
+
+func TestLoad_CodexSessionTTLEnvRejected(t *testing.T) {
+	t.Setenv("REALMS_CODEX_SESSION_TTL_SECONDS", "600")
+
+	if _, err := config.LoadFromEnv(); err == nil {
+		t.Fatalf("expected legacy codex session ttl env to be rejected")
 	}
 }
 

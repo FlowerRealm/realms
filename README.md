@@ -70,5 +70,7 @@ export OPENAI_API_KEY="sk_..."
 - `REALMS_ALLOW_OPEN_REGISTRATION` 已移除；注册开关改为运行时设置，首个 root 创建后会自动关闭公开注册
 - `FRONTEND_DIST_DIR` 与 `FRONTEND_BASE_URL` 已移除；部署只保留嵌入式同源前端
 - `REALMS_PUBLIC_BASE_URL`、`REALMS_CORS_ALLOW_ORIGINS`、`REALMS_DISABLE_SECURE_COOKIES`、`REALMS_TRUST_PROXY_HEADERS` 等旧启动期 env 已移除
+- `REALMS_SUB2API_BASE_URL` / `REALMS_SUB2API_GATEWAY_KEY` 已移除；请改用 `REALMS_COMPACT_GATEWAY_BASE_URL` / `REALMS_COMPACT_GATEWAY_KEY`
+- `REALMS_SUB2API_TIMEOUT_MS` 与 `REALMS_CODEX_SESSION_TTL_SECONDS` 已移除；检测到旧变量时服务会直接报错提示迁移
 - `cmd/realms-app`、`make app-dev`、`make app-dist`、`make app-set-key` 已删除
 - `web/dist-personal`、`npm --prefix web run build:personal` 与 personal embed 产物已删除

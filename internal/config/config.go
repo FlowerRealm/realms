@@ -202,6 +202,31 @@ func LoadFromEnv() (Config, error) {
 	if v := strings.TrimSpace(os.Getenv("REALMS_MODE")); v != "" {
 		return Config{}, fmt.Errorf("REALMS_MODE 已移除（检测到 %q）；请删除该配置并使用统一模式启动", v)
 	}
+	for _, removed := range []struct {
+		name    string
+		message string
+	}{
+		{
+			name:    "REALMS_SUB2API_BASE_URL",
+			message: "请改用 REALMS_COMPACT_GATEWAY_BASE_URL",
+		},
+		{
+			name:    "REALMS_SUB2API_GATEWAY_KEY",
+			message: "请改用 REALMS_COMPACT_GATEWAY_KEY",
+		},
+		{
+			name:    "REALMS_SUB2API_TIMEOUT_MS",
+			message: "请删除该配置；compact gateway 启动期超时覆盖已移除，当前固定为 300s",
+		},
+		{
+			name:    "REALMS_CODEX_SESSION_TTL_SECONDS",
+			message: "请删除该配置；Codex session TTL 启动期覆盖已移除，当前固定为 300 秒",
+		},
+	} {
+		if v := strings.TrimSpace(os.Getenv(removed.name)); v != "" {
+			return Config{}, fmt.Errorf("%s 已移除（检测到 %q）；%s", removed.name, v, removed.message)
+		}
+	}
 	cfg := defaultConfig()
 	applyEnvOverrides(&cfg)
 	return normalizeAndValidate(cfg)
