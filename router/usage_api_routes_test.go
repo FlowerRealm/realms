@@ -1706,6 +1706,165 @@ func TestUsageEventDetail_UserResponse_IncludesPricingBreakdown(t *testing.T) {
 	}
 }
 
+func TestUsageEventDetail_UserResponse_IncludesNestedGroupPathPricingBreakdown(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	userID, err := st.CreateUser(ctx, "detail-nested@example.com", "detailnested", pwHash, store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	modelID := "m_detail_nested"
+	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
+		PublicID:            modelID,
+		GroupName:           "parent",
+		InputUSDPer1M:       decimal.RequireFromString("1"),
+		OutputUSDPer1M:      decimal.Zero,
+		CacheInputUSDPer1M:  decimal.Zero,
+		CacheOutputUSDPer1M: decimal.Zero,
+		Status:              1,
+	}); err != nil {
+		t.Fatalf("CreateManagedModel: %v", err)
+	}
+
+	tokenName := "t-detail-nested"
+	tokenID, _, err := st.CreateUserToken(ctx, userID, &tokenName, "sk-detail-nested-123")
+	if err != nil {
+		t.Fatalf("CreateUserToken: %v", err)
+	}
+
+	usageEventID, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
+		RequestID:        "req_detail_nested_1",
+		UserID:           userID,
+		SubscriptionID:   nil,
+		TokenID:          tokenID,
+		Model:            &modelID,
+		ReservedUSD:      decimal.RequireFromString("1.8"),
+		ReserveExpiresAt: time.Now().UTC().Add(1 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("ReserveUsage: %v", err)
+	}
+
+	inTokens := int64(1_000_000)
+	groupPath := "parent/child"
+	if err := st.CommitUsage(ctx, store.CommitUsageInput{
+		UsageEventID:             usageEventID,
+		InputTokens:              &inTokens,
+		CommittedUSD:             decimal.RequireFromString("1.8"),
+		PriceMultiplier:          decimal.RequireFromString("1.8"),
+		PriceMultiplierGroup:     decimal.RequireFromString("1.8"),
+		PriceMultiplierPayment:   decimal.RequireFromString("1"),
+		PriceMultiplierGroupName: &groupPath,
+	}); err != nil {
+		t.Fatalf("CommitUsage: %v", err)
+	}
+
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+
+	cookieName := "realms_session"
+	sessionStore := cookie.NewStore([]byte("test-secret"))
+	sessionStore.Options(sessions.Options{
+		Path:     "/",
+		MaxAge:   2592000,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	engine.Use(sessions.Sessions(cookieName, sessionStore))
+
+	SetRouter(engine, Options{
+		Store:             st,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
+
+	loginBody, _ := json.Marshal(map[string]any{
+		"login":    "detail-nested@example.com",
+		"password": "password123",
+	})
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/user/login", bytes.NewReader(loginBody))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	sessionCookie := ""
+	for _, cookieItem := range rr.Result().Cookies() {
+		if cookieItem.Name == cookieName {
+			sessionCookie = cookieItem.String()
+			break
+		}
+	}
+	if sessionCookie == "" {
+		t.Fatalf("expected session cookie %q", cookieName)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/usage/events/"+strconv.FormatInt(usageEventID, 10)+"/detail", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("detail status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			PricingBreakdown struct {
+				GroupName           string `json:"group_name"`
+				GroupMultiplier     string `json:"group_multiplier"`
+				PaymentMultiplier   string `json:"payment_multiplier"`
+				EffectiveMultiplier string `json:"effective_multiplier"`
+				FinalCostUSD        string `json:"final_cost_usd"`
+			} `json:"pricing_breakdown"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal detail: %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("expected success, got message=%q", got.Message)
+	}
+	if got.Data.PricingBreakdown.GroupName != "parent/child" {
+		t.Fatalf("group_name mismatch: got=%q want=%q", got.Data.PricingBreakdown.GroupName, "parent/child")
+	}
+	if got.Data.PricingBreakdown.GroupMultiplier != "1.8" {
+		t.Fatalf("group_multiplier mismatch: got=%q want=%q", got.Data.PricingBreakdown.GroupMultiplier, "1.8")
+	}
+	if got.Data.PricingBreakdown.PaymentMultiplier != "1" {
+		t.Fatalf("payment_multiplier mismatch: got=%q want=%q", got.Data.PricingBreakdown.PaymentMultiplier, "1")
+	}
+	if got.Data.PricingBreakdown.EffectiveMultiplier != "1.8" {
+		t.Fatalf("effective_multiplier mismatch: got=%q want=%q", got.Data.PricingBreakdown.EffectiveMultiplier, "1.8")
+	}
+	if got.Data.PricingBreakdown.FinalCostUSD != "1.8" {
+		t.Fatalf("final_cost_usd mismatch: got=%q want=%q", got.Data.PricingBreakdown.FinalCostUSD, "1.8")
+	}
+}
+
 func TestParseDateRangeInLocation_UsesLocalDayBoundary(t *testing.T) {
 	loc := time.FixedZone("CST", 8*60*60)
 	nowUTC := time.Date(2026, 2, 8, 1, 30, 0, 0, time.UTC) // CST: 2026-02-08 09:30
@@ -1725,5 +1884,150 @@ func TestParseDateRangeInLocation_UsesLocalDayBoundary(t *testing.T) {
 	}
 	if got, want := untilUTC, nowUTC; !got.Equal(want) {
 		t.Fatalf("untilUTC=%s want=%s", got.Format(time.RFC3339), want.Format(time.RFC3339))
+	}
+}
+
+func TestUsageEventDetail_PricingBreakdown_ExposesGroupPathMultiplier(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	userID, err := st.CreateUser(ctx, "group-path@example.com", "grouppath", pwHash, store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	tokenID, _, err := st.CreateUserToken(ctx, userID, nil, "sk-group-path")
+	if err != nil {
+		t.Fatalf("CreateUserToken: %v", err)
+	}
+
+	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
+		PublicID:            "nested-model",
+		GroupName:           "parent",
+		InputUSDPer1M:       decimal.RequireFromString("1"),
+		OutputUSDPer1M:      decimal.Zero,
+		CacheInputUSDPer1M:  decimal.Zero,
+		CacheOutputUSDPer1M: decimal.Zero,
+		Status:              1,
+	}); err != nil {
+		t.Fatalf("CreateManagedModel: %v", err)
+	}
+
+	usageEventID, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
+		RequestID:        "req_group_path_detail_1",
+		UserID:           userID,
+		TokenID:          tokenID,
+		Model:            optionalStringForUsageRouteTest("nested-model"),
+		ReservedUSD:      decimal.Zero,
+		ReserveExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("ReserveUsage: %v", err)
+	}
+	inTokens := int64(1_000_000)
+	if err := st.CommitUsage(ctx, store.CommitUsageInput{
+		UsageEventID:             usageEventID,
+		InputTokens:              &inTokens,
+		CommittedUSD:             decimal.RequireFromString("1.8"),
+		PriceMultiplier:          decimal.RequireFromString("1.8"),
+		PriceMultiplierGroup:     decimal.RequireFromString("1.8"),
+		PriceMultiplierPayment:   decimal.RequireFromString("1"),
+		PriceMultiplierGroupName: optionalStringForUsageRouteTest("parent/child"),
+	}); err != nil {
+		t.Fatalf("CommitUsage: %v", err)
+	}
+
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+
+	cookieName := "realms_session"
+	sessionStore := cookie.NewStore([]byte("test-secret"))
+	sessionStore.Options(sessions.Options{
+		Path:     "/",
+		MaxAge:   2592000,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	engine.Use(sessions.Sessions(cookieName, sessionStore))
+
+	SetRouter(engine, Options{
+		Store:             st,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
+
+	loginBody, _ := json.Marshal(map[string]any{
+		"login":    "group-path@example.com",
+		"password": "password123",
+	})
+	loginReq := httptest.NewRequest(http.MethodPost, "http://example.com/api/user/login", bytes.NewReader(loginBody))
+	loginReq.Header.Set("Content-Type", "application/json; charset=utf-8")
+	loginResp := httptest.NewRecorder()
+	engine.ServeHTTP(loginResp, loginReq)
+	if loginResp.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", loginResp.Code, loginResp.Body.String())
+	}
+	sessionCookie := ""
+	for _, cookieItem := range loginResp.Result().Cookies() {
+		if cookieItem.Name == cookieName {
+			sessionCookie = cookieItem.String()
+			break
+		}
+	}
+	if sessionCookie == "" {
+		t.Fatalf("expected session cookie %q", cookieName)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/usage/events/"+strconv.FormatInt(usageEventID, 10)+"/detail", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("detail status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			PricingBreakdown struct {
+				GroupName           string `json:"group_name"`
+				GroupMultiplier     string `json:"group_multiplier"`
+				EffectiveMultiplier string `json:"effective_multiplier"`
+			} `json:"pricing_breakdown"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal detail: %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("expected success, got message=%q", got.Message)
+	}
+	if got.Data.PricingBreakdown.GroupName != "parent/child" {
+		t.Fatalf("group_name mismatch: got=%q want=%q", got.Data.PricingBreakdown.GroupName, "parent/child")
+	}
+	if got.Data.PricingBreakdown.GroupMultiplier != "1.8" {
+		t.Fatalf("group_multiplier mismatch: got=%q want=%q", got.Data.PricingBreakdown.GroupMultiplier, "1.8")
+	}
+	if got.Data.PricingBreakdown.EffectiveMultiplier != "1.8" {
+		t.Fatalf("effective_multiplier mismatch: got=%q want=%q", got.Data.PricingBreakdown.EffectiveMultiplier, "1.8")
 	}
 }

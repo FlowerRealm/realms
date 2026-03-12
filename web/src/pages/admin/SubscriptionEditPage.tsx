@@ -202,7 +202,7 @@ export function SubscriptionEditPage() {
                     <span className="input-group-text">×</span>
                     <input className="form-control" value={priceMultiplier} onChange={(e) => setPriceMultiplier(e.target.value)} inputMode="decimal" placeholder="1" />
                   </div>
-                  <div className="form-text small text-muted">最终计费倍率 = 订阅倍率 × 最终成功渠道组倍率。</div>
+                  <div className="form-text small text-muted">最终计费倍率 = 订阅倍率 × 最终命中渠道组路径倍率（父子组按路径叠乘）。</div>
                 </div>
                 <div className="col-md-4">
                   <label className="form-label">价格（CNY）</label>

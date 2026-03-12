@@ -1436,7 +1436,7 @@ export function UsageAdminPage() {
                                                       ?.payment_multiplier ||
                                                       "1",
                                                   )}{" "}
-                                                  × 渠道组(
+                                                  × 渠道组路径(
                                                   {detailByEventID[e.id]
                                                     ?.pricing_breakdown
                                                     ?.group_name || "default"}
