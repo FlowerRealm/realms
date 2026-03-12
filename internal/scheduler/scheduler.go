@@ -107,6 +107,7 @@ type Constraints struct {
 	RequireChannelType   string
 	RequireChannelID     int64
 	RequireCredentialKey string
+	RouteGroupHint       string
 	RequireFastMode      bool
 	AllowGroups          map[string]struct{}
 	AllowGroupOrder      []string

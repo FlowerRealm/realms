@@ -236,6 +236,108 @@ func TestBilling_GroupMultiplierStacking_Subscription_E2E(t *testing.T) {
 	}
 }
 
+func TestBilling_GroupMultiplierStacking_NestedPath_E2E(t *testing.T) {
+	const model = "gpt-5.2"
+
+	upstream := newMultiplierUpstreamServer(t, model)
+	st, db, dbPath := newMultiplierSQLiteStore(t)
+	ctx := context.Background()
+
+	parentID, err := st.CreateChannelGroup(ctx, "parent", nil, 1, decimal.RequireFromString("1.2"))
+	if err != nil {
+		t.Fatalf("CreateChannelGroup(parent): %v", err)
+	}
+	childID, err := st.CreateChannelGroup(ctx, "child", nil, 1, decimal.RequireFromString("1.5"))
+	if err != nil {
+		t.Fatalf("CreateChannelGroup(child): %v", err)
+	}
+	if err := st.CreateMainGroup(ctx, "ug1", nil, 1); err != nil {
+		t.Fatalf("CreateMainGroup: %v", err)
+	}
+	if err := st.ReplaceMainGroupSubgroups(ctx, "ug1", []string{"parent"}); err != nil {
+		t.Fatalf("ReplaceMainGroupSubgroups: %v", err)
+	}
+
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ci-upstream-nested", "child", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel: %v", err)
+	}
+	epID, err := st.CreateUpstreamEndpoint(ctx, channelID, strings.TrimRight(strings.TrimSpace(upstream.URL), "/")+"/v1", 0)
+	if err != nil {
+		t.Fatalf("CreateUpstreamEndpoint: %v", err)
+	}
+	if _, _, err := st.CreateOpenAICompatibleCredential(ctx, epID, strPtr("ci"), "sk-upstream-test"); err != nil {
+		t.Fatalf("CreateOpenAICompatibleCredential: %v", err)
+	}
+	if err := st.AddChannelGroupMemberGroup(ctx, parentID, childID, 100, false); err != nil {
+		t.Fatalf("AddChannelGroupMemberGroup: %v", err)
+	}
+	if err := st.AddChannelGroupMemberChannel(ctx, childID, channelID, 100, false); err != nil {
+		t.Fatalf("AddChannelGroupMemberChannel: %v", err)
+	}
+
+	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
+		PublicID:            model,
+		GroupName:           "parent",
+		OwnedBy:             strPtr("upstream"),
+		InputUSDPer1M:       decimal.RequireFromString("1"),
+		OutputUSDPer1M:      decimal.Zero,
+		CacheInputUSDPer1M:  decimal.Zero,
+		CacheOutputUSDPer1M: decimal.Zero,
+		Status:              1,
+	}); err != nil {
+		t.Fatalf("CreateManagedModel: %v", err)
+	}
+	if _, err := st.CreateChannelModel(ctx, store.ChannelModelCreate{
+		ChannelID:     channelID,
+		PublicID:      model,
+		UpstreamModel: model,
+		Status:        1,
+	}); err != nil {
+		t.Fatalf("CreateChannelModel: %v", err)
+	}
+
+	userID, err := st.CreateUser(ctx, "mul-nested@example.com", "mulnested", []byte("x"), store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if err := st.SetUserMainGroup(ctx, userID, "ug1"); err != nil {
+		t.Fatalf("SetUserMainGroup: %v", err)
+	}
+	if _, err := st.AddUserBalanceUSD(ctx, userID, decimal.RequireFromString("10")); err != nil {
+		t.Fatalf("AddUserBalanceUSD: %v", err)
+	}
+	rawToken, err := auth.NewRandomToken("sk_", 32)
+	if err != nil {
+		t.Fatalf("NewRandomToken: %v", err)
+	}
+	tokenID, _, err := st.CreateUserToken(ctx, userID, strPtr("ci-token"), rawToken)
+	if err != nil {
+		t.Fatalf("CreateUserToken: %v", err)
+	}
+	if err := st.ReplaceTokenChannelGroups(ctx, tokenID, []string{"parent"}); err != nil {
+		t.Fatalf("ReplaceTokenChannelGroups: %v", err)
+	}
+
+	ts := newMultiplierAppServer(t, db, dbPath, true)
+	callResponsesOnce(t, ts.URL, rawToken, model)
+
+	events := waitUsageEventsByUser(t, st, ctx, userID, 1)
+	ev := events[0]
+	if ev.State != store.UsageStateCommitted {
+		t.Fatalf("usage_event state mismatch: got=%q want=%q (id=%d)", ev.State, store.UsageStateCommitted, ev.ID)
+	}
+	if got, want := ev.PriceMultiplierGroup.StringFixed(6), "1.800000"; got != want {
+		t.Fatalf("group multiplier mismatch: got=%s want=%s", got, want)
+	}
+	if got, want := ev.CommittedUSD.StringFixed(6), "1.800000"; got != want {
+		t.Fatalf("committed_usd mismatch: got=%s want=%s", got, want)
+	}
+	if ev.PriceMultiplierGroupName == nil || *ev.PriceMultiplierGroupName != "parent/child" {
+		t.Fatalf("group path mismatch: %+v", ev.PriceMultiplierGroupName)
+	}
+}
+
 func newMultiplierSQLiteStore(t *testing.T) (*store.Store, *sql.DB, string) {
 	t.Helper()
 

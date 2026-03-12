@@ -73,3 +73,26 @@ func TestMigration0069_UpstreamChannelsAllowServiceTierDefault(t *testing.T) {
 		t.Fatalf("unexpected stmt count: %d", len(stmts))
 	}
 }
+
+func TestMigration0072_UsageEventsGroupPathText(t *testing.T) {
+	b, err := migrationsFS.ReadFile("migrations/0072_usage_events_group_path_text.sql")
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+
+	text := string(b)
+	for _, needle := range []string{
+		"column_name = 'price_multiplier_group_name'",
+		"DATA_TYPE",
+		"MODIFY COLUMN `price_multiplier_group_name` TEXT NULL",
+	} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("migration missing %q", needle)
+		}
+	}
+
+	stmts := splitSQLStatements(text)
+	if len(stmts) != 5 {
+		t.Fatalf("unexpected stmt count: %d", len(stmts))
+	}
+}

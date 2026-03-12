@@ -98,6 +98,10 @@ func ptrInt64(v int64) *int64 {
 	return &v
 }
 
+func ptrInt(v int) *int {
+	return &v
+}
+
 func TestGroupRouter_Next_AllowsOneRetryThenSwitchesChannel(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{
@@ -749,6 +753,535 @@ func TestGroupRouter_Next_SingleGroupAllBannedFallsBackToNearestUnban(t *testing
 	}
 	if sel.RouteGroup != g0.Name {
 		t.Fatalf("expected route_group=%q, got=%q", g0.Name, sel.RouteGroup)
+	}
+}
+
+func TestGroupRouter_Next_NestedGroupReturnsLeafPath(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0, Groups: "child"},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 101, EndpointID: 11, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+
+	parent := store.ChannelGroup{ID: 1, Name: "parent", Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	child := store.ChannelGroup{ID: 2, Name: "child", Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	gs := &fakeGroupStore{
+		groupsByID: map[int64]store.ChannelGroup{
+			parent.ID: parent,
+			child.ID:  child,
+		},
+		groupsByName: map[string]store.ChannelGroup{
+			parent.Name: parent,
+			child.Name:  child,
+		},
+		members: map[int64][]store.ChannelGroupMemberDetail{
+			parent.ID: {
+				{
+					MemberID:          1,
+					ParentGroupID:     parent.ID,
+					MemberGroupID:     ptrInt64(child.ID),
+					MemberGroupName:   ptrString(child.Name),
+					MemberGroupStatus: ptrInt(1),
+					Priority:          100,
+					CreatedAt:         time.Now(),
+					UpdatedAt:         time.Now(),
+				},
+			},
+			child.ID: {
+				{
+					MemberID:            2,
+					ParentGroupID:       child.ID,
+					MemberChannelID:     ptrInt64(1),
+					MemberChannelType:   ptrString(store.UpstreamTypeOpenAICompatible),
+					MemberChannelGroups: ptrString(child.Name),
+					Priority:            100,
+					CreatedAt:           time.Now(),
+					UpdatedAt:           time.Now(),
+				},
+			},
+		},
+	}
+
+	router := NewGroupRouter(gs, s, 10, "", Constraints{
+		AllowGroups:     map[string]struct{}{parent.Name: {}},
+		AllowGroupOrder: []string{parent.Name},
+	})
+
+	sel, err := router.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next err: %v", err)
+	}
+	if sel.ChannelID != 1 {
+		t.Fatalf("expected nested route to pick channel=1, got=%d", sel.ChannelID)
+	}
+	if sel.RouteGroup != "parent/child" {
+		t.Fatalf("expected nested route_group=%q, got=%q", "parent/child", sel.RouteGroup)
+	}
+}
+
+func TestGroupRouter_Next_DuplicateChannelPathsKeepFirstEncounteredRouteGroup(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0, Groups: "a,z"},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 101, EndpointID: 11, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+
+	parent := store.ChannelGroup{ID: 1, Name: "parent", Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	childA := store.ChannelGroup{ID: 2, Name: "a", Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	childZ := store.ChannelGroup{ID: 3, Name: "z", Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	gs := &fakeGroupStore{
+		groupsByID: map[int64]store.ChannelGroup{
+			parent.ID: parent,
+			childA.ID: childA,
+			childZ.ID: childZ,
+		},
+		groupsByName: map[string]store.ChannelGroup{
+			parent.Name: parent,
+			childA.Name: childA,
+			childZ.Name: childZ,
+		},
+		members: map[int64][]store.ChannelGroupMemberDetail{
+			parent.ID: {
+				{
+					MemberID:          1,
+					ParentGroupID:     parent.ID,
+					MemberGroupID:     ptrInt64(childA.ID),
+					MemberGroupName:   ptrString(childA.Name),
+					MemberGroupStatus: ptrInt(1),
+					Priority:          100,
+					CreatedAt:         time.Now(),
+					UpdatedAt:         time.Now(),
+				},
+				{
+					MemberID:          2,
+					ParentGroupID:     parent.ID,
+					MemberGroupID:     ptrInt64(childZ.ID),
+					MemberGroupName:   ptrString(childZ.Name),
+					MemberGroupStatus: ptrInt(1),
+					Priority:          100,
+					CreatedAt:         time.Now(),
+					UpdatedAt:         time.Now(),
+				},
+			},
+			childA.ID: {
+				{
+					MemberID:            3,
+					ParentGroupID:       childA.ID,
+					MemberChannelID:     ptrInt64(1),
+					MemberChannelType:   ptrString(store.UpstreamTypeOpenAICompatible),
+					MemberChannelGroups: ptrString(childA.Name),
+					Priority:            100,
+					CreatedAt:           time.Now(),
+					UpdatedAt:           time.Now(),
+				},
+			},
+			childZ.ID: {
+				{
+					MemberID:            4,
+					ParentGroupID:       childZ.ID,
+					MemberChannelID:     ptrInt64(1),
+					MemberChannelType:   ptrString(store.UpstreamTypeOpenAICompatible),
+					MemberChannelGroups: ptrString(childZ.Name),
+					Priority:            100,
+					CreatedAt:           time.Now(),
+					UpdatedAt:           time.Now(),
+				},
+			},
+		},
+	}
+
+	router := NewGroupRouter(gs, s, 10, "", Constraints{
+		AllowGroups:     map[string]struct{}{parent.Name: {}},
+		AllowGroupOrder: []string{parent.Name},
+	})
+
+	sel, err := router.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next err: %v", err)
+	}
+	if sel.ChannelID != 1 {
+		t.Fatalf("expected duplicate-path route to pick channel=1, got=%d", sel.ChannelID)
+	}
+	if sel.RouteGroup != "parent/a" {
+		t.Fatalf("expected first encountered route_group=%q, got=%q", "parent/a", sel.RouteGroup)
+	}
+}
+
+func TestGroupRouter_Next_RequireChannelBackfillsNestedRouteGroup(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0, Groups: "child"},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 101, EndpointID: 11, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+
+	parent := store.ChannelGroup{ID: 1, Name: "parent", Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	child := store.ChannelGroup{ID: 2, Name: "child", Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	gs := &fakeGroupStore{
+		groupsByID: map[int64]store.ChannelGroup{
+			parent.ID: parent,
+			child.ID:  child,
+		},
+		groupsByName: map[string]store.ChannelGroup{
+			parent.Name: parent,
+			child.Name:  child,
+		},
+		members: map[int64][]store.ChannelGroupMemberDetail{
+			parent.ID: {
+				{
+					MemberID:          1,
+					ParentGroupID:     parent.ID,
+					MemberGroupID:     ptrInt64(child.ID),
+					MemberGroupName:   ptrString(child.Name),
+					MemberGroupStatus: ptrInt(1),
+					Priority:          100,
+					CreatedAt:         time.Now(),
+					UpdatedAt:         time.Now(),
+				},
+			},
+			child.ID: {
+				{
+					MemberID:            2,
+					ParentGroupID:       child.ID,
+					MemberChannelID:     ptrInt64(1),
+					MemberChannelType:   ptrString(store.UpstreamTypeOpenAICompatible),
+					MemberChannelGroups: ptrString(child.Name),
+					Priority:            100,
+					CreatedAt:           time.Now(),
+					UpdatedAt:           time.Now(),
+				},
+			},
+		},
+	}
+
+	router := NewGroupRouter(gs, s, 10, "", Constraints{
+		AllowGroups:          map[string]struct{}{parent.Name: {}},
+		AllowGroupOrder:      []string{parent.Name},
+		RequireChannelID:     1,
+		RequireCredentialKey: "openai_compatible:101",
+	})
+
+	sel, err := router.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next err: %v", err)
+	}
+	if sel.ChannelID != 1 {
+		t.Fatalf("expected constrained selection to pick channel=1, got=%d", sel.ChannelID)
+	}
+	if sel.RouteGroup != "parent/child" {
+		t.Fatalf("expected backfilled route_group=%q, got=%q", "parent/child", sel.RouteGroup)
+	}
+}
+
+func TestGroupRouter_Next_RequireChannelUsesFirstEncounteredDuplicateRouteGroupWhenHintMissing(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0, Groups: "a,z"},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 101, EndpointID: 11, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+
+	parent := store.ChannelGroup{ID: 1, Name: "parent", Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	childA := store.ChannelGroup{ID: 2, Name: "a", Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	childZ := store.ChannelGroup{ID: 3, Name: "z", Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	gs := &fakeGroupStore{
+		groupsByID: map[int64]store.ChannelGroup{
+			parent.ID: parent,
+			childA.ID: childA,
+			childZ.ID: childZ,
+		},
+		groupsByName: map[string]store.ChannelGroup{
+			parent.Name: parent,
+			childA.Name: childA,
+			childZ.Name: childZ,
+		},
+		members: map[int64][]store.ChannelGroupMemberDetail{
+			parent.ID: {
+				{
+					MemberID:          1,
+					ParentGroupID:     parent.ID,
+					MemberGroupID:     ptrInt64(childA.ID),
+					MemberGroupName:   ptrString(childA.Name),
+					MemberGroupStatus: ptrInt(1),
+					Priority:          100,
+					CreatedAt:         time.Now(),
+					UpdatedAt:         time.Now(),
+				},
+				{
+					MemberID:          2,
+					ParentGroupID:     parent.ID,
+					MemberGroupID:     ptrInt64(childZ.ID),
+					MemberGroupName:   ptrString(childZ.Name),
+					MemberGroupStatus: ptrInt(1),
+					Priority:          100,
+					CreatedAt:         time.Now(),
+					UpdatedAt:         time.Now(),
+				},
+			},
+			childA.ID: {
+				{
+					MemberID:            3,
+					ParentGroupID:       childA.ID,
+					MemberChannelID:     ptrInt64(1),
+					MemberChannelType:   ptrString(store.UpstreamTypeOpenAICompatible),
+					MemberChannelGroups: ptrString(childA.Name),
+					Priority:            100,
+					CreatedAt:           time.Now(),
+					UpdatedAt:           time.Now(),
+				},
+			},
+			childZ.ID: {
+				{
+					MemberID:            4,
+					ParentGroupID:       childZ.ID,
+					MemberChannelID:     ptrInt64(1),
+					MemberChannelType:   ptrString(store.UpstreamTypeOpenAICompatible),
+					MemberChannelGroups: ptrString(childZ.Name),
+					Priority:            100,
+					CreatedAt:           time.Now(),
+					UpdatedAt:           time.Now(),
+				},
+			},
+		},
+	}
+
+	router := NewGroupRouter(gs, s, 10, "", Constraints{
+		AllowGroups:          map[string]struct{}{parent.Name: {}},
+		AllowGroupOrder:      []string{parent.Name},
+		RequireChannelID:     1,
+		RequireCredentialKey: "openai_compatible:101",
+	})
+
+	sel, err := router.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next err: %v", err)
+	}
+	if sel.ChannelID != 1 {
+		t.Fatalf("expected constrained duplicate-path selection to pick channel=1, got=%d", sel.ChannelID)
+	}
+	if sel.RouteGroup != "parent/a" {
+		t.Fatalf("expected constrained duplicate-path route_group=%q, got=%q", "parent/a", sel.RouteGroup)
+	}
+}
+
+func TestGroupRouter_Next_RequireChannelUsesHintedDuplicateRouteGroup(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0, Groups: "a,z"},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 101, EndpointID: 11, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+
+	parent := store.ChannelGroup{ID: 1, Name: "parent", Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	childA := store.ChannelGroup{ID: 2, Name: "a", Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	childZ := store.ChannelGroup{ID: 3, Name: "z", Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	gs := &fakeGroupStore{
+		groupsByID: map[int64]store.ChannelGroup{
+			parent.ID: parent,
+			childA.ID: childA,
+			childZ.ID: childZ,
+		},
+		groupsByName: map[string]store.ChannelGroup{
+			parent.Name: parent,
+			childA.Name: childA,
+			childZ.Name: childZ,
+		},
+		members: map[int64][]store.ChannelGroupMemberDetail{
+			parent.ID: {
+				{
+					MemberID:          1,
+					ParentGroupID:     parent.ID,
+					MemberGroupID:     ptrInt64(childA.ID),
+					MemberGroupName:   ptrString(childA.Name),
+					MemberGroupStatus: ptrInt(1),
+					Priority:          100,
+					CreatedAt:         time.Now(),
+					UpdatedAt:         time.Now(),
+				},
+				{
+					MemberID:          2,
+					ParentGroupID:     parent.ID,
+					MemberGroupID:     ptrInt64(childZ.ID),
+					MemberGroupName:   ptrString(childZ.Name),
+					MemberGroupStatus: ptrInt(1),
+					Priority:          100,
+					CreatedAt:         time.Now(),
+					UpdatedAt:         time.Now(),
+				},
+			},
+			childA.ID: {
+				{
+					MemberID:            3,
+					ParentGroupID:       childA.ID,
+					MemberChannelID:     ptrInt64(1),
+					MemberChannelType:   ptrString(store.UpstreamTypeOpenAICompatible),
+					MemberChannelGroups: ptrString(childA.Name),
+					Priority:            100,
+					CreatedAt:           time.Now(),
+					UpdatedAt:           time.Now(),
+				},
+			},
+			childZ.ID: {
+				{
+					MemberID:            4,
+					ParentGroupID:       childZ.ID,
+					MemberChannelID:     ptrInt64(1),
+					MemberChannelType:   ptrString(store.UpstreamTypeOpenAICompatible),
+					MemberChannelGroups: ptrString(childZ.Name),
+					Priority:            100,
+					CreatedAt:           time.Now(),
+					UpdatedAt:           time.Now(),
+				},
+			},
+		},
+	}
+
+	router := NewGroupRouter(gs, s, 10, "", Constraints{
+		AllowGroups:          map[string]struct{}{parent.Name: {}},
+		AllowGroupOrder:      []string{parent.Name},
+		RequireChannelID:     1,
+		RequireCredentialKey: "openai_compatible:101",
+		RouteGroupHint:       "parent/z",
+	})
+
+	sel, err := router.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next err: %v", err)
+	}
+	if sel.ChannelID != 1 {
+		t.Fatalf("expected constrained hinted duplicate-path selection to pick channel=1, got=%d", sel.ChannelID)
+	}
+	if sel.RouteGroup != "parent/z" {
+		t.Fatalf("expected constrained hinted route_group=%q, got=%q", "parent/z", sel.RouteGroup)
+	}
+}
+
+func TestGroupRouter_Next_AllGroupsBannedNestedFallbackIgnoresRootAllowGroups(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 0, Groups: "child"},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 101, EndpointID: 11, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+
+	parent := store.ChannelGroup{ID: 1, Name: "parent", Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	child := store.ChannelGroup{ID: 2, Name: "child", Status: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	gs := &fakeGroupStore{
+		groupsByID: map[int64]store.ChannelGroup{
+			parent.ID: parent,
+			child.ID:  child,
+		},
+		groupsByName: map[string]store.ChannelGroup{
+			parent.Name: parent,
+			child.Name:  child,
+		},
+		members: map[int64][]store.ChannelGroupMemberDetail{
+			parent.ID: {
+				{
+					MemberID:          1,
+					ParentGroupID:     parent.ID,
+					MemberGroupID:     ptrInt64(child.ID),
+					MemberGroupName:   ptrString(child.Name),
+					MemberGroupStatus: ptrInt(1),
+					Priority:          100,
+					CreatedAt:         time.Now(),
+					UpdatedAt:         time.Now(),
+				},
+			},
+			child.ID: {
+				{
+					MemberID:            2,
+					ParentGroupID:       child.ID,
+					MemberChannelID:     ptrInt64(1),
+					MemberChannelType:   ptrString(store.UpstreamTypeOpenAICompatible),
+					MemberChannelGroups: ptrString(child.Name),
+					Priority:            100,
+					CreatedAt:           time.Now(),
+					UpdatedAt:           time.Now(),
+				},
+			},
+		},
+	}
+
+	now := time.Now()
+	s.state.channelBanUntil[1] = now.Add(10 * time.Second)
+
+	router := NewGroupRouter(gs, s, 10, "", Constraints{
+		AllowGroups:     map[string]struct{}{parent.Name: {}},
+		AllowGroupOrder: []string{parent.Name},
+	})
+
+	sel, err := router.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next err: %v", err)
+	}
+	if sel.ChannelID != 1 {
+		t.Fatalf("expected banned nested fallback to keep channel=1, got=%d", sel.ChannelID)
+	}
+	if sel.RouteGroup != "parent/child" {
+		t.Fatalf("expected banned nested fallback route_group=%q, got=%q", "parent/child", sel.RouteGroup)
 	}
 }
 

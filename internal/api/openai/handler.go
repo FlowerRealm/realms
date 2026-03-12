@@ -571,6 +571,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	if stickyRouteKeyHash != "" && boundOK && boundRoute.channelID > 0 {
 		bindingActive = true
 		cons.StartChannelID = boundRoute.channelID
+		cons.RouteGroupHint = boundRoute.routeGroup
 		if strings.TrimSpace(boundRoute.credentialKey) != "" {
 			bindingCredentialPinned = true
 			cons.RequireChannelID = boundRoute.channelID
@@ -669,6 +670,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 				cons.StartChannelID = 0
 				cons.RequireChannelID = 0
 				cons.RequireCredentialKey = ""
+				cons.RouteGroupHint = ""
 				w.Header().Set("X-Realms-Codex-Sticky-Cleared", "1")
 				w.Header().Set("X-Realms-Codex-Prev-Channel", strconv.FormatInt(boundRoute.channelID, 10))
 				if strings.TrimSpace(boundRoute.credentialKey) != "" {
@@ -683,6 +685,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 				cons.StartChannelID = 0
 				cons.RequireChannelID = 0
 				cons.RequireCredentialKey = ""
+				cons.RouteGroupHint = ""
 				w.Header().Set("X-Realms-Codex-Sticky-Cleared", "1")
 				w.Header().Set("X-Realms-Codex-Prev-Channel", strconv.FormatInt(boundRoute.channelID, 10))
 				if strings.TrimSpace(boundRoute.credentialKey) != "" {
@@ -698,6 +701,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 				cons.StartChannelID = 0
 				cons.RequireChannelID = 0
 				cons.RequireCredentialKey = ""
+				cons.RouteGroupHint = ""
 				w.Header().Set("X-Realms-Codex-Sticky-Cleared", "1")
 				w.Header().Set("X-Realms-Codex-Prev-Channel", strconv.FormatInt(boundRoute.channelID, 10))
 				if strings.TrimSpace(boundRoute.credentialKey) != "" {
@@ -738,6 +742,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 					cons.StartChannelID = 0
 					cons.RequireChannelID = 0
 					cons.RequireCredentialKey = ""
+					cons.RouteGroupHint = ""
 					w.Header().Set("X-Realms-Codex-Sticky-Cleared", "1")
 					w.Header().Set("X-Realms-Codex-Prev-Channel", strconv.FormatInt(boundRoute.channelID, 10))
 					if strings.TrimSpace(boundRoute.credentialKey) != "" {
@@ -2102,6 +2107,7 @@ type codexStickyBindingPayloadV1 struct {
 	Kind            string `json:"kind,omitempty"`
 	ChannelID       int64  `json:"channel_id"`
 	CredentialKey   string `json:"credential_key"`
+	RouteGroup      string `json:"route_group,omitempty"`
 	UpdatedAtUnixMS int64  `json:"updated_at_unix_ms,omitempty"`
 }
 
@@ -2127,6 +2133,7 @@ func parseCodexStickyBindingPayload(payload string, now time.Time) (codexLastSuc
 	return codexLastSuccessRoute{
 		channelID:     parsed.ChannelID,
 		credentialKey: strings.TrimSpace(parsed.CredentialKey),
+		routeGroup:    strings.TrimSpace(parsed.RouteGroup),
 		expiresAt:     now.Add(codexSessionTTL()),
 	}, true
 }
@@ -2139,6 +2146,7 @@ func codexStickyBindingPayloadJSON(sel scheduler.Selection) (string, bool) {
 		Kind:            "codex_route_v1",
 		ChannelID:       sel.ChannelID,
 		CredentialKey:   strings.TrimSpace(sel.CredentialKey()),
+		RouteGroup:      strings.TrimSpace(sel.RouteGroup),
 		UpdatedAtUnixMS: time.Now().UnixMilli(),
 	})
 	if err != nil || len(b) == 0 {

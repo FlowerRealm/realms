@@ -2862,6 +2862,9 @@ func TestResponses_CodexSession_BindingPersistsCredentialAcrossHandlerInstances(
 	if got := route.credentialKey; got != "openai_compatible:111" {
 		t.Fatalf("expected sticky credential openai_compatible:111, got=%q payload=%s", got, payload)
 	}
+	if got := route.routeGroup; got != store.DefaultGroupName {
+		t.Fatalf("expected sticky route group %q, got=%q payload=%s", store.DefaultGroupName, got, payload)
+	}
 
 	fs.creds[11] = []store.OpenAICompatibleCredential{
 		{ID: 111, EndpointID: 11, Status: 1},
@@ -2889,6 +2892,31 @@ func TestResponses_CodexSession_BindingPersistsCredentialAcrossHandlerInstances(
 	}
 	if doer2.calls[0].CredentialKey() != "openai_compatible:111" {
 		t.Fatalf("expected stored binding to keep credential openai_compatible:111, got=%q", doer2.calls[0].CredentialKey())
+	}
+}
+
+func TestCodexStickyBindingPayload_RoundTripsRouteGroup(t *testing.T) {
+	payload, ok := codexStickyBindingPayloadJSON(scheduler.Selection{
+		ChannelID:      7,
+		CredentialType: scheduler.CredentialTypeOpenAI,
+		CredentialID:   77,
+		RouteGroup:     "parent/child",
+	})
+	if !ok {
+		t.Fatalf("expected sticky payload to be generated")
+	}
+	route, parsed := parseCodexStickyBindingPayload(payload, time.Now())
+	if !parsed {
+		t.Fatalf("expected sticky payload to parse, payload=%s", payload)
+	}
+	if route.channelID != 7 {
+		t.Fatalf("expected sticky channel=7, got=%d payload=%s", route.channelID, payload)
+	}
+	if route.credentialKey != "openai_compatible:77" {
+		t.Fatalf("expected sticky credential openai_compatible:77, got=%q payload=%s", route.credentialKey, payload)
+	}
+	if route.routeGroup != "parent/child" {
+		t.Fatalf("expected sticky route group parent/child, got=%q payload=%s", route.routeGroup, payload)
 	}
 }
 
