@@ -31,6 +31,11 @@ func TestRequestUsesHTTPS(t *testing.T) {
 			want:       true,
 		},
 		{
+			name:      "https origin on same host implies secure cookie",
+			targetURL: "http://example.com/login",
+			want:      true,
+		},
+		{
 			name:       "private network client cannot spoof forwarded proto",
 			targetURL:  "http://example.com/login",
 			remoteAddr: "10.0.0.9:12345",
@@ -48,6 +53,9 @@ func TestRequestUsesHTTPS(t *testing.T) {
 			if tc.forwarded != "" {
 				req.Header.Set("X-Forwarded-Proto", tc.forwarded)
 				req.Header.Set("X-Forwarded-Host", "example.com")
+			}
+			if tc.name == "https origin on same host implies secure cookie" {
+				req.Header.Set("Origin", "https://example.com")
 			}
 			if got := requestUsesHTTPS(req); got != tc.want {
 				t.Fatalf("requestUsesHTTPS() = %v, want %v", got, tc.want)
