@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -180,6 +181,119 @@ func TestAdminChannelGroups_List_DefaultPointerWhenMissing(t *testing.T) {
 		}
 		if g.PointerPinned {
 			t.Fatalf("expected default pointer_pinned=false")
+		}
+	}
+	if !found {
+		t.Fatalf("expected group %d to exist in response", groupID)
+	}
+}
+
+func TestAdminChannelGroups_List_DeletedPointerChannelFallsBackToRemainingCandidate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	engine, sessionCookie, userID := setupRootSession(t, st)
+
+	ctx := context.Background()
+	groupID, err := st.CreateChannelGroup(ctx, "g1", nil, 1, store.DefaultGroupPriceMultiplier)
+	if err != nil {
+		t.Fatalf("CreateChannelGroup: %v", err)
+	}
+	c1, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "c1", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel c1: %v", err)
+	}
+	c2, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "c2", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel c2: %v", err)
+	}
+	if err := st.AddChannelGroupMemberChannel(ctx, groupID, c1, 30, false); err != nil {
+		t.Fatalf("AddChannelGroupMemberChannel c1: %v", err)
+	}
+	if err := st.AddChannelGroupMemberChannel(ctx, groupID, c2, 20, false); err != nil {
+		t.Fatalf("AddChannelGroupMemberChannel c2: %v", err)
+	}
+	if err := st.UpsertChannelGroupPointer(ctx, store.ChannelGroupPointer{
+		GroupID:       groupID,
+		ChannelID:     c1,
+		Pinned:        true,
+		MovedAtUnixMS: time.Now().UnixMilli(),
+		Reason:        "manual",
+	}); err != nil {
+		t.Fatalf("UpsertChannelGroupPointer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "http://example.com/api/channel/"+strconv.FormatInt(c1, 10), nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("delete channel status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var delResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &delResp); err != nil {
+		t.Fatalf("json.Unmarshal delete: %v", err)
+	}
+	if !delResp.Success {
+		t.Fatalf("expected delete success, got message=%q", delResp.Message)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/channel-groups", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list channel-groups status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    []struct {
+			ID               int64  `json:"id"`
+			PointerChannelID int64  `json:"pointer_channel_id"`
+			PointerChannel   string `json:"pointer_channel_name"`
+			PointerPinned    bool   `json:"pointer_pinned"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json.Unmarshal list: %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("expected success, got message=%q", resp.Message)
+	}
+
+	found := false
+	for _, g := range resp.Data {
+		if g.ID != groupID {
+			continue
+		}
+		found = true
+		if g.PointerChannelID != c2 {
+			t.Fatalf("expected fallback pointer_channel_id=%d, got=%d", c2, g.PointerChannelID)
+		}
+		if g.PointerChannel != "c2" {
+			t.Fatalf("expected fallback pointer_channel_name=c2, got=%q", g.PointerChannel)
+		}
+		if g.PointerPinned {
+			t.Fatalf("expected fallback pointer_pinned=false")
 		}
 	}
 	if !found {

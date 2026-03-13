@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -113,6 +114,87 @@ func TestForceDeleteChannelGroup_SQLite(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("expected channel_group_members to be removed after deleting last group, got=%d", n)
+	}
+}
+
+func TestDeleteUpstreamChannel_CleansChannelGroupReferences_SQLite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+
+	ctx := context.Background()
+	groupID, err := st.CreateChannelGroup(ctx, "vip", nil, 1, store.DefaultGroupPriceMultiplier)
+	if err != nil {
+		t.Fatalf("CreateChannelGroup: %v", err)
+	}
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch1", "", 3, true, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel: %v", err)
+	}
+	if err := st.AddChannelGroupMemberChannel(ctx, groupID, channelID, 9, true); err != nil {
+		t.Fatalf("AddChannelGroupMemberChannel: %v", err)
+	}
+	if err := st.UpsertChannelGroupPointer(ctx, store.ChannelGroupPointer{
+		GroupID:       groupID,
+		ChannelID:     channelID,
+		Pinned:        true,
+		MovedAtUnixMS: time.Now().UnixMilli(),
+		Reason:        "manual",
+	}); err != nil {
+		t.Fatalf("UpsertChannelGroupPointer: %v", err)
+	}
+	ep, err := st.SetUpstreamEndpointBaseURL(ctx, channelID, "https://api.openai.com")
+	if err != nil {
+		t.Fatalf("SetUpstreamEndpointBaseURL: %v", err)
+	}
+	credID, _, err := st.CreateOpenAICompatibleCredential(ctx, ep.ID, nil, "sk-test-delete-channel")
+	if err != nil {
+		t.Fatalf("CreateOpenAICompatibleCredential: %v", err)
+	}
+
+	if err := st.DeleteUpstreamChannel(ctx, channelID); err != nil {
+		t.Fatalf("DeleteUpstreamChannel: %v", err)
+	}
+
+	if _, err := st.GetUpstreamChannelByID(ctx, channelID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("expected channel to be deleted, got err=%v", err)
+	}
+
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(1) FROM channel_group_members WHERE member_channel_id=?`, channelID).Scan(&n); err != nil {
+		t.Fatalf("query channel_group_members: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("expected channel_group_members to be removed, got=%d", n)
+	}
+	if err := db.QueryRow(`SELECT COUNT(1) FROM channel_group_pointers WHERE channel_id=?`, channelID).Scan(&n); err != nil {
+		t.Fatalf("query channel_group_pointers: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("expected channel_group_pointers to be removed, got=%d", n)
+	}
+	if err := db.QueryRow(`SELECT COUNT(1) FROM upstream_endpoints WHERE channel_id=?`, channelID).Scan(&n); err != nil {
+		t.Fatalf("query upstream_endpoints: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("expected upstream_endpoints to be removed, got=%d", n)
+	}
+	if err := db.QueryRow(`SELECT COUNT(1) FROM openai_compatible_credentials WHERE id=?`, credID).Scan(&n); err != nil {
+		t.Fatalf("query openai_compatible_credentials: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("expected openai_compatible_credentials to be removed, got=%d", n)
 	}
 }
 
