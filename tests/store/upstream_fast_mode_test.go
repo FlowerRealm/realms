@@ -215,6 +215,80 @@ func TestUpstreamChannel_UpdateSetting_RejectsInvalidAPICapabilities(t *testing.
 	}
 }
 
+func TestUpstreamChannel_ReadSetting_ToleratesHistoricalInvalidAPICapabilities(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+	ctx := context.Background()
+
+	openaiID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "openai", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel(openai): %v", err)
+	}
+	codexID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeCodexOAuth, "codex", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel(codex): %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE upstream_channels SET setting=? WHERE id=?`, `{"chat_completions_enabled":false,"responses_enabled":false}`, openaiID); err != nil {
+		t.Fatalf("UPDATE openai setting: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE upstream_channels SET setting=? WHERE id=?`, `{"chat_completions_enabled":true,"responses_enabled":false}`, codexID); err != nil {
+		t.Fatalf("UPDATE codex setting: %v", err)
+	}
+
+	openaiCh, err := st.GetUpstreamChannelByID(ctx, openaiID)
+	if err != nil {
+		t.Fatalf("GetUpstreamChannelByID(openai): %v", err)
+	}
+	if !openaiCh.Setting.ChatCompletionsEnabled || !openaiCh.Setting.ResponsesEnabled {
+		t.Fatalf("expected openai read path to backfill defaults, got %+v", openaiCh.Setting)
+	}
+
+	codexCh, err := st.GetUpstreamChannelByID(ctx, codexID)
+	if err != nil {
+		t.Fatalf("GetUpstreamChannelByID(codex): %v", err)
+	}
+	if codexCh.Setting.ChatCompletionsEnabled || !codexCh.Setting.ResponsesEnabled {
+		t.Fatalf("expected codex read path to recover supported defaults, got %+v", codexCh.Setting)
+	}
+
+	channels, err := st.ListUpstreamChannels(ctx)
+	if err != nil {
+		t.Fatalf("ListUpstreamChannels: %v", err)
+	}
+
+	var listedOpenAI, listedCodex *store.UpstreamChannel
+	for i := range channels {
+		switch channels[i].ID {
+		case openaiID:
+			listedOpenAI = &channels[i]
+		case codexID:
+			listedCodex = &channels[i]
+		}
+	}
+	if listedOpenAI == nil || listedCodex == nil {
+		t.Fatalf("expected both channels in list, got %+v", channels)
+	}
+	if !listedOpenAI.Setting.ChatCompletionsEnabled || !listedOpenAI.Setting.ResponsesEnabled {
+		t.Fatalf("expected listed openai channel to backfill defaults, got %+v", listedOpenAI.Setting)
+	}
+	if listedCodex.Setting.ChatCompletionsEnabled || !listedCodex.Setting.ResponsesEnabled {
+		t.Fatalf("expected listed codex channel to recover supported defaults, got %+v", listedCodex.Setting)
+	}
+}
+
 func TestUpstreamChannel_AnthropicAllowsEmptyAPISettings(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"

@@ -19,7 +19,7 @@ func defaultAPISettingsForChannelType(channelType string) (chatEnabled bool, res
 	}
 }
 
-func normalizeUpstreamChannelSetting(channelType string, setting UpstreamChannelSetting) (UpstreamChannelSetting, error) {
+func sanitizeUpstreamChannelSetting(setting UpstreamChannelSetting) UpstreamChannelSetting {
 	setting.Proxy = strings.TrimSpace(setting.Proxy)
 	setting.SystemPrompt = strings.TrimSpace(setting.SystemPrompt)
 	setting.CacheTTLPreference = strings.ToLower(strings.TrimSpace(setting.CacheTTLPreference))
@@ -28,10 +28,33 @@ func normalizeUpstreamChannelSetting(channelType string, setting UpstreamChannel
 	default:
 		setting.CacheTTLPreference = ""
 	}
-	if strings.TrimSpace(channelType) == UpstreamTypeCodexOAuth && setting.ChatCompletionsEnabled {
+	return setting
+}
+
+func normalizeUpstreamChannelSettingForRead(channelType string, setting UpstreamChannelSetting) UpstreamChannelSetting {
+	setting = sanitizeUpstreamChannelSetting(setting)
+	channelType = strings.TrimSpace(channelType)
+	if channelType == UpstreamTypeAnthropic {
+		setting.ChatCompletionsEnabled = false
+		setting.ResponsesEnabled = false
+		return setting
+	}
+	if channelType == UpstreamTypeCodexOAuth && setting.ChatCompletionsEnabled {
+		setting.ChatCompletionsEnabled = false
+	}
+	if !setting.ChatCompletionsEnabled && !setting.ResponsesEnabled {
+		return applyDefaultAPISettingsForChannelType(channelType, setting)
+	}
+	return setting
+}
+
+func normalizeUpstreamChannelSetting(channelType string, setting UpstreamChannelSetting) (UpstreamChannelSetting, error) {
+	setting = sanitizeUpstreamChannelSetting(setting)
+	channelType = strings.TrimSpace(channelType)
+	if channelType == UpstreamTypeCodexOAuth && setting.ChatCompletionsEnabled {
 		return setting, errors.New("codex_oauth 渠道不支持 chat/completions")
 	}
-	if strings.TrimSpace(channelType) == UpstreamTypeAnthropic {
+	if channelType == UpstreamTypeAnthropic {
 		setting.ChatCompletionsEnabled = false
 		setting.ResponsesEnabled = false
 		return setting, nil
