@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -68,6 +69,9 @@ func (s *Service) Probe(ctx context.Context, sel scheduler.Selection, model stri
 			out.UpstreamResponseModel = attempt.UpstreamResponseModel
 			out.SuccessPath = attempt.SuccessPath
 			return out, nil
+		}
+		if !shouldFallbackOpenAIResponses(err) {
+			return out, err
 		}
 
 		chatBody, chatErr := json.Marshal(map[string]any{
@@ -134,6 +138,41 @@ type probeAttempt struct {
 	UpstreamResponseModel string
 }
 
+type probeHTTPError struct {
+	Path       string
+	StatusCode int
+	Message    string
+}
+
+func (e *probeHTTPError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s returned HTTP %d: %s", e.Path, e.StatusCode, e.Message)
+}
+
+func shouldFallbackOpenAIResponses(err error) bool {
+	var httpErr *probeHTTPError
+	if !errors.As(err, &httpErr) || httpErr == nil {
+		return false
+	}
+	switch httpErr.StatusCode {
+	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
+		return true
+	}
+
+	msg := strings.ToLower(strings.TrimSpace(httpErr.Message))
+	if msg == "" {
+		return false
+	}
+	for _, marker := range []string{"unsupported", "not supported", "does not support"} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) doProbe(ctx context.Context, sel scheduler.Selection, path string, body []byte) (probeAttempt, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://channel-test.local"+path, bytes.NewReader(body))
 	if err != nil {
@@ -161,7 +200,11 @@ func (s *Service) doProbe(ctx context.Context, sel scheduler.Selection, path str
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return probeAttempt{}, fmt.Errorf("%s returned HTTP %d: %s", path, resp.StatusCode, summarizeProbeError(bodyBytes))
+		return probeAttempt{}, &probeHTTPError{
+			Path:       path,
+			StatusCode: resp.StatusCode,
+			Message:    summarizeProbeError(bodyBytes),
+		}
 	}
 
 	out := probeAttempt{SuccessPath: path}

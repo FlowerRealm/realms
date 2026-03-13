@@ -85,6 +85,59 @@ func TestProbeOpenAIFallbackToChatCompletions(t *testing.T) {
 	}
 }
 
+func TestProbeOpenAIFallbackToChatCompletionsOnExplicitUnsupportedError(t *testing.T) {
+	var calls []string
+	svc := New(fakeExecutor{
+		do: func(_ context.Context, _ scheduler.Selection, downstream *http.Request, _ []byte) (*http.Response, error) {
+			calls = append(calls, downstream.URL.Path)
+			switch downstream.URL.Path {
+			case "/v1/responses":
+				return jsonResponse(http.StatusBadRequest, `{"error":{"message":"responses is unsupported for this provider"}}`), nil
+			case "/v1/chat/completions":
+				return jsonResponse(http.StatusOK, `{"model":"gpt-4.1-mini"}`), nil
+			default:
+				t.Fatalf("unexpected path: %s", downstream.URL.Path)
+				return nil, nil
+			}
+		},
+	})
+
+	got, err := svc.Probe(context.Background(), scheduler.Selection{CredentialType: scheduler.CredentialTypeOpenAI}, "gpt-4.1-mini")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if strings.Join(calls, ",") != "/v1/responses,/v1/chat/completions" {
+		t.Fatalf("unexpected calls: %v", calls)
+	}
+	if !got.UsedFallback || got.SuccessPath != "/v1/chat/completions" {
+		t.Fatalf("expected fallback result, got %+v", got)
+	}
+}
+
+func TestProbeOpenAIDoesNotFallbackOnAuthFailure(t *testing.T) {
+	var calls []string
+	svc := New(fakeExecutor{
+		do: func(_ context.Context, _ scheduler.Selection, downstream *http.Request, _ []byte) (*http.Response, error) {
+			calls = append(calls, downstream.URL.Path)
+			if downstream.URL.Path != "/v1/responses" {
+				t.Fatalf("unexpected fallback path: %s", downstream.URL.Path)
+			}
+			return jsonResponse(http.StatusUnauthorized, `{"error":{"message":"invalid api key"}}`), nil
+		},
+	})
+
+	_, err := svc.Probe(context.Background(), scheduler.Selection{CredentialType: scheduler.CredentialTypeOpenAI}, "gpt-4.1-mini")
+	if err == nil {
+		t.Fatal("expected auth failure to be returned directly")
+	}
+	if !strings.Contains(err.Error(), "invalid api key") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Join(calls, ",") != "/v1/responses" {
+		t.Fatalf("unexpected calls: %v", calls)
+	}
+}
+
 func TestProbeCodexSSEModel(t *testing.T) {
 	svc := New(fakeExecutor{
 		do: func(_ context.Context, _ scheduler.Selection, downstream *http.Request, _ []byte) (*http.Response, error) {
