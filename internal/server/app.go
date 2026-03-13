@@ -24,7 +24,6 @@ import (
 	root "realms"
 	openaiapi "realms/internal/api/openai"
 	"realms/internal/assets"
-	"realms/internal/channeltest"
 	"realms/internal/codexoauth"
 	"realms/internal/concurrency"
 	"realms/internal/config"
@@ -98,7 +97,6 @@ func NewApp(opts AppOptions) (*App, error) {
 	})
 	sched.SetGroupPointerStore(st)
 	exec := upstream.NewExecutor(st, opts.Config)
-	channelTestProbe := channeltest.New(exec)
 
 	sessionCookieName := SessionCookieName
 	sessionSecret := strings.TrimSpace(opts.Config.SessionSecret)
@@ -194,7 +192,6 @@ func NewApp(opts AppOptions) (*App, error) {
 		Sched:                           sched,
 		ChannelTestCLIRunnerURL:         opts.Config.ChannelTestCLIRunnerURL,
 		ChannelTestCLIConcurrency:       opts.Config.ChannelTestCLIConcurrency,
-		ChannelTestProbe:                channelTestProbe,
 		CodexOAuthHandler: func() http.Handler {
 			if oauthFlow == nil {
 				return nil

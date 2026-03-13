@@ -64,11 +64,14 @@ func TestCLIChannelTest_E2E(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"ok":         true,
-			"latency_ms": 42,
-			"ttft_ms":    8,
-			"output":     "partial OK",
-			"error":      "",
+			"ok":                      true,
+			"latency_ms":              42,
+			"ttft_ms":                 8,
+			"output":                  "partial OK",
+			"error":                   "",
+			"success_path":            "/v1/responses",
+			"forwarded_model":         model,
+			"upstream_response_model": "gpt-test-mini",
 		})
 	}))
 	defer fakeRunner.Close()
@@ -227,10 +230,10 @@ func TestCLIChannelTest_E2E(t *testing.T) {
 			t.Fatalf("expected one result, got %+v", payload.Data.Probe.Results)
 		}
 		if payload.Data.Probe.Results[0].UpstreamResponseModel != "gpt-test-mini" {
-			t.Fatalf("expected upstream_response_model from probe, got %+v", payload.Data.Probe.Results[0])
+			t.Fatalf("expected upstream_response_model from runner, got %+v", payload.Data.Probe.Results[0])
 		}
 		if payload.Data.Probe.Results[0].SuccessPath != "/v1/responses" {
-			t.Fatalf("expected success_path from probe, got %+v", payload.Data.Probe.Results[0])
+			t.Fatalf("expected success_path from runner, got %+v", payload.Data.Probe.Results[0])
 		}
 	})
 

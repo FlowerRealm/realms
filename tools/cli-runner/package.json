@@ -5,7 +5,8 @@
   "description": "Lightweight HTTP runner for channel testing via Codex/Claude/Gemini CLI",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=20"

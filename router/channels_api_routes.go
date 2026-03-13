@@ -17,7 +17,6 @@ import (
 
 	"realms/internal/codexoauth"
 	"realms/internal/modelcheck"
-	"realms/internal/scheduler"
 	"realms/internal/security"
 	"realms/internal/store"
 )
@@ -2029,46 +2028,16 @@ func channelTypeToCLIType(chType string) string {
 	}
 }
 
-func buildChannelTestSelection(ch store.UpstreamChannel, ep store.UpstreamEndpoint, credentialType scheduler.CredentialType, credentialID int64) scheduler.Selection {
-	return scheduler.Selection{
-		ChannelID:              ch.ID,
-		ChannelType:            ch.Type,
-		ChannelGroups:          ch.Groups,
-		AllowServiceTier:       ch.AllowServiceTier,
-		FastMode:               ch.FastMode,
-		DisableStore:           ch.DisableStore,
-		AllowSafetyIdentifier:  ch.AllowSafetyIdentifier,
-		OpenAIOrganization:     ch.OpenAIOrganization,
-		AutoBan:                ch.AutoBan,
-		ForceFormat:            ch.Setting.ForceFormat,
-		ThinkingToContent:      ch.Setting.ThinkingToContent,
-		PassThroughBodyEnabled: ch.Setting.PassThroughBodyEnabled,
-		Proxy:                  ch.Setting.Proxy,
-		SystemPrompt:           ch.Setting.SystemPrompt,
-		SystemPromptOverride:   ch.Setting.SystemPromptOverride,
-		CacheTTLPreference:     ch.Setting.CacheTTLPreference,
-		ParamOverride:          ch.ParamOverride,
-		HeaderOverride:         ch.HeaderOverride,
-		StatusCodeMapping:      ch.StatusCodeMapping,
-		ModelSuffixPreserve:    ch.ModelSuffixPreserve,
-		RequestBodyBlacklist:   ch.RequestBodyBlacklist,
-		RequestBodyWhitelist:   ch.RequestBodyWhitelist,
-		EndpointID:             ep.ID,
-		BaseURL:                ep.BaseURL,
-		CredentialType:         credentialType,
-		CredentialID:           credentialID,
-	}
-}
-
 type channelTestRunnerResponse struct {
 	OK                    bool   `json:"ok"`
 	LatencyMS             int    `json:"latency_ms"`
 	TTFTMS                int    `json:"ttft_ms,omitempty"`
 	Output                string `json:"output"`
 	Error                 string `json:"error"`
+	SuccessPath           string `json:"success_path,omitempty"`
+	UsedFallback          bool   `json:"used_fallback,omitempty"`
 	ForwardedModel        string `json:"forwarded_model,omitempty"`
 	UpstreamResponseModel string `json:"upstream_response_model,omitempty"`
-	ModelCheckStatus      string `json:"model_check_status,omitempty"`
 }
 
 func readChannelTestRunnerResponse(resp *http.Response) (channelTestRunnerResponse, error) {
@@ -2083,6 +2052,15 @@ func readChannelTestRunnerResponse(resp *http.Response) (channelTestRunnerRespon
 		runnerResp.Error = fmt.Sprintf("CLI runner 返回 HTTP %d", resp.StatusCode)
 	}
 	return runnerResp, nil
+}
+
+func resolveRunnerModelCheck(runnerResp channelTestRunnerResponse, fallbackModel string) (*string, *string, modelcheck.Status) {
+	forwardedModel := modelcheck.Optional(runnerResp.ForwardedModel)
+	if forwardedModel == nil {
+		forwardedModel = modelcheck.Optional(fallbackModel)
+	}
+	upstreamResponseModel := modelcheck.Optional(runnerResp.UpstreamResponseModel)
+	return forwardedModel, upstreamResponseModel, modelcheck.StatusFrom(forwardedModel, upstreamResponseModel)
 }
 
 func channelTestFailureSummary(message string, total int) channelProbeSummary {
@@ -2188,15 +2166,11 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 	accessToken := ""
 	refreshToken := ""
 	idToken := ""
-	var probeSelection scheduler.Selection
-	probeReady := false
 	switch ch.Type {
 	case store.UpstreamTypeOpenAICompatible:
 		if creds, err := st.ListOpenAICompatibleCredentialsByEndpoint(ctx, ep.ID); err == nil && len(creds) > 0 {
 			if sec, err := st.GetOpenAICompatibleCredentialSecret(ctx, creds[0].ID); err == nil {
 				apiKey = sec.APIKey
-				probeSelection = buildChannelTestSelection(ch, ep, scheduler.CredentialTypeOpenAI, creds[0].ID)
-				probeReady = true
 			}
 		}
 		if apiKey == "" {
@@ -2207,8 +2181,6 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 		if creds, err := st.ListAnthropicCredentialsByEndpoint(ctx, ep.ID); err == nil && len(creds) > 0 {
 			if sec, err := st.GetAnthropicCredentialSecret(ctx, creds[0].ID); err == nil {
 				apiKey = sec.APIKey
-				probeSelection = buildChannelTestSelection(ch, ep, scheduler.CredentialTypeAnthropic, creds[0].ID)
-				probeReady = true
 			}
 		}
 		if apiKey == "" {
@@ -2255,8 +2227,6 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 		// 这里通过 profile_key 显式隔离 profile 目录。
 		baseURL = ""
 		profileKey = fmt.Sprintf("codex_oauth|endpoint:%d|account:%d", ep.ID, selected.ID)
-		probeSelection = buildChannelTestSelection(ch, ep, scheduler.CredentialTypeCodex, selected.ID)
-		probeReady = true
 		if chatgptAccountID == "" || accessToken == "" || refreshToken == "" || idToken == "" {
 			summary := channelTestFailureSummary("Codex OAuth 账号缺少必要凭据（account_id/access_token/refresh_token/id_token），请重新授权", total)
 			return finish(false, summary.Message, summary)
@@ -2295,19 +2265,6 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 		modelLabel string
 	}
 
-	type probeOutcome struct {
-		ForwardedModel        string
-		UpstreamResponseModel string
-		SuccessPath           string
-		UsedFallback          bool
-		Err                   error
-	}
-
-	type probeRequest struct {
-		ch     <-chan probeOutcome
-		cancel context.CancelFunc
-	}
-
 	type jobOutcome struct {
 		result           channelModelProbeResult
 		latencyMS        int
@@ -2318,80 +2275,6 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 	var mu sync.Mutex
 	jobs := make(chan job)
 	var wg sync.WaitGroup
-
-	startProbe := func(model string) probeRequest {
-		req := probeRequest{cancel: func() {}}
-		if opts.ChannelTestProbe == nil || !probeReady {
-			return req
-		}
-		ch := make(chan probeOutcome, 1)
-		probeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		req = probeRequest{ch: ch, cancel: cancel}
-		go func() {
-			defer close(ch)
-
-			probeResp, err := opts.ChannelTestProbe.Probe(probeCtx, probeSelection, model)
-			out := probeOutcome{Err: err}
-			if err == nil {
-				out.ForwardedModel = strings.TrimSpace(probeResp.ForwardedModel)
-				out.UpstreamResponseModel = strings.TrimSpace(probeResp.UpstreamResponseModel)
-				out.SuccessPath = strings.TrimSpace(probeResp.SuccessPath)
-				out.UsedFallback = probeResp.UsedFallback
-			}
-			ch <- out
-		}()
-		return req
-	}
-
-	normalizeProbe := func(out probeOutcome, fallbackModel string) probeOutcome {
-		if strings.TrimSpace(out.ForwardedModel) == "" {
-			out.ForwardedModel = strings.TrimSpace(fallbackModel)
-		}
-		return out
-	}
-
-	awaitProbe := func(req probeRequest, fallbackModel string) probeOutcome {
-		defer req.cancel()
-		if req.ch == nil {
-			return normalizeProbe(probeOutcome{}, fallbackModel)
-		}
-		out, ok := <-req.ch
-		if !ok {
-			return normalizeProbe(probeOutcome{}, fallbackModel)
-		}
-		return normalizeProbe(out, fallbackModel)
-	}
-
-	abandonProbe := func(req probeRequest, fallbackModel string) probeOutcome {
-		defer req.cancel()
-		if req.ch == nil {
-			return normalizeProbe(probeOutcome{}, fallbackModel)
-		}
-		select {
-		case out, ok := <-req.ch:
-			if !ok {
-				return normalizeProbe(probeOutcome{}, fallbackModel)
-			}
-			return normalizeProbe(out, fallbackModel)
-		default:
-			return normalizeProbe(probeOutcome{}, fallbackModel)
-		}
-	}
-
-	resolveModelCheck := func(probe probeOutcome, runnerResp channelTestRunnerResponse, fallbackModel string) (*string, *string, modelcheck.Status) {
-		forwardedModel := modelcheck.Optional(probe.ForwardedModel)
-		if forwardedModel == nil {
-			forwardedModel = modelcheck.Optional(runnerResp.ForwardedModel)
-		}
-		if forwardedModel == nil {
-			forwardedModel = modelcheck.Optional(fallbackModel)
-		}
-		upstreamResponseModel := modelcheck.Optional(probe.UpstreamResponseModel)
-		if upstreamResponseModel == nil {
-			upstreamResponseModel = modelcheck.Optional(runnerResp.UpstreamResponseModel)
-		}
-		return forwardedModel, upstreamResponseModel, modelcheck.StatusFrom(forwardedModel, upstreamResponseModel)
-	}
 
 	runJob := func(j job) jobOutcome {
 		runnerReq := struct {
@@ -2434,12 +2317,9 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
 
-		probeReq := startProbe(j.model)
-
 		resp, err := client.Do(httpReq)
 		if err != nil {
-			probe := abandonProbe(probeReq, j.model)
-			forwardedModel, upstreamResponseModel, modelCheckStatus := resolveModelCheck(probe, channelTestRunnerResponse{}, j.model)
+			forwardedModel, upstreamResponseModel, modelCheckStatus := resolveRunnerModelCheck(channelTestRunnerResponse{}, j.model)
 			msg := "CLI runner 不可达: " + err.Error()
 			result := channelModelProbeResult{
 				Model:            j.modelLabel,
@@ -2459,15 +2339,12 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 		runnerResp, decodeErr := readChannelTestRunnerResponse(resp)
 		_ = resp.Body.Close()
 		if decodeErr != nil {
-			probe := abandonProbe(probeReq, j.model)
-			forwardedModel, upstreamResponseModel, modelCheckStatus := resolveModelCheck(probe, channelTestRunnerResponse{}, j.model)
+			forwardedModel, upstreamResponseModel, modelCheckStatus := resolveRunnerModelCheck(channelTestRunnerResponse{}, j.model)
 			result := channelModelProbeResult{
 				Model:            j.modelLabel,
 				OK:               false,
 				Message:          "CLI runner 响应解析失败",
 				ModelCheckStatus: string(modelCheckStatus),
-				SuccessPath:      probe.SuccessPath,
-				UsedFallback:     probe.UsedFallback,
 			}
 			if forwardedModel != nil {
 				result.ForwardedModel = *forwardedModel
@@ -2484,16 +2361,15 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 			if strings.TrimSpace(msg) == "" {
 				msg = runnerResp.Output
 			}
-			probe := abandonProbe(probeReq, j.model)
-			forwardedModel, upstreamResponseModel, modelCheckStatus := resolveModelCheck(probe, runnerResp, j.model)
+			forwardedModel, upstreamResponseModel, modelCheckStatus := resolveRunnerModelCheck(runnerResp, j.model)
 			result := channelModelProbeResult{
 				Model:            j.modelLabel,
 				OK:               false,
 				Message:          msg,
 				Sample:           runnerResp.Output,
 				ModelCheckStatus: string(modelCheckStatus),
-				SuccessPath:      probe.SuccessPath,
-				UsedFallback:     probe.UsedFallback,
+				SuccessPath:      strings.TrimSpace(runnerResp.SuccessPath),
+				UsedFallback:     runnerResp.UsedFallback,
 			}
 			if forwardedModel != nil {
 				result.ForwardedModel = *forwardedModel
@@ -2504,8 +2380,7 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 			return jobOutcome{result: result, modelCheckStatus: modelCheckStatus}
 		}
 
-		probe := awaitProbe(probeReq, j.model)
-		forwardedModel, upstreamResponseModel, modelCheckStatus := resolveModelCheck(probe, runnerResp, j.model)
+		forwardedModel, upstreamResponseModel, modelCheckStatus := resolveRunnerModelCheck(runnerResp, j.model)
 		ttftMS := runnerResp.TTFTMS
 		if ttftMS <= 0 {
 			ttftMS = runnerResp.LatencyMS
@@ -2517,8 +2392,8 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 			Message:          msg,
 			TTFTMS:           ttftMS,
 			Sample:           runnerResp.Output,
-			SuccessPath:      probe.SuccessPath,
-			UsedFallback:     probe.UsedFallback,
+			SuccessPath:      strings.TrimSpace(runnerResp.SuccessPath),
+			UsedFallback:     runnerResp.UsedFallback,
 			ModelCheckStatus: string(modelCheckStatus),
 		}
 		if forwardedModel != nil {
@@ -2624,7 +2499,7 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 		ModelCheckUnknown:  modelCheckUnknown,
 	}
 
-	// CRITICAL: 不调用 UpdateUpstreamChannelTest，不调用 scheduler.Report
+	// CRITICAL: 不调用 UpdateUpstreamChannelTest，不落库任何测试结果。
 	return finish(okAll, message, summary)
 }
 

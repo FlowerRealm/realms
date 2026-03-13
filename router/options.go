@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	openaiapi "realms/internal/api/openai"
-	"realms/internal/channeltest"
 	"realms/internal/config"
 	"realms/internal/scheduler"
 	"realms/internal/store"
@@ -31,7 +30,6 @@ type Options struct {
 	// ChannelTestCLIRunnerURL 为 CLI Runner 服务地址；非空时启用 CLI 渠道测试。
 	ChannelTestCLIRunnerURL   string
 	ChannelTestCLIConcurrency int
-	ChannelTestProbe          channeltest.Prober
 
 	OpenAI *openaiapi.Handler
 
