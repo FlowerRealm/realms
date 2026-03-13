@@ -214,3 +214,34 @@ func TestUpstreamChannel_UpdateSetting_RejectsInvalidAPICapabilities(t *testing.
 		t.Fatalf("expected codex chat/completions enable to fail")
 	}
 }
+
+func TestUpstreamChannel_AnthropicAllowsEmptyAPISettings(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+	ctx := context.Background()
+
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeAnthropic, "anthropic", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel(anthropic): %v", err)
+	}
+
+	ch, err := st.GetUpstreamChannelByID(ctx, channelID)
+	if err != nil {
+		t.Fatalf("GetUpstreamChannelByID(anthropic): %v", err)
+	}
+	if ch.Setting.ChatCompletionsEnabled || ch.Setting.ResponsesEnabled {
+		t.Fatalf("expected anthropic openai api capabilities to remain disabled, got %+v", ch.Setting)
+	}
+}
