@@ -534,6 +534,10 @@ func selectionSupportsRequiredAPI(sel Selection, requiredAPI string) bool {
 	}
 }
 
+func SupportsRequiredAPI(sel Selection, requiredAPI string) bool {
+	return selectionSupportsRequiredAPI(sel, requiredAPI)
+}
+
 func resolvedAPICapabilities(channelType string, chatEnabled bool, responsesEnabled bool) (bool, bool) {
 	if chatEnabled || responsesEnabled {
 		return chatEnabled, responsesEnabled
@@ -546,6 +550,29 @@ func resolvedAPICapabilities(channelType string, chatEnabled bool, responsesEnab
 	default:
 		return false, false
 	}
+}
+
+func (s *Scheduler) ChannelSupportsRequiredAPI(ctx context.Context, channelID int64, requiredAPI string) (bool, bool, error) {
+	if s == nil || channelID <= 0 {
+		return false, false, nil
+	}
+	channels, err := s.st.ListUpstreamChannels(ctx)
+	if err != nil {
+		return false, false, err
+	}
+	for _, ch := range channels {
+		if ch.ID != channelID {
+			continue
+		}
+		if ch.Status != 1 {
+			return false, true, nil
+		}
+		if s.disableCodexOAuth && ch.Type == store.UpstreamTypeCodexOAuth {
+			return false, true, nil
+		}
+		return channelSupportsRequiredAPI(ch, requiredAPI), true, nil
+	}
+	return false, false, nil
 }
 
 func parseCredentialKey(key string) (CredentialType, int64, bool) {
