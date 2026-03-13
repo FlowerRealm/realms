@@ -244,4 +244,18 @@ func TestUpstreamChannel_AnthropicAllowsEmptyAPISettings(t *testing.T) {
 	if ch.Setting.ChatCompletionsEnabled || ch.Setting.ResponsesEnabled {
 		t.Fatalf("expected anthropic openai api capabilities to remain disabled, got %+v", ch.Setting)
 	}
+
+	if err := st.UpdateUpstreamChannelNewAPISetting(ctx, channelID, store.UpstreamChannelSetting{
+		ChatCompletionsEnabled: true,
+		ResponsesEnabled:       true,
+	}); err != nil {
+		t.Fatalf("UpdateUpstreamChannelNewAPISetting(anthropic): %v", err)
+	}
+	ch, err = st.GetUpstreamChannelByID(ctx, channelID)
+	if err != nil {
+		t.Fatalf("GetUpstreamChannelByID(anthropic after update): %v", err)
+	}
+	if ch.Setting.ChatCompletionsEnabled || ch.Setting.ResponsesEnabled {
+		t.Fatalf("expected anthropic update to clear openai api capabilities, got %+v", ch.Setting)
+	}
 }

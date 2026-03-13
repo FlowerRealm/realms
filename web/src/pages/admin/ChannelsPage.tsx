@@ -462,7 +462,9 @@ function ChannelCommonTab({
                   type="checkbox"
                   id="setting_chat_completions_enabled"
                   checked={settingChatCompletionsEnabled}
-                  disabled={channelType === "codex_oauth"}
+                  disabled={
+                    channelType === "codex_oauth" || channelType === "anthropic"
+                  }
                   onChange={(e) =>
                     setSettingChatCompletionsEnabled(e.target.checked)
                   }
@@ -476,6 +478,8 @@ function ChannelCommonTab({
                 <div className="form-text small text-muted">
                   {channelType === "codex_oauth"
                     ? "codex_oauth 上游只支持 responses。"
+                    : channelType === "anthropic"
+                      ? "anthropic 上游不支持 OpenAI chat/completions。"
                     : "关闭后：该渠道不会参与 chat/completions 请求选路。"}
                 </div>
               </div>
@@ -485,6 +489,7 @@ function ChannelCommonTab({
                   type="checkbox"
                   id="setting_responses_enabled"
                   checked={settingResponsesEnabled}
+                  disabled={channelType === "anthropic"}
                   onChange={(e) =>
                     setSettingResponsesEnabled(e.target.checked)
                   }
@@ -496,7 +501,9 @@ function ChannelCommonTab({
                   启用 <code>/v1/responses</code>
                 </label>
                 <div className="form-text small text-muted">
-                  关闭后：该渠道不会参与 responses 请求选路。
+                  {channelType === "anthropic"
+                    ? "anthropic 上游不支持 OpenAI responses。"
+                    : "关闭后：该渠道不会参与 responses 请求选路。"}
                 </div>
               </div>
               <div className="form-check">
@@ -715,8 +722,14 @@ function ChannelAdvancedTab({
       if (!v.chat_completions_enabled && !v.responses_enabled) {
         return "至少启用一个接口能力";
       }
-      if (channelType === "codex_oauth" && v.chat_completions_enabled) {
-        return "codex_oauth 渠道不支持 chat/completions";
+      if (
+        (channelType === "codex_oauth" || channelType === "anthropic") &&
+        v.chat_completions_enabled
+      ) {
+        return `${channelType} 渠道不支持 chat/completions`;
+      }
+      if (channelType === "anthropic" && v.responses_enabled) {
+        return "anthropic 渠道不支持 responses";
       }
       return "";
     },
@@ -3690,7 +3703,9 @@ export function ChannelsPage() {
                 type="checkbox"
                 id="createChatCompletionsEnabled"
                 checked={createChatCompletionsEnabled}
-                disabled={createType === "codex_oauth"}
+                disabled={
+                  createType === "codex_oauth" || createType === "anthropic"
+                }
                 onChange={(e) =>
                   setCreateChatCompletionsEnabled(e.target.checked)
                 }
@@ -3708,6 +3723,7 @@ export function ChannelsPage() {
                 type="checkbox"
                 id="createResponsesEnabled"
                 checked={createResponsesEnabled}
+                disabled={createType === "anthropic"}
                 onChange={(e) => setCreateResponsesEnabled(e.target.checked)}
               />
               <label
@@ -3718,7 +3734,7 @@ export function ChannelsPage() {
               </label>
             </div>
             <div className="form-text small text-muted mb-2">
-              至少启用一个接口能力；codex_oauth 仅支持 responses。
+              至少启用一个接口能力；codex_oauth 仅支持 responses；anthropic 不使用这两个 OpenAI 接口能力。
             </div>
             <div className="form-check">
               <input

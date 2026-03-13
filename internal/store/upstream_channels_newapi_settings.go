@@ -32,6 +32,8 @@ func normalizeUpstreamChannelSetting(channelType string, setting UpstreamChannel
 		return setting, errors.New("codex_oauth 渠道不支持 chat/completions")
 	}
 	if strings.TrimSpace(channelType) == UpstreamTypeAnthropic {
+		setting.ChatCompletionsEnabled = false
+		setting.ResponsesEnabled = false
 		return setting, nil
 	}
 	if !setting.ChatCompletionsEnabled && !setting.ResponsesEnabled {
