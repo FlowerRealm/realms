@@ -18,6 +18,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"realms/internal/auth"
+	"realms/internal/scheduler"
 	"realms/internal/store"
 )
 
@@ -401,5 +402,148 @@ func TestAdminUpdateChannelModel_AllowsDisablingMissingManagedModel(t *testing.T
 	}
 	if binding.Status != 2 {
 		t.Fatalf("binding status=%d want=2", binding.Status)
+	}
+}
+
+func TestAdminListChannelModels_IncludesRuntime(t *testing.T) {
+	st, cleanup := newTestSQLiteStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "ch-runtime", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel: %v", err)
+	}
+	if _, err := st.CreateManagedModel(ctx, store.ManagedModelCreate{
+		PublicID:            "gpt-5.2",
+		GroupName:           store.DefaultGroupName,
+		InputUSDPer1M:       decimal.RequireFromString("1"),
+		OutputUSDPer1M:      decimal.RequireFromString("2"),
+		CacheInputUSDPer1M:  decimal.RequireFromString("0.5"),
+		CacheOutputUSDPer1M: decimal.RequireFromString("0.25"),
+		Status:              1,
+	}); err != nil {
+		t.Fatalf("CreateManagedModel: %v", err)
+	}
+	bindingID, err := st.CreateChannelModel(ctx, store.ChannelModelCreate{
+		ChannelID:     channelID,
+		PublicID:      "gpt-5.2",
+		UpstreamModel: "gpt-5.2",
+		Status:        1,
+	})
+	if err != nil {
+		t.Fatalf("CreateChannelModel: %v", err)
+	}
+
+	sched := scheduler.New(st)
+	sched.Report(scheduler.Selection{
+		ChannelID:      channelID,
+		CredentialType: scheduler.CredentialTypeOpenAI,
+		CredentialID:   1,
+	}, scheduler.Result{
+		Success:               false,
+		Retriable:             true,
+		StatusCode:            http.StatusNotFound,
+		ErrorClass:            "upstream_model_unavailable",
+		Scope:                 scheduler.FailureScopeChannelModel,
+		ChannelModelBindingID: bindingID,
+	})
+
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+	cookieName := "realms_session"
+	sessionStore := cookie.NewStore([]byte("test-secret"))
+	sessionStore.Options(sessions.Options{
+		Path:     "/",
+		MaxAge:   2592000,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	engine.Use(sessions.Sessions(cookieName, sessionStore))
+	SetRouter(engine, Options{
+		Store:             st,
+		Sched:             sched,
+		FrontendIndexPage: []byte("<!doctype html><html><body>INDEX</body></html>"),
+	})
+
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	userID, err := st.CreateUser(ctx, "root-runtime@example.com", "rootruntime", pwHash, store.UserRoleRoot)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	loginBody, _ := json.Marshal(map[string]any{
+		"login":    "root-runtime@example.com",
+		"password": "password123",
+	})
+	loginReq := httptest.NewRequest(http.MethodPost, "http://example.com/api/user/login", bytes.NewReader(loginBody))
+	loginReq.Header.Set("Content-Type", "application/json; charset=utf-8")
+	loginRR := httptest.NewRecorder()
+	engine.ServeHTTP(loginRR, loginReq)
+	if loginRR.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", loginRR.Code, loginRR.Body.String())
+	}
+	sessionCookie := ""
+	for _, cookieItem := range loginRR.Result().Cookies() {
+		if cookieItem.Name == cookieName {
+			sessionCookie = cookieItem.String()
+			break
+		}
+	}
+	if sessionCookie == "" {
+		t.Fatalf("expected session cookie %q", cookieName)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/api/channel/"+strconv.FormatInt(channelID, 10)+"/models", nil)
+	req.Header.Set("Cookie", sessionCookie)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got struct {
+		Success bool `json:"success"`
+		Data    []struct {
+			ID      int64 `json:"id"`
+			Runtime struct {
+				Available       bool   `json:"available"`
+				FailScore       int    `json:"fail_score"`
+				BannedActive    bool   `json:"banned_active"`
+				BannedUntil     string `json:"banned_until"`
+				BannedRemaining string `json:"banned_remaining"`
+			} `json:"runtime"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("expected success body=%s", rr.Body.String())
+	}
+	if len(got.Data) != 1 {
+		t.Fatalf("expected 1 binding, got=%d", len(got.Data))
+	}
+	if got.Data[0].ID != bindingID {
+		t.Fatalf("binding id=%d want=%d", got.Data[0].ID, bindingID)
+	}
+	if !got.Data[0].Runtime.Available {
+		t.Fatalf("expected runtime to be available")
+	}
+	if got.Data[0].Runtime.FailScore == 0 {
+		t.Fatalf("expected runtime fail_score > 0")
+	}
+	if !got.Data[0].Runtime.BannedActive {
+		t.Fatalf("expected runtime banned_active=true")
+	}
+	if strings.TrimSpace(got.Data[0].Runtime.BannedUntil) == "" {
+		t.Fatalf("expected runtime banned_until to be set")
+	}
+	if strings.TrimSpace(got.Data[0].Runtime.BannedRemaining) == "" {
+		t.Fatalf("expected runtime banned_remaining to be set")
 	}
 }

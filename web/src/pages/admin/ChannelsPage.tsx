@@ -482,7 +482,8 @@ function ChannelCommonTab({
                   允许用户使用 Fast mode（<code>service_tier="priority"</code>）
                 </label>
                 <div className="form-text small text-muted">
-                  仅控制是否允许透传 Fast；不会自动把请求改写成 Fast。启用时会强制保留 <code>service_tier</code> 透传。
+                  仅控制是否允许透传 Fast；不会自动把请求改写成
+                  Fast。启用时会强制保留 <code>service_tier</code> 透传。
                 </div>
               </div>
               <div className="form-check">
@@ -1359,7 +1360,8 @@ export function ChannelsPage() {
     [selectedModelIDs],
   );
   const managedModelIDSet = useMemo(
-    () => new Set(managedModelIDs.map((id) => id.trim()).filter((id) => id !== "")),
+    () =>
+      new Set(managedModelIDs.map((id) => id.trim()).filter((id) => id !== "")),
     [managedModelIDs],
   );
   const bindingByPublicID = useMemo(() => {
@@ -1531,8 +1533,9 @@ export function ChannelsPage() {
         if (!modelsRes.success)
           throw new Error(modelsRes.message || "加载模型失败");
         setManagedModelIDs(
-          (modelsRes.data || [])
-            .filter((id) => typeof id === "string" && id.trim() !== ""),
+          (modelsRes.data || []).filter(
+            (id) => typeof id === "string" && id.trim() !== "",
+          ),
         );
 
         if (!pageRes.success)
@@ -3606,7 +3609,10 @@ export function ChannelsPage() {
                 disabled={createFastMode}
                 onChange={(e) => setCreateAllowServiceTier(e.target.checked)}
               />
-              <label className="form-check-label" htmlFor="createAllowServiceTier">
+              <label
+                className="form-check-label"
+                htmlFor="createAllowServiceTier"
+              >
                 允许透传 <code>service_tier</code>
               </label>
             </div>
@@ -3626,7 +3632,8 @@ export function ChannelsPage() {
                 允许用户使用 Fast mode（<code>service_tier="priority"</code>）
               </label>
               <div className="form-text small text-muted">
-                默认允许。该开关只控制是否接受 Fast，不会自动开启 Fast；启用时会强制保留 <code>service_tier</code> 透传。
+                默认允许。该开关只控制是否接受 Fast，不会自动开启
+                Fast；启用时会强制保留 <code>service_tier</code> 透传。
               </div>
             </div>
             <div className="form-check">
@@ -4417,7 +4424,8 @@ export function ChannelsPage() {
 
                     {staleEnabledBindings.length > 0 ? (
                       <div className="alert alert-warning py-2 px-3 mt-3 mb-0 small">
-                        当前渠道还有 {staleEnabledBindings.length} 个已启用绑定不在模型目录中：{" "}
+                        当前渠道还有 {staleEnabledBindings.length}{" "}
+                        个已启用绑定不在模型目录中：{" "}
                         {staleEnabledBindings
                           .map((b) => b.public_id.trim())
                           .filter((id) => id !== "")
@@ -4451,36 +4459,70 @@ export function ChannelsPage() {
                             <tr>
                               <th className="ps-3">对外模型</th>
                               <th>重定向到（上游模型）</th>
+                              <th>运行态</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {selectedModelIDs.map((id) => (
-                              <tr key={id}>
-                                <td className="ps-3">
-                                  <span className="font-monospace small user-select-all">
-                                    {id}
-                                  </span>
-                                </td>
-                                <td>
-                                  <input
-                                    className="form-control form-control-sm font-monospace"
-                                    value={modelRedirects[id] ?? ""}
-                                    onChange={(e) => {
-                                      const v = e.target.value;
-                                      setModelRedirects((prev) => {
-                                        const next = { ...prev };
-                                        const trimmed = v.trim();
-                                        if (trimmed === "" || trimmed === id)
-                                          delete next[id];
-                                        else next[id] = v;
-                                        return next;
-                                      });
-                                    }}
-                                    placeholder="留空=不重定向（使用同名）"
-                                  />
-                                </td>
-                              </tr>
-                            ))}
+                            {selectedModelIDs.map((id) => {
+                              const binding = bindingByPublicID.get(id);
+                              const runtime = binding?.runtime;
+                              return (
+                                <tr key={id}>
+                                  <td className="ps-3">
+                                    <span className="font-monospace small user-select-all">
+                                      {id}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <input
+                                      className="form-control form-control-sm font-monospace"
+                                      value={modelRedirects[id] ?? ""}
+                                      onChange={(e) => {
+                                        const v = e.target.value;
+                                        setModelRedirects((prev) => {
+                                          const next = { ...prev };
+                                          const trimmed = v.trim();
+                                          if (trimmed === "" || trimmed === id)
+                                            delete next[id];
+                                          else next[id] = v;
+                                          return next;
+                                        });
+                                      }}
+                                      placeholder="留空=不重定向（使用同名）"
+                                    />
+                                  </td>
+                                  <td className="small">
+                                    {!runtime?.available ? (
+                                      <span className="text-muted">未跟踪</span>
+                                    ) : runtime.banned_active ? (
+                                      <div className="d-flex flex-column gap-1">
+                                        <span className="badge bg-danger-subtle text-danger border border-danger-subtle align-self-start">
+                                          已熔断
+                                        </span>
+                                        <span className="text-muted">
+                                          {runtime.banned_remaining ||
+                                            runtime.banned_until ||
+                                            "-"}
+                                        </span>
+                                      </div>
+                                    ) : runtime.fail_score > 0 ? (
+                                      <div className="d-flex flex-column gap-1">
+                                        <span className="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle align-self-start">
+                                          失败计分 {runtime.fail_score}
+                                        </span>
+                                        <span className="text-muted">
+                                          连续封禁 {runtime.ban_streak} 次
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <span className="badge bg-success-subtle text-success border border-success-subtle">
+                                        正常
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
