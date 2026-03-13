@@ -1,7 +1,6 @@
 package e2e_test
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -26,14 +25,23 @@ import (
 
 // TestCLIChannelTest_E2E validates the full CLI channel test flow through the
 // HTTP stack:
-//  1. GET /api/channel/test/:id?stream=1 delegates to the CLI runner and returns SSE events
+//  1. GET /api/channel/test/:id?stream=1 delegates to the CLI runner and returns final JSON
 //  2. last_test_at is NOT updated in the database (result isolation)
 func TestCLIChannelTest_E2E(t *testing.T) {
 	const model = "gpt-test"
 
-	// ---------------------------------------------------------------
-	// Fake CLI runner: accepts POST /v1/test, returns a canned result.
-	// ---------------------------------------------------------------
+	fakeUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/responses" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model": "gpt-test-mini",
+		})
+	}))
+	defer fakeUpstream.Close()
+
 	fakeRunner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/test" {
 			w.WriteHeader(http.StatusNotFound)
@@ -56,17 +64,18 @@ func TestCLIChannelTest_E2E(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"ok":         true,
-			"latency_ms": 42,
-			"output":     "OK",
-			"error":      "",
+			"ok":                      true,
+			"latency_ms":              42,
+			"ttft_ms":                 8,
+			"output":                  "partial OK",
+			"error":                   "",
+			"success_path":            "/v1/responses",
+			"forwarded_model":         model,
+			"upstream_response_model": "gpt-test-mini",
 		})
 	}))
 	defer fakeRunner.Close()
 
-	// ---------------------------------------------------------------
-	// Bootstrap: temp SQLite + seed data + full app
-	// ---------------------------------------------------------------
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
 	db, err := store.OpenSQLite(dbPath)
@@ -92,7 +101,7 @@ func TestCLIChannelTest_E2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUpstreamChannel: %v", err)
 	}
-	epID, err := st.CreateUpstreamEndpoint(ctx, channelID, "https://api.example.com/v1", 0)
+	epID, err := st.CreateUpstreamEndpoint(ctx, channelID, fakeUpstream.URL, 0)
 	if err != nil {
 		t.Fatalf("CreateUpstreamEndpoint: %v", err)
 	}
@@ -121,7 +130,6 @@ func TestCLIChannelTest_E2E(t *testing.T) {
 		t.Fatalf("CreateChannelModel: %v", err)
 	}
 
-	// Create a root user for admin API access.
 	pwHash, err := auth.HashPassword("password123")
 	if err != nil {
 		t.Fatalf("HashPassword: %v", err)
@@ -131,15 +139,11 @@ func TestCLIChannelTest_E2E(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	// Record initial last_test_at.
 	chBefore, err := st.GetUpstreamChannelByID(ctx, channelID)
 	if err != nil {
 		t.Fatalf("GetUpstreamChannelByID (before): %v", err)
 	}
 
-	// ---------------------------------------------------------------
-	// Start the full app with CLI runner configured.
-	// ---------------------------------------------------------------
 	t.Setenv("REALMS_DB_DRIVER", "")
 	t.Setenv("REALMS_DB_DSN", "")
 	t.Setenv("REALMS_SQLITE_PATH", "")
@@ -167,20 +171,14 @@ func TestCLIChannelTest_E2E(t *testing.T) {
 	defer ts.Close()
 
 	client := &http.Client{}
-
-	// ---------------------------------------------------------------
-	// Login as admin.
-	// ---------------------------------------------------------------
 	sessionCookie := loginAsRoot(t, ts.URL, client, rootUserID)
 
-	// ---------------------------------------------------------------
-	// Test 1: GET /api/channel/test/:id?stream=1 — SSE stream from CLI runner.
-	// ---------------------------------------------------------------
-	t.Run("cli_test_sse_delegation", func(t *testing.T) {
+	t.Run("cli_test_json_delegation", func(t *testing.T) {
 		url := fmt.Sprintf("%s/api/channel/test/%d?stream=1", ts.URL, channelID)
 		req, _ := http.NewRequest(http.MethodGet, url, nil)
 		req.Header.Set("Cookie", sessionCookie)
 		req.Header.Set("Realms-User", strconv.FormatInt(rootUserID, 10))
+		req.Header.Set("Accept", "text/event-stream")
 
 		resp, err := client.Do(req)
 		if err != nil {
@@ -192,47 +190,53 @@ func TestCLIChannelTest_E2E(t *testing.T) {
 			body, _ := io.ReadAll(resp.Body)
 			t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(body))
 		}
-
-		// Parse SSE events.
-		events := parseSSEEvents(t, resp.Body)
-
-		// Verify expected events.
-		hasStart := false
-		hasModelDone := false
-		hasSummary := false
-		hasCLIRunner := false
-
-		for _, ev := range events {
-			switch ev.name {
-			case "start":
-				hasStart = true
-			case "model_done":
-				hasModelDone = true
-			case "summary":
-				hasSummary = true
-			}
-			if strings.Contains(ev.data, `"cli_runner"`) {
-				hasCLIRunner = true
-			}
+		if got := resp.Header.Get("Content-Type"); !strings.Contains(got, "application/json") {
+			t.Fatalf("expected json content type, got %q", got)
 		}
 
-		if !hasStart {
-			t.Error("expected SSE 'start' event")
+		var payload struct {
+			Success bool   `json:"success"`
+			Message string `json:"message"`
+			Data    struct {
+				LatencyMS int `json:"latency_ms"`
+				Probe     struct {
+					OK                 bool   `json:"ok"`
+					Source             string `json:"source"`
+					Total              int    `json:"total"`
+					Success            int    `json:"success"`
+					ModelCheckMismatch int    `json:"model_check_mismatch"`
+					Results            []struct {
+						Model                 string `json:"model"`
+						OK                    bool   `json:"ok"`
+						SuccessPath           string `json:"success_path"`
+						UpstreamResponseModel string `json:"upstream_response_model"`
+					} `json:"results"`
+				} `json:"probe"`
+			} `json:"data"`
 		}
-		if !hasModelDone {
-			t.Error("expected SSE 'model_done' event")
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode response: %v", err)
 		}
-		if !hasSummary {
-			t.Error("expected SSE 'summary' event")
+		if !payload.Success {
+			t.Fatalf("expected success payload, got %+v", payload)
 		}
-		if !hasCLIRunner {
-			t.Error("expected source='cli_runner' in SSE events")
+		if payload.Data.Probe.Source != "cli_runner" || payload.Data.Probe.Total != 1 || payload.Data.Probe.Success != 1 {
+			t.Fatalf("unexpected probe summary: %+v", payload.Data.Probe)
+		}
+		if payload.Data.Probe.ModelCheckMismatch != 1 {
+			t.Fatalf("expected model_check_mismatch=1, got %+v", payload.Data.Probe)
+		}
+		if len(payload.Data.Probe.Results) != 1 {
+			t.Fatalf("expected one result, got %+v", payload.Data.Probe.Results)
+		}
+		if payload.Data.Probe.Results[0].UpstreamResponseModel != "gpt-test-mini" {
+			t.Fatalf("expected upstream_response_model from runner, got %+v", payload.Data.Probe.Results[0])
+		}
+		if payload.Data.Probe.Results[0].SuccessPath != "/v1/responses" {
+			t.Fatalf("expected success_path from runner, got %+v", payload.Data.Probe.Results[0])
 		}
 	})
 
-	// ---------------------------------------------------------------
-	// Test 2: Verify result isolation — last_test_at NOT updated.
-	// ---------------------------------------------------------------
 	t.Run("result_isolation_no_db_write", func(t *testing.T) {
 		chAfter, err := st.GetUpstreamChannelByID(ctx, channelID)
 		if err != nil {
@@ -269,9 +273,6 @@ func TestCLIChannelTest_RealUpstream_E2E(t *testing.T) {
 	upstreamAPIKey := requiredEnvOrSkip(t, "REALMS_CI_UPSTREAM_API_KEY", "UPSTREAM_API_KEY")
 	model := requiredEnvOrSkip(t, "REALMS_CI_MODEL", "MODEL")
 
-	// ---------------------------------------------------------------
-	// Preflight: CLI runner healthz
-	// ---------------------------------------------------------------
 	{
 		hc, err := http.Get(strings.TrimRight(cliRunnerURL, "/") + "/healthz")
 		if err != nil {
@@ -295,9 +296,6 @@ func TestCLIChannelTest_RealUpstream_E2E(t *testing.T) {
 		}
 	}
 
-	// ---------------------------------------------------------------
-	// Bootstrap
-	// ---------------------------------------------------------------
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
 	db, err := store.OpenSQLite(dbPath)
@@ -368,9 +366,6 @@ func TestCLIChannelTest_RealUpstream_E2E(t *testing.T) {
 		t.Fatalf("GetUpstreamChannelByID (before): %v", err)
 	}
 
-	// ---------------------------------------------------------------
-	// App
-	// ---------------------------------------------------------------
 	t.Setenv("REALMS_DB_DRIVER", "")
 	t.Setenv("REALMS_DB_DSN", "")
 	t.Setenv("REALMS_SQLITE_PATH", "")
@@ -400,14 +395,12 @@ func TestCLIChannelTest_RealUpstream_E2E(t *testing.T) {
 	client := &http.Client{Timeout: 90 * time.Second}
 	sessionCookie := loginAsRoot(t, ts.URL, client, rootUserID)
 
-	// ---------------------------------------------------------------
-	// Test: SSE delegation → real CLI runner → real upstream
-	// ---------------------------------------------------------------
-	t.Run("real_cli_test_sse", func(t *testing.T) {
+	t.Run("real_cli_test_json", func(t *testing.T) {
 		url := fmt.Sprintf("%s/api/channel/test/%d?stream=1", ts.URL, channelID)
 		req, _ := http.NewRequest(http.MethodGet, url, nil)
 		req.Header.Set("Cookie", sessionCookie)
 		req.Header.Set("Realms-User", strconv.FormatInt(rootUserID, 10))
+		req.Header.Set("Accept", "text/event-stream")
 
 		resp, err := client.Do(req)
 		if err != nil {
@@ -419,65 +412,33 @@ func TestCLIChannelTest_RealUpstream_E2E(t *testing.T) {
 			body, _ := io.ReadAll(resp.Body)
 			t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(body))
 		}
-
-		events := parseSSEEvents(t, resp.Body)
-
-		hasStart := false
-		hasModelDone := false
-		hasSummary := false
-		summaryOK := false
-
-		for _, ev := range events {
-			switch ev.name {
-			case "start":
-				hasStart = true
-			case "model_done":
-				hasModelDone = true
-				// model_done 的 result 应该包含 "ok":true
-				if strings.Contains(ev.data, `"ok":true`) {
-					t.Logf("model_done result OK")
-				} else {
-					t.Logf("model_done data: %s", ev.data)
-				}
-			case "summary":
-				hasSummary = true
-				var s struct {
-					Data struct {
-						Summary struct {
-							OK      bool   `json:"ok"`
-							Source  string `json:"source"`
-							Message string `json:"message"`
-						} `json:"summary"`
-					} `json:"data"`
-				}
-				if err := json.Unmarshal([]byte(ev.data), &s); err == nil {
-					summaryOK = s.Data.Summary.OK
-					if !summaryOK {
-						t.Logf("summary 报告测试失败: source=%s message=%s", s.Data.Summary.Source, s.Data.Summary.Message)
-					}
-				} else {
-					t.Logf("summary data (raw): %s", ev.data)
-				}
-			}
+		var payload struct {
+			Success bool `json:"success"`
+			Data    struct {
+				Probe struct {
+					OK      bool   `json:"ok"`
+					Source  string `json:"source"`
+					Message string `json:"message"`
+					Results []struct {
+						OK bool `json:"ok"`
+					} `json:"results"`
+				} `json:"probe"`
+			} `json:"data"`
 		}
-
-		if !hasStart {
-			t.Error("expected SSE 'start' event")
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode response: %v", err)
 		}
-		if !hasModelDone {
-			t.Error("expected SSE 'model_done' event")
+		if !payload.Success || !payload.Data.Probe.OK {
+			t.Fatalf("expected successful summary, got %+v", payload)
 		}
-		if !hasSummary {
-			t.Error("expected SSE 'summary' event")
+		if payload.Data.Probe.Source != "cli_runner" {
+			t.Fatalf("expected source=cli_runner, got %+v", payload)
 		}
-		if !summaryOK {
-			t.Error("expected summary.ok=true (real upstream test should succeed)")
+		if len(payload.Data.Probe.Results) == 0 || !payload.Data.Probe.Results[0].OK {
+			t.Fatalf("expected successful model result, got %+v", payload)
 		}
 	})
 
-	// ---------------------------------------------------------------
-	// Verify result isolation after real test
-	// ---------------------------------------------------------------
 	t.Run("real_result_isolation", func(t *testing.T) {
 		chAfter, err := st.GetUpstreamChannelByID(ctx, channelID)
 		if err != nil {
@@ -538,37 +499,4 @@ func loginAsRoot(t *testing.T, baseURL string, client *http.Client, rootUserID i
 	}
 	t.Fatal("expected realms_session cookie after login")
 	return ""
-}
-
-type sseEvent struct {
-	name string
-	data string
-}
-
-// parseSSEEvents reads an SSE stream and returns all events.
-func parseSSEEvents(t *testing.T, r io.Reader) []sseEvent {
-	t.Helper()
-
-	var events []sseEvent
-	scanner := bufio.NewScanner(r)
-	var currentName, currentData string
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "event: ") {
-			currentName = strings.TrimPrefix(line, "event: ")
-		} else if strings.HasPrefix(line, "data: ") {
-			currentData = strings.TrimPrefix(line, "data: ")
-		} else if line == "" && currentName != "" {
-			events = append(events, sseEvent{name: currentName, data: currentData})
-			currentName = ""
-			currentData = ""
-		}
-	}
-	// Flush last event if stream didn't end with empty line.
-	if currentName != "" {
-		events = append(events, sseEvent{name: currentName, data: currentData})
-	}
-
-	return events
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"realms/internal/codexoauth"
+	"realms/internal/modelcheck"
 	"realms/internal/security"
 	"realms/internal/store"
 )
@@ -2030,7 +2031,8 @@ func testChannelHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel_id 不合法"})
 			return
 		}
-		streamChannelCLITestHandler(c, opts, channelID)
+		ok, latencyMS, message, probe := runChannelCLITest(c.Request.Context(), opts, channelID)
+		c.JSON(http.StatusOK, buildChannelTestResponse(ok, latencyMS, message, probe))
 	}
 }
 
@@ -2046,7 +2048,7 @@ func buildChannelTestResponse(ok bool, latencyMS int, message string, probe chan
 }
 
 // ---------------------------------------------------------------------------
-// CLI Runner 委派（结果仅通过 SSE 返回前端，不写数据库、不影响调度）
+// CLI Runner 委派（仅返回最终 JSON，不写数据库、不影响调度）
 // ---------------------------------------------------------------------------
 
 func channelTypeToCLIType(chType string) string {
@@ -2062,18 +2064,71 @@ func channelTypeToCLIType(chType string) string {
 	}
 }
 
-func streamChannelCLITestHandler(c *gin.Context, opts Options, channelID int64) {
+type channelTestRunnerResponse struct {
+	OK                    bool   `json:"ok"`
+	LatencyMS             int    `json:"latency_ms"`
+	TTFTMS                int    `json:"ttft_ms,omitempty"`
+	Output                string `json:"output"`
+	Error                 string `json:"error"`
+	SuccessPath           string `json:"success_path,omitempty"`
+	UsedFallback          bool   `json:"used_fallback,omitempty"`
+	ForwardedModel        string `json:"forwarded_model,omitempty"`
+	UpstreamResponseModel string `json:"upstream_response_model,omitempty"`
+}
+
+func readChannelTestRunnerResponse(resp *http.Response) (channelTestRunnerResponse, error) {
+	if resp == nil || resp.Body == nil {
+		return channelTestRunnerResponse{}, fmt.Errorf("CLI runner 无响应体")
+	}
+	var runnerResp channelTestRunnerResponse
+	if err := json.NewDecoder(resp.Body).Decode(&runnerResp); err != nil {
+		return channelTestRunnerResponse{}, err
+	}
+	if resp.StatusCode != http.StatusOK && strings.TrimSpace(runnerResp.Error) == "" {
+		runnerResp.Error = fmt.Sprintf("CLI runner 返回 HTTP %d", resp.StatusCode)
+	}
+	return runnerResp, nil
+}
+
+func resolveRunnerModelCheck(runnerResp channelTestRunnerResponse, fallbackModel string) (*string, *string, modelcheck.Status) {
+	forwardedModel := modelcheck.Optional(runnerResp.ForwardedModel)
+	if forwardedModel == nil {
+		forwardedModel = modelcheck.Optional(fallbackModel)
+	}
+	upstreamResponseModel := modelcheck.Optional(runnerResp.UpstreamResponseModel)
+	return forwardedModel, upstreamResponseModel, modelcheck.StatusFrom(forwardedModel, upstreamResponseModel)
+}
+
+func channelTestFailureSummary(message string, total int) channelProbeSummary {
+	return channelProbeSummary{
+		OK:      false,
+		Message: message,
+		Source:  "cli_runner",
+		Total:   total,
+		Success: 0,
+		Results: []channelModelProbeResult{},
+	}
+}
+
+func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool, int, string, channelProbeSummary) {
+	startedAt := time.Now()
+	finish := func(ok bool, message string, summary channelProbeSummary) (bool, int, string, channelProbeSummary) {
+		latencyMS := int(time.Since(startedAt) / time.Millisecond)
+		if latencyMS < 0 {
+			latencyMS = 0
+		}
+		return ok, latencyMS, message, summary
+	}
+
 	st := opts.Store
 
-	ch, err := st.GetUpstreamChannelByID(c.Request.Context(), channelID)
+	ch, err := st.GetUpstreamChannelByID(ctx, channelID)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel 不存在"})
-		return
+		return finish(false, "channel 不存在", channelProbeSummary{})
 	}
-	ep, err := st.GetUpstreamEndpointByChannelID(c.Request.Context(), ch.ID)
+	ep, err := st.GetUpstreamEndpointByChannelID(ctx, ch.ID)
 	if err != nil || ep.ID <= 0 {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": "endpoint 不存在"})
-		return
+		return finish(false, "endpoint 不存在", channelProbeSummary{})
 	}
 
 	// 获取所有“已配置模型”（默认：以绑定模型为准；如设置 test_model，则优先插入到首位）。
@@ -2082,7 +2137,7 @@ func streamChannelCLITestHandler(c *gin.Context, opts Options, channelID int64) 
 	if ch.TestModel != nil && strings.TrimSpace(*ch.TestModel) != "" {
 		models = append(models, strings.TrimSpace(*ch.TestModel))
 	}
-	if bindings, err := st.ListChannelModelsByChannelID(c.Request.Context(), ch.ID); err == nil && len(bindings) > 0 {
+	if bindings, err := st.ListChannelModelsByChannelID(ctx, ch.ID); err == nil && len(bindings) > 0 {
 		for _, b := range bindings {
 			if b.Status != 1 {
 				continue
@@ -2117,32 +2172,6 @@ func streamChannelCLITestHandler(c *gin.Context, opts Options, channelID int64) 
 		models = []string{""}
 	}
 
-	// SSE setup
-	flusher, ok := c.Writer.(http.Flusher)
-	if !ok {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": "当前连接不支持流式输出"})
-		return
-	}
-	header := c.Writer.Header()
-	header.Set("Content-Type", "text/event-stream")
-	header.Set("Cache-Control", "no-cache, no-transform")
-	header.Set("Connection", "keep-alive")
-	header.Set("X-Accel-Buffering", "no")
-	c.Status(http.StatusOK)
-	flusher.Flush()
-
-	var writeMu sync.Mutex
-	writeEvent := func(name string, payload any) {
-		b, err := json.Marshal(payload)
-		if err != nil {
-			return
-		}
-		writeMu.Lock()
-		_, _ = c.Writer.Write([]byte("event: " + name + "\ndata: " + string(b) + "\n\n"))
-		flusher.Flush()
-		writeMu.Unlock()
-	}
-
 	total := len(models)
 	modelLabels := make([]string, 0, total)
 	for _, m := range models {
@@ -2155,18 +2184,14 @@ func streamChannelCLITestHandler(c *gin.Context, opts Options, channelID int64) 
 
 	// 其他渠道：走 CLI runner。
 	if opts.ChannelTestCLIRunnerURL == "" {
-		writeEvent("summary", buildChannelTestResponse(false, 0, "CLI runner 未配置，请设置 REALMS_CHANNEL_TEST_CLI_RUNNER_URL", channelProbeSummary{
-			OK: false, Message: "CLI runner 未配置，请设置 REALMS_CHANNEL_TEST_CLI_RUNNER_URL", Source: "cli_runner", Total: total, Success: 0, Results: []channelModelProbeResult{},
-		}))
-		return
+		summary := channelTestFailureSummary("CLI runner 未配置，请设置 REALMS_CHANNEL_TEST_CLI_RUNNER_URL", total)
+		return finish(false, summary.Message, summary)
 	}
 
 	cliType := channelTypeToCLIType(ch.Type)
 	if cliType == "" {
-		writeEvent("summary", buildChannelTestResponse(false, 0, fmt.Sprintf("渠道类型 %s 暂不支持 CLI 测试", ch.Type), channelProbeSummary{
-			OK: false, Message: fmt.Sprintf("渠道类型 %s 暂不支持 CLI 测试", ch.Type), Source: "cli_runner", Total: total, Success: 0, Results: []channelModelProbeResult{},
-		}))
-		return
+		summary := channelTestFailureSummary(fmt.Sprintf("渠道类型 %s 暂不支持 CLI 测试", ch.Type), total)
+		return finish(false, summary.Message, summary)
 	}
 
 	// 准备 CLI runner 凭证（仅用于测试请求，不写数据库、不影响调度）。
@@ -2179,36 +2204,30 @@ func streamChannelCLITestHandler(c *gin.Context, opts Options, channelID int64) 
 	idToken := ""
 	switch ch.Type {
 	case store.UpstreamTypeOpenAICompatible:
-		if creds, err := st.ListOpenAICompatibleCredentialsByEndpoint(c.Request.Context(), ep.ID); err == nil && len(creds) > 0 {
-			if sec, err := st.GetOpenAICompatibleCredentialSecret(c.Request.Context(), creds[0].ID); err == nil {
+		if creds, err := st.ListOpenAICompatibleCredentialsByEndpoint(ctx, ep.ID); err == nil && len(creds) > 0 {
+			if sec, err := st.GetOpenAICompatibleCredentialSecret(ctx, creds[0].ID); err == nil {
 				apiKey = sec.APIKey
 			}
 		}
 		if apiKey == "" {
-			writeEvent("summary", buildChannelTestResponse(false, 0, "未找到可用凭证", channelProbeSummary{
-				OK: false, Message: "未找到可用凭证", Source: "cli_runner", Total: total, Success: 0, Results: []channelModelProbeResult{},
-			}))
-			return
+			summary := channelTestFailureSummary("未找到可用凭证", total)
+			return finish(false, summary.Message, summary)
 		}
 	case store.UpstreamTypeAnthropic:
-		if creds, err := st.ListAnthropicCredentialsByEndpoint(c.Request.Context(), ep.ID); err == nil && len(creds) > 0 {
-			if sec, err := st.GetAnthropicCredentialSecret(c.Request.Context(), creds[0].ID); err == nil {
+		if creds, err := st.ListAnthropicCredentialsByEndpoint(ctx, ep.ID); err == nil && len(creds) > 0 {
+			if sec, err := st.GetAnthropicCredentialSecret(ctx, creds[0].ID); err == nil {
 				apiKey = sec.APIKey
 			}
 		}
 		if apiKey == "" {
-			writeEvent("summary", buildChannelTestResponse(false, 0, "未找到可用凭证", channelProbeSummary{
-				OK: false, Message: "未找到可用凭证", Source: "cli_runner", Total: total, Success: 0, Results: []channelModelProbeResult{},
-			}))
-			return
+			summary := channelTestFailureSummary("未找到可用凭证", total)
+			return finish(false, summary.Message, summary)
 		}
 	case store.UpstreamTypeCodexOAuth:
-		accounts, err := st.ListCodexOAuthAccountsByEndpoint(c.Request.Context(), ep.ID)
+		accounts, err := st.ListCodexOAuthAccountsByEndpoint(ctx, ep.ID)
 		if err != nil {
-			writeEvent("summary", buildChannelTestResponse(false, 0, "读取 Codex OAuth 账号失败", channelProbeSummary{
-				OK: false, Message: "读取 Codex OAuth 账号失败", Source: "cli_runner", Total: total, Success: 0, Results: []channelModelProbeResult{},
-			}))
-			return
+			summary := channelTestFailureSummary("读取 Codex OAuth 账号失败", total)
+			return finish(false, summary.Message, summary)
 		}
 		now := time.Now()
 		var selected store.CodexOAuthAccount
@@ -2225,17 +2244,13 @@ func streamChannelCLITestHandler(c *gin.Context, opts Options, channelID int64) 
 			break
 		}
 		if !found {
-			writeEvent("summary", buildChannelTestResponse(false, 0, "暂无可用 Codex OAuth 账号（可能被禁用或冷却中）", channelProbeSummary{
-				OK: false, Message: "暂无可用 Codex OAuth 账号（可能被禁用或冷却中）", Source: "cli_runner", Total: total, Success: 0, Results: []channelModelProbeResult{},
-			}))
-			return
+			summary := channelTestFailureSummary("暂无可用 Codex OAuth 账号（可能被禁用或冷却中）", total)
+			return finish(false, summary.Message, summary)
 		}
-		sec, err := st.GetCodexOAuthSecret(c.Request.Context(), selected.ID)
+		sec, err := st.GetCodexOAuthSecret(ctx, selected.ID)
 		if err != nil {
-			writeEvent("summary", buildChannelTestResponse(false, 0, "读取 Codex OAuth 账号密钥失败", channelProbeSummary{
-				OK: false, Message: "读取 Codex OAuth 账号密钥失败", Source: "cli_runner", Total: total, Success: 0, Results: []channelModelProbeResult{},
-			}))
-			return
+			summary := channelTestFailureSummary("读取 Codex OAuth 账号密钥失败", total)
+			return finish(false, summary.Message, summary)
 		}
 		chatgptAccountID = strings.TrimSpace(sec.AccountID)
 		accessToken = strings.TrimSpace(sec.AccessToken)
@@ -2249,27 +2264,25 @@ func streamChannelCLITestHandler(c *gin.Context, opts Options, channelID int64) 
 		baseURL = ""
 		profileKey = fmt.Sprintf("codex_oauth|endpoint:%d|account:%d", ep.ID, selected.ID)
 		if chatgptAccountID == "" || accessToken == "" || refreshToken == "" || idToken == "" {
-			writeEvent("summary", buildChannelTestResponse(false, 0, "Codex OAuth 账号缺少必要凭据（account_id/access_token/refresh_token/id_token），请重新授权", channelProbeSummary{
-				OK: false, Message: "Codex OAuth 账号缺少必要凭据（account_id/access_token/refresh_token/id_token），请重新授权", Source: "cli_runner", Total: total, Success: 0, Results: []channelModelProbeResult{},
-			}))
-			return
+			summary := channelTestFailureSummary("Codex OAuth 账号缺少必要凭据（account_id/access_token/refresh_token/id_token），请重新授权", total)
+			return finish(false, summary.Message, summary)
 		}
 	}
-
-	writeEvent("start", channelProbeProgressEvent{
-		Type:   "start",
-		Source: "cli_runner",
-		Total:  total,
-		Models: modelLabels,
-	})
 
 	runnerURL := strings.TrimRight(opts.ChannelTestCLIRunnerURL, "/") + "/v1/test"
 	client := &http.Client{Timeout: 60 * time.Second}
 	results := make([]channelModelProbeResult, total)
 
 	success := 0
-	latencySum := 0
+	runnerLatencySum := 0
 	ttftSum := 0
+	ttftCount := 0
+	responsesOK := 0
+	chatOK := 0
+	fallbackCount := 0
+	modelCheckOK := 0
+	modelCheckMismatch := 0
+	modelCheckUnknown := 0
 	sample := ""
 	firstError := ""
 	firstErrorIdx := total + 1
@@ -2288,156 +2301,192 @@ func streamChannelCLITestHandler(c *gin.Context, opts Options, channelID int64) 
 		modelLabel string
 	}
 
+	type jobOutcome struct {
+		result           channelModelProbeResult
+		latencyMS        int
+		ttftMS           int
+		modelCheckStatus modelcheck.Status
+	}
+
 	var mu sync.Mutex
 	jobs := make(chan job)
 	var wg sync.WaitGroup
 
+	runJob := func(j job) jobOutcome {
+		runnerReq := struct {
+			CLIType          string `json:"cli_type"`
+			BaseURL          string `json:"base_url,omitempty"`
+			ProfileKey       string `json:"profile_key,omitempty"`
+			APIKey           string `json:"api_key"`
+			ChatGPTAccountID string `json:"chatgpt_account_id,omitempty"`
+			AccessToken      string `json:"access_token,omitempty"`
+			RefreshToken     string `json:"refresh_token,omitempty"`
+			IDToken          string `json:"id_token,omitempty"`
+			Model            string `json:"model,omitempty"`
+			Prompt           string `json:"prompt"`
+			TimeoutSeconds   int    `json:"timeout_seconds"`
+		}{
+			CLIType:          cliType,
+			BaseURL:          baseURL,
+			ProfileKey:       profileKey,
+			APIKey:           apiKey,
+			ChatGPTAccountID: chatgptAccountID,
+			AccessToken:      accessToken,
+			RefreshToken:     refreshToken,
+			IDToken:          idToken,
+			Model:            j.model,
+			Prompt:           "Reply with exactly: OK",
+			TimeoutSeconds:   30,
+		}
+		body, _ := json.Marshal(runnerReq)
+
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, runnerURL, bytes.NewReader(body))
+		if err != nil {
+			result := channelModelProbeResult{
+				Model:            j.modelLabel,
+				OK:               false,
+				Message:          "构建 CLI runner 请求失败",
+				ForwardedModel:   strings.TrimSpace(j.model),
+				ModelCheckStatus: string(modelcheck.StatusUnknown),
+			}
+			return jobOutcome{result: result, modelCheckStatus: modelcheck.StatusUnknown}
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			forwardedModel, upstreamResponseModel, modelCheckStatus := resolveRunnerModelCheck(channelTestRunnerResponse{}, j.model)
+			msg := "CLI runner 不可达: " + err.Error()
+			result := channelModelProbeResult{
+				Model:            j.modelLabel,
+				OK:               false,
+				Message:          msg,
+				ModelCheckStatus: string(modelCheckStatus),
+			}
+			if forwardedModel != nil {
+				result.ForwardedModel = *forwardedModel
+			}
+			if upstreamResponseModel != nil {
+				result.UpstreamResponseModel = *upstreamResponseModel
+			}
+			return jobOutcome{result: result, modelCheckStatus: modelCheckStatus}
+		}
+
+		runnerResp, decodeErr := readChannelTestRunnerResponse(resp)
+		_ = resp.Body.Close()
+		if decodeErr != nil {
+			forwardedModel, upstreamResponseModel, modelCheckStatus := resolveRunnerModelCheck(channelTestRunnerResponse{}, j.model)
+			result := channelModelProbeResult{
+				Model:            j.modelLabel,
+				OK:               false,
+				Message:          "CLI runner 响应解析失败",
+				ModelCheckStatus: string(modelCheckStatus),
+			}
+			if forwardedModel != nil {
+				result.ForwardedModel = *forwardedModel
+			}
+			if upstreamResponseModel != nil {
+				result.UpstreamResponseModel = *upstreamResponseModel
+			}
+			return jobOutcome{result: result, latencyMS: runnerResp.LatencyMS, modelCheckStatus: modelCheckStatus}
+		}
+
+		msg := runnerResp.Output
+		if !runnerResp.OK {
+			msg = runnerResp.Error
+			if strings.TrimSpace(msg) == "" {
+				msg = runnerResp.Output
+			}
+			forwardedModel, upstreamResponseModel, modelCheckStatus := resolveRunnerModelCheck(runnerResp, j.model)
+			result := channelModelProbeResult{
+				Model:            j.modelLabel,
+				OK:               false,
+				Message:          msg,
+				Sample:           runnerResp.Output,
+				ModelCheckStatus: string(modelCheckStatus),
+				SuccessPath:      strings.TrimSpace(runnerResp.SuccessPath),
+				UsedFallback:     runnerResp.UsedFallback,
+			}
+			if forwardedModel != nil {
+				result.ForwardedModel = *forwardedModel
+			}
+			if upstreamResponseModel != nil {
+				result.UpstreamResponseModel = *upstreamResponseModel
+			}
+			return jobOutcome{result: result, modelCheckStatus: modelCheckStatus}
+		}
+
+		forwardedModel, upstreamResponseModel, modelCheckStatus := resolveRunnerModelCheck(runnerResp, j.model)
+		ttftMS := runnerResp.TTFTMS
+		if ttftMS <= 0 {
+			ttftMS = runnerResp.LatencyMS
+		}
+
+		result := channelModelProbeResult{
+			Model:            j.modelLabel,
+			OK:               true,
+			Message:          msg,
+			TTFTMS:           ttftMS,
+			Sample:           runnerResp.Output,
+			SuccessPath:      strings.TrimSpace(runnerResp.SuccessPath),
+			UsedFallback:     runnerResp.UsedFallback,
+			ModelCheckStatus: string(modelCheckStatus),
+		}
+		if forwardedModel != nil {
+			result.ForwardedModel = *forwardedModel
+		}
+		if upstreamResponseModel != nil {
+			result.UpstreamResponseModel = *upstreamResponseModel
+		}
+
+		return jobOutcome{
+			result:           result,
+			latencyMS:        runnerResp.LatencyMS,
+			ttftMS:           ttftMS,
+			modelCheckStatus: modelCheckStatus,
+		}
+	}
+
 	worker := func() {
 		defer wg.Done()
 		for j := range jobs {
-			writeEvent("model_start", channelProbeProgressEvent{
-				Type:   "model_start",
-				Source: "cli_runner",
-				Index:  j.idx + 1,
-				Total:  total,
-				Model:  j.modelLabel,
-			})
-
-			runnerReq := struct {
-				CLIType          string `json:"cli_type"`
-				BaseURL          string `json:"base_url,omitempty"`
-				ProfileKey       string `json:"profile_key,omitempty"`
-				APIKey           string `json:"api_key"`
-				ChatGPTAccountID string `json:"chatgpt_account_id,omitempty"`
-				AccessToken      string `json:"access_token,omitempty"`
-				RefreshToken     string `json:"refresh_token,omitempty"`
-				IDToken          string `json:"id_token,omitempty"`
-				Model            string `json:"model,omitempty"`
-				Prompt           string `json:"prompt"`
-				TimeoutSeconds   int    `json:"timeout_seconds"`
-			}{
-				CLIType:          cliType,
-				BaseURL:          baseURL,
-				ProfileKey:       profileKey,
-				APIKey:           apiKey,
-				ChatGPTAccountID: chatgptAccountID,
-				AccessToken:      accessToken,
-				RefreshToken:     refreshToken,
-				IDToken:          idToken,
-				Model:            j.model,
-				Prompt:           "Reply with exactly: OK",
-				TimeoutSeconds:   30,
-			}
-			body, _ := json.Marshal(runnerReq)
-
-			httpReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, runnerURL, bytes.NewReader(body))
-			if err != nil {
-				result := channelModelProbeResult{Model: j.modelLabel, OK: false, Message: "构建 CLI runner 请求失败"}
-				mu.Lock()
-				results[j.idx] = result
-				if j.idx < firstErrorIdx {
-					firstErrorIdx = j.idx
-					firstError = result.Message
-				}
-				mu.Unlock()
-				writeEvent("model_done", channelProbeProgressEvent{
-					Type:   "model_done",
-					Source: "cli_runner",
-					Index:  j.idx + 1,
-					Total:  total,
-					Model:  j.modelLabel,
-					Result: &result,
-				})
-				continue
-			}
-			httpReq.Header.Set("Content-Type", "application/json")
-
-			resp, err := client.Do(httpReq)
-			if err != nil {
-				msg := "CLI runner 不可达: " + err.Error()
-				result := channelModelProbeResult{Model: j.modelLabel, OK: false, Message: msg}
-				mu.Lock()
-				results[j.idx] = result
-				if j.idx < firstErrorIdx {
-					firstErrorIdx = j.idx
-					firstError = result.Message
-				}
-				mu.Unlock()
-				writeEvent("model_done", channelProbeProgressEvent{
-					Type:   "model_done",
-					Source: "cli_runner",
-					Index:  j.idx + 1,
-					Total:  total,
-					Model:  j.modelLabel,
-					Result: &result,
-				})
-				continue
-			}
-
-			var runnerResp struct {
-				OK        bool   `json:"ok"`
-				LatencyMS int    `json:"latency_ms"`
-				Output    string `json:"output"`
-				Error     string `json:"error"`
-			}
-			decodeErr := json.NewDecoder(resp.Body).Decode(&runnerResp)
-			_ = resp.Body.Close()
-			if decodeErr != nil {
-				result := channelModelProbeResult{Model: j.modelLabel, OK: false, Message: "CLI runner 响应解析失败"}
-				mu.Lock()
-				results[j.idx] = result
-				if j.idx < firstErrorIdx {
-					firstErrorIdx = j.idx
-					firstError = result.Message
-				}
-				mu.Unlock()
-				writeEvent("model_done", channelProbeProgressEvent{
-					Type:   "model_done",
-					Source: "cli_runner",
-					Index:  j.idx + 1,
-					Total:  total,
-					Model:  j.modelLabel,
-					Result: &result,
-				})
-				continue
-			}
-
-			msg := runnerResp.Output
-			if !runnerResp.OK {
-				msg = runnerResp.Error
-			}
-
-			result := channelModelProbeResult{
-				Model:   j.modelLabel,
-				OK:      runnerResp.OK,
-				Message: msg,
-				TTFTMS:  runnerResp.LatencyMS,
-				Sample:  runnerResp.Output,
-			}
+			outcome := runJob(j)
+			result := outcome.result
 
 			mu.Lock()
 			results[j.idx] = result
-			latencySum += runnerResp.LatencyMS
-			ttftSum += runnerResp.LatencyMS
-			if sample == "" && strings.TrimSpace(runnerResp.Output) != "" {
-				sample = runnerResp.Output
+			runnerLatencySum += outcome.latencyMS
+			if result.OK && outcome.ttftMS > 0 {
+				ttftSum += outcome.ttftMS
+				ttftCount++
 			}
-			if runnerResp.OK {
+			switch outcome.modelCheckStatus {
+			case modelcheck.StatusOK:
+				modelCheckOK++
+			case modelcheck.StatusMismatch:
+				modelCheckMismatch++
+			default:
+				modelCheckUnknown++
+			}
+			switch result.SuccessPath {
+			case "/v1/responses":
+				responsesOK++
+			case "/v1/chat/completions":
+				chatOK++
+			}
+			if result.UsedFallback {
+				fallbackCount++
+			}
+			if sample == "" && strings.TrimSpace(result.Sample) != "" {
+				sample = result.Sample
+			}
+			if result.OK {
 				success++
 			} else if j.idx < firstErrorIdx {
 				firstErrorIdx = j.idx
-				firstError = msg
+				firstError = result.Message
 			}
 			mu.Unlock()
-
-			writeEvent("model_done", channelProbeProgressEvent{
-				Type:   "model_done",
-				Source: "cli_runner",
-				Index:  j.idx + 1,
-				Total:  total,
-				Model:  j.modelLabel,
-				Result: &result,
-			})
 		}
 	}
 
@@ -2452,62 +2501,71 @@ func streamChannelCLITestHandler(c *gin.Context, opts Options, channelID int64) 
 	wg.Wait()
 
 	avgTTFT := 0
-	if total > 0 {
-		avgTTFT = ttftSum / total
+	if ttftCount > 0 {
+		avgTTFT = ttftSum / ttftCount
 	}
 	okAll := total > 0 && success == total
-	message := fmt.Sprintf("成功 %d/%d", success, total)
+	msgParts := []string{fmt.Sprintf("成功 %d/%d", success, total)}
+	if modelCheckMismatch > 0 {
+		msgParts = append(msgParts, fmt.Sprintf("模型不一致 %d", modelCheckMismatch))
+	}
+	if modelCheckUnknown > 0 {
+		msgParts = append(msgParts, fmt.Sprintf("模型未知 %d", modelCheckUnknown))
+	}
+	message := strings.Join(msgParts, "，")
 	if !okAll && firstError != "" {
-		message = fmt.Sprintf("成功 %d/%d：%s", success, total, firstError)
+		message = fmt.Sprintf("%s：%s", message, firstError)
 	}
 
 	summary := channelProbeSummary{
-		OK:        okAll,
-		Message:   message,
-		Source:    "cli_runner",
-		Total:     total,
-		Success:   success,
-		AvgTTFTMS: avgTTFT,
-		LatencyMS: latencySum,
-		Sample:    sample,
-		Results:   results,
+		OK:                 okAll,
+		Message:            message,
+		Source:             "cli_runner",
+		Total:              total,
+		Success:            success,
+		ResponsesOK:        responsesOK,
+		ChatOK:             chatOK,
+		FallbackCount:      fallbackCount,
+		AvgTTFTMS:          avgTTFT,
+		LatencyMS:          runnerLatencySum,
+		Sample:             sample,
+		Results:            results,
+		ModelCheckOK:       modelCheckOK,
+		ModelCheckMismatch: modelCheckMismatch,
+		ModelCheckUnknown:  modelCheckUnknown,
 	}
 
-	// CRITICAL: 不调用 UpdateUpstreamChannelTest，不调用 scheduler.Report
-	writeEvent("summary", buildChannelTestResponse(okAll, latencySum, message, summary))
+	// CRITICAL: 不调用 UpdateUpstreamChannelTest，不落库任何测试结果。
+	return finish(okAll, message, summary)
 }
 
 type channelModelProbeResult struct {
-	Model        string `json:"model"`
-	OK           bool   `json:"ok"`
-	Message      string `json:"message"`
-	SuccessPath  string `json:"success_path,omitempty"`
-	UsedFallback bool   `json:"used_fallback,omitempty"`
-	TTFTMS       int    `json:"ttft_ms,omitempty"`
-	Sample       string `json:"sample,omitempty"`
+	Model                 string `json:"model"`
+	OK                    bool   `json:"ok"`
+	Message               string `json:"message"`
+	SuccessPath           string `json:"success_path,omitempty"`
+	UsedFallback          bool   `json:"used_fallback,omitempty"`
+	TTFTMS                int    `json:"ttft_ms,omitempty"`
+	Sample                string `json:"sample,omitempty"`
+	ForwardedModel        string `json:"forwarded_model,omitempty"`
+	UpstreamResponseModel string `json:"upstream_response_model,omitempty"`
+	ModelCheckStatus      string `json:"model_check_status,omitempty"`
 }
 
 type channelProbeSummary struct {
-	OK            bool                      `json:"ok"`
-	Message       string                    `json:"message"`
-	Source        string                    `json:"source,omitempty"`
-	Total         int                       `json:"total"`
-	Success       int                       `json:"success"`
-	ResponsesOK   int                       `json:"responses_ok"`
-	ChatOK        int                       `json:"chat_ok"`
-	FallbackCount int                       `json:"fallback_count"`
-	AvgTTFTMS     int                       `json:"avg_ttft_ms,omitempty"`
-	Sample        string                    `json:"sample,omitempty"`
-	LatencyMS     int                       `json:"latency_ms,omitempty"`
-	Results       []channelModelProbeResult `json:"results"`
-}
-
-type channelProbeProgressEvent struct {
-	Type   string                   `json:"type"`
-	Source string                   `json:"source,omitempty"`
-	Index  int                      `json:"index,omitempty"`
-	Total  int                      `json:"total,omitempty"`
-	Model  string                   `json:"model,omitempty"`
-	Models []string                 `json:"models,omitempty"`
-	Result *channelModelProbeResult `json:"result,omitempty"`
+	OK                 bool                      `json:"ok"`
+	Message            string                    `json:"message"`
+	Source             string                    `json:"source,omitempty"`
+	Total              int                       `json:"total"`
+	Success            int                       `json:"success"`
+	ResponsesOK        int                       `json:"responses_ok"`
+	ChatOK             int                       `json:"chat_ok"`
+	FallbackCount      int                       `json:"fallback_count"`
+	AvgTTFTMS          int                       `json:"avg_ttft_ms,omitempty"`
+	Sample             string                    `json:"sample,omitempty"`
+	LatencyMS          int                       `json:"latency_ms,omitempty"`
+	ModelCheckOK       int                       `json:"model_check_ok"`
+	ModelCheckMismatch int                       `json:"model_check_mismatch"`
+	ModelCheckUnknown  int                       `json:"model_check_unknown"`
+	Results            []channelModelProbeResult `json:"results"`
 }

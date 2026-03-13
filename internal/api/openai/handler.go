@@ -13,10 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tidwall/gjson"
-
 	"realms/internal/auth"
 	"realms/internal/middleware"
+	"realms/internal/modelcheck"
 	"realms/internal/obs"
 	"realms/internal/proxylog"
 	"realms/internal/quota"
@@ -2317,28 +2316,11 @@ func optionalString(s string) *string {
 }
 
 func extractTopLevelModel(body []byte) *string {
-	if len(body) == 0 {
-		return nil
-	}
-	model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
-	if model == "" {
-		model = strings.TrimSpace(gjson.GetBytes(body, "response.model").String())
-	}
-	if model == "" {
-		return nil
-	}
-	return optionalString(model)
+	return modelcheck.ExtractResponseModelBytes(body)
 }
 
 func extractTopLevelModelFromString(body string) *string {
-	model := strings.TrimSpace(gjson.Get(body, "model").String())
-	if model == "" {
-		model = strings.TrimSpace(gjson.Get(body, "response.model").String())
-	}
-	if model == "" {
-		return nil
-	}
-	return optionalString(model)
+	return modelcheck.ExtractResponseModelString(body)
 }
 
 func extractUsageTokens(body []byte) (*int64, *int64, *int64, *int64) {

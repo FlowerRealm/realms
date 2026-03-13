@@ -198,14 +198,14 @@ func NewApp(opts AppOptions) (*App, error) {
 			}
 			return oauthFlow.Handler()
 		}(),
-		Healthz:       app.handleHealthz,
-		RealmsIconSVG: app.handleRealmsIconSVG,
-		FaviconICO:    app.handleFaviconICO,
+		Healthz:                       app.handleHealthz,
+		RealmsIconSVG:                 app.handleRealmsIconSVG,
+		FaviconICO:                    app.handleFaviconICO,
 		SubscriptionOrderPaidWebhook:  app.handleSubscriptionOrderPaidWebhook,
 		StripeWebhookByPaymentChannel: app.handleStripeWebhookByPaymentChannel,
 		EPayNotifyByPaymentChannel:    app.handleEPayNotifyByPaymentChannel,
-		RefreshCodexQuotasByEndpoint: app.RefreshCodexQuotasByEndpoint,
-		RefreshCodexQuota:            app.RefreshCodexQuota,
+		RefreshCodexQuotasByEndpoint:  app.RefreshCodexQuotasByEndpoint,
+		RefreshCodexQuota:             app.RefreshCodexQuota,
 		StartCodexOAuth: func(ctx context.Context, endpointID int64, actorUserID int64) (string, error) {
 			if app.codexOAuth == nil {
 				return "", errors.New("Codex OAuth 未启用")
