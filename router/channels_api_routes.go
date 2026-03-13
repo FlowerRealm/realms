@@ -2103,7 +2103,6 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 		if latencyMS < 0 {
 			latencyMS = 0
 		}
-		summary.LatencyMS = latencyMS
 		return ok, latencyMS, message, summary
 	}
 
@@ -2269,6 +2268,7 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 	results := make([]channelModelProbeResult, total)
 
 	success := 0
+	runnerLatencySum := 0
 	ttftSum := 0
 	ttftCount := 0
 	responsesOK := 0
@@ -2310,6 +2310,7 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 
 	type jobOutcome struct {
 		result           channelModelProbeResult
+		latencyMS        int
 		ttftMS           int
 		modelCheckStatus modelcheck.Status
 	}
@@ -2474,7 +2475,7 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 			if upstreamResponseModel != nil {
 				result.UpstreamResponseModel = *upstreamResponseModel
 			}
-			return jobOutcome{result: result, modelCheckStatus: modelCheckStatus}
+			return jobOutcome{result: result, latencyMS: runnerResp.LatencyMS, modelCheckStatus: modelCheckStatus}
 		}
 
 		msg := runnerResp.Output
@@ -2529,6 +2530,7 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 
 		return jobOutcome{
 			result:           result,
+			latencyMS:        runnerResp.LatencyMS,
 			ttftMS:           ttftMS,
 			modelCheckStatus: modelCheckStatus,
 		}
@@ -2542,6 +2544,7 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 
 			mu.Lock()
 			results[j.idx] = result
+			runnerLatencySum += outcome.latencyMS
 			if result.OK && outcome.ttftMS > 0 {
 				ttftSum += outcome.ttftMS
 				ttftCount++
@@ -2613,6 +2616,7 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 		ChatOK:             chatOK,
 		FallbackCount:      fallbackCount,
 		AvgTTFTMS:          avgTTFT,
+		LatencyMS:          runnerLatencySum,
 		Sample:             sample,
 		Results:            results,
 		ModelCheckOK:       modelCheckOK,

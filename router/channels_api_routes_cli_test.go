@@ -87,8 +87,8 @@ func TestCLITestDelegation(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected ok=true, message=%s", message)
 	}
-	if summary.LatencyMS != latencyMS {
-		t.Fatalf("expected summary latency to match top-level latency, got summary=%d top=%d", summary.LatencyMS, latencyMS)
+	if summary.LatencyMS != 123 {
+		t.Fatalf("expected probe latency summary to keep runner latency, got %d", summary.LatencyMS)
 	}
 	if latencyMS > elapsedMS+100 {
 		t.Fatalf("expected latency to track wall-clock time, got latency=%d elapsed=%d", latencyMS, elapsedMS)
@@ -346,8 +346,8 @@ func TestCLITestDelegation_ReportsWallClockLatency(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected success summary, got %+v", summary)
 	}
-	if summary.LatencyMS != latencyMS {
-		t.Fatalf("expected summary latency to match top-level latency, got summary=%d top=%d", summary.LatencyMS, latencyMS)
+	if summary.LatencyMS != 2000 {
+		t.Fatalf("expected probe latency summary to accumulate runner latency, got %+v", summary)
 	}
 	if latencyMS > elapsedMS+100 {
 		t.Fatalf("expected latency to track wall-clock time, got latency=%d elapsed=%d", latencyMS, elapsedMS)
