@@ -719,17 +719,20 @@ function ChannelAdvancedTab({
       system_prompt_override: settingSystemPromptOverride,
     },
     validate: (v) => {
+      if (channelType === "anthropic") {
+        if (v.chat_completions_enabled) {
+          return "anthropic 渠道不支持 chat/completions";
+        }
+        if (v.responses_enabled) {
+          return "anthropic 渠道不支持 responses";
+        }
+        return "";
+      }
       if (!v.chat_completions_enabled && !v.responses_enabled) {
         return "至少启用一个接口能力";
       }
-      if (
-        (channelType === "codex_oauth" || channelType === "anthropic") &&
-        v.chat_completions_enabled
-      ) {
+      if (channelType === "codex_oauth" && v.chat_completions_enabled) {
         return `${channelType} 渠道不支持 chat/completions`;
-      }
-      if (channelType === "anthropic" && v.responses_enabled) {
-        return "anthropic 渠道不支持 responses";
       }
       return "";
     },
