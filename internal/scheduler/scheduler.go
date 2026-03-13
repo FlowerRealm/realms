@@ -51,6 +51,8 @@ type Selection struct {
 	AutoBan                bool
 	ForceFormat            bool
 	ThinkingToContent      bool
+	ChatCompletionsEnabled bool
+	ResponsesEnabled       bool
 	PassThroughBodyEnabled bool
 	Proxy                  string
 	SystemPrompt           string
@@ -105,6 +107,7 @@ type Scheduler struct {
 
 type Constraints struct {
 	RequireChannelType   string
+	RequireAPI           string
 	RequireChannelID     int64
 	RequireCredentialKey string
 	RouteGroupHint       string
@@ -129,6 +132,12 @@ type Options struct {
 var ErrRequiredCredentialUnavailable = errors.New("required credential unavailable")
 var ErrRequiredChannelUnavailable = errors.New("required channel unavailable")
 var ErrConstrainedSelectionUnavailable = errors.New("constrained selection unavailable")
+
+const (
+	RequiredAPIResponses       = "responses"
+	RequiredAPIChatCompletions = "chat_completions"
+	RequiredAPIMessages        = "messages"
+)
 
 type UpstreamStore interface {
 	ListUpstreamChannels(ctx context.Context) ([]store.UpstreamChannel, error)
@@ -349,6 +358,9 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 		if cons.RequireChannelType != "" && ch.Type != cons.RequireChannelType {
 			continue
 		}
+		if cons.RequireAPI != "" && !channelSupportsRequiredAPI(ch, cons.RequireAPI) {
+			continue
+		}
 		if cons.RequireChannelID != 0 && ch.ID != cons.RequireChannelID {
 			continue
 		}
@@ -467,6 +479,9 @@ func selectionMatchesConstraints(sel Selection, c Constraints) bool {
 	if c.RequireChannelType != "" && sel.ChannelType != c.RequireChannelType {
 		return false
 	}
+	if c.RequireAPI != "" && !selectionSupportsRequiredAPI(sel, c.RequireAPI) {
+		return false
+	}
 	if c.RequireChannelID != 0 && sel.ChannelID != c.RequireChannelID {
 		return false
 	}
@@ -485,6 +500,79 @@ func selectionMatchesConstraints(sel Selection, c Constraints) bool {
 		}
 	}
 	return true
+}
+
+func channelSupportsRequiredAPI(ch store.UpstreamChannel, requiredAPI string) bool {
+	chatEnabled, responsesEnabled := resolvedAPICapabilities(ch.Type, ch.Setting.ChatCompletionsEnabled, ch.Setting.ResponsesEnabled)
+	switch strings.TrimSpace(requiredAPI) {
+	case "":
+		return true
+	case RequiredAPIResponses:
+		return responsesEnabled
+	case RequiredAPIChatCompletions:
+		return chatEnabled
+	case RequiredAPIMessages:
+		return ch.Type == store.UpstreamTypeAnthropic
+	default:
+		return true
+	}
+}
+
+func selectionSupportsRequiredAPI(sel Selection, requiredAPI string) bool {
+	chatEnabled, responsesEnabled := resolvedAPICapabilities(sel.ChannelType, sel.ChatCompletionsEnabled, sel.ResponsesEnabled)
+	switch strings.TrimSpace(requiredAPI) {
+	case "":
+		return true
+	case RequiredAPIResponses:
+		return responsesEnabled
+	case RequiredAPIChatCompletions:
+		return chatEnabled
+	case RequiredAPIMessages:
+		return sel.ChannelType == store.UpstreamTypeAnthropic
+	default:
+		return true
+	}
+}
+
+func SupportsRequiredAPI(sel Selection, requiredAPI string) bool {
+	return selectionSupportsRequiredAPI(sel, requiredAPI)
+}
+
+func resolvedAPICapabilities(channelType string, chatEnabled bool, responsesEnabled bool) (bool, bool) {
+	if chatEnabled || responsesEnabled {
+		return chatEnabled, responsesEnabled
+	}
+	switch strings.TrimSpace(channelType) {
+	case store.UpstreamTypeOpenAICompatible:
+		return true, true
+	case store.UpstreamTypeCodexOAuth:
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func (s *Scheduler) ChannelSupportsRequiredAPI(ctx context.Context, channelID int64, requiredAPI string) (bool, bool, error) {
+	if s == nil || channelID <= 0 {
+		return false, false, nil
+	}
+	channels, err := s.st.ListUpstreamChannels(ctx)
+	if err != nil {
+		return false, false, err
+	}
+	for _, ch := range channels {
+		if ch.ID != channelID {
+			continue
+		}
+		if ch.Status != 1 {
+			return false, true, nil
+		}
+		if s.disableCodexOAuth && ch.Type == store.UpstreamTypeCodexOAuth {
+			return false, true, nil
+		}
+		return channelSupportsRequiredAPI(ch, requiredAPI), true, nil
+	}
+	return false, false, nil
 }
 
 func parseCredentialKey(key string) (CredentialType, int64, bool) {
@@ -573,6 +661,8 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			AutoBan:                ch.AutoBan,
 			ForceFormat:            ch.Setting.ForceFormat,
 			ThinkingToContent:      ch.Setting.ThinkingToContent,
+			ChatCompletionsEnabled: ch.Setting.ChatCompletionsEnabled,
+			ResponsesEnabled:       ch.Setting.ResponsesEnabled,
 			PassThroughBodyEnabled: ch.Setting.PassThroughBodyEnabled,
 			Proxy:                  ch.Setting.Proxy,
 			SystemPrompt:           ch.Setting.SystemPrompt,
@@ -647,6 +737,8 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			AutoBan:                ch.AutoBan,
 			ForceFormat:            ch.Setting.ForceFormat,
 			ThinkingToContent:      ch.Setting.ThinkingToContent,
+			ChatCompletionsEnabled: ch.Setting.ChatCompletionsEnabled,
+			ResponsesEnabled:       ch.Setting.ResponsesEnabled,
 			PassThroughBodyEnabled: ch.Setting.PassThroughBodyEnabled,
 			Proxy:                  ch.Setting.Proxy,
 			SystemPrompt:           ch.Setting.SystemPrompt,
@@ -734,6 +826,8 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			AutoBan:                ch.AutoBan,
 			ForceFormat:            ch.Setting.ForceFormat,
 			ThinkingToContent:      ch.Setting.ThinkingToContent,
+			ChatCompletionsEnabled: ch.Setting.ChatCompletionsEnabled,
+			ResponsesEnabled:       ch.Setting.ResponsesEnabled,
 			PassThroughBodyEnabled: ch.Setting.PassThroughBodyEnabled,
 			Proxy:                  ch.Setting.Proxy,
 			SystemPrompt:           ch.Setting.SystemPrompt,

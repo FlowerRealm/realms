@@ -8,12 +8,18 @@ import (
 	"strings"
 )
 
-func (s *Store) UpdateUpstreamChannelNewAPISetting(ctx context.Context, channelID int64, setting UpstreamChannelSetting) error {
-	if channelID == 0 {
-		return errors.New("channelID 不能为空")
+func defaultAPISettingsForChannelType(channelType string) (chatEnabled bool, responsesEnabled bool) {
+	switch strings.TrimSpace(channelType) {
+	case UpstreamTypeOpenAICompatible:
+		return true, true
+	case UpstreamTypeCodexOAuth:
+		return false, true
+	default:
+		return false, false
 	}
+}
 
-	// 规范化：避免写入无意义空白
+func sanitizeUpstreamChannelSetting(setting UpstreamChannelSetting) UpstreamChannelSetting {
 	setting.Proxy = strings.TrimSpace(setting.Proxy)
 	setting.SystemPrompt = strings.TrimSpace(setting.SystemPrompt)
 	setting.CacheTTLPreference = strings.ToLower(strings.TrimSpace(setting.CacheTTLPreference))
@@ -21,6 +27,66 @@ func (s *Store) UpdateUpstreamChannelNewAPISetting(ctx context.Context, channelI
 	case "", "inherit", "5m", "1h":
 	default:
 		setting.CacheTTLPreference = ""
+	}
+	return setting
+}
+
+func normalizeUpstreamChannelSettingForRead(channelType string, setting UpstreamChannelSetting) UpstreamChannelSetting {
+	setting = sanitizeUpstreamChannelSetting(setting)
+	channelType = strings.TrimSpace(channelType)
+	if channelType == UpstreamTypeAnthropic {
+		setting.ChatCompletionsEnabled = false
+		setting.ResponsesEnabled = false
+		return setting
+	}
+	if channelType == UpstreamTypeCodexOAuth && setting.ChatCompletionsEnabled {
+		setting.ChatCompletionsEnabled = false
+	}
+	if !setting.ChatCompletionsEnabled && !setting.ResponsesEnabled {
+		return applyDefaultAPISettingsForChannelType(channelType, setting)
+	}
+	return setting
+}
+
+func normalizeUpstreamChannelSetting(channelType string, setting UpstreamChannelSetting) (UpstreamChannelSetting, error) {
+	setting = sanitizeUpstreamChannelSetting(setting)
+	channelType = strings.TrimSpace(channelType)
+	if channelType == UpstreamTypeCodexOAuth && setting.ChatCompletionsEnabled {
+		return setting, errors.New("codex_oauth 渠道不支持 chat/completions")
+	}
+	if channelType == UpstreamTypeAnthropic {
+		setting.ChatCompletionsEnabled = false
+		setting.ResponsesEnabled = false
+		return setting, nil
+	}
+	if !setting.ChatCompletionsEnabled && !setting.ResponsesEnabled {
+		return setting, errors.New("至少启用一个接口能力")
+	}
+	return setting, nil
+}
+
+func applyDefaultAPISettingsForChannelType(channelType string, setting UpstreamChannelSetting) UpstreamChannelSetting {
+	if setting.ChatCompletionsEnabled || setting.ResponsesEnabled {
+		return setting
+	}
+	chatDefault, responsesDefault := defaultAPISettingsForChannelType(channelType)
+	setting.ChatCompletionsEnabled = chatDefault
+	setting.ResponsesEnabled = responsesDefault
+	return setting
+}
+
+func (s *Store) UpdateUpstreamChannelNewAPISetting(ctx context.Context, channelID int64, setting UpstreamChannelSetting) error {
+	if channelID == 0 {
+		return errors.New("channelID 不能为空")
+	}
+
+	ch, err := s.GetUpstreamChannelByID(ctx, channelID)
+	if err != nil {
+		return fmt.Errorf("查询 upstream_channel 失败: %w", err)
+	}
+	setting, err = normalizeUpstreamChannelSetting(ch.Type, setting)
+	if err != nil {
+		return err
 	}
 
 	b, err := json.Marshal(setting)

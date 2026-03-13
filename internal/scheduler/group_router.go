@@ -1037,6 +1037,11 @@ func (r *GroupRouter) channelAllowed(chType *string, chGroups *string, chID int6
 			return false
 		}
 	}
+	if r.cons.RequireAPI == RequiredAPIMessages {
+		if chType == nil || strings.TrimSpace(*chType) != store.UpstreamTypeAnthropic {
+			return false
+		}
+	}
 	if r.cons.AllowChannelIDs != nil {
 		if _, ok := r.cons.AllowChannelIDs[chID]; !ok {
 			return false

@@ -226,7 +226,7 @@ func (h *Handler) ResponseRetrieve(w http.ResponseWriter, r *http.Request) {
 		writeNotFound(w)
 		return
 	}
-	sel, ok := h.ownedSelection(r.Context(), p, openAIObjectTypeResponse, id)
+	sel, ok := h.ownedSelection(r.Context(), p, openAIObjectTypeResponse, id, scheduler.RequiredAPIResponses)
 	if !ok {
 		writeNotFound(w)
 		return
@@ -249,7 +249,7 @@ func (h *Handler) ResponseDelete(w http.ResponseWriter, r *http.Request) {
 		writeNotFound(w)
 		return
 	}
-	sel, ok := h.ownedSelection(r.Context(), p, openAIObjectTypeResponse, id)
+	sel, ok := h.ownedSelection(r.Context(), p, openAIObjectTypeResponse, id, scheduler.RequiredAPIResponses)
 	if !ok {
 		writeNotFound(w)
 		return
@@ -275,7 +275,7 @@ func (h *Handler) ResponseCancel(w http.ResponseWriter, r *http.Request) {
 		writeNotFound(w)
 		return
 	}
-	sel, ok := h.ownedSelection(r.Context(), p, openAIObjectTypeResponse, id)
+	sel, ok := h.ownedSelection(r.Context(), p, openAIObjectTypeResponse, id, scheduler.RequiredAPIResponses)
 	if !ok {
 		writeNotFound(w)
 		return
@@ -299,7 +299,7 @@ func (h *Handler) ResponseInputItems(w http.ResponseWriter, r *http.Request) {
 		writeNotFound(w)
 		return
 	}
-	sel, ok := h.ownedSelection(r.Context(), p, openAIObjectTypeResponse, id)
+	sel, ok := h.ownedSelection(r.Context(), p, openAIObjectTypeResponse, id, scheduler.RequiredAPIResponses)
 	if !ok {
 		writeNotFound(w)
 		return
@@ -347,7 +347,11 @@ func (h *Handler) ChatCompletionsList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "解析对象归属失败", http.StatusBadGateway)
 		return
 	}
-	sel = h.resolveFixedRouteSelection(ctx, p.UserID, sel)
+	sel, ok = h.resolveFixedRouteSelection(ctx, p.UserID, sel, scheduler.RequiredAPIChatCompletions)
+	if !ok {
+		http.Error(w, "未找到可用上游", http.StatusBadGateway)
+		return
+	}
 
 	upReq := r.Clone(ctx)
 	q := upReq.URL.Query()
@@ -469,7 +473,7 @@ func (h *Handler) ChatCompletionRetrieve(w http.ResponseWriter, r *http.Request)
 		writeNotFound(w)
 		return
 	}
-	sel, ok := h.ownedSelection(r.Context(), p, openAIObjectTypeChatCompletion, id)
+	sel, ok := h.ownedSelection(r.Context(), p, openAIObjectTypeChatCompletion, id, scheduler.RequiredAPIChatCompletions)
 	if !ok {
 		writeNotFound(w)
 		return
@@ -488,7 +492,7 @@ func (h *Handler) ChatCompletionUpdate(w http.ResponseWriter, r *http.Request) {
 		writeNotFound(w)
 		return
 	}
-	sel, ok := h.ownedSelection(r.Context(), p, openAIObjectTypeChatCompletion, id)
+	sel, ok := h.ownedSelection(r.Context(), p, openAIObjectTypeChatCompletion, id, scheduler.RequiredAPIChatCompletions)
 	if !ok {
 		writeNotFound(w)
 		return
@@ -518,7 +522,7 @@ func (h *Handler) ChatCompletionDelete(w http.ResponseWriter, r *http.Request) {
 		writeNotFound(w)
 		return
 	}
-	sel, ok := h.ownedSelection(r.Context(), p, openAIObjectTypeChatCompletion, id)
+	sel, ok := h.ownedSelection(r.Context(), p, openAIObjectTypeChatCompletion, id, scheduler.RequiredAPIChatCompletions)
 	if !ok {
 		writeNotFound(w)
 		return
@@ -540,7 +544,7 @@ func (h *Handler) ChatCompletionMessages(w http.ResponseWriter, r *http.Request)
 		writeNotFound(w)
 		return
 	}
-	sel, ok := h.ownedSelection(r.Context(), p, openAIObjectTypeChatCompletion, id)
+	sel, ok := h.ownedSelection(r.Context(), p, openAIObjectTypeChatCompletion, id, scheduler.RequiredAPIChatCompletions)
 	if !ok {
 		writeNotFound(w)
 		return

@@ -104,6 +104,7 @@ func (s *Store) ListUpstreamChannels(ctx context.Context) ([]UpstreamChannel, er
 				return nil, fmt.Errorf("解析 upstream_channels.setting 失败: %w", err)
 			}
 		}
+		c.Setting = normalizeUpstreamChannelSettingForRead(c.Type, c.Setting)
 		if paramOverride.Valid {
 			c.ParamOverride = strings.TrimSpace(paramOverride.String)
 		}
@@ -449,6 +450,7 @@ func (s *Store) GetUpstreamChannelByID(ctx context.Context, id int64) (UpstreamC
 			return UpstreamChannel{}, fmt.Errorf("解析 upstream_channels.setting 失败: %w", err)
 		}
 	}
+	c.Setting = normalizeUpstreamChannelSettingForRead(c.Type, c.Setting)
 	if paramOverride.Valid {
 		c.ParamOverride = strings.TrimSpace(paramOverride.String)
 	}

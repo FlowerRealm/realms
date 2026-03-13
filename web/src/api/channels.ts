@@ -4,6 +4,8 @@ import type { APIResponse } from './types';
 export type UpstreamChannelSetting = {
   force_format?: boolean;
   thinking_to_content?: boolean;
+  chat_completions_enabled?: boolean;
+  responses_enabled?: boolean;
   proxy?: string;
   pass_through_body_enabled?: boolean;
   system_prompt?: string;
@@ -116,6 +118,8 @@ type CreateChannelRequest = {
   fast_mode?: boolean;
   disable_store?: boolean;
   allow_safety_identifier?: boolean;
+  chat_completions_enabled?: boolean;
+  responses_enabled?: boolean;
 };
 
 type UpdateChannelRequest = {
@@ -452,6 +456,8 @@ export async function updateChannelSetting(
   req: {
     force_format?: boolean;
     thinking_to_content?: boolean;
+    chat_completions_enabled?: boolean;
+    responses_enabled?: boolean;
     proxy?: string;
     pass_through_body_enabled?: boolean;
     system_prompt?: string;

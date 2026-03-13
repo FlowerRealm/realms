@@ -648,6 +648,161 @@ func TestResponseRetrieve_StreamIdleTimeoutCoolsFixedEndpoint(t *testing.T) {
 	}
 }
 
+func TestResponseRetrieve_ReSelectsWhenStoredChannelNoLongerSupportsAPI(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{
+				ID:     1,
+				Type:   store.UpstreamTypeOpenAICompatible,
+				Status: 1,
+				Setting: store.UpstreamChannelSetting{
+					ChatCompletionsEnabled: true,
+					ResponsesEnabled:       false,
+				},
+			},
+			{
+				ID:     2,
+				Type:   store.UpstreamTypeOpenAICompatible,
+				Status: 1,
+				Setting: store.UpstreamChannelSetting{
+					ChatCompletionsEnabled: true,
+					ResponsesEnabled:       true,
+				},
+			},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://old.example", Status: 1, Priority: 100},
+			},
+			2: {
+				{ID: 22, ChannelID: 2, BaseURL: "https://new.example", Status: 1, Priority: 100},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+			},
+			22: {
+				{ID: 222, EndpointID: 22, Status: 1},
+			},
+		},
+	}
+
+	refs := newMemObjectRefs()
+	selJSON, _ := json.Marshal(scheduler.Selection{
+		ChannelID:              1,
+		ChannelType:            store.UpstreamTypeOpenAICompatible,
+		EndpointID:             11,
+		BaseURL:                "https://old.example",
+		CredentialType:         scheduler.CredentialTypeOpenAI,
+		CredentialID:           111,
+		ChatCompletionsEnabled: true,
+		ResponsesEnabled:       true,
+	})
+	_ = refs.UpsertOpenAIObjectRef(context.Background(), store.OpenAIObjectRef{
+		ObjectType:    openAIObjectTypeResponse,
+		ObjectID:      "resp_reselect",
+		UserID:        10,
+		TokenID:       123,
+		SelectionJSON: string(selJSON),
+	})
+
+	var gotEndpoints []int64
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		gotEndpoints = append(gotEndpoints, sel.EndpointID)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"resp_reselect","ok":true}`))),
+		}, nil
+	})
+
+	h := NewHandler(nil, nil, scheduler.New(fs), doer, nil, nil, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
+	rr := runHandler(h.ResponseRetrieve, makeTokenRequest(http.MethodGet, "/v1/responses/resp_reselect", "", 10))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(gotEndpoints) != 1 || gotEndpoints[0] != 22 {
+		t.Fatalf("expected forced reselection to hit endpoint 22 only, got=%v", gotEndpoints)
+	}
+
+	ref, ok, err := refs.GetOpenAIObjectRefForUser(context.Background(), 10, openAIObjectTypeResponse, "resp_reselect")
+	if err != nil || !ok {
+		t.Fatalf("expected local ref after reselection, ok=%v err=%v", ok, err)
+	}
+	var updated scheduler.Selection
+	if err := json.Unmarshal([]byte(ref.SelectionJSON), &updated); err != nil {
+		t.Fatalf("unmarshal updated selection: %v", err)
+	}
+	if updated.ChannelID != 2 || updated.EndpointID != 22 || updated.CredentialID != 222 {
+		t.Fatalf("expected ref to be rebound to channel 2 endpoint 22, got %+v", updated)
+	}
+}
+
+func TestResponseRetrieve_CapabilityMismatchWithoutReplacement_DoesNotFallbackToOldSelection(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{
+				ID:     1,
+				Type:   store.UpstreamTypeOpenAICompatible,
+				Status: 1,
+				Setting: store.UpstreamChannelSetting{
+					ChatCompletionsEnabled: true,
+					ResponsesEnabled:       false,
+				},
+			},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://old.example", Status: 1, Priority: 100},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+			},
+		},
+	}
+
+	refs := newMemObjectRefs()
+	selJSON, _ := json.Marshal(scheduler.Selection{
+		ChannelID:              1,
+		ChannelType:            store.UpstreamTypeOpenAICompatible,
+		EndpointID:             11,
+		BaseURL:                "https://old.example",
+		CredentialType:         scheduler.CredentialTypeOpenAI,
+		CredentialID:           111,
+		ChatCompletionsEnabled: true,
+		ResponsesEnabled:       true,
+	})
+	_ = refs.UpsertOpenAIObjectRef(context.Background(), store.OpenAIObjectRef{
+		ObjectType:    openAIObjectTypeResponse,
+		ObjectID:      "resp_gone",
+		UserID:        10,
+		TokenID:       123,
+		SelectionJSON: string(selJSON),
+	})
+
+	calls := 0
+	doer := DoerFunc(func(_ context.Context, _ scheduler.Selection, _ *http.Request, _ []byte) (*http.Response, error) {
+		calls++
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"resp_gone","ok":true}`))),
+		}, nil
+	})
+
+	h := NewHandler(nil, nil, scheduler.New(fs), doer, nil, nil, nil, fakeAudit{}, nil, refs, upstream.SSEPumpOptions{}, nil)
+	rr := runHandler(h.ResponseRetrieve, makeTokenRequest(http.MethodGet, "/v1/responses/resp_gone", "", 10))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when no replacement exists, got=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if calls != 0 {
+		t.Fatalf("expected no upstream call when reselection fails, got=%d", calls)
+	}
+}
+
 func TestChatCompletionsList_FiltersByLocalRefsAndForcesOwnerMetadataQuery(t *testing.T) {
 	refs := newMemObjectRefs()
 	selJSON, _ := json.Marshal(scheduler.Selection{

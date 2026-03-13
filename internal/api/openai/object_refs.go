@@ -110,28 +110,49 @@ func (h *Handler) recordOpenAIObjectRef(ctx context.Context, objectType string, 
 	})
 }
 
-func (h *Handler) resolveFixedRouteSelection(ctx context.Context, userID int64, sel scheduler.Selection) scheduler.Selection {
-	if h == nil || h.sched == nil {
-		return sel
+func (h *Handler) resolveFixedRouteSelection(ctx context.Context, userID int64, sel scheduler.Selection, requiredAPI string) (scheduler.Selection, bool) {
+	requiredAPI = strings.TrimSpace(requiredAPI)
+	if h == nil {
+		return sel, true
+	}
+	if h.sched == nil {
+		if requiredAPI != "" && !scheduler.SupportsRequiredAPI(sel, requiredAPI) {
+			return scheduler.Selection{}, false
+		}
+		return sel, true
+	}
+	channelSupportsAPI, channelKnown, err := h.sched.ChannelSupportsRequiredAPI(ctx, sel.ChannelID, requiredAPI)
+	if err != nil {
+		return sel, true
+	}
+	if channelKnown && !channelSupportsAPI {
+		next, err := h.sched.SelectWithConstraints(ctx, userID, "", scheduler.Constraints{
+			RequireAPI: requiredAPI,
+		})
+		if err != nil || next.EndpointID <= 0 {
+			return scheduler.Selection{}, false
+		}
+		return next, true
 	}
 	if sel.ChannelID <= 0 || sel.EndpointID <= 0 {
-		return sel
+		return sel, true
 	}
 	if !h.sched.IsEndpointCooling(sel.EndpointID) {
-		return sel
+		return sel, true
 	}
 	cons := scheduler.Constraints{
 		RequireChannelID:   sel.ChannelID,
 		RequireChannelType: sel.ChannelType,
+		RequireAPI:         requiredAPI,
 	}
 	next, err := h.sched.SelectWithConstraints(ctx, userID, "", cons)
 	if err != nil || next.EndpointID <= 0 {
-		return sel
+		return sel, true
 	}
-	return next
+	return next, true
 }
 
-func (h *Handler) ownedSelection(ctx context.Context, p auth.Principal, objectType string, objectID string) (scheduler.Selection, bool) {
+func (h *Handler) ownedSelection(ctx context.Context, p auth.Principal, objectType string, objectID string, requiredAPI string) (scheduler.Selection, bool) {
 	if h == nil || h.refs == nil {
 		return scheduler.Selection{}, false
 	}
@@ -146,7 +167,18 @@ func (h *Handler) ownedSelection(ctx context.Context, p auth.Principal, objectTy
 	if err := json.Unmarshal([]byte(ref.SelectionJSON), &sel); err != nil {
 		return scheduler.Selection{}, false
 	}
-	return h.resolveFixedRouteSelection(ctx, p.UserID, sel), true
+	resolved, ok := h.resolveFixedRouteSelection(ctx, p.UserID, sel, requiredAPI)
+	if !ok {
+		return scheduler.Selection{}, false
+	}
+	if resolved.ChannelID != sel.ChannelID || resolved.EndpointID != sel.EndpointID || resolved.CredentialKey() != sel.CredentialKey() {
+		rawSel, err := json.Marshal(resolved)
+		if err == nil && len(rawSel) > 0 {
+			ref.SelectionJSON = string(rawSel)
+			_ = h.refs.UpsertOpenAIObjectRef(ctx, ref)
+		}
+	}
+	return resolved, true
 }
 
 func writeNotFound(w http.ResponseWriter) {

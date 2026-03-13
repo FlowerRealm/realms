@@ -266,6 +266,56 @@ func TestSelectWithConstraints_RequireChannelID_StatusFilteredReturnsConstrained
 	}
 }
 
+func TestSelectWithConstraints_RequireAPI_FiltersChannels(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{
+				ID:     1,
+				Type:   store.UpstreamTypeOpenAICompatible,
+				Status: 1,
+				Setting: store.UpstreamChannelSetting{
+					ChatCompletionsEnabled: false,
+					ResponsesEnabled:       true,
+				},
+			},
+			{
+				ID:     2,
+				Type:   store.UpstreamTypeOpenAICompatible,
+				Status: 1,
+				Setting: store.UpstreamChannelSetting{
+					ChatCompletionsEnabled: true,
+					ResponsesEnabled:       false,
+				},
+			},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1}},
+			2: {{ID: 21, ChannelID: 2, BaseURL: "https://b.example", Status: 1}},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {{ID: 111, EndpointID: 11, Status: 1}},
+			21: {{ID: 211, EndpointID: 21, Status: 1}},
+		},
+	}
+	s := New(fs)
+
+	respSel, err := s.SelectWithConstraints(context.Background(), 10, "", Constraints{RequireAPI: RequiredAPIResponses})
+	if err != nil {
+		t.Fatalf("Select responses err: %v", err)
+	}
+	if respSel.ChannelID != 1 {
+		t.Fatalf("expected responses channel=1, got=%d", respSel.ChannelID)
+	}
+
+	chatSel, err := s.SelectWithConstraints(context.Background(), 10, "", Constraints{RequireAPI: RequiredAPIChatCompletions})
+	if err != nil {
+		t.Fatalf("Select chat err: %v", err)
+	}
+	if chatSel.ChannelID != 2 {
+		t.Fatalf("expected chat channel=2, got=%d", chatSel.ChannelID)
+	}
+}
+
 func TestSelectWithConstraints_RequireCredentialKey_AllowsEndpointInCooldown(t *testing.T) {
 	fs := &fakeStore{
 		channels: []store.UpstreamChannel{

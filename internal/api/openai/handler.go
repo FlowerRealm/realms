@@ -332,8 +332,11 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var cons scheduler.Constraints
-	if r != nil && r.URL != nil && r.URL.Path != "/v1/responses" {
+	if r != nil && r.URL != nil && !strings.HasPrefix(r.URL.Path, "/v1/responses") {
 		cons.RequireChannelType = store.UpstreamTypeOpenAICompatible
+		cons.RequireAPI = scheduler.RequiredAPIChatCompletions
+	} else {
+		cons.RequireAPI = scheduler.RequiredAPIResponses
 	}
 
 	ags := allowGroupsFromPrincipal(p)

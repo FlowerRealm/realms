@@ -855,6 +855,9 @@ func TestChannels_CreateDefaultsAllowServiceTierAndRejectsInvalidFastMode(t *tes
 	if !created.FastMode {
 		t.Fatalf("expected fast_mode=true by default, got false")
 	}
+	if !created.Setting.ChatCompletionsEnabled || !created.Setting.ResponsesEnabled {
+		t.Fatalf("expected openai channel api settings to default to both enabled, got %+v", created.Setting)
+	}
 
 	badCreateBody, _ := json.Marshal(map[string]any{
 		"type":               store.UpstreamTypeOpenAICompatible,
@@ -916,6 +919,33 @@ func TestChannels_CreateDefaultsAllowServiceTierAndRejectsInvalidFastMode(t *tes
 	}
 	if updateResp.Message != store.ErrUpstreamChannelFastModeRequiresServiceTier.Error() {
 		t.Fatalf("unexpected bad update message: %q", updateResp.Message)
+	}
+
+	settingBody, _ := json.Marshal(map[string]any{
+		"chat_completions_enabled": false,
+		"responses_enabled":        true,
+	})
+	req = httptest.NewRequest(http.MethodPut, "http://example.com/api/channel/"+strconv.FormatInt(channelID, 10)+"/setting", bytes.NewReader(settingBody))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("setting update status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &updateResp); err != nil {
+		t.Fatalf("json.Unmarshal setting update: %v", err)
+	}
+	if !updateResp.Success {
+		t.Fatalf("expected setting update success, got message=%q", updateResp.Message)
+	}
+	updated, err := st.GetUpstreamChannelByID(ctx, channelID)
+	if err != nil {
+		t.Fatalf("GetUpstreamChannelByID(updated): %v", err)
+	}
+	if updated.Setting.ChatCompletionsEnabled || !updated.Setting.ResponsesEnabled {
+		t.Fatalf("unexpected api settings after update: %+v", updated.Setting)
 	}
 }
 

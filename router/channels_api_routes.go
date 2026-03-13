@@ -20,6 +20,17 @@ import (
 	"realms/internal/store"
 )
 
+func defaultChannelAPISettings(channelType string) (chatEnabled bool, responsesEnabled bool) {
+	switch strings.TrimSpace(channelType) {
+	case store.UpstreamTypeOpenAICompatible:
+		return true, true
+	case store.UpstreamTypeCodexOAuth:
+		return false, true
+	default:
+		return false, false
+	}
+}
+
 type channelView struct {
 	ID        int64  `json:"id"`
 	Type      string `json:"type"`
@@ -594,17 +605,19 @@ func getChannelHandler(opts Options) gin.HandlerFunc {
 }
 
 type createChannelRequest struct {
-	Type                  string  `json:"type"`
-	Name                  string  `json:"name"`
-	Groups                string  `json:"groups"`
-	BaseURL               string  `json:"base_url"`
-	Key                   *string `json:"key,omitempty"`
-	Priority              int     `json:"priority"`
-	Promotion             bool    `json:"promotion"`
-	AllowServiceTier      *bool   `json:"allow_service_tier,omitempty"`
-	FastMode              *bool   `json:"fast_mode,omitempty"`
-	DisableStore          bool    `json:"disable_store"`
-	AllowSafetyIdentifier bool    `json:"allow_safety_identifier"`
+	Type                   string  `json:"type"`
+	Name                   string  `json:"name"`
+	Groups                 string  `json:"groups"`
+	BaseURL                string  `json:"base_url"`
+	Key                    *string `json:"key,omitempty"`
+	Priority               int     `json:"priority"`
+	Promotion              bool    `json:"promotion"`
+	AllowServiceTier       *bool   `json:"allow_service_tier,omitempty"`
+	FastMode               *bool   `json:"fast_mode,omitempty"`
+	DisableStore           bool    `json:"disable_store"`
+	AllowSafetyIdentifier  bool    `json:"allow_safety_identifier"`
+	ChatCompletionsEnabled *bool   `json:"chat_completions_enabled,omitempty"`
+	ResponsesEnabled       *bool   `json:"responses_enabled,omitempty"`
 }
 
 func createChannelHandler(opts Options) gin.HandlerFunc {
@@ -667,6 +680,21 @@ func createChannelHandler(opts Options) gin.HandlerFunc {
 		ep, err := opts.Store.SetUpstreamEndpointBaseURL(c.Request.Context(), id, req.BaseURL)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "创建 Endpoint 失败"})
+			return
+		}
+		chatEnabled, responsesEnabled := defaultChannelAPISettings(req.Type)
+		if req.ChatCompletionsEnabled != nil {
+			chatEnabled = *req.ChatCompletionsEnabled
+		}
+		if req.ResponsesEnabled != nil {
+			responsesEnabled = *req.ResponsesEnabled
+		}
+		if err := opts.Store.UpdateUpstreamChannelNewAPISetting(c.Request.Context(), id, store.UpstreamChannelSetting{
+			ChatCompletionsEnabled: chatEnabled,
+			ResponsesEnabled:       responsesEnabled,
+		}); err != nil {
+			_ = opts.Store.DeleteUpstreamChannel(c.Request.Context(), id)
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 			return
 		}
 		if req.Key != nil {
@@ -1585,6 +1613,8 @@ func updateChannelSettingHandler(opts Options) gin.HandlerFunc {
 	type reqBody struct {
 		ForceFormat            *bool   `json:"force_format,omitempty"`
 		ThinkingToContent      *bool   `json:"thinking_to_content,omitempty"`
+		ChatCompletionsEnabled *bool   `json:"chat_completions_enabled,omitempty"`
+		ResponsesEnabled       *bool   `json:"responses_enabled,omitempty"`
 		Proxy                  *string `json:"proxy,omitempty"`
 		PassThroughBodyEnabled *bool   `json:"pass_through_body_enabled,omitempty"`
 		SystemPrompt           *string `json:"system_prompt,omitempty"`
@@ -1623,6 +1653,12 @@ func updateChannelSettingHandler(opts Options) gin.HandlerFunc {
 		}
 		if req.ThinkingToContent != nil {
 			next.ThinkingToContent = *req.ThinkingToContent
+		}
+		if req.ChatCompletionsEnabled != nil {
+			next.ChatCompletionsEnabled = *req.ChatCompletionsEnabled
+		}
+		if req.ResponsesEnabled != nil {
+			next.ResponsesEnabled = *req.ResponsesEnabled
 		}
 		if req.Proxy != nil {
 			next.Proxy = *req.Proxy
