@@ -51,6 +51,8 @@ type Selection struct {
 	AutoBan                bool
 	ForceFormat            bool
 	ThinkingToContent      bool
+	ChatCompletionsEnabled bool
+	ResponsesEnabled       bool
 	PassThroughBodyEnabled bool
 	Proxy                  string
 	SystemPrompt           string
@@ -105,6 +107,7 @@ type Scheduler struct {
 
 type Constraints struct {
 	RequireChannelType   string
+	RequireAPI           string
 	RequireChannelID     int64
 	RequireCredentialKey string
 	RouteGroupHint       string
@@ -129,6 +132,12 @@ type Options struct {
 var ErrRequiredCredentialUnavailable = errors.New("required credential unavailable")
 var ErrRequiredChannelUnavailable = errors.New("required channel unavailable")
 var ErrConstrainedSelectionUnavailable = errors.New("constrained selection unavailable")
+
+const (
+	RequiredAPIResponses       = "responses"
+	RequiredAPIChatCompletions = "chat_completions"
+	RequiredAPIMessages        = "messages"
+)
 
 type UpstreamStore interface {
 	ListUpstreamChannels(ctx context.Context) ([]store.UpstreamChannel, error)
@@ -349,6 +358,9 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 		if cons.RequireChannelType != "" && ch.Type != cons.RequireChannelType {
 			continue
 		}
+		if cons.RequireAPI != "" && !channelSupportsRequiredAPI(ch, cons.RequireAPI) {
+			continue
+		}
 		if cons.RequireChannelID != 0 && ch.ID != cons.RequireChannelID {
 			continue
 		}
@@ -467,6 +479,9 @@ func selectionMatchesConstraints(sel Selection, c Constraints) bool {
 	if c.RequireChannelType != "" && sel.ChannelType != c.RequireChannelType {
 		return false
 	}
+	if c.RequireAPI != "" && !selectionSupportsRequiredAPI(sel, c.RequireAPI) {
+		return false
+	}
 	if c.RequireChannelID != 0 && sel.ChannelID != c.RequireChannelID {
 		return false
 	}
@@ -485,6 +500,36 @@ func selectionMatchesConstraints(sel Selection, c Constraints) bool {
 		}
 	}
 	return true
+}
+
+func channelSupportsRequiredAPI(ch store.UpstreamChannel, requiredAPI string) bool {
+	switch strings.TrimSpace(requiredAPI) {
+	case "":
+		return true
+	case RequiredAPIResponses:
+		return ch.Setting.ResponsesEnabled
+	case RequiredAPIChatCompletions:
+		return ch.Setting.ChatCompletionsEnabled
+	case RequiredAPIMessages:
+		return ch.Type == store.UpstreamTypeAnthropic
+	default:
+		return true
+	}
+}
+
+func selectionSupportsRequiredAPI(sel Selection, requiredAPI string) bool {
+	switch strings.TrimSpace(requiredAPI) {
+	case "":
+		return true
+	case RequiredAPIResponses:
+		return sel.ResponsesEnabled
+	case RequiredAPIChatCompletions:
+		return sel.ChatCompletionsEnabled
+	case RequiredAPIMessages:
+		return sel.ChannelType == store.UpstreamTypeAnthropic
+	default:
+		return true
+	}
 }
 
 func parseCredentialKey(key string) (CredentialType, int64, bool) {
@@ -573,6 +618,8 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			AutoBan:                ch.AutoBan,
 			ForceFormat:            ch.Setting.ForceFormat,
 			ThinkingToContent:      ch.Setting.ThinkingToContent,
+			ChatCompletionsEnabled: ch.Setting.ChatCompletionsEnabled,
+			ResponsesEnabled:       ch.Setting.ResponsesEnabled,
 			PassThroughBodyEnabled: ch.Setting.PassThroughBodyEnabled,
 			Proxy:                  ch.Setting.Proxy,
 			SystemPrompt:           ch.Setting.SystemPrompt,
@@ -647,6 +694,8 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			AutoBan:                ch.AutoBan,
 			ForceFormat:            ch.Setting.ForceFormat,
 			ThinkingToContent:      ch.Setting.ThinkingToContent,
+			ChatCompletionsEnabled: ch.Setting.ChatCompletionsEnabled,
+			ResponsesEnabled:       ch.Setting.ResponsesEnabled,
 			PassThroughBodyEnabled: ch.Setting.PassThroughBodyEnabled,
 			Proxy:                  ch.Setting.Proxy,
 			SystemPrompt:           ch.Setting.SystemPrompt,
@@ -734,6 +783,8 @@ func (s *Scheduler) selectCredential(ctx context.Context, ch store.UpstreamChann
 			AutoBan:                ch.AutoBan,
 			ForceFormat:            ch.Setting.ForceFormat,
 			ThinkingToContent:      ch.Setting.ThinkingToContent,
+			ChatCompletionsEnabled: ch.Setting.ChatCompletionsEnabled,
+			ResponsesEnabled:       ch.Setting.ResponsesEnabled,
 			PassThroughBodyEnabled: ch.Setting.PassThroughBodyEnabled,
 			Proxy:                  ch.Setting.Proxy,
 			SystemPrompt:           ch.Setting.SystemPrompt,

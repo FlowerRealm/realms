@@ -75,6 +75,7 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 
 	var cons scheduler.Constraints
 	cons.RequireChannelType = store.UpstreamTypeAnthropic
+	cons.RequireAPI = scheduler.RequiredAPIMessages
 	ags := allowGroupsFromPrincipal(p)
 	allowSet := ags.Set
 	if len(ags.Order) == 0 {

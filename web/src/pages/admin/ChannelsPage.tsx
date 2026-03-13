@@ -71,6 +71,14 @@ function channelTypeLabel(t: string): string {
   return t;
 }
 
+function defaultAPISettingsForChannelType(
+  t: "openai_compatible" | "anthropic" | "codex_oauth",
+): { chat: boolean; responses: boolean } {
+  if (t === "openai_compatible") return { chat: true, responses: true };
+  if (t === "codex_oauth") return { chat: false, responses: true };
+  return { chat: false, responses: false };
+}
+
 function statusBadge(status: number): { cls: string; label: string } {
   if (status === 1)
     return {
@@ -452,6 +460,49 @@ function ChannelCommonTab({
                 <input
                   className="form-check-input"
                   type="checkbox"
+                  id="setting_chat_completions_enabled"
+                  checked={settingChatCompletionsEnabled}
+                  disabled={channelType === "codex_oauth"}
+                  onChange={(e) =>
+                    setSettingChatCompletionsEnabled(e.target.checked)
+                  }
+                />
+                <label
+                  className="form-check-label"
+                  htmlFor="setting_chat_completions_enabled"
+                >
+                  启用 <code>/v1/chat/completions</code>
+                </label>
+                <div className="form-text small text-muted">
+                  {channelType === "codex_oauth"
+                    ? "codex_oauth 上游只支持 responses。"
+                    : "关闭后：该渠道不会参与 chat/completions 请求选路。"}
+                </div>
+              </div>
+              <div className="form-check">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="setting_responses_enabled"
+                  checked={settingResponsesEnabled}
+                  onChange={(e) =>
+                    setSettingResponsesEnabled(e.target.checked)
+                  }
+                />
+                <label
+                  className="form-check-label"
+                  htmlFor="setting_responses_enabled"
+                >
+                  启用 <code>/v1/responses</code>
+                </label>
+                <div className="form-text small text-muted">
+                  关闭后：该渠道不会参与 responses 请求选路。
+                </div>
+              </div>
+              <div className="form-check">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
                   id="editAllowServiceTier"
                   checked={editAllowServiceTier}
                   onChange={(e) => setEditAllowServiceTier(e.target.checked)}
@@ -555,6 +606,10 @@ function ChannelAdvancedTab({
   setMetaRemark,
   settingThinkingToContent,
   setSettingThinkingToContent,
+  settingChatCompletionsEnabled,
+  setSettingChatCompletionsEnabled,
+  settingResponsesEnabled,
+  setSettingResponsesEnabled,
   settingPassThroughBodyEnabled,
   setSettingPassThroughBodyEnabled,
   settingProxy,
@@ -594,6 +649,10 @@ function ChannelAdvancedTab({
   setMetaRemark: (v: string) => void;
   settingThinkingToContent: boolean;
   setSettingThinkingToContent: (v: boolean) => void;
+  settingChatCompletionsEnabled: boolean;
+  setSettingChatCompletionsEnabled: (v: boolean) => void;
+  settingResponsesEnabled: boolean;
+  setSettingResponsesEnabled: (v: boolean) => void;
   settingPassThroughBodyEnabled: boolean;
   setSettingPassThroughBodyEnabled: (v: boolean) => void;
   settingProxy: string;
@@ -645,10 +704,21 @@ function ChannelAdvancedTab({
     debounceMs: 800,
     value: {
       thinking_to_content: settingThinkingToContent,
+      chat_completions_enabled: settingChatCompletionsEnabled,
+      responses_enabled: settingResponsesEnabled,
       pass_through_body_enabled: settingPassThroughBodyEnabled,
       proxy: settingProxy,
       system_prompt: settingSystemPrompt,
       system_prompt_override: settingSystemPromptOverride,
+    },
+    validate: (v) => {
+      if (!v.chat_completions_enabled && !v.responses_enabled) {
+        return "至少启用一个接口能力";
+      }
+      if (channelType === "codex_oauth" && v.chat_completions_enabled) {
+        return "codex_oauth 渠道不支持 chat/completions";
+      }
+      return "";
     },
     save: async (v) => {
       const res = await updateChannelSetting(channelID, v);
@@ -1235,6 +1305,9 @@ export function ChannelsPage() {
   const [createDisableStore, setCreateDisableStore] = useState(false);
   const [createAllowSafetyIdentifier, setCreateAllowSafetyIdentifier] =
     useState(false);
+  const [createChatCompletionsEnabled, setCreateChatCompletionsEnabled] =
+    useState(true);
+  const [createResponsesEnabled, setCreateResponsesEnabled] = useState(true);
 
   const [settingsChannelID, setSettingsChannelID] = useState<number | null>(
     null,
@@ -1295,6 +1368,9 @@ export function ChannelsPage() {
 
   const [settingThinkingToContent, setSettingThinkingToContent] =
     useState(false);
+  const [settingChatCompletionsEnabled, setSettingChatCompletionsEnabled] =
+    useState(true);
+  const [settingResponsesEnabled, setSettingResponsesEnabled] = useState(true);
   const [settingPassThroughBodyEnabled, setSettingPassThroughBodyEnabled] =
     useState(false);
   const [settingProxy, setSettingProxy] = useState("");
@@ -1931,6 +2007,10 @@ export function ChannelsPage() {
 
         const setting = ch.setting || {};
         setSettingThinkingToContent(!!setting.thinking_to_content);
+        setSettingChatCompletionsEnabled(
+          setting.chat_completions_enabled !== false,
+        );
+        setSettingResponsesEnabled(setting.responses_enabled !== false);
         setSettingPassThroughBodyEnabled(!!setting.pass_through_body_enabled);
         setSettingProxy(setting.proxy || "");
         setSettingSystemPrompt(setting.system_prompt || "");
@@ -3453,6 +3533,8 @@ export function ChannelsPage() {
           setCreateFastMode(true);
           setCreateDisableStore(false);
           setCreateAllowSafetyIdentifier(false);
+          setCreateChatCompletionsEnabled(true);
+          setCreateResponsesEnabled(true);
         }}
       >
         <form
@@ -3477,6 +3559,8 @@ export function ChannelsPage() {
                 fast_mode: createFastMode,
                 disable_store: createDisableStore,
                 allow_safety_identifier: createAllowSafetyIdentifier,
+                chat_completions_enabled: createChatCompletionsEnabled,
+                responses_enabled: createResponsesEnabled,
               });
               if (!res.success) throw new Error(res.message || "创建失败");
               setNotice("已创建");
@@ -3499,6 +3583,9 @@ export function ChannelsPage() {
                   | "codex_oauth";
                 if (!allowCodexOAuth && t === "codex_oauth") return;
                 setCreateType(t);
+                const defaults = defaultAPISettingsForChannelType(t);
+                setCreateChatCompletionsEnabled(defaults.chat);
+                setCreateResponsesEnabled(defaults.responses);
                 if (t === "openai_compatible")
                   setCreateBaseURL("https://api.openai.com");
                 if (t === "anthropic")
@@ -3597,6 +3684,42 @@ export function ChannelsPage() {
           )}
 
           <div className="col-12">
+            <div className="form-check">
+              <input
+                className="form-check-input"
+                type="checkbox"
+                id="createChatCompletionsEnabled"
+                checked={createChatCompletionsEnabled}
+                disabled={createType === "codex_oauth"}
+                onChange={(e) =>
+                  setCreateChatCompletionsEnabled(e.target.checked)
+                }
+              />
+              <label
+                className="form-check-label"
+                htmlFor="createChatCompletionsEnabled"
+              >
+                启用 <code>/v1/chat/completions</code>
+              </label>
+            </div>
+            <div className="form-check">
+              <input
+                className="form-check-input"
+                type="checkbox"
+                id="createResponsesEnabled"
+                checked={createResponsesEnabled}
+                onChange={(e) => setCreateResponsesEnabled(e.target.checked)}
+              />
+              <label
+                className="form-check-label"
+                htmlFor="createResponsesEnabled"
+              >
+                启用 <code>/v1/responses</code>
+              </label>
+            </div>
+            <div className="form-text small text-muted mb-2">
+              至少启用一个接口能力；codex_oauth 仅支持 responses。
+            </div>
             <div className="form-check">
               <input
                 className="form-check-input"
@@ -3729,6 +3852,8 @@ export function ChannelsPage() {
           setMetaRemark("");
 
           setSettingThinkingToContent(false);
+          setSettingChatCompletionsEnabled(true);
+          setSettingResponsesEnabled(true);
           setSettingPassThroughBodyEnabled(false);
           setSettingProxy("");
           setSettingSystemPrompt("");
@@ -4524,6 +4649,12 @@ export function ChannelsPage() {
                 setMetaRemark={setMetaRemark}
                 settingThinkingToContent={settingThinkingToContent}
                 setSettingThinkingToContent={setSettingThinkingToContent}
+                settingChatCompletionsEnabled={settingChatCompletionsEnabled}
+                setSettingChatCompletionsEnabled={
+                  setSettingChatCompletionsEnabled
+                }
+                settingResponsesEnabled={settingResponsesEnabled}
+                setSettingResponsesEnabled={setSettingResponsesEnabled}
                 settingPassThroughBodyEnabled={settingPassThroughBodyEnabled}
                 setSettingPassThroughBodyEnabled={
                   setSettingPassThroughBodyEnabled

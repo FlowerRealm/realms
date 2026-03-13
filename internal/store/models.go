@@ -134,6 +134,8 @@ type UpstreamChannel struct {
 type UpstreamChannelSetting struct {
 	ForceFormat            bool   `json:"force_format,omitempty"`
 	ThinkingToContent      bool   `json:"thinking_to_content,omitempty"`
+	ChatCompletionsEnabled bool   `json:"chat_completions_enabled,omitempty"`
+	ResponsesEnabled       bool   `json:"responses_enabled,omitempty"`
 	Proxy                  string `json:"proxy,omitempty"`
 	PassThroughBodyEnabled bool   `json:"pass_through_body_enabled,omitempty"`
 	SystemPrompt           string `json:"system_prompt,omitempty"`

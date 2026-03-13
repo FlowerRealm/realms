@@ -131,3 +131,86 @@ func TestEnsureSQLiteSchema_BackfillsAllowServiceTierForFastMode(t *testing.T) {
 		t.Fatalf("expected allow_service_tier=true after backfill, got false")
 	}
 }
+
+func TestUpstreamChannel_DefaultAPISettings_ByChannelType(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+	ctx := context.Background()
+
+	openaiID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "openai", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel(openai): %v", err)
+	}
+	codexID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeCodexOAuth, "codex", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel(codex): %v", err)
+	}
+
+	openaiCh, err := st.GetUpstreamChannelByID(ctx, openaiID)
+	if err != nil {
+		t.Fatalf("GetUpstreamChannelByID(openai): %v", err)
+	}
+	if !openaiCh.Setting.ChatCompletionsEnabled || !openaiCh.Setting.ResponsesEnabled {
+		t.Fatalf("expected openai channel to enable both APIs, got %+v", openaiCh.Setting)
+	}
+
+	codexCh, err := st.GetUpstreamChannelByID(ctx, codexID)
+	if err != nil {
+		t.Fatalf("GetUpstreamChannelByID(codex): %v", err)
+	}
+	if codexCh.Setting.ChatCompletionsEnabled || !codexCh.Setting.ResponsesEnabled {
+		t.Fatalf("expected codex channel to only enable responses, got %+v", codexCh.Setting)
+	}
+}
+
+func TestUpstreamChannel_UpdateSetting_RejectsInvalidAPICapabilities(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "realms.db") + "?_busy_timeout=1000"
+
+	db, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer db.Close()
+	if err := store.EnsureSQLiteSchema(db); err != nil {
+		t.Fatalf("EnsureSQLiteSchema: %v", err)
+	}
+
+	st := store.New(db)
+	st.SetDialect(store.DialectSQLite)
+	ctx := context.Background()
+
+	openaiID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "openai", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel(openai): %v", err)
+	}
+	if err := st.UpdateUpstreamChannelNewAPISetting(ctx, openaiID, store.UpstreamChannelSetting{
+		ChatCompletionsEnabled: false,
+		ResponsesEnabled:       false,
+	}); err == nil {
+		t.Fatalf("expected disabling all APIs to fail")
+	}
+
+	codexID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeCodexOAuth, "codex", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel(codex): %v", err)
+	}
+	if err := st.UpdateUpstreamChannelNewAPISetting(ctx, codexID, store.UpstreamChannelSetting{
+		ChatCompletionsEnabled: true,
+		ResponsesEnabled:       true,
+	}); err == nil {
+		t.Fatalf("expected codex chat/completions enable to fail")
+	}
+}

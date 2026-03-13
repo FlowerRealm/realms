@@ -123,6 +123,18 @@ func (h *Handler) resolveFixedRouteSelection(ctx context.Context, userID int64, 
 	cons := scheduler.Constraints{
 		RequireChannelID:   sel.ChannelID,
 		RequireChannelType: sel.ChannelType,
+		RequireAPI: func() string {
+			if sel.ChannelType == store.UpstreamTypeAnthropic {
+				return scheduler.RequiredAPIMessages
+			}
+			if sel.ChatCompletionsEnabled && !sel.ResponsesEnabled {
+				return scheduler.RequiredAPIChatCompletions
+			}
+			if sel.ResponsesEnabled {
+				return scheduler.RequiredAPIResponses
+			}
+			return ""
+		}(),
 	}
 	next, err := h.sched.SelectWithConstraints(ctx, userID, "", cons)
 	if err != nil || next.EndpointID <= 0 {

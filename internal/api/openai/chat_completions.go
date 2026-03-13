@@ -81,6 +81,7 @@ func (h *Handler) proxyChatCompletionsJSON(w http.ResponseWriter, r *http.Reques
 
 	var cons scheduler.Constraints
 	cons.RequireChannelType = store.UpstreamTypeOpenAICompatible
+	cons.RequireAPI = scheduler.RequiredAPIChatCompletions
 	ags := allowGroupsFromPrincipal(p)
 	allowSet := ags.Set
 	if len(ags.Order) == 0 {
