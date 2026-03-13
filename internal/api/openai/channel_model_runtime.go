@@ -144,6 +144,9 @@ func isExplicitChannelModelFailure(statusCode int, body []byte) bool {
 	if !modelMentioned {
 		return false
 	}
+	if looksLikePermissionOrPolicyFailure(msg) {
+		return false
+	}
 	if containsAny(msg,
 		"model not found",
 		"no such model",
@@ -161,16 +164,45 @@ func isExplicitChannelModelFailure(statusCode int, body []byte) bool {
 		"not support",
 		"not supported",
 		"doesn't support",
-		"not available",
-		"unavailable",
-		"does not exist",
-		"not allowed",
-		"disabled",
-		"decommissioned",
+		"model is unavailable",
+		"selected model is unavailable",
+		"this model is unavailable",
+		"requested model is unavailable",
+		"model unavailable",
+		"capability unavailable",
+		"model does not exist",
 	) {
 		return true
 	}
 	return false
+}
+
+func looksLikePermissionOrPolicyFailure(msg string) bool {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return false
+	}
+	return containsAny(msg,
+		"permission",
+		"permissions",
+		"forbidden",
+		"unauthorized",
+		"not authorized",
+		"authentication",
+		"authorization",
+		"auth",
+		"quota",
+		"billing",
+		"subscription",
+		"plan",
+		"organization",
+		"workspace",
+		"account",
+		"policy",
+		"entitlement",
+		"not allowed for",
+		"not permitted",
+	)
 }
 
 func looksLikeModelFailureCode(v string) bool {

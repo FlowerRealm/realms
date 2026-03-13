@@ -370,6 +370,20 @@ func TestClassifyUpstreamHTTPFailure_GenericNotFoundWithModelMentionStaysChannel
 	}
 }
 
+func TestClassifyUpstreamHTTPFailure_PermissionStyleModelErrorStaysChannelScoped(t *testing.T) {
+	body := []byte(`{"error":{"message":"selected model is not allowed for this organization"}}`)
+	got := classifyUpstreamHTTPFailure(http.StatusBadRequest, body, 101, codexOAuthUpstreamErr{})
+	if got.Retriable {
+		t.Fatalf("expected permission/policy failure to stay non-retriable")
+	}
+	if got.Scope != scheduler.FailureScopeRequest {
+		t.Fatalf("scope=%q want=%q", got.Scope, scheduler.FailureScopeRequest)
+	}
+	if got.ErrorClass != "upstream_status" {
+		t.Fatalf("error_class=%q want=%q", got.ErrorClass, "upstream_status")
+	}
+}
+
 func TestIsRetriableStreamFailure(t *testing.T) {
 	cases := []struct {
 		name       string
