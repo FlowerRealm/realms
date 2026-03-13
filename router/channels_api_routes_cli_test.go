@@ -15,6 +15,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"realms/internal/channeltest"
+	"realms/internal/scheduler"
 	"realms/internal/store"
 )
 
@@ -37,11 +39,7 @@ func TestChannelTypeToCLIType(t *testing.T) {
 	}
 }
 
-// TestCLITestDelegation starts a fake CLI runner, wires up the handler,
-// and verifies that the SSE stream returns the expected events without
-// writing to the database (no UpdateUpstreamChannelTest).
 func TestCLITestDelegation(t *testing.T) {
-	// Fake CLI runner: accepts POST /v1/test and returns a canned response.
 	fakeRunner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/test" {
 			w.WriteHeader(http.StatusNotFound)
@@ -74,54 +72,32 @@ func TestCLITestDelegation(t *testing.T) {
 
 	st := openTestStore(t)
 	ctx := context.Background()
-
-	// Create an OpenAI-compatible channel with a credential.
 	channelID := createOpenAIChannelWithCredential(t, ctx, st, "https://api.example.com")
 
-	// Record the initial last_test_at so we can verify it did NOT change.
 	chBefore, err := st.GetUpstreamChannelByID(ctx, channelID)
 	if err != nil {
 		t.Fatalf("GetUpstreamChannelByID: %v", err)
 	}
 
-	// Build a test Gin engine with CLI runner URL configured.
-	opts := Options{
-		Store:                   st,
-		ChannelTestCLIRunnerURL: fakeRunner.URL,
+	opts := Options{Store: st, ChannelTestCLIRunnerURL: fakeRunner.URL}
+	ok, latencyMS, message, summary := runChannelCLITest(ctx, opts, channelID)
+
+	if !ok {
+		t.Fatalf("expected ok=true, message=%s", message)
+	}
+	if latencyMS != 123 {
+		t.Fatalf("expected latency=123, got %d", latencyMS)
+	}
+	if summary.Source != "cli_runner" {
+		t.Fatalf("expected source=cli_runner, got %q", summary.Source)
+	}
+	if summary.Total != 1 || summary.Success != 1 {
+		t.Fatalf("unexpected summary counts: %+v", summary)
+	}
+	if len(summary.Results) != 1 || !summary.Results[0].OK {
+		t.Fatalf("unexpected results: %+v", summary.Results)
 	}
 
-	// Directly invoke the handler function to test SSE output.
-	w := httptest.NewRecorder()
-	c, _ := newTestGinContext(w)
-	c.Params = gin.Params{{Key: "channel_id", Value: fmt.Sprintf("%d", channelID)}}
-
-	streamChannelCLITestHandler(c, opts, channelID)
-
-	resp := w.Result()
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
-	}
-
-	bodyBytes, _ := io.ReadAll(resp.Body)
-	bodyStr := string(bodyBytes)
-
-	// Verify SSE events.
-	if !strings.Contains(bodyStr, "event: start") {
-		t.Error("expected SSE 'start' event")
-	}
-	if !strings.Contains(bodyStr, "event: model_done") {
-		t.Error("expected SSE 'model_done' event")
-	}
-	if !strings.Contains(bodyStr, "event: summary") {
-		t.Error("expected SSE 'summary' event")
-	}
-	if !strings.Contains(bodyStr, `"cli_runner"`) {
-		t.Error("expected source to be 'cli_runner'")
-	}
-
-	// CRITICAL: verify that last_test_at was NOT updated.
 	chAfter, err := st.GetUpstreamChannelByID(ctx, channelID)
 	if err != nil {
 		t.Fatalf("GetUpstreamChannelByID after: %v", err)
@@ -157,35 +133,11 @@ func TestChannelTest_CodexOAuth_Supported(t *testing.T) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		if req.CLIType != "codex_oauth" {
+		if req.CLIType != "codex_oauth" || strings.TrimSpace(req.ChatGPTAccountID) != "acc_test" || strings.TrimSpace(req.AccessToken) != "at" || strings.TrimSpace(req.RefreshToken) != "rt" || strings.TrimSpace(req.IDToken) != "it" {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		if strings.TrimSpace(req.ChatGPTAccountID) != "acc_test" {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		if strings.TrimSpace(req.AccessToken) != "at" {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		if strings.TrimSpace(req.RefreshToken) != "rt" {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		if strings.TrimSpace(req.IDToken) != "it" {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		if strings.TrimSpace(req.BaseURL) != "" {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		if strings.TrimSpace(req.ProfileKey) == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		if strings.TrimSpace(req.Prompt) == "" {
+		if strings.TrimSpace(req.BaseURL) != "" || strings.TrimSpace(req.ProfileKey) == "" || strings.TrimSpace(req.Prompt) == "" {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -220,39 +172,18 @@ func TestChannelTest_CodexOAuth_Supported(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetUpstreamChannelByID: %v", err)
 	}
-
 	ep, err := st.GetUpstreamEndpointByChannelID(ctx, channelID)
 	if err != nil {
 		t.Fatalf("GetUpstreamEndpointByChannelID: %v", err)
 	}
 
 	opts := Options{Store: st, ChannelTestCLIRunnerURL: fakeRunner.URL}
-
-	w := httptest.NewRecorder()
-	c, _ := newTestGinContext(w)
-	c.Params = gin.Params{{Key: "channel_id", Value: fmt.Sprintf("%d", channelID)}}
-
-	streamChannelCLITestHandler(c, opts, channelID)
-
-	resp := w.Result()
-	defer resp.Body.Close()
-	bodyBytes, _ := io.ReadAll(resp.Body)
-	bodyStr := string(bodyBytes)
-
-	if !strings.Contains(bodyStr, "event: start") {
-		t.Error("expected SSE 'start' event")
+	ok, _, _, summary := runChannelCLITest(ctx, opts, channelID)
+	if !ok {
+		t.Fatalf("expected success summary, got %+v", summary)
 	}
-	if !strings.Contains(bodyStr, "event: model_done") {
-		t.Error("expected SSE 'model_done' event")
-	}
-	if !strings.Contains(bodyStr, "event: summary") {
-		t.Error("expected SSE 'summary' event")
-	}
-	if !strings.Contains(bodyStr, `"success":true`) {
-		t.Fatalf("expected success=true in summary, got: %s", bodyStr)
-	}
-	if !strings.Contains(bodyStr, `"cli_runner"`) {
-		t.Fatalf("expected source=cli_runner, got: %s", bodyStr)
+	if summary.Source != "cli_runner" || summary.Total != 1 || summary.Success != 1 {
+		t.Fatalf("unexpected summary: %+v", summary)
 	}
 
 	chAfter, err := st.GetUpstreamChannelByID(ctx, channelID)
@@ -265,7 +196,6 @@ func TestChannelTest_CodexOAuth_Supported(t *testing.T) {
 	if chBefore.LastTestAt != nil && chAfter.LastTestAt != nil && !chBefore.LastTestAt.Equal(*chAfter.LastTestAt) {
 		t.Errorf("expected last_test_at to be unchanged, before=%v after=%v", chBefore.LastTestAt, chAfter.LastTestAt)
 	}
-
 	if strings.TrimRight(strings.TrimSpace(ep.BaseURL), "/") == "" {
 		t.Fatalf("expected endpoint base_url to be set")
 	}
@@ -354,11 +284,10 @@ func TestCLITestDelegation_ConcurrentModels(t *testing.T) {
 		ChannelTestCLIConcurrency: wantConcurrency,
 	}
 
-	w := httptest.NewRecorder()
-	c, _ := newTestGinContext(w)
-	c.Params = gin.Params{{Key: "channel_id", Value: fmt.Sprintf("%d", channelID)}}
-
-	streamChannelCLITestHandler(c, opts, channelID)
+	ok, _, _, summary := runChannelCLITest(ctx, opts, channelID)
+	if !ok {
+		t.Fatalf("expected concurrent test to succeed, got %+v", summary)
+	}
 
 	mu.Lock()
 	gotMax := maxInFlight
@@ -368,36 +297,153 @@ func TestCLITestDelegation_ConcurrentModels(t *testing.T) {
 	}
 }
 
-// TestCLITestRunnerURLEmpty verifies that streamChannelCLITestHandler returns
-// an error summary when ChannelTestCLIRunnerURL is empty.
+func TestCLITestDelegation_ModelCheckWarning(t *testing.T) {
+	fakeRunner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/test" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":         true,
+			"latency_ms": 42,
+			"ttft_ms":    9,
+			"output":     "partial OK",
+			"error":      "",
+		})
+	}))
+	defer fakeRunner.Close()
+
+	st := openTestStore(t)
+	ctx := context.Background()
+	channelID := createOpenAIChannelWithCredential(t, ctx, st, "https://api.example.com")
+	if _, err := st.CreateChannelModel(ctx, store.ChannelModelCreate{
+		ChannelID:     channelID,
+		PublicID:      "alias",
+		UpstreamModel: "gpt-5.2",
+		Status:        1,
+	}); err != nil {
+		t.Fatalf("CreateChannelModel: %v", err)
+	}
+
+	opts := Options{
+		Store:                   st,
+		ChannelTestCLIRunnerURL: fakeRunner.URL,
+		ChannelTestProbe: fakeChannelTestProber{probe: func(_ context.Context, sel scheduler.Selection, model string) (channeltest.Result, error) {
+			if sel.CredentialType != scheduler.CredentialTypeOpenAI {
+				t.Fatalf("unexpected credential type: %s", sel.CredentialType)
+			}
+			if model != "gpt-5.2" {
+				t.Fatalf("unexpected model: %s", model)
+			}
+			return channeltest.Result{
+				ForwardedModel:        "gpt-5.2",
+				UpstreamResponseModel: "gpt-5.2-mini",
+				SuccessPath:           "/v1/responses",
+			}, nil
+		}},
+	}
+
+	ok, _, _, summary := runChannelCLITest(ctx, opts, channelID)
+	if !ok {
+		t.Fatalf("expected test success despite mismatch warning, got %+v", summary)
+	}
+	if len(summary.Results) != 1 {
+		t.Fatalf("expected 1 result, got %+v", summary.Results)
+	}
+	result := summary.Results[0]
+	if result.ForwardedModel != "gpt-5.2" {
+		t.Fatalf("expected forwarded_model=gpt-5.2, got %+v", result)
+	}
+	if result.UpstreamResponseModel != "gpt-5.2-mini" {
+		t.Fatalf("expected upstream_response_model=gpt-5.2-mini, got %+v", result)
+	}
+	if result.ModelCheckStatus != "mismatch" {
+		t.Fatalf("expected mismatch model_check_status, got %+v", result)
+	}
+	if summary.ModelCheckMismatch != 1 {
+		t.Fatalf("expected summary mismatch count, got %+v", summary)
+	}
+	if result.SuccessPath != "/v1/responses" {
+		t.Fatalf("expected success_path from probe, got %+v", result)
+	}
+}
+
 func TestCLITestRunnerURLEmpty(t *testing.T) {
 	st := openTestStore(t)
 	ctx := context.Background()
 	channelID := createOpenAIChannelWithCredential(t, ctx, st, "https://api.example.com")
 
-	opts := Options{
-		Store:                   st,
-		ChannelTestCLIRunnerURL: "",
+	opts := Options{Store: st, ChannelTestCLIRunnerURL: ""}
+	ok, _, message, summary := runChannelCLITest(ctx, opts, channelID)
+	if ok {
+		t.Fatalf("expected failure when runner URL empty, got %+v", summary)
 	}
+	if !strings.Contains(message, "CLI runner") {
+		t.Fatalf("expected error message to mention CLI runner, got: %s", message)
+	}
+}
+
+func TestChannelTestHandler_StreamParamStillReturnsJSON(t *testing.T) {
+	fakeRunner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/test" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":         true,
+			"latency_ms": 12,
+			"output":     "OK",
+			"error":      "",
+		})
+	}))
+	defer fakeRunner.Close()
+
+	st := openTestStore(t)
+	ctx := context.Background()
+	channelID := createOpenAIChannelWithCredential(t, ctx, st, "https://api.example.com")
+	_ = ctx
+
+	opts := Options{Store: st, ChannelTestCLIRunnerURL: fakeRunner.URL}
 
 	w := httptest.NewRecorder()
 	c, _ := newTestGinContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/channel/test/%d?stream=1", channelID), nil)
 	c.Params = gin.Params{{Key: "channel_id", Value: fmt.Sprintf("%d", channelID)}}
 
-	streamChannelCLITestHandler(c, opts, channelID)
+	testChannelHandler(opts)(c)
 
-	body := w.Body.String()
-	if !strings.Contains(body, "event: summary") {
-		t.Fatalf("expected SSE summary event, got: %s", body)
+	resp := w.Result()
+	defer resp.Body.Close()
+	if got := resp.Header.Get("Content-Type"); !strings.Contains(got, "application/json") {
+		t.Fatalf("expected json response, got content-type=%q", got)
 	}
-	if !strings.Contains(body, "CLI runner") {
-		t.Fatalf("expected error message to mention CLI runner, got: %s", body)
+	var payload struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Probe channelProbeSummary `json:"probe"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !payload.Success || payload.Data.Probe.Total != 1 {
+		t.Fatalf("unexpected payload: %+v", payload)
 	}
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+type fakeChannelTestProber struct {
+	probe func(ctx context.Context, sel scheduler.Selection, model string) (channeltest.Result, error)
+}
+
+func (f fakeChannelTestProber) Probe(ctx context.Context, sel scheduler.Selection, model string) (channeltest.Result, error) {
+	return f.probe(ctx, sel, model)
+}
 
 func newTestGinContext(w *httptest.ResponseRecorder) (*gin.Context, *gin.Engine) {
 	gin.SetMode(gin.TestMode)

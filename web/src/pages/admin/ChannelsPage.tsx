@@ -32,7 +32,7 @@ import {
   listChannelCredentials,
   refreshChannelCodexAccount,
   startChannelCodexOAuth,
-  testChannelStream,
+  testChannel,
   updateChannel,
   updateChannelHeaderOverride,
   updateChannelMeta,
@@ -46,7 +46,6 @@ import {
   type ChannelAdminItem,
   type ChannelCredential,
   type ChannelModelProbeResult,
-  type ChannelTestProgressEvent,
   type ChannelTimeSeriesPoint,
   type CodexOAuthAccount,
 } from "../../api/channels";
@@ -145,6 +144,22 @@ function compactProbeMessage(raw: string): string {
   return msg;
 }
 
+function modelCheckLabel(status?: string): string {
+  if (status === "ok") return "模型一致";
+  if (status === "mismatch") return "模型不一致";
+  return "模型未知";
+}
+
+function modelCheckBadgeClass(status?: string): string {
+  if (status === "ok") {
+    return "badge bg-success bg-opacity-10 text-success border border-success-subtle";
+  }
+  if (status === "mismatch") {
+    return "badge bg-warning bg-opacity-10 text-warning border border-warning-subtle";
+  }
+  return "badge bg-secondary bg-opacity-10 text-secondary border";
+}
+
 type ChartInstance = {
   destroy?: () => void;
 };
@@ -156,8 +171,9 @@ type ChartConstructor = new (
 
 type ChannelModelLiveState = {
   model: string;
-  status: "pending" | "running" | "success" | "failed";
+  status: "success" | "failed";
   message: string;
+  output: string;
   result?: ChannelModelProbeResult;
 };
 
@@ -166,7 +182,6 @@ type ChannelTestPanelState = {
   source: string;
   total: number;
   done: number;
-  currentModel: string;
   models: ChannelModelLiveState[];
   error: string;
 };
@@ -1390,20 +1405,6 @@ export function ChannelsPage() {
     return d.toLocaleString("zh-CN", { hour12: false });
   }
 
-  function upsertModelState(
-    models: ChannelModelLiveState[],
-    model: string,
-    patch: Partial<ChannelModelLiveState>,
-  ): ChannelModelLiveState[] {
-    const idx = models.findIndex((item) => item.model === model);
-    if (idx < 0) {
-      return [...models, { model, status: "pending", message: "", ...patch }];
-    }
-    const next = [...models];
-    next[idx] = { ...next[idx], ...patch };
-    return next;
-  }
-
   function clearTestPanel(channelID: number) {
     setTestPanels((prev) => {
       const current = prev[channelID];
@@ -1428,87 +1429,6 @@ export function ChannelsPage() {
       return;
     }
     openChannelPanel(channelID);
-  }
-
-  function applyTestProgress(channelID: number, evt: ChannelTestProgressEvent) {
-    setTestPanels((prev) => {
-      const current = prev[channelID] || {
-        running: true,
-        source: "",
-        total: 0,
-        done: 0,
-        currentModel: "",
-        models: [],
-        error: "",
-      };
-      if (evt.type === "start") {
-        const modelList = Array.isArray(evt.models) ? evt.models : [];
-        return {
-          ...prev,
-          [channelID]: {
-            ...current,
-            running: true,
-            source: evt.source || current.source,
-            total: evt.total || modelList.length,
-            done: 0,
-            currentModel: "",
-            models: modelList.map((model) => ({
-              model,
-              status: "pending",
-              message: "",
-            })),
-            error: "",
-          },
-        };
-      }
-      if (evt.type === "model_start") {
-        const model = evt.model || "";
-        return {
-          ...prev,
-          [channelID]: {
-            ...current,
-            running: true,
-            source: evt.source || current.source,
-            total: evt.total || current.total,
-            currentModel: model,
-            models: model
-              ? upsertModelState(current.models, model, {
-                  status: "running",
-                  message: "测试中...",
-                })
-              : current.models,
-          },
-        };
-      }
-      if (evt.type === "model_done") {
-        const model = evt.model || evt.result?.model || "";
-        const result = evt.result;
-        const done = Math.max(current.done, evt.index || current.done);
-        const rawMessage = (result?.message || "").toString();
-        return {
-          ...prev,
-          [channelID]: {
-            ...current,
-            running: true,
-            source: evt.source || current.source,
-            total: evt.total || current.total,
-            done,
-            currentModel:
-              done >= (evt.total || current.total || 0)
-                ? ""
-                : current.currentModel,
-            models: model
-              ? upsertModelState(current.models, model, {
-                  status: result?.ok ? "success" : "failed",
-                  message: compactProbeMessage(rawMessage) || rawMessage,
-                  result,
-                })
-              : current.models,
-          },
-        };
-      }
-      return prev;
-    });
   }
 
   const refresh = useCallback(
@@ -2466,54 +2386,40 @@ export function ChannelsPage() {
                                         source: "",
                                         total: 0,
                                         done: 0,
-                                        currentModel: "",
                                         models: [],
                                         error: "",
                                       },
                                     }));
                                     try {
-                                      const res = await testChannelStream(
-                                        ch.id,
-                                        (evt) => applyTestProgress(ch.id, evt),
-                                      );
+                                      const res = await testChannel(ch.id);
                                       const probe = res.data?.probe;
-                                      setTestPanels((prev) => {
-                                        const current = prev[ch.id];
-                                        if (!current) return prev;
-                                        const finalModels =
-                                          probe?.results?.length &&
-                                          probe.results.length > 0
-                                            ? probe.results.map((item) => ({
-                                                model: item.model,
-                                                status: item.ok
-                                                  ? ("success" as const)
-                                                  : ("failed" as const),
-                                                message: (
-                                                  compactProbeMessage(
-                                                    item.message || "",
-                                                  ) ||
-                                                  item.message ||
-                                                  ""
-                                                ).toString(),
-                                                result: item,
-                                              }))
-                                            : current.models;
-                                        return {
-                                          ...prev,
-                                          [ch.id]: {
-                                            ...current,
-                                            running: false,
-                                            source:
-                                              probe?.source || current.source,
-                                            total:
-                                              probe?.total ?? current.total,
-                                            done: probe?.total ?? current.done,
-                                            currentModel: "",
-                                            models: finalModels,
-                                            error: "",
-                                          },
-                                        };
-                                      });
+                                      const finalModels =
+                                        probe?.results?.map((item) => ({
+                                          model: item.model,
+                                          status: item.ok
+                                            ? ("success" as const)
+                                            : ("failed" as const),
+                                          message: (
+                                            compactProbeMessage(
+                                              item.message || "",
+                                            ) ||
+                                            item.message ||
+                                            ""
+                                          ).toString(),
+                                          output: item.sample || "",
+                                          result: item,
+                                        })) || [];
+                                      setTestPanels((prev) => ({
+                                        ...prev,
+                                        [ch.id]: {
+                                          running: false,
+                                          source: probe?.source || "",
+                                          total: probe?.total ?? finalModels.length,
+                                          done: probe?.total ?? finalModels.length,
+                                          models: finalModels,
+                                          error: "",
+                                        },
+                                      }));
                                       if (!res.success)
                                         throw new Error(
                                           res.message || "测试失败",
@@ -2534,7 +2440,6 @@ export function ChannelsPage() {
                                           [ch.id]: {
                                             ...current,
                                             running: false,
-                                            currentModel: "",
                                             error: msg.toString().trim(),
                                           },
                                         };
@@ -2551,7 +2456,6 @@ export function ChannelsPage() {
                                           [ch.id]: {
                                             ...current,
                                             running: false,
-                                            currentModel: "",
                                           },
                                         };
                                       });
@@ -2814,39 +2718,99 @@ export function ChannelsPage() {
                                       {activeTestPanel?.models?.length ? (
                                         <div className="d-flex flex-column gap-1 mt-2">
                                           {(activeTestPanel?.models || []).map(
-                                            (item) => (
-                                              <div
-                                                key={item.model}
-                                                className="d-flex flex-column gap-1 mt-1"
-                                              >
-                                                <div className="small">
-                                                  <span className="font-monospace text-dark">
-                                                    {item.model}
-                                                  </span>
+                                            (item) => {
+                                              const forwardedModel =
+                                                item.result?.forwarded_model ||
+                                                item.model;
+                                              const upstreamResponseModel =
+                                                item.result
+                                                  ?.upstream_response_model ||
+                                                "-";
+                                              const summaryMessage =
+                                                item.message ||
+                                                item.result?.message ||
+                                                "";
+                                              const outputText =
+                                                item.output ||
+                                                item.result?.sample ||
+                                                "";
+                                              return (
+                                                <div
+                                                  key={item.model}
+                                                  className="d-flex flex-column gap-1 mt-1 border rounded-3 p-2"
+                                                >
+                                                  <div className="d-flex flex-wrap align-items-center gap-2 small">
+                                                    <span className="font-monospace text-dark">
+                                                      {item.model}
+                                                    </span>
+                                                    <span
+                                                      className={
+                                                        item.status ===
+                                                        "success"
+                                                          ? "badge bg-success bg-opacity-10 text-success border border-success-subtle"
+                                                          : item.status ===
+                                                              "failed"
+                                                            ? "badge bg-danger bg-opacity-10 text-danger border border-danger-subtle"
+                                                            : item.status ===
+                                                                "running"
+                                                              ? "badge bg-primary bg-opacity-10 text-primary border border-primary-subtle"
+                                                              : "badge bg-secondary bg-opacity-10 text-secondary border"
+                                                      }
+                                                    >
+                                                      {item.status ===
+                                                      "success"
+                                                        ? "成功"
+                                                        : item.status ===
+                                                            "failed"
+                                                          ? "失败"
+                                                          : item.status ===
+                                                              "running"
+                                                            ? "进行中"
+                                                            : "等待中"}
+                                                    </span>
+                                                    <span
+                                                      className={modelCheckBadgeClass(
+                                                        item.result
+                                                          ?.model_check_status,
+                                                      )}
+                                                    >
+                                                      {modelCheckLabel(
+                                                        item.result
+                                                          ?.model_check_status,
+                                                      )}
+                                                    </span>
+                                                  </div>
+                                                  <div className="small text-muted">
+                                                    请求模型：
+                                                    <span className="font-monospace text-dark ms-1">
+                                                      {forwardedModel || "-"}
+                                                    </span>
+                                                  </div>
+                                                  <div className="small text-muted">
+                                                    返回模型：
+                                                    <span className="font-monospace text-dark ms-1">
+                                                      {upstreamResponseModel}
+                                                    </span>
+                                                  </div>
+                                                  {summaryMessage ? (
+                                                    <div className="small text-muted">
+                                                      {summaryMessage}
+                                                    </div>
+                                                  ) : null}
+                                                  {outputText ? (
+                                                    <pre
+                                                      className="mb-0 small text-muted"
+                                                      style={{
+                                                        whiteSpace: "pre-wrap",
+                                                        wordBreak: "break-word",
+                                                      }}
+                                                    >
+                                                      {outputText}
+                                                    </pre>
+                                                  ) : null}
                                                 </div>
-                                                {item.result?.message ? (
-                                                  <pre
-                                                    className="mb-0 small text-muted"
-                                                    style={{
-                                                      whiteSpace: "pre-wrap",
-                                                      wordBreak: "break-word",
-                                                    }}
-                                                  >
-                                                    {item.result.message}
-                                                  </pre>
-                                                ) : item.message ? (
-                                                  <pre
-                                                    className="mb-0 small text-muted"
-                                                    style={{
-                                                      whiteSpace: "pre-wrap",
-                                                      wordBreak: "break-word",
-                                                    }}
-                                                  >
-                                                    {item.message}
-                                                  </pre>
-                                                ) : null}
-                                              </div>
-                                            ),
+                                              );
+                                            },
                                           )}
                                         </div>
                                       ) : (

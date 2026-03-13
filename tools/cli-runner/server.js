@@ -137,10 +137,6 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// ---------------------------------------------------------------------------
-// CLI executors
-// ---------------------------------------------------------------------------
-
 function runCodex({ base_url, api_key, model, prompt, timeout_seconds, _paths }, home) {
   const paths = _paths || {};
   const codexDir = paths.codexHome ? path.resolve(paths.codexHome) : ensureDir(path.join(home, '.codex'));
@@ -443,7 +439,7 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify(result));
     } catch (e) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: false, error: truncate(e.message, MAX_OUTPUT) }));
+      res.end(JSON.stringify({ ok: false, error: truncate(e instanceof Error ? e.message : String(e), MAX_OUTPUT) }));
     } finally {
       cleanup(home);
     }
