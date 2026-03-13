@@ -2270,6 +2270,7 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 
 	success := 0
 	ttftSum := 0
+	ttftCount := 0
 	responsesOK := 0
 	chatOK := 0
 	fallbackCount := 0
@@ -2541,7 +2542,10 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 
 			mu.Lock()
 			results[j.idx] = result
-			ttftSum += outcome.ttftMS
+			if result.OK && outcome.ttftMS > 0 {
+				ttftSum += outcome.ttftMS
+				ttftCount++
+			}
 			switch outcome.modelCheckStatus {
 			case modelcheck.StatusOK:
 				modelCheckOK++
@@ -2583,8 +2587,8 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 	wg.Wait()
 
 	avgTTFT := 0
-	if total > 0 {
-		avgTTFT = ttftSum / total
+	if ttftCount > 0 {
+		avgTTFT = ttftSum / ttftCount
 	}
 	okAll := total > 0 && success == total
 	msgParts := []string{fmt.Sprintf("成功 %d/%d", success, total)}

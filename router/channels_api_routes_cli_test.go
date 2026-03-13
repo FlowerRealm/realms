@@ -408,6 +408,64 @@ func TestCLITestDelegation_RunnerFailureDoesNotWaitForProbe(t *testing.T) {
 	}
 }
 
+func TestCLITestDelegation_AvgTTFTUsesSuccessfulSamplesOnly(t *testing.T) {
+	fakeRunner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/test" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var req struct {
+			Model string `json:"model"`
+		}
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if req.Model == "ttft-ok" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":         true,
+				"latency_ms": 50,
+				"ttft_ms":    20,
+				"output":     "OK",
+				"error":      "",
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":         false,
+			"latency_ms": 10,
+			"output":     "",
+			"error":      "runner failed",
+		})
+	}))
+	defer fakeRunner.Close()
+
+	st := openTestStore(t)
+	ctx := context.Background()
+	channelID := createOpenAIChannelWithCredential(t, ctx, st, "https://api.example.com")
+	for _, modelID := range []string{"ttft-ok", "ttft-fail"} {
+		if _, err := st.CreateChannelModel(ctx, store.ChannelModelCreate{
+			ChannelID:     channelID,
+			PublicID:      modelID,
+			UpstreamModel: modelID,
+			Status:        1,
+		}); err != nil {
+			t.Fatalf("CreateChannelModel(%s): %v", modelID, err)
+		}
+	}
+
+	opts := Options{Store: st, ChannelTestCLIRunnerURL: fakeRunner.URL}
+	ok, _, _, summary := runChannelCLITest(ctx, opts, channelID)
+	if ok {
+		t.Fatalf("expected mixed result summary, got %+v", summary)
+	}
+	if summary.AvgTTFTMS != 20 {
+		t.Fatalf("expected avg_ttft_ms to use successful samples only, got %+v", summary)
+	}
+}
+
 func TestCLITestDelegation_ModelCheckWarning(t *testing.T) {
 	fakeRunner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/test" {
