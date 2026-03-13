@@ -2097,15 +2097,25 @@ func channelTestFailureSummary(message string, total int) channelProbeSummary {
 }
 
 func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool, int, string, channelProbeSummary) {
+	startedAt := time.Now()
+	finish := func(ok bool, message string, summary channelProbeSummary) (bool, int, string, channelProbeSummary) {
+		latencyMS := int(time.Since(startedAt) / time.Millisecond)
+		if latencyMS < 0 {
+			latencyMS = 0
+		}
+		summary.LatencyMS = latencyMS
+		return ok, latencyMS, message, summary
+	}
+
 	st := opts.Store
 
 	ch, err := st.GetUpstreamChannelByID(ctx, channelID)
 	if err != nil {
-		return false, 0, "channel 不存在", channelProbeSummary{}
+		return finish(false, "channel 不存在", channelProbeSummary{})
 	}
 	ep, err := st.GetUpstreamEndpointByChannelID(ctx, ch.ID)
 	if err != nil || ep.ID <= 0 {
-		return false, 0, "endpoint 不存在", channelProbeSummary{}
+		return finish(false, "endpoint 不存在", channelProbeSummary{})
 	}
 
 	// 获取所有“已配置模型”（默认：以绑定模型为准；如设置 test_model，则优先插入到首位）。
@@ -2162,13 +2172,13 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 	// 其他渠道：走 CLI runner。
 	if opts.ChannelTestCLIRunnerURL == "" {
 		summary := channelTestFailureSummary("CLI runner 未配置，请设置 REALMS_CHANNEL_TEST_CLI_RUNNER_URL", total)
-		return false, 0, summary.Message, summary
+		return finish(false, summary.Message, summary)
 	}
 
 	cliType := channelTypeToCLIType(ch.Type)
 	if cliType == "" {
 		summary := channelTestFailureSummary(fmt.Sprintf("渠道类型 %s 暂不支持 CLI 测试", ch.Type), total)
-		return false, 0, summary.Message, summary
+		return finish(false, summary.Message, summary)
 	}
 
 	// 准备 CLI runner 凭证（仅用于测试请求，不写数据库、不影响调度）。
@@ -2192,7 +2202,7 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 		}
 		if apiKey == "" {
 			summary := channelTestFailureSummary("未找到可用凭证", total)
-			return false, 0, summary.Message, summary
+			return finish(false, summary.Message, summary)
 		}
 	case store.UpstreamTypeAnthropic:
 		if creds, err := st.ListAnthropicCredentialsByEndpoint(ctx, ep.ID); err == nil && len(creds) > 0 {
@@ -2204,13 +2214,13 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 		}
 		if apiKey == "" {
 			summary := channelTestFailureSummary("未找到可用凭证", total)
-			return false, 0, summary.Message, summary
+			return finish(false, summary.Message, summary)
 		}
 	case store.UpstreamTypeCodexOAuth:
 		accounts, err := st.ListCodexOAuthAccountsByEndpoint(ctx, ep.ID)
 		if err != nil {
 			summary := channelTestFailureSummary("读取 Codex OAuth 账号失败", total)
-			return false, 0, summary.Message, summary
+			return finish(false, summary.Message, summary)
 		}
 		now := time.Now()
 		var selected store.CodexOAuthAccount
@@ -2228,12 +2238,12 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 		}
 		if !found {
 			summary := channelTestFailureSummary("暂无可用 Codex OAuth 账号（可能被禁用或冷却中）", total)
-			return false, 0, summary.Message, summary
+			return finish(false, summary.Message, summary)
 		}
 		sec, err := st.GetCodexOAuthSecret(ctx, selected.ID)
 		if err != nil {
 			summary := channelTestFailureSummary("读取 Codex OAuth 账号密钥失败", total)
-			return false, 0, summary.Message, summary
+			return finish(false, summary.Message, summary)
 		}
 		chatgptAccountID = strings.TrimSpace(sec.AccountID)
 		accessToken = strings.TrimSpace(sec.AccessToken)
@@ -2250,7 +2260,7 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 		probeReady = true
 		if chatgptAccountID == "" || accessToken == "" || refreshToken == "" || idToken == "" {
 			summary := channelTestFailureSummary("Codex OAuth 账号缺少必要凭据（account_id/access_token/refresh_token/id_token），请重新授权", total)
-			return false, 0, summary.Message, summary
+			return finish(false, summary.Message, summary)
 		}
 	}
 
@@ -2259,7 +2269,6 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 	results := make([]channelModelProbeResult, total)
 
 	success := 0
-	latencySum := 0
 	ttftSum := 0
 	responsesOK := 0
 	chatOK := 0
@@ -2293,9 +2302,13 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 		Err                   error
 	}
 
+	type probeRequest struct {
+		ch     <-chan probeOutcome
+		cancel context.CancelFunc
+	}
+
 	type jobOutcome struct {
 		result           channelModelProbeResult
-		latencyMS        int
 		ttftMS           int
 		modelCheckStatus modelcheck.Status
 	}
@@ -2304,15 +2317,16 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 	jobs := make(chan job)
 	var wg sync.WaitGroup
 
-	startProbe := func(model string) <-chan probeOutcome {
+	startProbe := func(model string) probeRequest {
+		req := probeRequest{cancel: func() {}}
 		if opts.ChannelTestProbe == nil || !probeReady {
-			return nil
+			return req
 		}
 		ch := make(chan probeOutcome, 1)
+		probeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		req = probeRequest{ch: ch, cancel: cancel}
 		go func() {
 			defer close(ch)
-			probeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			defer cancel()
 
 			probeResp, err := opts.ChannelTestProbe.Probe(probeCtx, probeSelection, model)
 			out := probeOutcome{Err: err}
@@ -2324,26 +2338,60 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 			}
 			ch <- out
 		}()
-		return ch
+		return req
 	}
 
-	awaitProbe := func(ch <-chan probeOutcome, fallbackModel string) probeOutcome {
-		if ch == nil {
-			return probeOutcome{ForwardedModel: strings.TrimSpace(fallbackModel)}
-		}
-		out, ok := <-ch
-		if !ok {
-			return probeOutcome{ForwardedModel: strings.TrimSpace(fallbackModel)}
-		}
+	normalizeProbe := func(out probeOutcome, fallbackModel string) probeOutcome {
 		if strings.TrimSpace(out.ForwardedModel) == "" {
 			out.ForwardedModel = strings.TrimSpace(fallbackModel)
 		}
 		return out
 	}
 
-	runJob := func(j job) jobOutcome {
-		probeCh := startProbe(j.model)
+	awaitProbe := func(req probeRequest, fallbackModel string) probeOutcome {
+		defer req.cancel()
+		if req.ch == nil {
+			return normalizeProbe(probeOutcome{}, fallbackModel)
+		}
+		out, ok := <-req.ch
+		if !ok {
+			return normalizeProbe(probeOutcome{}, fallbackModel)
+		}
+		return normalizeProbe(out, fallbackModel)
+	}
 
+	abandonProbe := func(req probeRequest, fallbackModel string) probeOutcome {
+		defer req.cancel()
+		if req.ch == nil {
+			return normalizeProbe(probeOutcome{}, fallbackModel)
+		}
+		select {
+		case out, ok := <-req.ch:
+			if !ok {
+				return normalizeProbe(probeOutcome{}, fallbackModel)
+			}
+			return normalizeProbe(out, fallbackModel)
+		default:
+			return normalizeProbe(probeOutcome{}, fallbackModel)
+		}
+	}
+
+	resolveModelCheck := func(probe probeOutcome, runnerResp channelTestRunnerResponse, fallbackModel string) (*string, *string, modelcheck.Status) {
+		forwardedModel := modelcheck.Optional(probe.ForwardedModel)
+		if forwardedModel == nil {
+			forwardedModel = modelcheck.Optional(runnerResp.ForwardedModel)
+		}
+		if forwardedModel == nil {
+			forwardedModel = modelcheck.Optional(fallbackModel)
+		}
+		upstreamResponseModel := modelcheck.Optional(probe.UpstreamResponseModel)
+		if upstreamResponseModel == nil {
+			upstreamResponseModel = modelcheck.Optional(runnerResp.UpstreamResponseModel)
+		}
+		return forwardedModel, upstreamResponseModel, modelcheck.StatusFrom(forwardedModel, upstreamResponseModel)
+	}
+
+	runJob := func(j job) jobOutcome {
 		runnerReq := struct {
 			CLIType          string `json:"cli_type"`
 			BaseURL          string `json:"base_url,omitempty"`
@@ -2373,54 +2421,44 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, runnerURL, bytes.NewReader(body))
 		if err != nil {
-			probe := awaitProbe(probeCh, j.model)
-			return jobOutcome{
-				result: channelModelProbeResult{
-					Model:            j.modelLabel,
-					OK:               false,
-					Message:          "构建 CLI runner 请求失败",
-					ForwardedModel:   probe.ForwardedModel,
-					ModelCheckStatus: string(modelcheck.StatusUnknown),
-				},
-				modelCheckStatus: modelcheck.StatusUnknown,
+			result := channelModelProbeResult{
+				Model:            j.modelLabel,
+				OK:               false,
+				Message:          "构建 CLI runner 请求失败",
+				ForwardedModel:   strings.TrimSpace(j.model),
+				ModelCheckStatus: string(modelcheck.StatusUnknown),
 			}
+			return jobOutcome{result: result, modelCheckStatus: modelcheck.StatusUnknown}
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
 
+		probeReq := startProbe(j.model)
+
 		resp, err := client.Do(httpReq)
 		if err != nil {
-			probe := awaitProbe(probeCh, j.model)
+			probe := abandonProbe(probeReq, j.model)
+			forwardedModel, upstreamResponseModel, modelCheckStatus := resolveModelCheck(probe, channelTestRunnerResponse{}, j.model)
 			msg := "CLI runner 不可达: " + err.Error()
-			return jobOutcome{
-				result: channelModelProbeResult{
-					Model:            j.modelLabel,
-					OK:               false,
-					Message:          msg,
-					ForwardedModel:   probe.ForwardedModel,
-					ModelCheckStatus: string(modelcheck.StatusUnknown),
-				},
-				modelCheckStatus: modelcheck.StatusUnknown,
+			result := channelModelProbeResult{
+				Model:            j.modelLabel,
+				OK:               false,
+				Message:          msg,
+				ModelCheckStatus: string(modelCheckStatus),
 			}
+			if forwardedModel != nil {
+				result.ForwardedModel = *forwardedModel
+			}
+			if upstreamResponseModel != nil {
+				result.UpstreamResponseModel = *upstreamResponseModel
+			}
+			return jobOutcome{result: result, modelCheckStatus: modelCheckStatus}
 		}
 
 		runnerResp, decodeErr := readChannelTestRunnerResponse(resp)
 		_ = resp.Body.Close()
-
-		probe := awaitProbe(probeCh, j.model)
-		forwardedModel := modelcheck.Optional(probe.ForwardedModel)
-		if forwardedModel == nil {
-			forwardedModel = modelcheck.Optional(runnerResp.ForwardedModel)
-		}
-		if forwardedModel == nil {
-			forwardedModel = modelcheck.Optional(j.model)
-		}
-		upstreamResponseModel := modelcheck.Optional(probe.UpstreamResponseModel)
-		if upstreamResponseModel == nil {
-			upstreamResponseModel = modelcheck.Optional(runnerResp.UpstreamResponseModel)
-		}
-		modelCheckStatus := modelcheck.StatusFrom(forwardedModel, upstreamResponseModel)
-
 		if decodeErr != nil {
+			probe := abandonProbe(probeReq, j.model)
+			forwardedModel, upstreamResponseModel, modelCheckStatus := resolveModelCheck(probe, channelTestRunnerResponse{}, j.model)
 			result := channelModelProbeResult{
 				Model:            j.modelLabel,
 				OK:               false,
@@ -2444,7 +2482,28 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 			if strings.TrimSpace(msg) == "" {
 				msg = runnerResp.Output
 			}
+			probe := abandonProbe(probeReq, j.model)
+			forwardedModel, upstreamResponseModel, modelCheckStatus := resolveModelCheck(probe, runnerResp, j.model)
+			result := channelModelProbeResult{
+				Model:            j.modelLabel,
+				OK:               false,
+				Message:          msg,
+				Sample:           runnerResp.Output,
+				ModelCheckStatus: string(modelCheckStatus),
+				SuccessPath:      probe.SuccessPath,
+				UsedFallback:     probe.UsedFallback,
+			}
+			if forwardedModel != nil {
+				result.ForwardedModel = *forwardedModel
+			}
+			if upstreamResponseModel != nil {
+				result.UpstreamResponseModel = *upstreamResponseModel
+			}
+			return jobOutcome{result: result, modelCheckStatus: modelCheckStatus}
 		}
+
+		probe := awaitProbe(probeReq, j.model)
+		forwardedModel, upstreamResponseModel, modelCheckStatus := resolveModelCheck(probe, runnerResp, j.model)
 		ttftMS := runnerResp.TTFTMS
 		if ttftMS <= 0 {
 			ttftMS = runnerResp.LatencyMS
@@ -2452,7 +2511,7 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 
 		result := channelModelProbeResult{
 			Model:            j.modelLabel,
-			OK:               runnerResp.OK,
+			OK:               true,
 			Message:          msg,
 			TTFTMS:           ttftMS,
 			Sample:           runnerResp.Output,
@@ -2469,7 +2528,6 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 
 		return jobOutcome{
 			result:           result,
-			latencyMS:        runnerResp.LatencyMS,
 			ttftMS:           ttftMS,
 			modelCheckStatus: modelCheckStatus,
 		}
@@ -2483,7 +2541,6 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 
 			mu.Lock()
 			results[j.idx] = result
-			latencySum += outcome.latencyMS
 			ttftSum += outcome.ttftMS
 			switch outcome.modelCheckStatus {
 			case modelcheck.StatusOK:
@@ -2552,7 +2609,6 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 		ChatOK:             chatOK,
 		FallbackCount:      fallbackCount,
 		AvgTTFTMS:          avgTTFT,
-		LatencyMS:          latencySum,
 		Sample:             sample,
 		Results:            results,
 		ModelCheckOK:       modelCheckOK,
@@ -2561,7 +2617,7 @@ func runChannelCLITest(ctx context.Context, opts Options, channelID int64) (bool
 	}
 
 	// CRITICAL: 不调用 UpdateUpstreamChannelTest，不调用 scheduler.Report
-	return okAll, latencySum, message, summary
+	return finish(okAll, message, summary)
 }
 
 type channelModelProbeResult struct {

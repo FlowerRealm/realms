@@ -80,13 +80,18 @@ func TestCLITestDelegation(t *testing.T) {
 	}
 
 	opts := Options{Store: st, ChannelTestCLIRunnerURL: fakeRunner.URL}
+	startedAt := time.Now()
 	ok, latencyMS, message, summary := runChannelCLITest(ctx, opts, channelID)
+	elapsedMS := int(time.Since(startedAt) / time.Millisecond)
 
 	if !ok {
 		t.Fatalf("expected ok=true, message=%s", message)
 	}
-	if latencyMS != 123 {
-		t.Fatalf("expected latency=123, got %d", latencyMS)
+	if summary.LatencyMS != latencyMS {
+		t.Fatalf("expected summary latency to match top-level latency, got summary=%d top=%d", summary.LatencyMS, latencyMS)
+	}
+	if latencyMS > elapsedMS+100 {
+		t.Fatalf("expected latency to track wall-clock time, got latency=%d elapsed=%d", latencyMS, elapsedMS)
 	}
 	if summary.Source != "cli_runner" {
 		t.Fatalf("expected source=cli_runner, got %q", summary.Source)
@@ -294,6 +299,112 @@ func TestCLITestDelegation_ConcurrentModels(t *testing.T) {
 	mu.Unlock()
 	if gotMax < 2 {
 		t.Fatalf("expected concurrent runner requests, got max_in_flight=%d", gotMax)
+	}
+}
+
+func TestCLITestDelegation_ReportsWallClockLatency(t *testing.T) {
+	fakeRunner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/test" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":         true,
+			"latency_ms": 500,
+			"output":     "OK",
+			"error":      "",
+		})
+	}))
+	defer fakeRunner.Close()
+
+	st := openTestStore(t)
+	ctx := context.Background()
+	channelID := createOpenAIChannelWithCredential(t, ctx, st, "https://api.example.com")
+	for i := 0; i < 4; i++ {
+		modelID := fmt.Sprintf("latency-%d", i+1)
+		if _, err := st.CreateChannelModel(ctx, store.ChannelModelCreate{
+			ChannelID:     channelID,
+			PublicID:      modelID,
+			UpstreamModel: modelID,
+			Status:        1,
+		}); err != nil {
+			t.Fatalf("CreateChannelModel(%s): %v", modelID, err)
+		}
+	}
+
+	opts := Options{
+		Store:                     st,
+		ChannelTestCLIRunnerURL:   fakeRunner.URL,
+		ChannelTestCLIConcurrency: 4,
+	}
+
+	startedAt := time.Now()
+	ok, latencyMS, _, summary := runChannelCLITest(ctx, opts, channelID)
+	elapsedMS := int(time.Since(startedAt) / time.Millisecond)
+
+	if !ok {
+		t.Fatalf("expected success summary, got %+v", summary)
+	}
+	if summary.LatencyMS != latencyMS {
+		t.Fatalf("expected summary latency to match top-level latency, got summary=%d top=%d", summary.LatencyMS, latencyMS)
+	}
+	if latencyMS > elapsedMS+100 {
+		t.Fatalf("expected latency to track wall-clock time, got latency=%d elapsed=%d", latencyMS, elapsedMS)
+	}
+}
+
+func TestCLITestDelegation_RunnerFailureDoesNotWaitForProbe(t *testing.T) {
+	fakeRunner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/test" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": "runner boom",
+		})
+	}))
+	defer fakeRunner.Close()
+
+	st := openTestStore(t)
+	baseCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	channelID := createOpenAIChannelWithCredential(t, baseCtx, st, "https://api.example.com")
+
+	probeCanceled := make(chan struct{})
+	opts := Options{
+		Store:                   st,
+		ChannelTestCLIRunnerURL: fakeRunner.URL,
+		ChannelTestProbe: fakeChannelTestProber{probe: func(ctx context.Context, _ scheduler.Selection, _ string) (channeltest.Result, error) {
+			select {
+			case <-ctx.Done():
+				close(probeCanceled)
+				return channeltest.Result{}, ctx.Err()
+			case <-time.After(2 * time.Second):
+				return channeltest.Result{}, nil
+			}
+		}},
+	}
+
+	startedAt := time.Now()
+	ok, _, message, summary := runChannelCLITest(baseCtx, opts, channelID)
+	elapsed := time.Since(startedAt)
+
+	if ok {
+		t.Fatalf("expected failure summary, got %+v", summary)
+	}
+	if !strings.Contains(message, "runner boom") {
+		t.Fatalf("expected runner error in message, got %q", message)
+	}
+	if elapsed >= 700*time.Millisecond {
+		t.Fatalf("expected runner failure to return before probe timeout, elapsed=%s summary=%+v", elapsed, summary)
+	}
+	select {
+	case <-probeCanceled:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected probe context to be canceled on runner failure")
 	}
 }
 
