@@ -31,10 +31,11 @@ const (
 type FailureScope string
 
 const (
-	FailureScopeCredential FailureScope = "credential"
-	FailureScopeEndpoint   FailureScope = "endpoint"
-	FailureScopeChannel    FailureScope = "channel"
-	FailureScopeRequest    FailureScope = "request"
+	FailureScopeCredential   FailureScope = "credential"
+	FailureScopeEndpoint     FailureScope = "endpoint"
+	FailureScopeChannel      FailureScope = "channel"
+	FailureScopeChannelModel FailureScope = "channel_model"
+	FailureScopeRequest      FailureScope = "request"
 )
 
 type Selection struct {
@@ -82,6 +83,8 @@ type Result struct {
 	StatusCode int
 	ErrorClass string
 	Scope      FailureScope
+	// ChannelModelBindingID 用于把模型级运行态错误精确绑定到当前请求命中的 channel_model。
+	ChannelModelBindingID int64
 	// CooldownUntil 用于上层传入精确的冷却截止时间（例如上游返回 resets_at）。
 	// 为空时按调度器默认策略计算。
 	CooldownUntil *time.Time
@@ -115,6 +118,9 @@ type Constraints struct {
 	AllowGroups          map[string]struct{}
 	AllowGroupOrder      []string
 	AllowChannelIDs      map[int64]struct{}
+	// ChannelModelBindingIDs 将“当前请求允许的 channel”映射到对应的 channel_model binding id，
+	// 用于按 binding 运行态封禁筛掉仅对该模型不可用的渠道。
+	ChannelModelBindingIDs map[int64]int64
 	// SequentialChannelFailover 用于用户侧 API key 的顺序转移：
 	// 候选 channel 按绑定顺序从前往后尝试，失败后只向后推进，不做 ring/回绕/运行时重排。
 	// 这里的“失败”定义在 channel 层：只有当前 channel 已无法选出任何可用 credential/account，
@@ -372,6 +378,11 @@ func (s *Scheduler) selectWithConstraints(ctx context.Context, userID int64, rou
 		}
 		if cons.AllowChannelIDs != nil {
 			if _, ok := cons.AllowChannelIDs[ch.ID]; !ok {
+				continue
+			}
+		}
+		if cons.ChannelModelBindingIDs != nil {
+			if bindingID, ok := cons.ChannelModelBindingIDs[ch.ID]; ok && s.state.IsChannelModelBanned(bindingID, now) {
 				continue
 			}
 		}
@@ -882,14 +893,19 @@ func (s *Scheduler) Report(sel Selection, res Result) {
 		s.state.RecordCredentialResult(sel.CredentialKey(), true)
 		s.state.ClearChannelBan(sel.ChannelID)
 		s.state.ResetChannelFailScore(sel.ChannelID)
+		s.state.ClearChannelModelBan(res.ChannelModelBindingID)
+		s.state.ResetChannelModelFailScore(res.ChannelModelBindingID)
 		s.touchCredentialLastUsed(sel)
 		return
 	}
-	if scope != FailureScopeRequest {
+	if scope != FailureScopeRequest && scope != FailureScopeChannelModel {
 		s.state.RecordCredentialResult(sel.CredentialKey(), false)
 	}
 	if scope == FailureScopeChannel {
 		s.state.RecordChannelResult(sel.ChannelID, false)
+	}
+	if scope == FailureScopeChannelModel {
+		s.state.RecordChannelModelResult(res.ChannelModelBindingID, false)
 	}
 	if res.Retriable {
 		cooldown := s.cooldownBase
@@ -908,6 +924,8 @@ func (s *Scheduler) Report(sel Selection, res Result) {
 		case FailureScopeChannel:
 			s.state.SetEndpointCooling(sel.EndpointID, cooldownUntil)
 			s.state.SetCredentialCooling(sel.CredentialKey(), cooldownUntil)
+		case FailureScopeChannelModel:
+			s.state.BanChannelModel(res.ChannelModelBindingID, now, cooldown, cooldownUntil)
 		default:
 			s.state.SetCredentialCooling(sel.CredentialKey(), cooldownUntil)
 		}

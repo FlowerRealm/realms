@@ -28,11 +28,14 @@ type State struct {
 	credentialCooldown map[string]time.Time
 	endpointCooldown   map[int64]time.Time
 
-	channelFails map[int64]int
-	credFails    map[string]int
+	channelFails      map[int64]int
+	credFails         map[string]int
+	channelModelFails map[int64]int
 
-	channelBanUntil  map[int64]time.Time
-	channelBanStreak map[int64]int
+	channelBanUntil       map[int64]time.Time
+	channelBanStreak      map[int64]int
+	channelModelBanUntil  map[int64]time.Time
+	channelModelBanStreak map[int64]int
 
 	channelProbeDueAt      map[int64]time.Time
 	channelProbeClaimUntil map[int64]time.Time
@@ -47,8 +50,11 @@ func NewState() *State {
 		endpointCooldown:       make(map[int64]time.Time),
 		channelFails:           make(map[int64]int),
 		credFails:              make(map[string]int),
+		channelModelFails:      make(map[int64]int),
 		channelBanUntil:        make(map[int64]time.Time),
 		channelBanStreak:       make(map[int64]int),
+		channelModelBanUntil:   make(map[int64]time.Time),
+		channelModelBanStreak:  make(map[int64]int),
 		channelProbeDueAt:      make(map[int64]time.Time),
 		channelProbeClaimUntil: make(map[int64]time.Time),
 	}
@@ -191,6 +197,24 @@ func (s *State) ChannelFailScore(channelID int64) int {
 	return s.channelFails[channelID]
 }
 
+func (s *State) RecordChannelModelResult(bindingID int64, success bool) {
+	if bindingID == 0 || success {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.channelModelFails[bindingID]++
+}
+
+func (s *State) ChannelModelFailScore(bindingID int64) int {
+	if bindingID == 0 {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.channelModelFails[bindingID]
+}
+
 func (s *State) IsChannelBanned(channelID int64, now time.Time) bool {
 	if channelID == 0 {
 		return false
@@ -243,6 +267,86 @@ func (s *State) ClearChannelBan(channelID int64) {
 	delete(s.channelBanStreak, channelID)
 	delete(s.channelProbeDueAt, channelID)
 	delete(s.channelProbeClaimUntil, channelID)
+}
+
+func (s *State) IsChannelModelBanned(bindingID int64, now time.Time) bool {
+	if bindingID == 0 {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	until, ok := s.channelModelBanUntil[bindingID]
+	if !ok {
+		return false
+	}
+	if now.After(until) {
+		delete(s.channelModelBanUntil, bindingID)
+		delete(s.channelModelBanStreak, bindingID)
+		return false
+	}
+	return true
+}
+
+func (s *State) ChannelModelBanUntil(bindingID int64, now time.Time) (time.Time, bool) {
+	if bindingID == 0 {
+		return time.Time{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	until, ok := s.channelModelBanUntil[bindingID]
+	if !ok {
+		return time.Time{}, false
+	}
+	if now.After(until) {
+		delete(s.channelModelBanUntil, bindingID)
+		delete(s.channelModelBanStreak, bindingID)
+		return time.Time{}, false
+	}
+	return until, true
+}
+
+func (s *State) ClearChannelModelBan(bindingID int64) {
+	if bindingID == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.channelModelBanUntil, bindingID)
+	delete(s.channelModelBanStreak, bindingID)
+}
+
+func (s *State) BanChannelModel(bindingID int64, now time.Time, base time.Duration, minUntil time.Time) time.Time {
+	if bindingID == 0 {
+		return now
+	}
+	if base <= 0 {
+		base = 30 * time.Second
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	streak := s.channelModelBanStreak[bindingID] + 1
+	if streak > 20 {
+		streak = 20
+	}
+	s.channelModelBanStreak[bindingID] = streak
+
+	start := now
+	if until, ok := s.channelModelBanUntil[bindingID]; ok && until.After(now) {
+		start = until
+	}
+	newUntil := start.Add(base * time.Duration(streak))
+	if newUntil.Before(start) {
+		newUntil = start.Add(24 * time.Hour)
+	}
+	if !minUntil.IsZero() && minUntil.After(newUntil) {
+		newUntil = minUntil
+	}
+	maxUntil := now.Add(10 * time.Minute)
+	if newUntil.After(maxUntil) {
+		newUntil = maxUntil
+	}
+	s.channelModelBanUntil[bindingID] = newUntil
+	return newUntil
 }
 
 func (s *State) BanChannel(channelID int64, now time.Time, base time.Duration) time.Time {
@@ -396,6 +500,15 @@ func (s *State) ResetChannelFailScore(channelID int64) {
 	delete(s.channelFails, channelID)
 }
 
+func (s *State) ResetChannelModelFailScore(bindingID int64) {
+	if s == nil || bindingID == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.channelModelFails, bindingID)
+}
+
 func (s *State) SweepExpiredChannelBans(now time.Time) {
 	if s == nil {
 		return
@@ -409,6 +522,12 @@ func (s *State) SweepExpiredChannelBans(now time.Time) {
 				s.channelProbeDueAt[channelID] = now
 			}
 			delete(s.channelProbeClaimUntil, channelID)
+		}
+	}
+	for bindingID, until := range s.channelModelBanUntil {
+		if now.After(until) {
+			delete(s.channelModelBanUntil, bindingID)
+			delete(s.channelModelBanStreak, bindingID)
 		}
 	}
 }

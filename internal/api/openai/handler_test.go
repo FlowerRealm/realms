@@ -331,6 +331,59 @@ func TestClassifyNonRetriableFailureScope(t *testing.T) {
 	}
 }
 
+func TestClassifyUpstreamHTTPFailure_ExplicitModelFailureUsesChannelModelScope(t *testing.T) {
+	body := []byte(`{"error":{"code":"model_not_found","message":"model gpt-5.2 not found"}}`)
+	got := classifyUpstreamHTTPFailure(http.StatusNotFound, body, 101, codexOAuthUpstreamErr{})
+	if !got.Retriable {
+		t.Fatalf("expected model failure to be retriable")
+	}
+	if got.Scope != scheduler.FailureScopeChannelModel {
+		t.Fatalf("scope=%q want=%q", got.Scope, scheduler.FailureScopeChannelModel)
+	}
+	if got.ErrorClass != "upstream_model_unavailable" {
+		t.Fatalf("error_class=%q want=%q", got.ErrorClass, "upstream_model_unavailable")
+	}
+}
+
+func TestClassifyUpstreamHTTPFailure_RouteMissingStaysChannelScoped(t *testing.T) {
+	body := []byte(`{"error":{"message":"route missing"}}`)
+	got := classifyUpstreamHTTPFailure(http.StatusNotFound, body, 101, codexOAuthUpstreamErr{})
+	if !got.Retriable {
+		t.Fatalf("expected route failure to stay retriable")
+	}
+	if got.Scope != scheduler.FailureScopeChannel {
+		t.Fatalf("scope=%q want=%q", got.Scope, scheduler.FailureScopeChannel)
+	}
+}
+
+func TestClassifyUpstreamHTTPFailure_GenericNotFoundWithModelMentionStaysChannelScoped(t *testing.T) {
+	body := []byte(`{"error":{"message":"model route not found on upstream"}}`)
+	got := classifyUpstreamHTTPFailure(http.StatusNotFound, body, 101, codexOAuthUpstreamErr{})
+	if !got.Retriable {
+		t.Fatalf("expected generic route/resource 404 to stay retriable")
+	}
+	if got.Scope != scheduler.FailureScopeChannel {
+		t.Fatalf("scope=%q want=%q", got.Scope, scheduler.FailureScopeChannel)
+	}
+	if got.ErrorClass != "upstream_status" {
+		t.Fatalf("error_class=%q want=%q", got.ErrorClass, "upstream_status")
+	}
+}
+
+func TestClassifyUpstreamHTTPFailure_PermissionStyleModelErrorStaysChannelScoped(t *testing.T) {
+	body := []byte(`{"error":{"message":"selected model is not allowed for this organization"}}`)
+	got := classifyUpstreamHTTPFailure(http.StatusBadRequest, body, 101, codexOAuthUpstreamErr{})
+	if got.Retriable {
+		t.Fatalf("expected permission/policy failure to stay non-retriable")
+	}
+	if got.Scope != scheduler.FailureScopeRequest {
+		t.Fatalf("scope=%q want=%q", got.Scope, scheduler.FailureScopeRequest)
+	}
+	if got.ErrorClass != "upstream_status" {
+		t.Fatalf("error_class=%q want=%q", got.ErrorClass, "upstream_status")
+	}
+}
+
 func TestIsRetriableStreamFailure(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -1345,6 +1398,116 @@ func TestResponses_404FailoverSkipsSiblingEndpointAndSwitchesChannel(t *testing.
 	}
 	if calls[1].ChannelID != 1 || calls[1].EndpointID != 11 {
 		t.Fatalf("expected second call on fallback channel endpoint=11, got=%+v", calls[1])
+	}
+}
+
+func TestResponses_ModelFailureOnlyBansSelectedBinding(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 100},
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 10},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			2: {
+				{ID: 21, ChannelID: 2, BaseURL: "https://primary.example", Status: 1, Priority: 100},
+			},
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://fallback.example", Status: 1, Priority: 100},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			21: {
+				{ID: 21, EndpointID: 21, Status: 1},
+			},
+			11: {
+				{ID: 11, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"alias-bad":  {ID: 1, PublicID: "alias-bad", Status: 1},
+			"alias-good": {ID: 2, PublicID: "alias-good", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"alias-bad": {
+				{ID: 101, ChannelID: 2, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "alias-bad", UpstreamModel: "bad-upstream", Status: 1},
+				{ID: 102, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "alias-bad", UpstreamModel: "bad-fallback", Status: 1},
+			},
+			"alias-good": {
+				{ID: 201, ChannelID: 2, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "alias-good", UpstreamModel: "good-primary", Status: 1},
+				{ID: 202, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "alias-good", UpstreamModel: "good-fallback", Status: 1},
+			},
+		},
+	}
+
+	var calls []scheduler.Selection
+	doer := DoerFunc(func(_ context.Context, sel scheduler.Selection, _ *http.Request, body []byte) (*http.Response, error) {
+		calls = append(calls, sel)
+		model := gjson.GetBytes(body, "model").String()
+		switch model {
+		case "bad-upstream":
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(bytes.NewReader([]byte(`{"error":{"code":"model_not_found","message":"model bad-upstream not found"}}`))),
+			}, nil
+		default:
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(bytes.NewReader([]byte(`{"id":"ok","usage":{"input_tokens":1,"output_tokens":2}}`))),
+			}, nil
+		}
+	})
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, doer, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+	tokenID := int64(123)
+	principal := auth.Principal{
+		ActorType: auth.ActorTypeToken,
+		UserID:    10,
+		Role:      store.UserRoleUser,
+		TokenID:   &tokenID,
+		Groups:    []string{store.DefaultGroupName},
+	}
+
+	makeRequest := func(model string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"`+model+`","input":"hi","stream":false}`)))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(auth.WithPrincipal(req.Context(), principal))
+		rr := httptest.NewRecorder()
+		middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+		return rr
+	}
+
+	first := makeRequest("alias-bad")
+	if first.Code != http.StatusOK {
+		t.Fatalf("first status=%d body=%s", first.Code, first.Body.String())
+	}
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 attempts for alias-bad, got=%d calls=%+v", len(calls), calls)
+	}
+	if calls[0].ChannelID != 2 || calls[1].ChannelID != 1 {
+		t.Fatalf("expected alias-bad to fail over 2->1, got=%+v", calls)
+	}
+
+	channelRuntime := sched.RuntimeChannelStats(2)
+	if channelRuntime.FailScore != 0 || channelRuntime.BannedUntil != nil {
+		t.Fatalf("expected channel 2 to stay healthy, got=%+v", channelRuntime)
+	}
+	modelRuntime := sched.RuntimeChannelModelStats(101)
+	if modelRuntime.FailScore == 0 || modelRuntime.BannedUntil == nil {
+		t.Fatalf("expected binding 101 to be runtime-banned, got=%+v", modelRuntime)
+	}
+
+	second := makeRequest("alias-good")
+	if second.Code != http.StatusOK {
+		t.Fatalf("second status=%d body=%s", second.Code, second.Body.String())
+	}
+	if len(calls) != 3 {
+		t.Fatalf("expected alias-good to succeed in one extra attempt, got=%d calls", len(calls))
+	}
+	if calls[2].ChannelID != 2 {
+		t.Fatalf("expected alias-good to keep using primary channel 2, got=%+v", calls[2])
 	}
 }
 
@@ -4792,6 +4955,70 @@ func TestResponses_FailoverExhausted429MapsToRateLimitError(t *testing.T) {
 	}
 	if rr.Header().Get("Retry-After") != "30" {
 		t.Fatalf("expected Retry-After=30, got=%q", rr.Header().Get("Retry-After"))
+	}
+}
+
+func TestResponses_FailoverExhaustedModelFailurePreservesUpstream4xx(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"m1": {ID: 1, PublicID: "m1", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"m1": {
+				{ID: 101, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "bad-upstream", Status: 1},
+			},
+		},
+	}
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, statusDoer{
+		status: http.StatusNotFound,
+		body:   `{"error":{"code":"model_not_found","message":"model bad-upstream not found"}}`,
+	}, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+	h.SetGatewayPolicy(GatewayPolicy{MaxFailoverSwitches: 1})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"api_error"`) {
+		t.Fatalf("expected api_error body, got=%s", rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "model bad-upstream not found") {
+		t.Fatalf("expected upstream model message to be preserved, got=%s", rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "上游不可用") {
+		t.Fatalf("expected generic upstream unavailable message to be absent, got=%s", rr.Body.String())
+	}
+
+	channelRuntime := sched.RuntimeChannelStats(1)
+	if channelRuntime.FailScore != 0 || channelRuntime.BannedUntil != nil {
+		t.Fatalf("expected channel runtime to stay healthy, got=%+v", channelRuntime)
+	}
+	modelRuntime := sched.RuntimeChannelModelStats(101)
+	if modelRuntime.FailScore == 0 || modelRuntime.BannedUntil == nil {
+		t.Fatalf("expected binding runtime to be banned, got=%+v", modelRuntime)
 	}
 }
 

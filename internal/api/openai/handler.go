@@ -353,7 +353,7 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 	var rewriteBody func(sel scheduler.Selection) ([]byte, error)
 
 	var bindings []store.ChannelModelBinding
-	var upstreamByChannel map[int64]string
+	var resolvedBindings resolvedChannelModelBindings
 
 	if modelPassthrough {
 		// 非 free_mode 下仍要求模型定价存在（用于配额预留与计费口径），但不要求“启用”。
@@ -382,35 +382,16 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		// passthrough 模式下仍尝试使用“渠道绑定模型”做 model 转发（best-effort）；
 		// 但不强制要求存在绑定（无绑定时直接透传 model）。
 		if bindings, err := h.models.ListEnabledChannelModelBindingsByPublicID(r.Context(), publicModel); err == nil {
-			requireType := strings.TrimSpace(cons.RequireChannelType)
-			m := make(map[int64]string, len(bindings))
-			for _, b := range bindings {
-				if requireType != "" && strings.TrimSpace(b.ChannelType) != requireType {
-					continue
-				}
-				if strings.TrimSpace(b.UpstreamModel) == "" {
-					continue
-				}
-				m[b.ChannelID] = b.UpstreamModel
-			}
-			if len(m) > 0 {
-				upstreamByChannel = m
-				cons.AllowChannelIDs = make(map[int64]struct{}, len(upstreamByChannel))
-				for id := range upstreamByChannel {
-					cons.AllowChannelIDs[id] = struct{}{}
-				}
+			resolvedBindings = resolveChannelModelBindings(bindings, cons.RequireChannelType)
+			if !resolvedBindings.Empty() {
+				resolvedBindings.ApplyToConstraints(&cons)
 			}
 		}
 		rewriteBody = func(sel scheduler.Selection) ([]byte, error) {
 			if sel.PassThroughBodyEnabled {
 				return rawBody, nil
 			}
-			upstreamModel := publicModel
-			if upstreamByChannel != nil {
-				if up, ok := upstreamByChannel[sel.ChannelID]; ok && strings.TrimSpace(up) != "" {
-					upstreamModel = up
-				}
-			}
+			upstreamModel := resolvedBindings.UpstreamModel(sel.ChannelID, publicModel)
 			out := clonePayload(payload)
 			out["model"] = upstreamModel
 			applyChannelSystemPromptToResponsesPayload(out, sel)
@@ -464,31 +445,20 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		upstreamByChannel = make(map[int64]string, len(bindings))
-		for _, b := range bindings {
-			if strings.TrimSpace(b.UpstreamModel) == "" {
-				continue
-			}
-			upstreamByChannel[b.ChannelID] = b.UpstreamModel
-		}
-
+		resolvedBindings = resolveChannelModelBindings(bindings, cons.RequireChannelType)
 		// 统一使用“渠道绑定模型”配置：无绑定即不可用（避免 legacy 字段导致的调度歧义）。
-		if len(upstreamByChannel) == 0 {
+		if resolvedBindings.Empty() {
 			http.Error(w, "模型未配置可用上游", http.StatusBadGateway)
 			return
 		}
-
-		cons.AllowChannelIDs = make(map[int64]struct{}, len(upstreamByChannel))
-		for id := range upstreamByChannel {
-			cons.AllowChannelIDs[id] = struct{}{}
-		}
+		resolvedBindings.ApplyToConstraints(&cons)
 
 		rewriteBody = func(sel scheduler.Selection) ([]byte, error) {
 			if sel.PassThroughBodyEnabled {
 				return rawBody, nil
 			}
-			up, ok := upstreamByChannel[sel.ChannelID]
-			if !ok {
+			up := resolvedBindings.UpstreamModel(sel.ChannelID, "")
+			if strings.TrimSpace(up) == "" {
 				return nil, errors.New("选中渠道未配置该模型")
 			}
 			out := clonePayload(payload)
@@ -783,7 +753,8 @@ func (h *Handler) proxyJSON(w http.ResponseWriter, r *http.Request) {
 		if shouldPreferSequentialChannelSwitch(cons, bindingCredentialPinned) {
 			selectionRetries = 1
 		}
-		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), extractTopLevelModel(rewritten), usageID, reqStart, reqBytes, loopStart, selectionRetries, &bestFailure) {
+		bindingID := resolvedBindings.BindingID(sel.ChannelID)
+		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), extractTopLevelModel(rewritten), bindingID, usageID, reqStart, reqBytes, loopStart, selectionRetries, &bestFailure) {
 			return
 		}
 		if shouldPreferSequentialChannelSwitch(cons, bindingCredentialPinned) {
@@ -912,7 +883,7 @@ func upstreamUnavailableUsageMessage(best proxyFailureInfo) string {
 	return "上游不可用；最后一次失败: " + detail
 }
 
-func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p auth.Principal, sel scheduler.Selection, body []byte, wantStream bool, model *string, forwardedModel *string, usageID int64, reqStart time.Time, reqBytes int64, loopStart time.Time, retries int, bestFailure *proxyFailureInfo) bool {
+func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p auth.Principal, sel scheduler.Selection, body []byte, wantStream bool, model *string, forwardedModel *string, bindingID int64, usageID int64, reqStart time.Time, reqBytes int64, loopStart time.Time, retries int, bestFailure *proxyFailureInfo) bool {
 	retries = h.sameSelectionRetries(retries)
 	backoff := h.initialBackoff()
 	for i := 0; i < retries; i++ {
@@ -924,7 +895,7 @@ func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p aut
 			recordProxyFailure(bestFailure, classifyConcurrencyAcquireFailure(err))
 			return false
 		}
-		decision, failure := h.proxyOnce(w, r, sel, body, wantStream, model, forwardedModel, p, usageID, reqStart, reqBytes)
+		decision, failure := h.proxyOnce(w, r, sel, body, wantStream, model, forwardedModel, bindingID, p, usageID, reqStart, reqBytes)
 		if releaseCred != nil {
 			releaseCred()
 		}
@@ -960,7 +931,7 @@ func (h *Handler) tryWithSelection(w http.ResponseWriter, r *http.Request, p aut
 	return false
 }
 
-func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel scheduler.Selection, body []byte, wantStream bool, model *string, forwardedModel *string, p auth.Principal, usageID int64, reqStart time.Time, reqBytes int64) (proxyAttemptDecision, proxyFailureInfo) {
+func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel scheduler.Selection, body []byte, wantStream bool, model *string, forwardedModel *string, bindingID int64, p auth.Principal, usageID int64, reqStart time.Time, reqBytes int64) (proxyAttemptDecision, proxyFailureInfo) {
 	attemptStart := time.Now()
 	serviceTier := requestedServiceTierFromJSONBytes(body)
 	var resp *http.Response
@@ -1007,14 +978,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			_ = resp.Body.Close()
 
 			codexErr := classifyCodexOAuthUpstreamError(sel, resp.StatusCode, bodyBytes)
-			retriable := isRetriableStatus(resp.StatusCode) || codexErr.retriable()
-			errorClass := "upstream_status"
-			scope := classifyRetriableFailureScope(resp.StatusCode, codexErr)
-			var cooldownUntil *time.Time
 			if codexErr.Kind != codexOAuthErrNone {
-				if cls := codexErr.errorClass(); cls != "" {
-					errorClass = cls
-				}
 				if codexErr.DisableAccount {
 					h.setCodexCredentialDisabled(r.Context(), sel)
 				}
@@ -1022,31 +986,32 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 					h.setCodexCredentialQuotaError(r.Context(), sel, "余额用尽")
 				}
 				if until := codexErr.cooldownUntil(time.Now(), bodyBytes); until != nil {
-					cooldownUntil = until
 					h.setCodexCredentialCooldown(r.Context(), sel, *until)
 				}
 			}
-			if retriable {
+			classification := classifyUpstreamHTTPFailure(resp.StatusCode, bodyBytes, bindingID, codexErr)
+			if classification.Retriable {
 				failMsg := summarizeUpstreamErrorBody(bodyBytes)
 				if strings.TrimSpace(failMsg) == "" {
 					failMsg = strings.TrimSpace(resp.Status)
 				}
 				res := scheduler.Result{
-					Success:       false,
-					Retriable:     true,
-					StatusCode:    resp.StatusCode,
-					ErrorClass:    errorClass,
-					Scope:         scope,
-					CooldownUntil: cooldownUntil,
+					Success:               false,
+					Retriable:             true,
+					StatusCode:            resp.StatusCode,
+					ErrorClass:            classification.ErrorClass,
+					Scope:                 classification.Scope,
+					ChannelModelBindingID: bindingID,
+					CooldownUntil:         classification.CooldownUntil,
 				}
-				h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, errorClass, time.Since(attemptStart))
+				h.auditFailover(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, classification.ErrorClass, time.Since(attemptStart))
 				decision := proxyAttemptFailover
-				if shouldRetrySameSelection(scope, resp.StatusCode, errorClass) {
+				if shouldRetrySameSelection(classification.Scope, resp.StatusCode, classification.ErrorClass) {
 					decision = proxyAttemptRetrySameSelection
 				}
 				return decision, proxyFailureInfo{
 					Valid:      true,
-					Class:      errorClass,
+					Class:      classification.ErrorClass,
 					StatusCode: resp.StatusCode,
 					Message:    failMsg,
 					Body:       bodyBytes,
@@ -1056,14 +1021,15 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 
 			if h.sched != nil {
 				h.sched.Report(sel, scheduler.Result{
-					Success:    false,
-					Retriable:  false,
-					StatusCode: resp.StatusCode,
-					ErrorClass: "upstream_status",
-					Scope:      classifyNonRetriableFailureScope(resp.StatusCode),
+					Success:               false,
+					Retriable:             false,
+					StatusCode:            resp.StatusCode,
+					ErrorClass:            classification.ErrorClass,
+					Scope:                 classification.Scope,
+					ChannelModelBindingID: bindingID,
 				})
 			}
-			h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, "upstream_status", time.Since(attemptStart))
+			h.auditUpstreamError(r.Context(), r.URL.Path, p, &sel, model, resp.StatusCode, classification.ErrorClass, time.Since(attemptStart))
 			cw := &countingResponseWriter{ResponseWriter: w}
 			downstreamStatus := resetStatusCode(resp.StatusCode, sel.StatusCodeMapping)
 			copyResponseHeaders(cw.Header(), resp.Header)
@@ -1076,13 +1042,13 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 			if strings.TrimSpace(failMsg) != "" {
 				logMsg = failMsg
 			}
-			h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, resp.StatusCode, "upstream_status", logMsg, time.Since(attemptStart), wantStream || isSSE)
+			h.maybeLogProxyFailure(r.Context(), r, p, &sel, model, resp.StatusCode, classification.ErrorClass, logMsg, time.Since(attemptStart), wantStream || isSSE)
 			if usageID != 0 && h.quota != nil {
 				bookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				_ = h.quota.Void(bookCtx, usageID)
 			}
-			h.finalizeUsageEventWithModelCheck(r, usageID, &sel, resp.StatusCode, "upstream_status", failMsg, time.Since(reqStart), 0, wantStream || isSSE, reqBytes, respBytes, forwardedModel, nil)
+			h.finalizeUsageEventWithModelCheck(r, usageID, &sel, resp.StatusCode, classification.ErrorClass, failMsg, time.Since(reqStart), 0, wantStream || isSSE, reqBytes, respBytes, forwardedModel, nil)
 			return proxyAttemptDone, proxyFailureInfo{}
 		}
 		break
@@ -1250,7 +1216,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 
 		// SSE 已写回后不再 failover，但仍记录结果以用于后续调度权重。
 		if pumpRes.ErrorClass == "" || pumpRes.ErrorClass == "client_disconnect" || pumpRes.ErrorClass == "stream_max_duration" {
-			h.sched.Report(sel, scheduler.Result{Success: true})
+			h.sched.Report(sel, scheduler.Result{Success: true, ChannelModelBindingID: bindingID})
 			h.rememberCodexLastSuccessRoute(r, sel)
 		} else {
 			h.sched.Report(sel, scheduler.Result{
@@ -1355,7 +1321,7 @@ func (h *Handler) proxyOnce(w http.ResponseWriter, r *http.Request, sel schedule
 		if total > 0 {
 			h.sched.RecordTokens(sel.CredentialKey(), int(total))
 		}
-		h.sched.Report(sel, scheduler.Result{Success: true})
+		h.sched.Report(sel, scheduler.Result{Success: true, ChannelModelBindingID: bindingID})
 	}
 	h.rememberCodexLastSuccessRoute(r, sel)
 	h.finalizeUsageEventWithModelCheck(r, usageID, &sel, resp.StatusCode, "", "", time.Since(reqStart), 0, false, reqBytes, respBytes, forwardedModel, responseModel)

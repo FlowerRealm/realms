@@ -613,11 +613,12 @@ func adminDeleteManagedModelHandler(opts Options) gin.HandlerFunc {
 }
 
 type channelModelView struct {
-	ID            int64  `json:"id"`
-	ChannelID     int64  `json:"channel_id"`
-	PublicID      string `json:"public_id"`
-	UpstreamModel string `json:"upstream_model"`
-	Status        int    `json:"status"`
+	ID            int64                   `json:"id"`
+	ChannelID     int64                   `json:"channel_id"`
+	PublicID      string                  `json:"public_id"`
+	UpstreamModel string                  `json:"upstream_model"`
+	Status        int                     `json:"status"`
+	Runtime       channelModelRuntimeInfo `json:"runtime"`
 }
 
 func adminListChannelModelsHandler(opts Options) gin.HandlerFunc {
@@ -636,6 +637,7 @@ func adminListChannelModelsHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询失败"})
 			return
 		}
+		loc, _ := adminTimeLocation(c.Request.Context(), opts)
 		out := make([]channelModelView, 0, len(ms))
 		for _, m := range ms {
 			out = append(out, channelModelView{
@@ -644,6 +646,7 @@ func adminListChannelModelsHandler(opts Options) gin.HandlerFunc {
 				PublicID:      m.PublicID,
 				UpstreamModel: m.UpstreamModel,
 				Status:        m.Status,
+				Runtime:       channelModelRuntimeForAPI(c.Request.Context(), opts, m.ID, loc),
 			})
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": out})

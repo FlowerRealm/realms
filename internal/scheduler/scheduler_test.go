@@ -464,6 +464,97 @@ func TestReport_RequestScopedFailureSkipsCredentialPenalty(t *testing.T) {
 	}
 }
 
+func TestReport_ChannelModelScopedFailureBansBindingOnly(t *testing.T) {
+	s := New(&fakeStore{})
+	s.cooldownBase = 200 * time.Millisecond
+
+	sel := Selection{
+		ChannelID:      7,
+		EndpointID:     17,
+		CredentialType: CredentialTypeOpenAI,
+		CredentialID:   99,
+		AutoBan:        true,
+	}
+	s.Report(sel, Result{
+		Success:               false,
+		Retriable:             true,
+		StatusCode:            http.StatusNotFound,
+		ErrorClass:            "upstream_model_unavailable",
+		Scope:                 FailureScopeChannelModel,
+		ChannelModelBindingID: 701,
+	})
+
+	s.state.mu.Lock()
+	credFails := s.state.credFails[sel.CredentialKey()]
+	_, credCooling := s.state.credentialCooldown[sel.CredentialKey()]
+	_, endpointCooling := s.state.endpointCooldown[sel.EndpointID]
+	channelFails := s.state.channelFails[sel.ChannelID]
+	_, channelBanned := s.state.channelBanUntil[sel.ChannelID]
+	modelFails := s.state.channelModelFails[701]
+	modelBanUntil, modelBanned := s.state.channelModelBanUntil[701]
+	s.state.mu.Unlock()
+
+	if credFails != 0 {
+		t.Fatalf("expected credential fail score to stay 0, got=%d", credFails)
+	}
+	if credCooling {
+		t.Fatalf("expected credential cooldown to be skipped for channel-model failure")
+	}
+	if endpointCooling {
+		t.Fatalf("expected endpoint cooldown to be skipped for channel-model failure")
+	}
+	if channelFails != 0 {
+		t.Fatalf("expected channel fail score to stay 0, got=%d", channelFails)
+	}
+	if channelBanned {
+		t.Fatalf("expected channel ban to be skipped for channel-model failure")
+	}
+	if modelFails != 1 {
+		t.Fatalf("expected model fail score=1, got=%d", modelFails)
+	}
+	if !modelBanned || modelBanUntil.IsZero() {
+		t.Fatalf("expected model binding to be banned")
+	}
+}
+
+func TestSelectWithConstraints_SkipsBannedChannelModelBinding(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 100},
+			{ID: 2, Type: store.UpstreamTypeOpenAICompatible, Status: 1, Priority: 10},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+			2: {
+				{ID: 21, ChannelID: 2, BaseURL: "https://b.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 111, EndpointID: 11, Status: 1},
+			},
+			21: {
+				{ID: 211, EndpointID: 21, Status: 1},
+			},
+		},
+	}
+	s := New(fs)
+	s.state.BanChannelModel(101, time.Now(), time.Minute, time.Time{})
+
+	sel, err := s.SelectWithConstraints(context.Background(), 10, "", Constraints{
+		AllowChannelIDs:        map[int64]struct{}{1: {}, 2: {}},
+		ChannelModelBindingIDs: map[int64]int64{1: 101, 2: 202},
+	})
+	if err != nil {
+		t.Fatalf("Select err: %v", err)
+	}
+	if sel.ChannelID != 2 {
+		t.Fatalf("expected channel=2 after channel-model ban, got=%d", sel.ChannelID)
+	}
+}
+
 func TestState_IsChannelBanned_ExpiredMarksProbeDue(t *testing.T) {
 	st := NewState()
 	now := time.Now()

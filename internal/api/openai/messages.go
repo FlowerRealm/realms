@@ -88,7 +88,7 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 	cons.SequentialChannelFailover = true
 
 	var rewriteBody func(sel scheduler.Selection) ([]byte, error)
-	var upstreamByChannel map[int64]string
+	var resolvedBindings resolvedChannelModelBindings
 
 	if modelPassthrough {
 		// 非 free_mode 下仍要求模型定价存在（用于配额预留与计费口径），但不要求“启用”。
@@ -116,35 +116,16 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 		// passthrough 模式下仍尝试使用“渠道绑定模型”做 model 转发（best-effort）；
 		// 但不强制要求存在绑定（无绑定时直接透传 model）。
 		if bindings, err := h.models.ListEnabledChannelModelBindingsByPublicID(r.Context(), publicModel); err == nil {
-			requireType := strings.TrimSpace(cons.RequireChannelType)
-			m := make(map[int64]string, len(bindings))
-			for _, b := range bindings {
-				if requireType != "" && strings.TrimSpace(b.ChannelType) != requireType {
-					continue
-				}
-				if strings.TrimSpace(b.UpstreamModel) == "" {
-					continue
-				}
-				m[b.ChannelID] = b.UpstreamModel
-			}
-			if len(m) > 0 {
-				upstreamByChannel = m
-				cons.AllowChannelIDs = make(map[int64]struct{}, len(upstreamByChannel))
-				for id := range upstreamByChannel {
-					cons.AllowChannelIDs[id] = struct{}{}
-				}
+			resolvedBindings = resolveChannelModelBindings(bindings, cons.RequireChannelType)
+			if !resolvedBindings.Empty() {
+				resolvedBindings.ApplyToConstraints(&cons)
 			}
 		}
 		rewriteBody = func(sel scheduler.Selection) ([]byte, error) {
 			if sel.PassThroughBodyEnabled {
 				return rawBody, nil
 			}
-			upstreamModel := publicModel
-			if upstreamByChannel != nil {
-				if up, ok := upstreamByChannel[sel.ChannelID]; ok && strings.TrimSpace(up) != "" {
-					upstreamModel = up
-				}
-			}
+			upstreamModel := resolvedBindings.UpstreamModel(sel.ChannelID, publicModel)
 			out := clonePayload(payload)
 			out["model"] = upstreamModel
 			applyChannelSystemPromptToMessagesPayload(out, sel)
@@ -197,30 +178,20 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		upstreamByChannel = make(map[int64]string, len(bindings))
-		for _, b := range bindings {
-			if strings.TrimSpace(b.UpstreamModel) == "" {
-				continue
-			}
-			upstreamByChannel[b.ChannelID] = b.UpstreamModel
-		}
+		resolvedBindings = resolveChannelModelBindings(bindings, cons.RequireChannelType)
 		// 统一使用“渠道绑定模型”配置：无绑定即不可用（避免 legacy 字段导致的调度歧义）。
-		if len(upstreamByChannel) == 0 {
+		if resolvedBindings.Empty() {
 			writeAnthropicError(w, http.StatusBadGateway, "模型未配置可用上游")
 			return
 		}
-
-		cons.AllowChannelIDs = make(map[int64]struct{}, len(upstreamByChannel))
-		for id := range upstreamByChannel {
-			cons.AllowChannelIDs[id] = struct{}{}
-		}
+		resolvedBindings.ApplyToConstraints(&cons)
 
 		rewriteBody = func(sel scheduler.Selection) ([]byte, error) {
 			if sel.PassThroughBodyEnabled {
 				return rawBody, nil
 			}
-			up, ok := upstreamByChannel[sel.ChannelID]
-			if !ok {
+			up := resolvedBindings.UpstreamModel(sel.ChannelID, "")
+			if strings.TrimSpace(up) == "" {
 				return nil, errors.New("选中渠道未配置该模型")
 			}
 			out := clonePayload(payload)
@@ -367,7 +338,8 @@ func (h *Handler) proxyMessagesJSON(w http.ResponseWriter, r *http.Request) {
 			h.finalizeUsageEvent(r, usageID, &sel, http.StatusInternalServerError, "rewrite_body", "请求体处理失败", time.Since(reqStart), 0, stream, reqBytes, cw.bytes)
 			return
 		}
-		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), extractTopLevelModel(rewritten), usageID, reqStart, reqBytes, loopStart, 1, &bestFailure) {
+		bindingID := resolvedBindings.BindingID(sel.ChannelID)
+		if h.tryWithSelection(w, r, p, sel, rewritten, stream, optionalString(publicModel), extractTopLevelModel(rewritten), bindingID, usageID, reqStart, reqBytes, loopStart, 1, &bestFailure) {
 			return
 		}
 		switches++

@@ -311,6 +311,16 @@ func mapFailoverFailure(best proxyFailureInfo) gatewayErrorResponse {
 	}
 
 	switch {
+	case strings.EqualFold(best.Class, "upstream_model_unavailable") && isExplicitModelFailureStatus(best.StatusCode):
+		resp.Status = best.StatusCode
+		resp.ErrType = gatewayErrorTypeForStatus(resp.Status)
+		resp.ErrorClass = "upstream_model_unavailable"
+		resp.Message = "上游模型不可用"
+		resp.UsageMessage = "上游模型不可用"
+		if msg := strings.TrimSpace(best.Message); msg != "" {
+			resp.Message = msg
+			resp.UsageMessage = msg
+		}
 	case best.StatusCode == http.StatusTooManyRequests || strings.EqualFold(best.Class, "upstream_throttled"):
 		resp.Status = http.StatusTooManyRequests
 		resp.ErrType = "rate_limit_error"

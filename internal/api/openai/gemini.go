@@ -143,7 +143,7 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 	// 用户侧 token 默认按绑定顺序做 channel 级 failover；sticky 只影响“从哪里继续”，不决定是否启用该语义。
 	cons.SequentialChannelFailover = true
 
-	var upstreamByChannel map[int64]string
+	var resolvedBindings resolvedChannelModelBindings
 	if !modelPassthrough {
 		mm, err := h.models.GetEnabledManagedModelByPublicID(r.Context(), publicModel)
 		if err != nil {
@@ -169,21 +169,12 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "查询模型绑定失败", http.StatusBadGateway)
 			return
 		}
-		upstreamByChannel = make(map[int64]string, len(bindings))
-		for _, b := range bindings {
-			if strings.TrimSpace(b.UpstreamModel) == "" {
-				continue
-			}
-			upstreamByChannel[b.ChannelID] = b.UpstreamModel
-		}
-		if len(upstreamByChannel) == 0 {
+		resolvedBindings = resolveChannelModelBindings(bindings, cons.RequireChannelType)
+		if resolvedBindings.Empty() {
 			http.Error(w, "模型未配置可用上游", http.StatusBadGateway)
 			return
 		}
-		cons.AllowChannelIDs = make(map[int64]struct{}, len(upstreamByChannel))
-		for id := range upstreamByChannel {
-			cons.AllowChannelIDs[id] = struct{}{}
-		}
+		resolvedBindings.ApplyToConstraints(&cons)
 	} else {
 		// 非 free_mode 下仍要求模型定价存在（用于配额预留与计费口径），但不要求“启用”。
 		if !freeMode || isPriorityServiceTier(serviceTier) {
@@ -210,23 +201,9 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 		// passthrough 模式下仍尝试使用“渠道绑定模型”做 model 转发（best-effort）；
 		// 但不强制要求存在绑定（无绑定时直接透传 model）。
 		if bindings, err := h.models.ListEnabledChannelModelBindingsByPublicID(r.Context(), publicModel); err == nil {
-			requireType := strings.TrimSpace(cons.RequireChannelType)
-			m := make(map[int64]string, len(bindings))
-			for _, b := range bindings {
-				if requireType != "" && strings.TrimSpace(b.ChannelType) != requireType {
-					continue
-				}
-				if strings.TrimSpace(b.UpstreamModel) == "" {
-					continue
-				}
-				m[b.ChannelID] = b.UpstreamModel
-			}
-			if len(m) > 0 {
-				upstreamByChannel = m
-				cons.AllowChannelIDs = make(map[int64]struct{}, len(upstreamByChannel))
-				for id := range upstreamByChannel {
-					cons.AllowChannelIDs[id] = struct{}{}
-				}
+			resolvedBindings = resolveChannelModelBindings(bindings, cons.RequireChannelType)
+			if !resolvedBindings.Empty() {
+				resolvedBindings.ApplyToConstraints(&cons)
 			}
 		}
 	}
@@ -333,12 +310,7 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		upstreamModel := publicModel
-		if upstreamByChannel != nil {
-			if up, ok := upstreamByChannel[sel.ChannelID]; ok && strings.TrimSpace(up) != "" {
-				upstreamModel = up
-			}
-		}
+		upstreamModel := resolvedBindings.UpstreamModel(sel.ChannelID, publicModel)
 
 		// 重写 path：/v1beta/models/{public}:{action} -> /v1beta/models/{upstream}:{action}
 		req2 := r.Clone(r.Context())
@@ -359,7 +331,8 @@ func (h *Handler) GeminiProxy(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if h.tryWithSelection(w, req2, p, sel, rewritten, wantStream, optionalString(publicModel), optionalString(upstreamModel), usageID, reqStart, reqBytes, loopStart, 2, &bestFailure) {
+		bindingID := resolvedBindings.BindingID(sel.ChannelID)
+		if h.tryWithSelection(w, req2, p, sel, rewritten, wantStream, optionalString(publicModel), optionalString(upstreamModel), bindingID, usageID, reqStart, reqBytes, loopStart, 2, &bestFailure) {
 			return
 		}
 		switches++
