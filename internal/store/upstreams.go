@@ -1559,6 +1559,12 @@ func (s *Store) DeleteUpstreamChannel(ctx context.Context, channelID int64) erro
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if _, err := tx.ExecContext(ctx, `DELETE FROM channel_group_members WHERE member_channel_id=?`, channelID); err != nil {
+		return fmt.Errorf("删除 channel_group_members 失败: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM channel_group_pointers WHERE channel_id=?`, channelID); err != nil {
+		return fmt.Errorf("删除 channel_group_pointers 失败: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, `
 DELETE FROM openai_compatible_credentials
 WHERE endpoint_id IN (SELECT id FROM upstream_endpoints WHERE channel_id=?)
