@@ -82,6 +82,15 @@ type upstreamHTTPFailureClassification struct {
 	CooldownUntil *time.Time
 }
 
+func isExplicitModelFailureStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusBadRequest, http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusUnprocessableEntity:
+		return true
+	default:
+		return false
+	}
+}
+
 func classifyUpstreamHTTPFailure(statusCode int, body []byte, bindingID int64, codexErr codexOAuthUpstreamErr) upstreamHTTPFailureClassification {
 	if codexErr.Kind != codexOAuthErrNone {
 		return upstreamHTTPFailureClassification{
@@ -113,9 +122,7 @@ func classifyUpstreamHTTPFailure(statusCode int, body []byte, bindingID int64, c
 }
 
 func isExplicitChannelModelFailure(statusCode int, body []byte) bool {
-	switch statusCode {
-	case http.StatusBadRequest, http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusUnprocessableEntity:
-	default:
+	if !isExplicitModelFailureStatus(statusCode) {
 		return false
 	}
 
@@ -139,7 +146,6 @@ func isExplicitChannelModelFailure(statusCode int, body []byte) bool {
 	}
 	if containsAny(msg,
 		"model not found",
-		"not found",
 		"no such model",
 		"unknown model",
 		"invalid model",

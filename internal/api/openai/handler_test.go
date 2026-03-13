@@ -356,6 +356,20 @@ func TestClassifyUpstreamHTTPFailure_RouteMissingStaysChannelScoped(t *testing.T
 	}
 }
 
+func TestClassifyUpstreamHTTPFailure_GenericNotFoundWithModelMentionStaysChannelScoped(t *testing.T) {
+	body := []byte(`{"error":{"message":"model route not found on upstream"}}`)
+	got := classifyUpstreamHTTPFailure(http.StatusNotFound, body, 101, codexOAuthUpstreamErr{})
+	if !got.Retriable {
+		t.Fatalf("expected generic route/resource 404 to stay retriable")
+	}
+	if got.Scope != scheduler.FailureScopeChannel {
+		t.Fatalf("scope=%q want=%q", got.Scope, scheduler.FailureScopeChannel)
+	}
+	if got.ErrorClass != "upstream_status" {
+		t.Fatalf("error_class=%q want=%q", got.ErrorClass, "upstream_status")
+	}
+}
+
 func TestIsRetriableStreamFailure(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -4927,6 +4941,70 @@ func TestResponses_FailoverExhausted429MapsToRateLimitError(t *testing.T) {
 	}
 	if rr.Header().Get("Retry-After") != "30" {
 		t.Fatalf("expected Retry-After=30, got=%q", rr.Header().Get("Retry-After"))
+	}
+}
+
+func TestResponses_FailoverExhaustedModelFailurePreservesUpstream4xx(t *testing.T) {
+	fs := &fakeStore{
+		channels: []store.UpstreamChannel{
+			{ID: 1, Type: store.UpstreamTypeOpenAICompatible, Status: 1},
+		},
+		endpoints: map[int64][]store.UpstreamEndpoint{
+			1: {
+				{ID: 11, ChannelID: 1, BaseURL: "https://a.example", Status: 1},
+			},
+		},
+		creds: map[int64][]store.OpenAICompatibleCredential{
+			11: {
+				{ID: 1, EndpointID: 11, Status: 1},
+			},
+		},
+		models: map[string]store.ManagedModel{
+			"m1": {ID: 1, PublicID: "m1", Status: 1},
+		},
+		bindings: map[string][]store.ChannelModelBinding{
+			"m1": {
+				{ID: 101, ChannelID: 1, ChannelType: store.UpstreamTypeOpenAICompatible, PublicID: "m1", UpstreamModel: "bad-upstream", Status: 1},
+			},
+		},
+	}
+
+	sched := scheduler.New(fs)
+	h := NewHandler(fs, fs, sched, statusDoer{
+		status: http.StatusNotFound,
+		body:   `{"error":{"code":"model_not_found","message":"model bad-upstream not found"}}`,
+	}, nil, nil, nil, fakeAudit{}, nil, nil, upstream.SSEPumpOptions{}, nil)
+	h.SetGatewayPolicy(GatewayPolicy{MaxFailoverSwitches: 1})
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/responses", bytes.NewReader([]byte(`{"model":"m1","input":"hi"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	tokenID := int64(123)
+	p := auth.Principal{ActorType: auth.ActorTypeToken, UserID: 10, Role: store.UserRoleUser, TokenID: &tokenID, Groups: []string{store.DefaultGroupName}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+
+	rr := httptest.NewRecorder()
+	middleware.Chain(http.HandlerFunc(h.Responses), middleware.BodyCache(1<<20)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"api_error"`) {
+		t.Fatalf("expected api_error body, got=%s", rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "model bad-upstream not found") {
+		t.Fatalf("expected upstream model message to be preserved, got=%s", rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "上游不可用") {
+		t.Fatalf("expected generic upstream unavailable message to be absent, got=%s", rr.Body.String())
+	}
+
+	channelRuntime := sched.RuntimeChannelStats(1)
+	if channelRuntime.FailScore != 0 || channelRuntime.BannedUntil != nil {
+		t.Fatalf("expected channel runtime to stay healthy, got=%+v", channelRuntime)
+	}
+	modelRuntime := sched.RuntimeChannelModelStats(101)
+	if modelRuntime.FailScore == 0 || modelRuntime.BannedUntil == nil {
+		t.Fatalf("expected binding runtime to be banned, got=%+v", modelRuntime)
 	}
 }
 
