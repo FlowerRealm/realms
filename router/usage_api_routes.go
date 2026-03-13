@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 
+	"realms/internal/modelcheck"
 	"realms/internal/store"
 )
 
@@ -147,15 +148,7 @@ type usageEventModelCheckAPI struct {
 }
 
 func usageEventModelMismatch(forwardedModel *string, upstreamResponseModel *string) bool {
-	if forwardedModel == nil || upstreamResponseModel == nil {
-		return false
-	}
-	forwarded := strings.TrimSpace(*forwardedModel)
-	upstream := strings.TrimSpace(*upstreamResponseModel)
-	if forwarded == "" || upstream == "" {
-		return false
-	}
-	return forwarded != upstream
+	return modelcheck.Mismatch(forwardedModel, upstreamResponseModel)
 }
 
 func buildUsageEventModelCheck(ev store.UsageEvent) *usageEventModelCheckAPI {

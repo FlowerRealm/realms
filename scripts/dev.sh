@@ -9,6 +9,117 @@ FRONTEND_WATCH_PID=""
 FRONTEND_WATCH_OWN_GROUP="false"
 AIR_PID=""
 
+trim_leading_whitespace() {
+  local value="$1"
+  printf '%s' "${value#"${value%%[![:space:]]*}"}"
+}
+
+trim_trailing_whitespace() {
+  local value="$1"
+  printf '%s' "${value%"${value##*[![:space:]]}"}"
+}
+
+trim_whitespace() {
+  local value="$1"
+  value="$(trim_leading_whitespace "${value}")"
+  trim_trailing_whitespace "${value}"
+}
+
+strip_inline_comment() {
+  local value="$1"
+  local result=""
+  local quote=""
+  local prev=""
+  local ch=""
+  local i=0
+
+  for ((i = 0; i < ${#value}; i++)); do
+    ch="${value:i:1}"
+    if [[ -n "${quote}" ]]; then
+      if [[ "${ch}" == "${quote}" && "${prev}" != "\\" ]]; then
+        quote=""
+      fi
+      result+="${ch}"
+    else
+      case "${ch}" in
+        "'"|'"')
+          quote="${ch}"
+          result+="${ch}"
+          ;;
+        "#")
+          if [[ -z "${prev}" || "${prev}" =~ [[:space:]] ]]; then
+            break
+          fi
+          result+="${ch}"
+          ;;
+        *)
+          result+="${ch}"
+          ;;
+      esac
+    fi
+    prev="${ch}"
+  done
+
+  trim_trailing_whitespace "${result}"
+}
+
+unquote_dotenv_value() {
+  local value="$1"
+
+  if [[ "${value}" =~ ^\".*\"$ ]]; then
+    value="${value:1:${#value}-2}"
+    value="${value//\\\"/\"}"
+    printf '%s' "${value}"
+    return
+  fi
+
+  if [[ "${value}" =~ ^\'.*\'$ ]]; then
+    printf '%s' "${value:1:${#value}-2}"
+    return
+  fi
+
+  printf '%s' "${value}"
+}
+
+load_dotenv_file() {
+  local env_file="$1"
+  local line=""
+  local key=""
+  local value=""
+
+  [[ -f "${env_file}" ]] || return 0
+
+  # .env 是配置数据，不是 shell 脚本；这里按 dotenv 键值对字面解析。
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="${line%$'\r'}"
+    line="$(trim_whitespace "${line}")"
+
+    if [[ -z "${line}" || "${line}" == \#* ]]; then
+      continue
+    fi
+
+    if [[ "${line}" == export[[:space:]]* ]]; then
+      line="$(trim_leading_whitespace "${line#export}")"
+    fi
+
+    if [[ "${line}" != *=* ]]; then
+      continue
+    fi
+
+    key="$(trim_whitespace "${line%%=*}")"
+    value="${line#*=}"
+
+    if [[ ! "${key}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      continue
+    fi
+
+    value="$(strip_inline_comment "${value}")"
+    value="$(trim_leading_whitespace "${value}")"
+    value="$(unquote_dotenv_value "${value}")"
+    export "${key}=${value}"
+  done <"${env_file}"
+}
+
 stop_frontend_watch() {
   if [[ -z "${FRONTEND_WATCH_PID}" ]]; then
     return
@@ -66,12 +177,7 @@ if [[ ! -f "./.env" ]]; then
   echo "已生成 .env（来自 .env.example）"
 fi
 
-set -a
-if [[ -f "./.env" ]]; then
-  # shellcheck disable=SC1091
-  source "./.env"
-fi
-set +a
+load_dotenv_file "./.env"
 
 # dev：默认启用 CLI 渠道测试，并尽力拉起本地 cli-runner（docker compose）。
 if [[ ! "${REALMS_DEV_CLI_RUNNER:-}" =~ ^(0|false|no|off|skip)$ ]]; then
