@@ -503,13 +503,14 @@ func selectionMatchesConstraints(sel Selection, c Constraints) bool {
 }
 
 func channelSupportsRequiredAPI(ch store.UpstreamChannel, requiredAPI string) bool {
+	chatEnabled, responsesEnabled := resolvedAPICapabilities(ch.Type, ch.Setting.ChatCompletionsEnabled, ch.Setting.ResponsesEnabled)
 	switch strings.TrimSpace(requiredAPI) {
 	case "":
 		return true
 	case RequiredAPIResponses:
-		return ch.Setting.ResponsesEnabled
+		return responsesEnabled
 	case RequiredAPIChatCompletions:
-		return ch.Setting.ChatCompletionsEnabled
+		return chatEnabled
 	case RequiredAPIMessages:
 		return ch.Type == store.UpstreamTypeAnthropic
 	default:
@@ -518,17 +519,32 @@ func channelSupportsRequiredAPI(ch store.UpstreamChannel, requiredAPI string) bo
 }
 
 func selectionSupportsRequiredAPI(sel Selection, requiredAPI string) bool {
+	chatEnabled, responsesEnabled := resolvedAPICapabilities(sel.ChannelType, sel.ChatCompletionsEnabled, sel.ResponsesEnabled)
 	switch strings.TrimSpace(requiredAPI) {
 	case "":
 		return true
 	case RequiredAPIResponses:
-		return sel.ResponsesEnabled
+		return responsesEnabled
 	case RequiredAPIChatCompletions:
-		return sel.ChatCompletionsEnabled
+		return chatEnabled
 	case RequiredAPIMessages:
 		return sel.ChannelType == store.UpstreamTypeAnthropic
 	default:
 		return true
+	}
+}
+
+func resolvedAPICapabilities(channelType string, chatEnabled bool, responsesEnabled bool) (bool, bool) {
+	if chatEnabled || responsesEnabled {
+		return chatEnabled, responsesEnabled
+	}
+	switch strings.TrimSpace(channelType) {
+	case store.UpstreamTypeOpenAICompatible:
+		return true, true
+	case store.UpstreamTypeCodexOAuth:
+		return false, true
+	default:
+		return false, false
 	}
 }
 

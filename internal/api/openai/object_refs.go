@@ -110,7 +110,7 @@ func (h *Handler) recordOpenAIObjectRef(ctx context.Context, objectType string, 
 	})
 }
 
-func (h *Handler) resolveFixedRouteSelection(ctx context.Context, userID int64, sel scheduler.Selection) scheduler.Selection {
+func (h *Handler) resolveFixedRouteSelection(ctx context.Context, userID int64, sel scheduler.Selection, requiredAPI string) scheduler.Selection {
 	if h == nil || h.sched == nil {
 		return sel
 	}
@@ -123,18 +123,7 @@ func (h *Handler) resolveFixedRouteSelection(ctx context.Context, userID int64, 
 	cons := scheduler.Constraints{
 		RequireChannelID:   sel.ChannelID,
 		RequireChannelType: sel.ChannelType,
-		RequireAPI: func() string {
-			if sel.ChannelType == store.UpstreamTypeAnthropic {
-				return scheduler.RequiredAPIMessages
-			}
-			if sel.ChatCompletionsEnabled && !sel.ResponsesEnabled {
-				return scheduler.RequiredAPIChatCompletions
-			}
-			if sel.ResponsesEnabled {
-				return scheduler.RequiredAPIResponses
-			}
-			return ""
-		}(),
+		RequireAPI:         strings.TrimSpace(requiredAPI),
 	}
 	next, err := h.sched.SelectWithConstraints(ctx, userID, "", cons)
 	if err != nil || next.EndpointID <= 0 {
@@ -143,7 +132,7 @@ func (h *Handler) resolveFixedRouteSelection(ctx context.Context, userID int64, 
 	return next
 }
 
-func (h *Handler) ownedSelection(ctx context.Context, p auth.Principal, objectType string, objectID string) (scheduler.Selection, bool) {
+func (h *Handler) ownedSelection(ctx context.Context, p auth.Principal, objectType string, objectID string, requiredAPI string) (scheduler.Selection, bool) {
 	if h == nil || h.refs == nil {
 		return scheduler.Selection{}, false
 	}
@@ -158,7 +147,7 @@ func (h *Handler) ownedSelection(ctx context.Context, p auth.Principal, objectTy
 	if err := json.Unmarshal([]byte(ref.SelectionJSON), &sel); err != nil {
 		return scheduler.Selection{}, false
 	}
-	return h.resolveFixedRouteSelection(ctx, p.UserID, sel), true
+	return h.resolveFixedRouteSelection(ctx, p.UserID, sel, requiredAPI), true
 }
 
 func writeNotFound(w http.ResponseWriter) {
