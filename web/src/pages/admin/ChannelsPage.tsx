@@ -460,56 +460,6 @@ function ChannelCommonTab({
                 <input
                   className="form-check-input"
                   type="checkbox"
-                  id="setting_chat_completions_enabled"
-                  checked={settingChatCompletionsEnabled}
-                  disabled={
-                    channelType === "codex_oauth" || channelType === "anthropic"
-                  }
-                  onChange={(e) =>
-                    setSettingChatCompletionsEnabled(e.target.checked)
-                  }
-                />
-                <label
-                  className="form-check-label"
-                  htmlFor="setting_chat_completions_enabled"
-                >
-                  启用 <code>/v1/chat/completions</code>
-                </label>
-                <div className="form-text small text-muted">
-                  {channelType === "codex_oauth"
-                    ? "codex_oauth 上游只支持 responses。"
-                    : channelType === "anthropic"
-                      ? "anthropic 上游不支持 OpenAI chat/completions。"
-                    : "关闭后：该渠道不会参与 chat/completions 请求选路。"}
-                </div>
-              </div>
-              <div className="form-check">
-                <input
-                  className="form-check-input"
-                  type="checkbox"
-                  id="setting_responses_enabled"
-                  checked={settingResponsesEnabled}
-                  disabled={channelType === "anthropic"}
-                  onChange={(e) =>
-                    setSettingResponsesEnabled(e.target.checked)
-                  }
-                />
-                <label
-                  className="form-check-label"
-                  htmlFor="setting_responses_enabled"
-                >
-                  启用 <code>/v1/responses</code>
-                </label>
-                <div className="form-text small text-muted">
-                  {channelType === "anthropic"
-                    ? "anthropic 上游不支持 OpenAI responses。"
-                    : "关闭后：该渠道不会参与 responses 请求选路。"}
-                </div>
-              </div>
-              <div className="form-check">
-                <input
-                  className="form-check-input"
-                  type="checkbox"
                   id="editAllowServiceTier"
                   checked={editAllowServiceTier}
                   onChange={(e) => setEditAllowServiceTier(e.target.checked)}
@@ -948,6 +898,54 @@ function ChannelAdvancedTab({
                   将流式 <code>reasoning_content</code> 转为{" "}
                   <code>&lt;think&gt;...&lt;/think&gt;</code> 并拼接到{" "}
                   <code>content</code> 中返回。
+                </div>
+              </div>
+              <div className="form-check">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="setting_chat_completions_enabled"
+                  checked={settingChatCompletionsEnabled}
+                  disabled={
+                    channelType === "codex_oauth" || channelType === "anthropic"
+                  }
+                  onChange={(e) =>
+                    setSettingChatCompletionsEnabled(e.target.checked)
+                  }
+                />
+                <label
+                  className="form-check-label"
+                  htmlFor="setting_chat_completions_enabled"
+                >
+                  启用 <code>/v1/chat/completions</code>
+                </label>
+                <div className="form-text small text-muted">
+                  {channelType === "codex_oauth"
+                    ? "codex_oauth 上游只支持 responses。"
+                    : channelType === "anthropic"
+                      ? "anthropic 上游不支持 OpenAI chat/completions。"
+                      : "关闭后：该渠道不会参与 chat/completions 请求选路。"}
+                </div>
+              </div>
+              <div className="form-check">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="setting_responses_enabled"
+                  checked={settingResponsesEnabled}
+                  disabled={channelType === "anthropic"}
+                  onChange={(e) => setSettingResponsesEnabled(e.target.checked)}
+                />
+                <label
+                  className="form-check-label"
+                  htmlFor="setting_responses_enabled"
+                >
+                  启用 <code>/v1/responses</code>
+                </label>
+                <div className="form-text small text-muted">
+                  {channelType === "anthropic"
+                    ? "anthropic 上游不支持 OpenAI responses。"
+                    : "关闭后：该渠道不会参与 responses 请求选路。"}
                 </div>
               </div>
               <div className="form-check">
