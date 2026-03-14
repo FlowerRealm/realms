@@ -5,6 +5,7 @@ import { getDashboard, type DashboardData } from '../api/dashboard';
 import { getUsageTimeSeries, type UsageTimeSeriesPoint } from '../api/usage';
 import { SegmentedFrame } from '../components/SegmentedFrame';
 import { formatIntComma } from '../format/int';
+import { fillDailyBuckets } from '../utils/timeSeries';
 
 type ChartInstance = {
   destroy?: () => void;
@@ -25,6 +26,8 @@ export function DashboardPage() {
   const detailTimeLineRef = useRef<HTMLCanvasElement | null>(null);
   const detailTimeLineChartRef = useRef<ChartInstance | null>(null);
   const [detailSeries, setDetailSeries] = useState<UsageTimeSeriesPoint[]>([]);
+  const [detailSeriesStart, setDetailSeriesStart] = useState('');
+  const [detailSeriesEnd, setDetailSeriesEnd] = useState('');
   const [detailSeriesLoading, setDetailSeriesLoading] = useState(false);
   const [detailSeriesErr, setDetailSeriesErr] = useState('');
   const [detailField, setDetailField] = useState<'requests' | 'tokens' | 'committed_usd' | 'cache_ratio' | 'avg_first_token_latency' | 'tokens_per_second'>(
@@ -80,10 +83,29 @@ export function DashboardPage() {
         const res = await getUsageTimeSeries(undefined, undefined, detailGranularity);
         if (!res.success) throw new Error(res.message || '时间序列加载失败');
         if (!active) return;
-        setDetailSeries(res.data?.points || []);
+        const start = res.data?.start || '';
+        const end = res.data?.end || '';
+        const points = res.data?.points || [];
+        setDetailSeriesStart(start);
+        setDetailSeriesEnd(end);
+        setDetailSeries(
+          detailGranularity === 'day'
+            ? fillDailyBuckets(points, start, end, (bucket) => ({
+                bucket,
+                requests: 0,
+                tokens: 0,
+                committed_usd: 0,
+                cache_ratio: 0,
+                avg_first_token_latency: 0,
+                tokens_per_second: 0,
+              }))
+            : points,
+        );
       } catch (e) {
         if (!active) return;
         setDetailSeries([]);
+        setDetailSeriesStart('');
+        setDetailSeriesEnd('');
         setDetailSeriesErr(e instanceof Error ? e.message : '时间序列加载失败');
       } finally {
         if (active) setDetailSeriesLoading(false);
@@ -403,6 +425,9 @@ export function DashboardPage() {
               </div>
             </div>
             {detailSeriesErr ? <div className="alert alert-danger py-2 mb-2">{detailSeriesErr}</div> : null}
+            <div className="small text-muted mb-2">
+              时间区间：{detailSeriesStart || '-'} ~ {detailSeriesEnd || '-'}
+            </div>
             {detailSeriesLoading ? (
               <div className="text-muted small py-4">时间序列加载中…</div>
             ) : (

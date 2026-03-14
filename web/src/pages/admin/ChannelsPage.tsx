@@ -62,6 +62,7 @@ import {
 } from "../../api/channelModels";
 import { listSelectableManagedModelIDsAdmin } from "../../api/models";
 import { DateRangePicker } from "../../components/DateRangePicker";
+import { fillDailyBuckets } from "../../utils/timeSeries";
 
 function channelTypeLabel(t: string): string {
   if (t === "openai_compatible") return "OpenAI 兼容";
@@ -1278,14 +1279,15 @@ export function ChannelsPage() {
   const [usageStart, setUsageStart] = useState("");
   const [usageEnd, setUsageEnd] = useState("");
   const [usageAllTime, setUsageAllTime] = useState(false);
-  const [usageResolvedStart, setUsageResolvedStart] = useState("");
-  const [usageResolvedEnd, setUsageResolvedEnd] = useState("");
+  const [usageRangeCustomized, setUsageRangeCustomized] = useState(false);
   const [usageRangeDirty, setUsageRangeDirty] = useState(false);
   const detailTimeLineRef = useRef<HTMLCanvasElement | null>(null);
   const detailTimeLineChartRef = useRef<ChartInstance | null>(null);
   const [detailSeries, setDetailSeries] = useState<ChannelTimeSeriesPoint[]>(
     [],
   );
+  const [detailSeriesStart, setDetailSeriesStart] = useState("");
+  const [detailSeriesEnd, setDetailSeriesEnd] = useState("");
   const [detailSeriesLoading, setDetailSeriesLoading] = useState(false);
   const [detailSeriesErr, setDetailSeriesErr] = useState("");
   const [detailPanelByChannel, setDetailPanelByChannel] = useState<
@@ -1555,8 +1557,6 @@ export function ChannelsPage() {
           pageChannels,
         ).filter((ch) => (allowCodexOAuth ? true : ch.type !== "codex_oauth"));
         channelsRef.current = normalizedChannels;
-        setUsageResolvedStart(pageRes.data?.start || "");
-        setUsageResolvedEnd(pageRes.data?.end || "");
         if (!allTimeActive) {
           setUsageStart(pageRes.data?.start || "");
           setUsageEnd(pageRes.data?.end || "");
@@ -1594,6 +1594,8 @@ export function ChannelsPage() {
   useEffect(() => {
     if (!expandedChannelID) {
       setDetailSeries([]);
+      setDetailSeriesStart("");
+      setDetailSeriesEnd("");
       setDetailSeriesErr("");
       setDetailSeriesLoading(false);
       return;
@@ -1605,18 +1607,46 @@ export function ChannelsPage() {
       try {
         const allTimeActive =
           usageAllTime && !usageStart.trim() && !usageEnd.trim();
+        const implicitDayRange =
+          detailGranularity === "day" &&
+          !usageRangeCustomized &&
+          !allTimeActive;
         const res = await getChannelTimeSeries(expandedChannelID, {
-          start: allTimeActive ? undefined : usageStart.trim() || undefined,
-          end: allTimeActive ? undefined : usageEnd.trim() || undefined,
+          start:
+            allTimeActive || implicitDayRange
+              ? undefined
+              : usageStart.trim() || undefined,
+          end:
+            allTimeActive || implicitDayRange
+              ? undefined
+              : usageEnd.trim() || undefined,
           all_time: allTimeActive ? true : undefined,
           granularity: detailGranularity,
         });
         if (!res.success) throw new Error(res.message || "加载时间序列失败");
         if (!active) return;
-        setDetailSeries(res.data?.points || []);
+        const startValue = res.data?.start || "";
+        const endValue = res.data?.end || "";
+        const points = res.data?.points || [];
+        setDetailSeriesStart(startValue);
+        setDetailSeriesEnd(endValue);
+        setDetailSeries(
+          detailGranularity === "day"
+            ? fillDailyBuckets(points, startValue, endValue, (bucket) => ({
+                bucket,
+                committed_usd: 0,
+                tokens: 0,
+                cache_ratio: 0,
+                avg_first_token_latency: 0,
+                tokens_per_second: 0,
+              }))
+            : points,
+        );
       } catch (e) {
         if (!active) return;
         setDetailSeries([]);
+        setDetailSeriesStart("");
+        setDetailSeriesEnd("");
         setDetailSeriesErr(e instanceof Error ? e.message : "加载时间序列失败");
       } finally {
         if (active) setDetailSeriesLoading(false);
@@ -1628,6 +1658,7 @@ export function ChannelsPage() {
   }, [
     expandedChannelID,
     usageAllTime,
+    usageRangeCustomized,
     usageStart,
     usageEnd,
     detailGranularity,
@@ -2222,6 +2253,7 @@ export function ChannelsPage() {
               end={usageEnd}
               onChange={(r) => {
                 const isAll = !r.start.trim() && !r.end.trim();
+                setUsageRangeCustomized(true);
                 setUsageAllTime(isAll);
                 if (isAll) setDetailGranularity("day");
                 setUsageStart(r.start);
@@ -2280,6 +2312,7 @@ export function ChannelsPage() {
               disabled={loading}
               onClick={() => {
                 setUsageAllTime(false);
+                setUsageRangeCustomized(false);
                 setUsageStart("");
                 setUsageEnd("");
                 setUsageRangeDirty(true);
@@ -3360,14 +3393,8 @@ export function ChannelsPage() {
                                           </div>
                                         </div>
                                         <div className="small text-muted mb-2">
-                                          时间区间：
-                                          {(usageAllTime
-                                            ? usageResolvedStart
-                                            : usageStart) || "-"}{" "}
-                                          ~{" "}
-                                          {(usageAllTime
-                                            ? usageResolvedEnd
-                                            : usageEnd) || "-"}
+                                          时间区间：{detailSeriesStart || "-"} ~{" "}
+                                          {detailSeriesEnd || "-"}
                                         </div>
                                         {detailSeriesErr ? (
                                           <div className="alert alert-danger py-2 mb-2">

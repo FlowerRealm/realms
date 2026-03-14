@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -408,6 +409,127 @@ func TestChannels_PageAndInUse_RootFlow(t *testing.T) {
 	}
 	if tsResp.Data.Granularity != "day" {
 		t.Fatalf("expected granularity=day, got %q", tsResp.Data.Granularity)
+	}
+}
+
+func TestChannelTimeSeries_DayDefaultsToLast30Days(t *testing.T) {
+	st, db, closeDB := newTestSQLiteStoreWithDB(t)
+	defer closeDB()
+
+	oldNow := channelTimeSeriesNow
+	fixedNow := time.Date(2026, 3, 14, 4, 30, 0, 0, time.UTC)
+	channelTimeSeriesNow = func() time.Time { return fixedNow }
+	defer func() {
+		channelTimeSeriesNow = oldNow
+	}()
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	userID, err := st.CreateUser(ctx, "root_channel_30d@example.com", "rootchannel30d", pwHash, store.UserRoleRoot)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	tokenID, _, err := st.CreateUserToken(ctx, userID, nil, "tok_channel_30d")
+	if err != nil {
+		t.Fatalf("CreateUserToken: %v", err)
+	}
+	channelID, err := st.CreateUpstreamChannel(ctx, store.UpstreamTypeOpenAICompatible, "channel-30d", "", 0, false, false, false, false)
+	if err != nil {
+		t.Fatalf("CreateUpstreamChannel: %v", err)
+	}
+
+	createEvent := func(requestID string, at time.Time) int64 {
+		t.Helper()
+		usageID, err := st.ReserveUsage(ctx, store.ReserveUsageInput{
+			RequestID:        requestID,
+			UserID:           userID,
+			TokenID:          tokenID,
+			ReservedUSD:      decimal.Zero,
+			ReserveExpiresAt: fixedNow.Add(time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("ReserveUsage(%s): %v", requestID, err)
+		}
+		inTokens := int64(50)
+		outTokens := int64(25)
+		if err := st.CommitUsage(ctx, store.CommitUsageInput{
+			UsageEventID:      usageID,
+			UpstreamChannelID: &channelID,
+			InputTokens:       &inTokens,
+			OutputTokens:      &outTokens,
+			CommittedUSD:      decimal.RequireFromString("1.11"),
+		}); err != nil {
+			t.Fatalf("CommitUsage(%s): %v", requestID, err)
+		}
+		if err := st.FinalizeUsageEvent(ctx, store.FinalizeUsageEventInput{
+			UsageEventID:        usageID,
+			Endpoint:            "/v1/responses",
+			Method:              "POST",
+			StatusCode:          200,
+			LatencyMS:           900,
+			FirstTokenLatencyMS: 120,
+			UpstreamChannelID:   &channelID,
+		}); err != nil {
+			t.Fatalf("FinalizeUsageEvent(%s): %v", requestID, err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE usage_events SET time=?, created_at=?, updated_at=? WHERE id=?`,
+			at.UTC().Format("2006-01-02 15:04:05"),
+			at.UTC().Format("2006-01-02 15:04:05"),
+			at.UTC().Format("2006-01-02 15:04:05"),
+			usageID,
+		); err != nil {
+			t.Fatalf("UPDATE usage_events(%s): %v", requestID, err)
+		}
+		return usageID
+	}
+
+	createEvent("req_channel_30d_in", time.Date(2026, 3, 3, 11, 0, 0, 0, time.UTC))
+	createEvent("req_channel_30d_out", time.Date(2026, 1, 31, 11, 0, 0, 0, time.UTC))
+
+	engine, cookieName := newTestEngine(t, st)
+	sessionCookie := loginCookie(t, engine, cookieName, "root_channel_30d@example.com", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/api/channel/"+strconv.FormatInt(channelID, 10)+"/timeseries?granularity=day", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("channel timeseries(day) status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Start       string `json:"start"`
+			End         string `json:"end"`
+			Granularity string `json:"granularity"`
+			Points      []struct {
+				Bucket string `json:"bucket"`
+			} `json:"points"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal channel timeseries(day): %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("channel timeseries(day) expected success, got message=%q", got.Message)
+	}
+	if got.Data.Start != "2026-02-13" || got.Data.End != "2026-03-14" {
+		t.Fatalf("expected default range 2026-02-13~2026-03-14, got %s~%s", got.Data.Start, got.Data.End)
+	}
+	if got.Data.Granularity != "day" {
+		t.Fatalf("expected granularity=day, got %q", got.Data.Granularity)
+	}
+	if len(got.Data.Points) != 1 {
+		t.Fatalf("expected 1 point inside 30-day default range, got %d", len(got.Data.Points))
+	}
+	if !strings.HasPrefix(got.Data.Points[0].Bucket, "2026-03-03") {
+		t.Fatalf("expected in-range bucket on 2026-03-03, got %q", got.Data.Points[0].Bucket)
 	}
 }
 

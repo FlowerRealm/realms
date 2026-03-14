@@ -91,6 +91,10 @@ var usageLeaderboardNow = func() time.Time {
 	return time.Now().UTC()
 }
 
+var usageTimeSeriesNow = func() time.Time {
+	return time.Now().UTC()
+}
+
 func setUsageAPIRoutes(r gin.IRoutes, opts Options) {
 	authn := requireUserSession(opts)
 
@@ -574,18 +578,6 @@ func usageTimeSeriesHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "tz 不合法（需为 IANA 时区名，如 Asia/Shanghai）"})
 			return
 		}
-		now := time.Now().UTC()
-		startStr := strings.TrimSpace(c.Query("start"))
-		endStr := strings.TrimSpace(c.Query("end"))
-		allTime := queryBool(c.Query("all_time"))
-
-		rng, ok := resolveUsageDateRange(c, opts, loc, now, startStr, endStr, userID, tokenID, allTime)
-		if !ok {
-			return
-		}
-		startResp := rng.sinceLocal.Format("2006-01-02")
-		endResp := rng.untilLocal.Add(-time.Second).Format("2006-01-02")
-
 		granularity := strings.TrimSpace(strings.ToLower(c.Query("granularity")))
 		if granularity == "" {
 			granularity = "hour"
@@ -594,6 +586,24 @@ func usageTimeSeriesHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "granularity 仅支持 hour/day"})
 			return
 		}
+
+		now := usageTimeSeriesNow()
+		startStr, endStr := defaultDayTimeSeriesDateRange(
+			now,
+			loc,
+			c.Query("start"),
+			c.Query("end"),
+			granularity,
+			queryBool(c.Query("all_time")),
+		)
+		allTime := queryBool(c.Query("all_time"))
+
+		rng, ok := resolveUsageDateRange(c, opts, loc, now, startStr, endStr, userID, tokenID, allTime)
+		if !ok {
+			return
+		}
+		startResp := rng.sinceLocal.Format("2006-01-02")
+		endResp := rng.untilLocal.Add(-time.Second).Format("2006-01-02")
 
 		var rows []store.ChannelTimeSeriesUsageStats
 		var err error

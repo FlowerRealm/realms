@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -447,6 +448,78 @@ func TestAdminUsagePage_WindowAndTimeseries_IgnoreNonCommittedRows(t *testing.T)
 	}
 	if point.TokensPerSecond != 62.5 {
 		t.Fatalf("expected point tokens_per_second=62.5, got %f", point.TokensPerSecond)
+	}
+}
+
+func TestAdminUsageTimeSeries_DayDefaultsToLast30Days(t *testing.T) {
+	st, db, closeDB := newTestSQLiteStoreWithDB(t)
+	defer closeDB()
+
+	oldNow := adminUsageTimeSeriesNow
+	fixedNow := time.Date(2026, 3, 14, 4, 30, 0, 0, time.UTC)
+	adminUsageTimeSeriesNow = func() time.Time { return fixedNow }
+	defer func() {
+		adminUsageTimeSeriesNow = oldNow
+	}()
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	userID, err := st.CreateUser(ctx, "root_30d@example.com", "root30d", pwHash, store.UserRoleRoot)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	tokenID, _, err := st.CreateUserToken(ctx, userID, nil, "tok_admin_30d")
+	if err != nil {
+		t.Fatalf("CreateUserToken: %v", err)
+	}
+
+	insertUsageEventRow(t, db, "req_admin_30d_in", userID, tokenID, store.UsageStateCommitted, time.Date(2026, 3, 5, 12, 0, 0, 0, time.UTC), 40, 20, "3.25", "0", 700, 100)
+	insertUsageEventRow(t, db, "req_admin_30d_out", userID, tokenID, store.UsageStateCommitted, time.Date(2026, 1, 31, 9, 0, 0, 0, time.UTC), 10, 5, "0.75", "0", 600, 90)
+
+	engine, cookieName := newTestEngine(t, st)
+	sessionCookie := loginCookie(t, engine, cookieName, "root_30d@example.com", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/usage/timeseries?granularity=day", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("admin usage timeseries(day) status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Start       string `json:"start"`
+			End         string `json:"end"`
+			Granularity string `json:"granularity"`
+			Points      []struct {
+				Bucket string `json:"bucket"`
+			} `json:"points"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal admin usage timeseries(day): %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("admin usage timeseries(day) expected success, got message=%q", got.Message)
+	}
+	if got.Data.Start != "2026-02-13" || got.Data.End != "2026-03-14" {
+		t.Fatalf("expected default range 2026-02-13~2026-03-14, got %s~%s", got.Data.Start, got.Data.End)
+	}
+	if got.Data.Granularity != "day" {
+		t.Fatalf("expected granularity=day, got %q", got.Data.Granularity)
+	}
+	if len(got.Data.Points) != 1 {
+		t.Fatalf("expected 1 point inside 30-day default range, got %d", len(got.Data.Points))
+	}
+	if !strings.HasPrefix(got.Data.Points[0].Bucket, "2026-03-05") {
+		t.Fatalf("expected in-range bucket on 2026-03-05, got %q", got.Data.Points[0].Bucket)
 	}
 }
 

@@ -225,6 +225,10 @@ type channelTimeSeriesResponse struct {
 	Points        []channelTimeSeriesPointView `json:"points"`
 }
 
+var channelTimeSeriesNow = func() time.Time {
+	return time.Now().UTC()
+}
+
 func formatAvgFirstTokenLatency(ms float64, samples int64) string {
 	if samples <= 0 || ms <= 0 {
 		return "-"
@@ -441,14 +445,12 @@ func channelTimeSeriesHandler(opts Options) gin.HandlerFunc {
 
 		loc, tzName := adminTimeLocation(c.Request.Context(), opts)
 
-		nowUTC := time.Now().UTC()
+		nowUTC := channelTimeSeriesNow()
 		nowLocal := nowUTC.In(loc)
 		todayStartLocal := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc)
 		todayStr := todayStartLocal.Format("2006-01-02")
 
 		q := c.Request.URL.Query()
-		startStr := strings.TrimSpace(q.Get("start"))
-		endStr := strings.TrimSpace(q.Get("end"))
 		allTime := queryBool(q.Get("all_time"))
 		granularity := strings.TrimSpace(strings.ToLower(q.Get("granularity")))
 		if granularity == "" {
@@ -458,6 +460,14 @@ func channelTimeSeriesHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "granularity 仅支持 hour/day"})
 			return
 		}
+		startStr, endStr := defaultDayTimeSeriesDateRange(
+			nowUTC,
+			loc,
+			q.Get("start"),
+			q.Get("end"),
+			granularity,
+			allTime,
+		)
 		if allTime {
 			s, e, has, err := resolveAllTimeChannelStartEnd(c.Request.Context(), opts, loc, todayStr, channelID)
 			if err != nil {
