@@ -32,6 +32,7 @@ import {
   formatSecondsFromMilliseconds,
 } from "../../format/duration";
 import { formatIntComma } from "../../format/int";
+import { fillDailyBuckets } from "../../utils/timeSeries";
 
 type ChartInstance = {
   destroy?: () => void;
@@ -104,6 +105,7 @@ export function UsageAdminPage() {
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [allTime, setAllTime] = useState(false);
+  const [dateRangeCustomized, setDateRangeCustomized] = useState(false);
   const [limit, setLimit] = useState(50);
   const [beforeID, setBeforeID] = useState<number | undefined>(undefined);
   const [afterID, setAfterID] = useState<number | undefined>(undefined);
@@ -131,6 +133,8 @@ export function UsageAdminPage() {
   const [detailSeries, setDetailSeries] = useState<AdminUsageTimeSeriesPoint[]>(
     [],
   );
+  const [detailSeriesStart, setDetailSeriesStart] = useState("");
+  const [detailSeriesEnd, setDetailSeriesEnd] = useState("");
   const [detailSeriesLoading, setDetailSeriesLoading] = useState(false);
   const [detailSeriesErr, setDetailSeriesErr] = useState("");
   const [detailField, setDetailField] = useState<
@@ -298,6 +302,8 @@ export function UsageAdminPage() {
   useEffect(() => {
     if (!hasSeriesSource) {
       setDetailSeries([]);
+      setDetailSeriesStart("");
+      setDetailSeriesEnd("");
       setDetailSeriesErr("");
       setDetailSeriesLoading(false);
       return;
@@ -307,17 +313,46 @@ export function UsageAdminPage() {
       setDetailSeriesErr("");
       setDetailSeriesLoading(true);
       try {
+        const allTimeActive = allTime && !start.trim() && !end.trim();
+        const implicitDayRange =
+          detailGranularity === "day" && !dateRangeCustomized && !allTimeActive;
         const res = await getAdminUsageTimeSeries({
-          start: seriesStart || undefined,
-          end: seriesEnd || undefined,
+          start:
+            allTimeActive || implicitDayRange
+              ? undefined
+              : seriesStart || undefined,
+          end:
+            allTimeActive || implicitDayRange
+              ? undefined
+              : seriesEnd || undefined,
+          all_time: allTimeActive ? true : undefined,
           granularity: detailGranularity,
         });
         if (!res.success) throw new Error(res.message || "加载时间序列失败");
         if (!active) return;
-        setDetailSeries(res.data?.points || []);
+        const startValue = res.data?.start || "";
+        const endValue = res.data?.end || "";
+        const points = res.data?.points || [];
+        setDetailSeriesStart(startValue);
+        setDetailSeriesEnd(endValue);
+        setDetailSeries(
+          detailGranularity === "day"
+            ? fillDailyBuckets(points, startValue, endValue, (bucket) => ({
+                bucket,
+                requests: 0,
+                tokens: 0,
+                committed_usd: 0,
+                cache_ratio: 0,
+                avg_first_token_latency: 0,
+                tokens_per_second: 0,
+              }))
+            : points,
+        );
       } catch (e) {
         if (!active) return;
         setDetailSeries([]);
+        setDetailSeriesStart("");
+        setDetailSeriesEnd("");
         setDetailSeriesErr(e instanceof Error ? e.message : "加载时间序列失败");
       } finally {
         if (active) setDetailSeriesLoading(false);
@@ -326,7 +361,16 @@ export function UsageAdminPage() {
     return () => {
       active = false;
     };
-  }, [hasSeriesSource, seriesStart, seriesEnd, detailGranularity]);
+  }, [
+    allTime,
+    dateRangeCustomized,
+    detailGranularity,
+    end,
+    hasSeriesSource,
+    seriesEnd,
+    seriesStart,
+    start,
+  ]);
 
   useEffect(() => {
     const ChartCtor = (
@@ -491,6 +535,7 @@ export function UsageAdminPage() {
                     end={end}
                     onChange={(r) => {
                       const isAll = !r.start.trim() && !r.end.trim();
+                      setDateRangeCustomized(true);
                       setAllTime(isAll);
                       if (isAll) setDetailGranularity("day");
                       setStart(r.start);
@@ -686,6 +731,7 @@ export function UsageAdminPage() {
                     type="button"
                     disabled={loading}
                     onClick={() => {
+                      setDateRangeCustomized(false);
                       setStart("");
                       setEnd("");
                       setAllTime(false);
@@ -920,7 +966,7 @@ export function UsageAdminPage() {
                     </div>
                   </div>
                   <div className="small text-muted mb-2">
-                    时间区间：{windowStats.since} ~ {windowStats.until}
+                    时间区间：{detailSeriesStart || "-"} ~ {detailSeriesEnd || "-"}
                   </div>
                   {detailSeriesErr ? (
                     <div className="alert alert-danger py-2 mb-2">

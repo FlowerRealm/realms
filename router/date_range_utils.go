@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -42,6 +43,20 @@ func resolveAllTimeChannelStartEnd(ctx context.Context, opts Options, loc *time.
 	return resolveAllTimeStartEnd(ctx, func(ctx context.Context) (time.Time, bool, error) {
 		return opts.Store.GetFirstUsageEventTimeByChannel(ctx, channelID)
 	}, loc, todayStr)
+}
+
+func defaultDayTimeSeriesDateRange(nowUTC time.Time, loc *time.Location, startStr string, endStr string, granularity string, allTime bool) (string, string) {
+	startStr = strings.TrimSpace(startStr)
+	endStr = strings.TrimSpace(endStr)
+	if allTime || granularity != "day" || startStr != "" || endStr != "" {
+		return startStr, endStr
+	}
+	if loc == nil {
+		loc = time.UTC
+	}
+	nowLocal := nowUTC.In(loc)
+	todayStartLocal := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc)
+	return todayStartLocal.AddDate(0, 0, -29).Format("2006-01-02"), todayStartLocal.Format("2006-01-02")
 }
 
 type usageResolvedRange struct {

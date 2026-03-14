@@ -111,6 +111,10 @@ type adminUsageTimeSeriesResponse struct {
 	Points        []adminUsageTimeSeriesPointView `json:"points"`
 }
 
+var adminUsageTimeSeriesNow = func() time.Time {
+	return time.Now().UTC()
+}
+
 func setAdminUsageAPIRoutes(r gin.IRoutes, opts Options) {
 	r.GET("/usage", adminUsagePageHandler(opts))
 	r.GET("/usage/users/suggest", adminUsageUsersSuggestHandler(opts))
@@ -838,11 +842,7 @@ func adminUsageTimeSeriesHandler(opts Options) gin.HandlerFunc {
 
 		loc, tzName := adminTimeLocation(c.Request.Context(), opts)
 
-		nowUTC := time.Now().UTC()
-
 		q := c.Request.URL.Query()
-		startStr := strings.TrimSpace(q.Get("start"))
-		endStr := strings.TrimSpace(q.Get("end"))
 		allTime := queryBool(q.Get("all_time"))
 		granularity := strings.TrimSpace(strings.ToLower(q.Get("granularity")))
 		if granularity == "" {
@@ -852,6 +852,15 @@ func adminUsageTimeSeriesHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "granularity 仅支持 hour/day"})
 			return
 		}
+		nowUTC := adminUsageTimeSeriesNow()
+		startStr, endStr := defaultDayTimeSeriesDateRange(
+			nowUTC,
+			loc,
+			q.Get("start"),
+			q.Get("end"),
+			granularity,
+			allTime,
+		)
 		rng, err := adminUsageResolveRange(c.Request.Context(), opts, loc, nowUTC, startStr, endStr, allTime)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})

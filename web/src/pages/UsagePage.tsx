@@ -20,6 +20,7 @@ import { UsageEventsCard } from './usage/UsageEventsCard';
 import { UsageSummaryCard } from './usage/UsageSummaryCard';
 import { UsageTimeSeriesCard } from './usage/UsageTimeSeriesCard';
 import { formatLocalDate, formatLocalDateTimeMinute } from './usage/usageUtils';
+import { fillDailyBuckets } from '../utils/timeSeries';
 
 type DetailField = 'committed_usd' | 'requests' | 'tokens' | 'cache_ratio' | 'avg_first_token_latency' | 'tokens_per_second';
 type DetailGranularity = 'hour' | 'day';
@@ -37,6 +38,7 @@ export function UsagePage() {
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
   const [allTime, setAllTime] = useState(false);
+  const [dateRangeCustomized, setDateRangeCustomized] = useState(false);
   const [limit, setLimit] = useState(50);
   const [filterKey, setFilterKey] = useState('');
   const [filterModel, setFilterModel] = useState('');
@@ -52,6 +54,8 @@ export function UsagePage() {
   const [detailLoadingID, setDetailLoadingID] = useState<number | null>(null);
 
   const [detailSeries, setDetailSeries] = useState<UsageTimeSeriesPoint[]>([]);
+  const [detailSeriesStart, setDetailSeriesStart] = useState('');
+  const [detailSeriesEnd, setDetailSeriesEnd] = useState('');
   const [detailSeriesLoading, setDetailSeriesLoading] = useState(false);
   const [detailSeriesErr, setDetailSeriesErr] = useState('');
   const [detailField, setDetailField] = useState<DetailField>('committed_usd');
@@ -187,6 +191,8 @@ export function UsagePage() {
   useEffect(() => {
     if (!hasSeriesSource) {
       setDetailSeries([]);
+      setDetailSeriesStart('');
+      setDetailSeriesEnd('');
       setDetailSeriesErr('');
       setDetailSeriesLoading(false);
       return;
@@ -197,19 +203,39 @@ export function UsagePage() {
       setDetailSeriesLoading(true);
       try {
         const allTimeActive = allTime && !start.trim() && !end.trim();
+        const implicitDayRange = detailGranularity === 'day' && !dateRangeCustomized && !allTimeActive;
         const res = await getUsageTimeSeries(
-          allTimeActive ? undefined : seriesStart || undefined,
-          allTimeActive ? undefined : seriesEnd || undefined,
+          allTimeActive || implicitDayRange ? undefined : seriesStart || undefined,
+          allTimeActive || implicitDayRange ? undefined : seriesEnd || undefined,
           detailGranularity,
           undefined, // tokenID
           allTimeActive,
         );
         if (!res.success) throw new Error(res.message || '加载时间序列失败');
         if (!active) return;
-        setDetailSeries(res.data?.points || []);
+        const startValue = res.data?.start || '';
+        const endValue = res.data?.end || '';
+        const points = res.data?.points || [];
+        setDetailSeriesStart(startValue);
+        setDetailSeriesEnd(endValue);
+        setDetailSeries(
+          detailGranularity === 'day'
+            ? fillDailyBuckets(points, startValue, endValue, (bucket) => ({
+                bucket,
+                requests: 0,
+                tokens: 0,
+                committed_usd: 0,
+                cache_ratio: 0,
+                avg_first_token_latency: 0,
+                tokens_per_second: 0,
+              }))
+            : points,
+        );
       } catch (e) {
         if (!active) return;
         setDetailSeries([]);
+        setDetailSeriesStart('');
+        setDetailSeriesEnd('');
         setDetailSeriesErr(e instanceof Error ? e.message : '加载时间序列失败');
       } finally {
         if (active) setDetailSeriesLoading(false);
@@ -218,7 +244,7 @@ export function UsagePage() {
     return () => {
       active = false;
     };
-  }, [allTime, detailGranularity, end, hasSeriesSource, seriesEnd, seriesStart, start]);
+  }, [allTime, dateRangeCustomized, detailGranularity, end, hasSeriesSource, seriesEnd, seriesStart, start]);
 
   const rangeSinceText = data ? formatLocalDateTimeMinute(String(data.since)) : '';
   const rangeUntilText = data ? formatLocalDateTimeMinute(String(data.until)) : '';
@@ -284,6 +310,7 @@ export function UsagePage() {
                     end={end}
                     onChange={(r) => {
                       const isAll = !r.start.trim() && !r.end.trim();
+                      setDateRangeCustomized(true);
                       setAllTime(isAll);
                       if (isAll) setDetailGranularity('day');
                       setStart(r.start);
@@ -366,6 +393,7 @@ export function UsagePage() {
                     type="button"
                     disabled={loading}
                     onClick={() => {
+                      setDateRangeCustomized(false);
                       setAllTime(false);
                       setStart('');
                       setEnd('');
@@ -401,8 +429,8 @@ export function UsagePage() {
 
             <div className="col-12">
               <UsageTimeSeriesCard
-                rangeSinceText={rangeSinceText}
-                rangeUntilText={rangeUntilText}
+                rangeSinceText={detailSeriesStart || '-'}
+                rangeUntilText={detailSeriesEnd || '-'}
                 detailSeries={detailSeries}
                 detailSeriesErr={detailSeriesErr}
                 detailSeriesLoading={detailSeriesLoading}

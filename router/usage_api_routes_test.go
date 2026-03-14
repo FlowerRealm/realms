@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -924,6 +925,103 @@ func TestUsageTimeSeries_UserResponse_ReturnsPoints(t *testing.T) {
 	}
 	if point.TokensPerSecond != 62.5 {
 		t.Fatalf("expected point tokens_per_second=62.5, got %f", point.TokensPerSecond)
+	}
+}
+
+func TestUsageTimeSeries_DayDefaultsToLast30Days(t *testing.T) {
+	st, db, closeDB := newTestSQLiteStoreWithDB(t)
+	defer closeDB()
+
+	oldNow := usageTimeSeriesNow
+	fixedNow := time.Date(2026, 3, 14, 15, 30, 0, 0, time.UTC)
+	usageTimeSeriesNow = func() time.Time { return fixedNow }
+	defer func() {
+		usageTimeSeriesNow = oldNow
+	}()
+
+	ctx := context.Background()
+	pwHash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	userID, err := st.CreateUser(ctx, "series_30d@example.com", "series30d", pwHash, store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	tokenID, _, err := st.CreateUserToken(ctx, userID, nil, "tok_series_30d")
+	if err != nil {
+		t.Fatalf("CreateUserToken: %v", err)
+	}
+
+	insertUsageEventRow(t, db, "req_series_30d_in", userID, tokenID, store.UsageStateCommitted, time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC), 20, 10, "1.50", "0", 800, 100)
+	insertUsageEventRow(t, db, "req_series_30d_out", userID, tokenID, store.UsageStateCommitted, time.Date(2026, 1, 31, 10, 0, 0, 0, time.UTC), 30, 15, "2.00", "0", 900, 120)
+
+	engine, cookieName := newTestEngine(t, st)
+	sessionCookie := loginCookie(t, engine, cookieName, "series_30d@example.com", "password123")
+
+	type usageTimeSeriesResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			Start       string `json:"start"`
+			End         string `json:"end"`
+			Granularity string `json:"granularity"`
+			Points      []struct {
+				Bucket string `json:"bucket"`
+			} `json:"points"`
+		} `json:"data"`
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/api/usage/timeseries?granularity=day&tz=UTC", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("usage timeseries(day) status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got usageTimeSeriesResp
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal usage timeseries(day): %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("usage timeseries(day) expected success, got message=%q", got.Message)
+	}
+	if got.Data.Start != "2026-02-13" || got.Data.End != "2026-03-14" {
+		t.Fatalf("expected default range 2026-02-13~2026-03-14, got %s~%s", got.Data.Start, got.Data.End)
+	}
+	if got.Data.Granularity != "day" {
+		t.Fatalf("expected granularity=day, got %q", got.Data.Granularity)
+	}
+	if len(got.Data.Points) != 1 {
+		t.Fatalf("expected 1 point inside 30-day default range, got %d", len(got.Data.Points))
+	}
+	if !strings.HasPrefix(got.Data.Points[0].Bucket, "2026-03-01") {
+		t.Fatalf("expected in-range bucket on 2026-03-01, got %q", got.Data.Points[0].Bucket)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/api/usage/timeseries?granularity=day&tz=UTC&start=2026-01-31&end=2026-01-31", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr = httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("usage timeseries(day, explicit) status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	got = usageTimeSeriesResp{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal usage timeseries(day, explicit): %v", err)
+	}
+	if !got.Success {
+		t.Fatalf("usage timeseries(day, explicit) expected success, got message=%q", got.Message)
+	}
+	if got.Data.Start != "2026-01-31" || got.Data.End != "2026-01-31" {
+		t.Fatalf("expected explicit range 2026-01-31~2026-01-31, got %s~%s", got.Data.Start, got.Data.End)
+	}
+	if len(got.Data.Points) != 1 || !strings.HasPrefix(got.Data.Points[0].Bucket, "2026-01-31") {
+		t.Fatalf("expected explicit range to keep out-of-window bucket, got %#v", got.Data.Points)
 	}
 }
 
