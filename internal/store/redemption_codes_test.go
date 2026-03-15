@@ -116,8 +116,8 @@ func TestRedeemCode_SharedSinglePerUser(t *testing.T) {
 	if _, err := st.RedeemCode(ctx, store.RedeemCodeInput{UserID: user2, Code: "SHARED"}); err != nil {
 		t.Fatalf("RedeemCode user2: %v", err)
 	}
-	if _, err := st.RedeemCode(ctx, store.RedeemCodeInput{UserID: user2, Code: "SHARED"}); err == nil || err != store.ErrRedemptionCodeExhausted {
-		t.Fatalf("expected exhausted after total usage, got %v", err)
+	if _, err := st.RedeemCode(ctx, store.RedeemCodeInput{UserID: user2, Code: "SHARED"}); err == nil || err != store.ErrRedemptionCodeAlreadyRedeemed {
+		t.Fatalf("expected already redeemed for user2, got %v", err)
 	}
 }
 

@@ -751,7 +751,7 @@ VALUES(?, ?, ?, ?, NULL, NULL, CURRENT_TIMESTAMP)
 			}
 			grantMode = mode
 		}
-		sub, err := grantSubscriptionByPlanTx(ctx, tx, in.UserID, plan, now, grantMode)
+		sub, err := grantSubscriptionByPlanTxWithOptions(ctx, tx, in.UserID, plan, now, grantMode, false)
 		if err != nil {
 			return RedeemCodeResult{}, err
 		}

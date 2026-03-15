@@ -177,14 +177,22 @@ LIMIT 1
 }
 
 func grantSubscriptionByPlanTx(ctx context.Context, tx *sql.Tx, userID int64, plan SubscriptionPlan, now time.Time, activationMode string) (UserSubscription, error) {
+	return grantSubscriptionByPlanTxWithOptions(ctx, tx, userID, plan, now, activationMode, true)
+}
+
+func grantSubscriptionByPlanTxWithOptions(ctx context.Context, tx *sql.Tx, userID int64, plan SubscriptionPlan, now time.Time, activationMode string, enforcePurchasable bool) (UserSubscription, error) {
 	if userID <= 0 {
 		return UserSubscription{}, errors.New("user_id 不能为空")
 	}
 	if plan.ID <= 0 {
 		return UserSubscription{}, errors.New("plan_id 不能为空")
 	}
-	if err := ensureSubscriptionPlanPurchasableTx(ctx, tx, userID, plan); err != nil {
-		return UserSubscription{}, err
+	if enforcePurchasable {
+		if err := ensureSubscriptionPlanPurchasableTx(ctx, tx, userID, plan); err != nil {
+			return UserSubscription{}, err
+		}
+	} else if plan.Status != 1 {
+		return UserSubscription{}, errors.New("订阅套餐不可用")
 	}
 	if now.IsZero() {
 		now = time.Now()
