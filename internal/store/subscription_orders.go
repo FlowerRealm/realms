@@ -379,50 +379,23 @@ WHERE id=?
 		return 0, ErrOrderCanceled
 	}
 
-	var plan SubscriptionPlan
-	err = tx.QueryRowContext(ctx, `
-SELECT id, group_name, duration_days, status, created_at, updated_at
-FROM subscription_plans
-WHERE id=?
-`, o.PlanID).Scan(
-		&plan.ID, &plan.GroupName, &plan.DurationDays, &plan.Status, &plan.CreatedAt, &plan.UpdatedAt,
-	)
+	plan, err := getSubscriptionPlanByIDTx(ctx, tx, o.PlanID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, errors.New("订阅套餐不存在")
 		}
 		return 0, fmt.Errorf("查询 subscription_plan 失败: %w", err)
 	}
-	if plan.Status != 1 {
-		return 0, errors.New("订阅套餐不可用")
-	}
-	if plan.DurationDays <= 0 {
-		plan.DurationDays = 30
-	}
 
 	subscriptionID := int64(0)
 	if subID.Valid {
 		subscriptionID = subID.Int64
 	} else {
-		us := UserSubscription{
-			UserID:  o.UserID,
-			PlanID:  o.PlanID,
-			StartAt: approvedAt,
-			EndAt:   approvedAt.Add(time.Duration(plan.DurationDays) * 24 * time.Hour),
-			Status:  1,
-		}
-		res, err := tx.ExecContext(ctx, `
-INSERT INTO user_subscriptions(user_id, plan_id, start_at, end_at, status, created_at, updated_at)
-VALUES(?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-`, us.UserID, us.PlanID, us.StartAt, us.EndAt)
+		us, err := grantSubscriptionByPlanTx(ctx, tx, o.UserID, plan, approvedAt, SubscriptionActivationModeImmediate)
 		if err != nil {
-			return 0, fmt.Errorf("创建 user_subscription 失败: %w", err)
+			return 0, err
 		}
-		id, err := res.LastInsertId()
-		if err != nil {
-			return 0, fmt.Errorf("获取 user_subscription id 失败: %w", err)
-		}
-		subscriptionID = id
+		subscriptionID = us.ID
 	}
 
 	if _, err := tx.ExecContext(ctx, `
@@ -559,49 +532,22 @@ WHERE id=?
 		return 0, true, nil
 	}
 
-	var plan SubscriptionPlan
-	err = tx.QueryRowContext(ctx, `
-SELECT id, group_name, duration_days, status, created_at, updated_at
-FROM subscription_plans
-WHERE id=?
-`, o.PlanID).Scan(
-		&plan.ID, &plan.GroupName, &plan.DurationDays, &plan.Status, &plan.CreatedAt, &plan.UpdatedAt,
-	)
+	plan, err := getSubscriptionPlanByIDTx(ctx, tx, o.PlanID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, true, errors.New("订阅套餐不存在")
 		}
 		return 0, true, fmt.Errorf("查询 subscription_plan 失败: %w", err)
 	}
-	if plan.Status != 1 {
-		return 0, true, errors.New("订阅套餐不可用")
-	}
-	if plan.DurationDays <= 0 {
-		plan.DurationDays = 30
-	}
 
 	if subID.Valid {
 		subscriptionID = subID.Int64
 	} else {
-		us := UserSubscription{
-			UserID:  o.UserID,
-			PlanID:  o.PlanID,
-			StartAt: paidAt,
-			EndAt:   paidAt.Add(time.Duration(plan.DurationDays) * 24 * time.Hour),
-			Status:  1,
-		}
-		res, err := tx.ExecContext(ctx, `
-INSERT INTO user_subscriptions(user_id, plan_id, start_at, end_at, status, created_at, updated_at)
-VALUES(?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-`, us.UserID, us.PlanID, us.StartAt, us.EndAt)
+		us, err := grantSubscriptionByPlanTx(ctx, tx, o.UserID, plan, paidAt, SubscriptionActivationModeImmediate)
 		if err != nil {
-			return 0, true, fmt.Errorf("创建 user_subscription 失败: %w", err)
+			return 0, true, err
 		}
-		id, err := res.LastInsertId()
-		if err != nil {
-			return 0, true, fmt.Errorf("获取 user_subscription id 失败: %w", err)
-		}
-		subscriptionID = id
+		subscriptionID = us.ID
 	}
 
 	if _, err := tx.ExecContext(ctx, `

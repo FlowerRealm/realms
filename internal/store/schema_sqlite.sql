@@ -602,6 +602,43 @@ CREATE UNIQUE INDEX IF NOT EXISTS `uk_oauth_app_tokens_token_id` ON `oauth_app_t
 CREATE INDEX IF NOT EXISTS `idx_oauth_app_tokens_user_id` ON `oauth_app_tokens` (`user_id`);
 CREATE INDEX IF NOT EXISTS `idx_oauth_app_tokens_app_id` ON `oauth_app_tokens` (`app_id`);
 
+CREATE TABLE IF NOT EXISTS `redemption_codes` (
+  `id` INTEGER PRIMARY KEY AUTOINCREMENT,
+  `batch_name` TEXT NOT NULL,
+  `code` TEXT NOT NULL,
+  `distribution_mode` TEXT NOT NULL,
+  `reward_type` TEXT NOT NULL,
+  `subscription_plan_id` INTEGER NULL,
+  `balance_usd` DECIMAL(20,6) NOT NULL DEFAULT 0,
+  `max_redemptions` INTEGER NOT NULL DEFAULT 1,
+  `redeemed_count` INTEGER NOT NULL DEFAULT 0,
+  `expires_at` DATETIME NULL,
+  `status` INTEGER NOT NULL DEFAULT 1,
+  `created_by` INTEGER NOT NULL DEFAULT 0,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS `uk_redemption_codes_code` ON `redemption_codes` (`code`);
+CREATE INDEX IF NOT EXISTS `idx_redemption_codes_batch_name` ON `redemption_codes` (`batch_name`);
+CREATE INDEX IF NOT EXISTS `idx_redemption_codes_distribution_mode` ON `redemption_codes` (`distribution_mode`);
+CREATE INDEX IF NOT EXISTS `idx_redemption_codes_reward_type` ON `redemption_codes` (`reward_type`);
+CREATE INDEX IF NOT EXISTS `idx_redemption_codes_status` ON `redemption_codes` (`status`);
+CREATE INDEX IF NOT EXISTS `idx_redemption_codes_subscription_plan_id` ON `redemption_codes` (`subscription_plan_id`);
+
+CREATE TABLE IF NOT EXISTS `redemption_code_redemptions` (
+  `id` INTEGER PRIMARY KEY AUTOINCREMENT,
+  `code_id` INTEGER NOT NULL,
+  `user_id` INTEGER NOT NULL,
+  `reward_type` TEXT NOT NULL,
+  `balance_usd` DECIMAL(20,6) NOT NULL DEFAULT 0,
+  `subscription_id` INTEGER NULL,
+  `subscription_activation_mode` TEXT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS `uk_redemption_code_redemptions_code_user` ON `redemption_code_redemptions` (`code_id`, `user_id`);
+CREATE INDEX IF NOT EXISTS `idx_redemption_code_redemptions_user_id` ON `redemption_code_redemptions` (`user_id`);
+CREATE INDEX IF NOT EXISTS `idx_redemption_code_redemptions_subscription_id` ON `redemption_code_redemptions` (`subscription_id`);
+
 CREATE TABLE IF NOT EXISTS `error_passthrough_rules` (
   `id` INTEGER PRIMARY KEY AUTOINCREMENT,
   `name` TEXT NOT NULL,

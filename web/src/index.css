@@ -1238,6 +1238,7 @@ h6,
 .sidebar-link {
   display: flex;
   align-items: center;
+  gap: 0.65rem;
   padding: 0.72rem 0.95rem;
   color: var(--rlm-muted) !important;
   text-decoration: none;
@@ -1264,15 +1265,25 @@ h6,
 /* Material Symbols Adaptation */
 .sidebar-link .material-symbols-rounded {
   font-size: 1.05rem;
-  margin-right: 0.65rem;
   opacity: 0.8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  flex-shrink: 0;
   font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
 }
 .sidebar-link i {
   font-size: 1.1rem;
-  margin-right: 0.75rem;
   opacity: 0.8;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  flex-shrink: 0;
 }
 .sidebar-link:hover .material-symbols-rounded,
 .sidebar-link.active .material-symbols-rounded {

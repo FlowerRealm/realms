@@ -22,6 +22,7 @@ func SetRouter(r *gin.Engine, opts Options) {
 	setAnnouncementAPIRoutes(api, opts)
 	setAccountAPIRoutes(api, opts)
 	setBillingAPIRoutes(api, opts)
+	setRedemptionCodeAPIRoutes(api, opts)
 	setTicketAPIRoutes(api, opts)
 	setAdminAPIRoutes(api, opts)
 

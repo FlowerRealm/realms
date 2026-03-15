@@ -83,6 +83,9 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 		if err := ensureSQLiteChannelGroupPointers(db); err != nil {
 			return err
 		}
+		if err := ensureSQLiteRedemptionCodeTables(db); err != nil {
+			return err
+		}
 		if err := ensureSQLiteUsageSearchIndexes(db); err != nil {
 			return err
 		}
@@ -158,6 +161,9 @@ func EnsureSQLiteSchema(db *sql.DB) error {
 		return err
 	}
 	if err := ensureSQLiteChannelGroupPointers(db); err != nil {
+		return err
+	}
+	if err := ensureSQLiteRedemptionCodeTables(db); err != nil {
 		return err
 	}
 	if err := ensureSQLiteUsageSearchIndexes(db); err != nil {
