@@ -151,6 +151,62 @@ func TestRedeemCodeRoute_SamePlanNeedsMode(t *testing.T) {
 	}
 }
 
+func TestRedeemCodeRoute_InvalidSubscriptionActivationModeRejected(t *testing.T) {
+	st, cleanup := newTestSQLiteStore(t)
+	defer cleanup()
+	ensureDefaultMainGroupForTest(t, st)
+	engine, cookieName := newTestEngine(t, st)
+
+	userID, sessionCookie := createLoggedInUser(t, st, engine, cookieName, "redeem-invalid-mode@example.com", "redeeminvalidmode", "password123")
+	ctx := context.Background()
+	planID, err := st.CreateSubscriptionPlan(ctx, store.SubscriptionPlanCreate{
+		Code:         "route_invalid_mode_plan",
+		Name:         "Route Invalid Mode Plan",
+		DurationDays: 30,
+		Status:       1,
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscriptionPlan: %v", err)
+	}
+	if _, err := st.CreateRedemptionCode(ctx, store.RedemptionCodeCreate{
+		BatchName:          "route-invalid-mode",
+		Code:               "ROUTE-INVALID-MODE",
+		DistributionMode:   store.RedemptionCodeDistributionSingle,
+		RewardType:         store.RedemptionCodeRewardSubscription,
+		SubscriptionPlanID: &planID,
+		MaxRedemptions:     1,
+		Status:             store.RedemptionCodeStatusActive,
+	}); err != nil {
+		t.Fatalf("CreateRedemptionCode: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"kind":                         "subscription",
+		"code":                         "ROUTE-INVALID-MODE",
+		"subscription_activation_mode": "weird",
+	})
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/billing/redeem", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if resp.Success || resp.Message != "subscription_activation_mode 不合法" {
+		t.Fatalf("expected invalid mode response, got body=%s", rr.Body.String())
+	}
+}
+
 func TestAdminRedemptionCodesExportRoute(t *testing.T) {
 	st, cleanup := newTestSQLiteStore(t)
 	defer cleanup()

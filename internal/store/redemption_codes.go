@@ -25,6 +25,7 @@ var (
 	ErrRedemptionCodeExhausted            = errors.New("兑换码已兑完")
 	ErrRedemptionCodeAlreadyRedeemed      = errors.New("你已兑换过该兑换码")
 	ErrSubscriptionActivationModeRequired = errors.New("需要选择套餐生效方式")
+	ErrSubscriptionActivationModeInvalid  = errors.New("subscription_activation_mode 不合法")
 	ErrRedemptionCodeInvalidReward        = errors.New("兑换码奖励配置不合法")
 	ErrRedemptionCodeImmutable            = errors.New("兑换码奖励内容不可修改")
 	ErrRedemptionCodeDuplicate            = errors.New("兑换码已存在")
@@ -110,17 +111,21 @@ func normalizeRedemptionCodeRewardType(raw RedemptionCodeRewardType) RedemptionC
 	}
 }
 
-func normalizeSubscriptionActivationMode(raw *string) (string, bool) {
+func parseSubscriptionActivationMode(raw *string) (string, bool, error) {
 	if raw == nil {
-		return "", false
+		return "", false, nil
 	}
-	switch strings.TrimSpace(*raw) {
+	normalized := strings.TrimSpace(*raw)
+	if normalized == "" {
+		return "", false, nil
+	}
+	switch normalized {
 	case SubscriptionActivationModeImmediate:
-		return SubscriptionActivationModeImmediate, true
+		return SubscriptionActivationModeImmediate, true, nil
 	case SubscriptionActivationModeDeferred:
-		return SubscriptionActivationModeDeferred, true
+		return SubscriptionActivationModeDeferred, true, nil
 	default:
-		return "", false
+		return "", false, ErrSubscriptionActivationModeInvalid
 	}
 }
 
@@ -649,7 +654,10 @@ func (s *Store) RedeemCode(ctx context.Context, in RedeemCodeInput) (RedeemCodeR
 	if now.IsZero() {
 		now = time.Now()
 	}
-	mode, hasMode := normalizeSubscriptionActivationMode(in.SubscriptionActivationMode)
+	mode, hasMode, err := parseSubscriptionActivationMode(in.SubscriptionActivationMode)
+	if err != nil {
+		return RedeemCodeResult{}, err
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

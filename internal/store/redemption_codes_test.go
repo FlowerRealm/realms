@@ -254,6 +254,54 @@ func TestRedeemCode_SubscriptionDeferredStartsAfterSamePlanEnd(t *testing.T) {
 	}
 }
 
+func TestRedeemCode_SubscriptionInvalidModeRejected(t *testing.T) {
+	st := newSQLiteStoreForRedemptionTest(t)
+	ctx := context.Background()
+
+	if err := st.CreateMainGroup(ctx, "default", nil, 1); err != nil && err.Error() != "main_group 名称已存在" {
+	}
+	userID, err := st.CreateUser(ctx, "invalid-mode-user@example.com", "invalidmodeuser", []byte("pw"), store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if err := st.SetUserMainGroup(ctx, userID, "default"); err != nil {
+		t.Fatalf("SetUserMainGroup: %v", err)
+	}
+
+	planID, err := st.CreateSubscriptionPlan(ctx, store.SubscriptionPlanCreate{
+		Code:         "invalid_mode_plan",
+		Name:         "Invalid Mode Plan",
+		DurationDays: 30,
+		Status:       1,
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscriptionPlan: %v", err)
+	}
+
+	_, err = st.CreateRedemptionCode(ctx, store.RedemptionCodeCreate{
+		BatchName:          "sub-batch-invalid-mode",
+		Code:               "INVALIDMODE",
+		DistributionMode:   store.RedemptionCodeDistributionSingle,
+		RewardType:         store.RedemptionCodeRewardSubscription,
+		SubscriptionPlanID: &planID,
+		MaxRedemptions:     1,
+		Status:             store.RedemptionCodeStatusActive,
+	})
+	if err != nil {
+		t.Fatalf("CreateRedemptionCode: %v", err)
+	}
+
+	mode := "weird"
+	_, err = st.RedeemCode(ctx, store.RedeemCodeInput{
+		UserID:                     userID,
+		Code:                       "INVALIDMODE",
+		SubscriptionActivationMode: &mode,
+	})
+	if !errors.Is(err, store.ErrSubscriptionActivationModeInvalid) {
+		t.Fatalf("expected invalid mode error, got %v", err)
+	}
+}
+
 func TestCreateRedemptionCodes_AtomicOnDuplicate(t *testing.T) {
 	st := newSQLiteStoreForRedemptionTest(t)
 	ctx := context.Background()

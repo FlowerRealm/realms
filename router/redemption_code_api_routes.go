@@ -212,6 +212,8 @@ func redeemCodeHandler(opts Options) gin.HandlerFunc {
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "你已兑换过该兑换码"})
 			case errors.Is(err, store.ErrRedemptionCodeRewardMismatch):
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "兑换码类型不匹配"})
+			case errors.Is(err, store.ErrSubscriptionActivationModeInvalid):
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "subscription_activation_mode 不合法"})
 			case errors.Is(err, store.ErrSubscriptionActivationModeRequired):
 				c.JSON(http.StatusOK, gin.H{
 					"success": false,
