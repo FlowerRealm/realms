@@ -128,6 +128,16 @@ func truncateRedemptionCodeMoney(code *RedemptionCode) {
 	code.BalanceUSD = code.BalanceUSD.Truncate(USDScale)
 }
 
+func mapRedemptionRecordInsertError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if isUniqueConstraintError(err) {
+		return ErrRedemptionCodeAlreadyRedeemed
+	}
+	return fmt.Errorf("写入兑换记录失败: %w", err)
+}
+
 func validateRedemptionCodeCreateInput(in *RedemptionCodeCreate) error {
 	if in == nil {
 		return errors.New("参数不能为空")
@@ -660,7 +670,7 @@ LIMIT 1
 INSERT INTO redemption_code_redemptions(code_id, user_id, reward_type, balance_usd, subscription_id, subscription_activation_mode, created_at)
 VALUES(?, ?, ?, ?, NULL, NULL, CURRENT_TIMESTAMP)
 `, code.ID, in.UserID, string(code.RewardType), code.BalanceUSD); err != nil {
-			return RedeemCodeResult{}, fmt.Errorf("写入兑换记录失败: %w", err)
+			return RedeemCodeResult{}, mapRedemptionRecordInsertError(err)
 		}
 		result.BalanceUSD = code.BalanceUSD
 		result.NewBalanceUSD = balance
@@ -700,7 +710,7 @@ VALUES(?, ?, ?, ?, NULL, NULL, CURRENT_TIMESTAMP)
 INSERT INTO redemption_code_redemptions(code_id, user_id, reward_type, balance_usd, subscription_id, subscription_activation_mode, created_at)
 VALUES(?, ?, ?, 0, ?, ?, CURRENT_TIMESTAMP)
 `, code.ID, in.UserID, string(code.RewardType), sub.ID, grantMode); err != nil {
-			return RedeemCodeResult{}, fmt.Errorf("写入兑换记录失败: %w", err)
+			return RedeemCodeResult{}, mapRedemptionRecordInsertError(err)
 		}
 		result.Plan = &plan
 		result.Subscription = &sub

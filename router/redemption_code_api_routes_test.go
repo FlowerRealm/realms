@@ -325,6 +325,41 @@ func TestAdminCreateRedemptionCodesRoute_GenerateCodes(t *testing.T) {
 	}
 }
 
+func TestAdminCreateRedemptionCodesRoute_InvalidStatusRejected(t *testing.T) {
+	st, cleanup := newTestSQLiteStore(t)
+	defer cleanup()
+	ensureDefaultMainGroupForTest(t, st)
+	engine, sessionCookie, rootID := setupRootSession(t, st)
+
+	body, _ := json.Marshal(map[string]any{
+		"batch_name":        "invalid-status",
+		"distribution_mode": "single",
+		"reward_type":       "balance",
+		"balance_usd":       "1",
+		"status":            9,
+	})
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/admin/redemption-codes", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Realms-User", strconv.FormatInt(rootID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if resp.Success || resp.Message != "status 不合法" {
+		t.Fatalf("expected invalid status response, got body=%s", rr.Body.String())
+	}
+}
+
 func TestAdminUpdateRedemptionCodeRoute_AcceptsDatetimeLocal(t *testing.T) {
 	st, cleanup := newTestSQLiteStore(t)
 	defer cleanup()

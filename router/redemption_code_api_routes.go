@@ -297,7 +297,7 @@ func adminCreateRedemptionCodesHandler(opts Options) gin.HandlerFunc {
 		BalanceUSD         string   `json:"balance_usd"`
 		MaxRedemptions     int      `json:"max_redemptions"`
 		ExpiresAt          string   `json:"expires_at"`
-		Status             int      `json:"status"`
+		Status             *int     `json:"status"`
 	}
 	return func(c *gin.Context) {
 		if opts.Store == nil {
@@ -321,9 +321,13 @@ func adminCreateRedemptionCodesHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 			return
 		}
-		status := store.RedemptionCodeStatus(req.Status)
-		if status != store.RedemptionCodeStatusActive && status != store.RedemptionCodeStatusDisabled {
-			status = store.RedemptionCodeStatusActive
+		status := store.RedemptionCodeStatusActive
+		if req.Status != nil {
+			status = store.RedemptionCodeStatus(*req.Status)
+			if status != store.RedemptionCodeStatusActive && status != store.RedemptionCodeStatusDisabled {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "status 不合法"})
+				return
+			}
 		}
 		var balanceUSD decimal.Decimal
 		if strings.TrimSpace(req.BalanceUSD) != "" {
