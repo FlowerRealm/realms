@@ -462,3 +462,114 @@ func TestAdminUpdateRedemptionCodeRoute_AllowsPartialStatusOnly(t *testing.T) {
 		t.Fatalf("expected status disabled, got %d", item.Code.Status)
 	}
 }
+
+func TestAdminUpdateRedemptionCodeRoute_DateOnlyExpiryUsesEndOfDay(t *testing.T) {
+	st, cleanup := newTestSQLiteStore(t)
+	defer cleanup()
+	ensureDefaultMainGroupForTest(t, st)
+	engine, sessionCookie, rootID := setupRootSession(t, st)
+
+	ctx := context.Background()
+	codeID, err := st.CreateRedemptionCode(ctx, store.RedemptionCodeCreate{
+		BatchName:        "shared-date-only",
+		Code:             "SHARED-DATE-ONLY",
+		DistributionMode: store.RedemptionCodeDistributionShared,
+		RewardType:       store.RedemptionCodeRewardBalance,
+		BalanceUSD:       decimal.RequireFromString("1"),
+		MaxRedemptions:   2,
+		Status:           store.RedemptionCodeStatusActive,
+		CreatedBy:        rootID,
+	})
+	if err != nil {
+		t.Fatalf("CreateRedemptionCode: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"expires_at": "2026-03-15",
+	})
+	req := httptest.NewRequest(http.MethodPatch, "http://example.com/api/admin/redemption-codes/"+strconv.FormatInt(codeID, 10), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Realms-User", strconv.FormatInt(rootID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	item, err := st.GetRedemptionCodeByID(ctx, codeID)
+	if err != nil {
+		t.Fatalf("GetRedemptionCodeByID: %v", err)
+	}
+	if item.Code.ExpiresAt == nil {
+		t.Fatalf("expected expires_at to be set")
+	}
+	if item.Code.ExpiresAt.Hour() != 23 || item.Code.ExpiresAt.Minute() != 59 || item.Code.ExpiresAt.Second() != 59 {
+		t.Fatalf("expected end-of-day expiry, got %v", item.Code.ExpiresAt)
+	}
+}
+
+func TestAdminRedemptionCodesExportRoute_FiltersExhausted(t *testing.T) {
+	st, cleanup := newTestSQLiteStore(t)
+	defer cleanup()
+	ensureDefaultMainGroupForTest(t, st)
+	engine, sessionCookie, rootID := setupRootSession(t, st)
+
+	ctx := context.Background()
+	userID, err := st.CreateUser(ctx, "export-filter-user@example.com", "exportfilteruser", []byte("pw"), store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if err := st.SetUserMainGroup(ctx, userID, "default"); err != nil {
+		t.Fatalf("SetUserMainGroup: %v", err)
+	}
+
+	if _, err := st.CreateRedemptionCode(ctx, store.RedemptionCodeCreate{
+		BatchName:        "export-filter",
+		Code:             "EXHAUSTED-ONLY",
+		DistributionMode: store.RedemptionCodeDistributionSingle,
+		RewardType:       store.RedemptionCodeRewardBalance,
+		BalanceUSD:       decimal.RequireFromString("1"),
+		MaxRedemptions:   1,
+		Status:           store.RedemptionCodeStatusActive,
+		CreatedBy:        rootID,
+	}); err != nil {
+		t.Fatalf("CreateRedemptionCode exhausted: %v", err)
+	}
+	if _, err := st.CreateRedemptionCode(ctx, store.RedemptionCodeCreate{
+		BatchName:        "export-filter",
+		Code:             "UNUSED-ONLY",
+		DistributionMode: store.RedemptionCodeDistributionSingle,
+		RewardType:       store.RedemptionCodeRewardBalance,
+		BalanceUSD:       decimal.RequireFromString("1"),
+		MaxRedemptions:   1,
+		Status:           store.RedemptionCodeStatusActive,
+		CreatedBy:        rootID,
+	}); err != nil {
+		t.Fatalf("CreateRedemptionCode unused: %v", err)
+	}
+	if _, err := st.RedeemCode(ctx, store.RedeemCodeInput{UserID: userID, Code: "EXHAUSTED-ONLY", Now: time.Now()}); err != nil {
+		t.Fatalf("RedeemCode exhausted: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/api/admin/redemption-codes/export?exhausted=true", nil)
+	req.Header.Set("Realms-User", strconv.FormatInt(rootID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	reader := csv.NewReader(strings.NewReader(rr.Body.String()))
+	rows, err := reader.ReadAll()
+	if err != nil {
+		t.Fatalf("ReadAll CSV: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected header + 1 exhausted row, got %d rows: %v", len(rows), rows)
+	}
+	if rows[1][0] != "EXHAUSTED-ONLY" {
+		t.Fatalf("expected exhausted row only, got %v", rows[1])
+	}
+}

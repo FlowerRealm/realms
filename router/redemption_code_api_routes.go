@@ -130,13 +130,16 @@ func parseRedemptionCodeExpiry(raw string) (*time.Time, error) {
 	if s == "" {
 		return nil, nil
 	}
+	if t, err := time.ParseInLocation("2006-01-02", s, time.Local); err == nil {
+		endOfDay := time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 0, t.Location())
+		return &endOfDay, nil
+	}
 	layouts := []string{
 		time.RFC3339,
 		"2006-01-02T15:04",
 		"2006-01-02T15:04:05",
 		"2006-01-02 15:04",
 		"2006-01-02 15:04:05",
-		"2006-01-02",
 	}
 	for _, layout := range layouts {
 		if t, err := time.ParseInLocation(layout, s, time.Local); err == nil {
@@ -516,6 +519,11 @@ func adminExportRedemptionCodesHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 			return
 		}
+		var exhausted *bool
+		if q := strings.TrimSpace(c.Query("exhausted")); q != "" {
+			v := queryBool(q)
+			exhausted = &v
+		}
 		c.Writer.Header().Set("Content-Type", "text/csv; charset=utf-8")
 		c.Writer.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": "redemption-codes.csv"}))
 		err = opts.Store.ExportRedemptionCodesCSV(c.Request.Context(), c.Writer, store.RedemptionCodeListFilter{
@@ -524,6 +532,7 @@ func adminExportRedemptionCodesHandler(opts Options) gin.HandlerFunc {
 			DistributionMode: store.RedemptionCodeDistributionMode(strings.TrimSpace(c.Query("distribution_mode"))),
 			RewardType:       store.RedemptionCodeRewardType(strings.TrimSpace(c.Query("reward_type"))),
 			Status:           status,
+			Exhausted:        exhausted,
 			Limit:            5000,
 		})
 		if err != nil {
