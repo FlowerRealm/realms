@@ -138,6 +138,52 @@ func mapRedemptionRecordInsertError(err error) error {
 	return fmt.Errorf("写入兑换记录失败: %w", err)
 }
 
+func hasRedemptionRecordForUserTx(ctx context.Context, tx *sql.Tx, codeID, userID int64) (bool, error) {
+	var exists int
+	err := tx.QueryRowContext(ctx, `
+SELECT 1
+FROM redemption_code_redemptions
+WHERE code_id=? AND user_id=?
+LIMIT 1
+`, codeID, userID).Scan(&exists)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return false, fmt.Errorf("查询兑换记录失败: %w", err)
+}
+
+func reserveRedemptionSlotTx(ctx context.Context, tx *sql.Tx, code RedemptionCode, userID int64) (RedemptionCode, error) {
+	res, err := tx.ExecContext(ctx, `
+UPDATE redemption_codes
+SET redeemed_count=redeemed_count+1, updated_at=CURRENT_TIMESTAMP
+WHERE id=? AND redeemed_count < max_redemptions
+`, code.ID)
+	if err != nil {
+		return code, fmt.Errorf("抢占兑换名额失败: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return code, fmt.Errorf("读取兑换名额结果失败: %w", err)
+	}
+	if affected == 0 {
+		if code.DistributionMode == RedemptionCodeDistributionShared {
+			exists, err := hasRedemptionRecordForUserTx(ctx, tx, code.ID, userID)
+			if err != nil {
+				return code, err
+			}
+			if exists {
+				return code, ErrRedemptionCodeAlreadyRedeemed
+			}
+		}
+		return code, ErrRedemptionCodeExhausted
+	}
+	code.RedeemedCount++
+	return code, nil
+}
+
 func validateRedemptionCodeCreateInput(in *RedemptionCodeCreate) error {
 	if in == nil {
 		return errors.New("参数不能为空")
@@ -638,19 +684,17 @@ WHERE code=?
 		return RedeemCodeResult{}, ErrRedemptionCodeExhausted
 	}
 	if code.DistributionMode == RedemptionCodeDistributionShared {
-		var exists int
-		err := tx.QueryRowContext(ctx, `
-SELECT 1
-FROM redemption_code_redemptions
-WHERE code_id=? AND user_id=?
-LIMIT 1
-`, code.ID, in.UserID).Scan(&exists)
-		if err == nil {
+		exists, err := hasRedemptionRecordForUserTx(ctx, tx, code.ID, in.UserID)
+		if err != nil {
+			return RedeemCodeResult{}, err
+		}
+		if exists {
 			return RedeemCodeResult{}, ErrRedemptionCodeAlreadyRedeemed
 		}
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return RedeemCodeResult{}, fmt.Errorf("查询兑换记录失败: %w", err)
-		}
+	}
+	code, err = reserveRedemptionSlotTx(ctx, tx, code, in.UserID)
+	if err != nil {
+		return RedeemCodeResult{}, err
 	}
 
 	result := RedeemCodeResult{
@@ -719,14 +763,6 @@ VALUES(?, ?, ?, 0, ?, ?, CURRENT_TIMESTAMP)
 		return RedeemCodeResult{}, ErrRedemptionCodeInvalidReward
 	}
 
-	if _, err := tx.ExecContext(ctx, `
-UPDATE redemption_codes
-SET redeemed_count=redeemed_count+1, updated_at=CURRENT_TIMESTAMP
-WHERE id=?
-`, code.ID); err != nil {
-		return RedeemCodeResult{}, fmt.Errorf("更新兑换码计数失败: %w", err)
-	}
-	code.RedeemedCount++
 	result.Code = code
 
 	if err := tx.Commit(); err != nil {
