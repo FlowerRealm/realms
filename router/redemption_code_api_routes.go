@@ -357,6 +357,10 @@ func adminCreateRedemptionCodesHandler(opts Options) gin.HandlerFunc {
 			seen[code] = struct{}{}
 			codes = append(codes, code)
 		}
+		if len(codes) > 500 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "codes 不能超过 500 条"})
+			return
+		}
 		if len(codes) == 0 {
 			count := req.Count
 			if count <= 0 {

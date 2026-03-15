@@ -416,6 +416,47 @@ func TestAdminCreateRedemptionCodesRoute_InvalidStatusRejected(t *testing.T) {
 	}
 }
 
+func TestAdminCreateRedemptionCodesRoute_RejectsMoreThan500ManualCodes(t *testing.T) {
+	st, cleanup := newTestSQLiteStore(t)
+	defer cleanup()
+	ensureDefaultMainGroupForTest(t, st)
+	engine, sessionCookie, rootID := setupRootSession(t, st)
+
+	codes := make([]string, 0, 501)
+	for i := 0; i < 501; i++ {
+		codes = append(codes, "BULK-"+strconv.Itoa(i+1))
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"batch_name":        "too-many-manual-codes",
+		"distribution_mode": "single",
+		"reward_type":       "balance",
+		"balance_usd":       "1",
+		"codes":             codes,
+		"status":            1,
+	})
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/admin/redemption-codes", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Realms-User", strconv.FormatInt(rootID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if resp.Success || resp.Message != "codes 不能超过 500 条" {
+		t.Fatalf("expected manual codes limit response, got body=%s", rr.Body.String())
+	}
+}
+
 func TestAdminUpdateRedemptionCodeRoute_AcceptsDatetimeLocal(t *testing.T) {
 	st, cleanup := newTestSQLiteStore(t)
 	defer cleanup()
