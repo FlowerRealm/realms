@@ -376,6 +376,55 @@ type UserSubscription struct {
 	UpdatedAt time.Time
 }
 
+type RedemptionCodeDistributionMode string
+
+const (
+	RedemptionCodeDistributionSingle RedemptionCodeDistributionMode = "single"
+	RedemptionCodeDistributionShared RedemptionCodeDistributionMode = "shared"
+)
+
+type RedemptionCodeRewardType string
+
+const (
+	RedemptionCodeRewardBalance      RedemptionCodeRewardType = "balance"
+	RedemptionCodeRewardSubscription RedemptionCodeRewardType = "subscription"
+)
+
+type RedemptionCodeStatus int
+
+const (
+	RedemptionCodeStatusDisabled RedemptionCodeStatus = 0
+	RedemptionCodeStatusActive   RedemptionCodeStatus = 1
+)
+
+type RedemptionCode struct {
+	ID               int64
+	BatchName        string
+	Code             string
+	DistributionMode RedemptionCodeDistributionMode
+	RewardType       RedemptionCodeRewardType
+	SubscriptionPlanID *int64
+	BalanceUSD       decimal.Decimal
+	MaxRedemptions   int
+	RedeemedCount    int
+	ExpiresAt        *time.Time
+	Status           RedemptionCodeStatus
+	CreatedBy        int64
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+type RedemptionCodeRedemption struct {
+	ID                         int64
+	CodeID                     int64
+	UserID                     int64
+	RewardType                 RedemptionCodeRewardType
+	BalanceUSD                 decimal.Decimal
+	SubscriptionID             *int64
+	SubscriptionActivationMode *string
+	CreatedAt                  time.Time
+}
+
 type UserBalance struct {
 	UserID    int64
 	USD       decimal.Decimal

@@ -34,6 +34,203 @@ func truncateSubscriptionPlanMoney(p *SubscriptionPlan) {
 	p.Limit30DUSD = p.Limit30DUSD.Truncate(USDScale)
 }
 
+func getSubscriptionPlanByIDTx(ctx context.Context, tx *sql.Tx, id int64) (SubscriptionPlan, error) {
+	var p SubscriptionPlan
+	err := tx.QueryRowContext(ctx, `
+SELECT id, code, name, group_name, price_multiplier, price_cny, limit_5h_usd, limit_1d_usd, limit_7d_usd, limit_30d_usd, duration_days, status, created_at, updated_at
+FROM subscription_plans
+WHERE id=?
+`, id).Scan(&p.ID, &p.Code, &p.Name, &p.GroupName, &p.PriceMultiplier, &p.PriceCNY, &p.Limit5HUSD, &p.Limit1DUSD, &p.Limit7DUSD, &p.Limit30DUSD, &p.DurationDays, &p.Status, &p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return SubscriptionPlan{}, sql.ErrNoRows
+		}
+		return SubscriptionPlan{}, fmt.Errorf("查询 subscription_plan 失败: %w", err)
+	}
+	truncateSubscriptionPlanMoney(&p)
+	return p, nil
+}
+
+func userMainGroupAllowsSubgroupTx(ctx context.Context, tx *sql.Tx, userID int64, subgroup string) (bool, error) {
+	if userID <= 0 {
+		return false, errors.New("userID 不能为空")
+	}
+	subgroup = strings.TrimSpace(subgroup)
+	if subgroup == "" {
+		return false, errors.New("subgroup 不能为空")
+	}
+	normSubgroup, err := normalizeGroupName(subgroup)
+	if err != nil {
+		return false, err
+	}
+
+	var mainGroup sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT main_group FROM users WHERE id=? LIMIT 1`, userID).Scan(&mainGroup); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, sql.ErrNoRows
+		}
+		return false, fmt.Errorf("查询 users.main_group 失败: %w", err)
+	}
+	mainGroupName := ""
+	if mainGroup.Valid {
+		mainGroupName = strings.TrimSpace(mainGroup.String)
+	}
+	if mainGroupName == "" {
+		return false, errors.New("用户未配置用户分组")
+	}
+
+	rows, err := tx.QueryContext(ctx, `
+SELECT subgroup
+FROM main_group_subgroups
+WHERE main_group=?
+`, mainGroupName)
+	if err != nil {
+		return false, fmt.Errorf("查询 main_group_subgroups 失败: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var sub string
+		if err := rows.Scan(&sub); err != nil {
+			return false, fmt.Errorf("扫描 main_group_subgroups 失败: %w", err)
+		}
+		if strings.TrimSpace(sub) == normSubgroup {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("遍历 main_group_subgroups 失败: %w", err)
+	}
+	return false, nil
+}
+
+func ensureSubscriptionPlanPurchasable(ctx context.Context, s *Store, userID int64, plan SubscriptionPlan) error {
+	if plan.Status != 1 {
+		return errors.New("订阅套餐不可用")
+	}
+	group := strings.TrimSpace(plan.GroupName)
+	if group == "" {
+		return nil
+	}
+	ok, err := s.UserMainGroupAllowsSubgroup(ctx, userID, group)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("无权限购买该套餐")
+	}
+	return nil
+}
+
+func ensureSubscriptionPlanPurchasableTx(ctx context.Context, tx *sql.Tx, userID int64, plan SubscriptionPlan) error {
+	if plan.Status != 1 {
+		return errors.New("订阅套餐不可用")
+	}
+	group := strings.TrimSpace(plan.GroupName)
+	if group == "" {
+		return nil
+	}
+	ok, err := userMainGroupAllowsSubgroupTx(ctx, tx, userID, group)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("无权限购买该套餐")
+	}
+	return nil
+}
+
+func hasNonExpiredSubscriptionForPlanTx(ctx context.Context, tx *sql.Tx, userID int64, planID int64, now time.Time) (bool, error) {
+	var v int64
+	err := tx.QueryRowContext(ctx, `
+SELECT id
+FROM user_subscriptions
+WHERE user_id=? AND plan_id=? AND status=1 AND end_at > ?
+ORDER BY end_at DESC, id DESC
+LIMIT 1
+`, userID, planID, now).Scan(&v)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return false, fmt.Errorf("查询用户订阅失败: %w", err)
+}
+
+func latestNonExpiredSubscriptionEndAtForPlanTx(ctx context.Context, tx *sql.Tx, userID int64, planID int64, now time.Time) (*time.Time, error) {
+	var endAt time.Time
+	err := tx.QueryRowContext(ctx, `
+SELECT end_at
+FROM user_subscriptions
+WHERE user_id=? AND plan_id=? AND status=1 AND end_at > ?
+ORDER BY end_at DESC, id DESC
+LIMIT 1
+`, userID, planID, now).Scan(&endAt)
+	if err == nil {
+		return &endAt, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return nil, fmt.Errorf("查询用户订阅结束时间失败: %w", err)
+}
+
+func grantSubscriptionByPlanTx(ctx context.Context, tx *sql.Tx, userID int64, plan SubscriptionPlan, now time.Time, activationMode string) (UserSubscription, error) {
+	if userID <= 0 {
+		return UserSubscription{}, errors.New("user_id 不能为空")
+	}
+	if plan.ID <= 0 {
+		return UserSubscription{}, errors.New("plan_id 不能为空")
+	}
+	if err := ensureSubscriptionPlanPurchasableTx(ctx, tx, userID, plan); err != nil {
+		return UserSubscription{}, err
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if plan.DurationDays <= 0 {
+		plan.DurationDays = 30
+	}
+	startAt := now
+	switch strings.TrimSpace(activationMode) {
+	case "", SubscriptionActivationModeImmediate:
+		activationMode = SubscriptionActivationModeImmediate
+	case SubscriptionActivationModeDeferred:
+		endAt, err := latestNonExpiredSubscriptionEndAtForPlanTx(ctx, tx, userID, plan.ID, now)
+		if err != nil {
+			return UserSubscription{}, err
+		}
+		if endAt != nil && endAt.After(startAt) {
+			startAt = *endAt
+		}
+	default:
+		return UserSubscription{}, errors.New("subscription_activation_mode 不合法")
+	}
+	endAt := startAt.Add(time.Duration(plan.DurationDays) * 24 * time.Hour)
+
+	us := UserSubscription{
+		UserID:  userID,
+		PlanID:  plan.ID,
+		StartAt: startAt,
+		EndAt:   endAt,
+		Status:  1,
+	}
+	res, err := tx.ExecContext(ctx, `
+INSERT INTO user_subscriptions(user_id, plan_id, start_at, end_at, status, created_at, updated_at)
+VALUES(?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+`, us.UserID, us.PlanID, us.StartAt, us.EndAt)
+	if err != nil {
+		return UserSubscription{}, fmt.Errorf("创建 user_subscription 失败: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return UserSubscription{}, fmt.Errorf("获取 user_subscription id 失败: %w", err)
+	}
+	us.ID = id
+	return us, nil
+}
+
 func (s *Store) GetSubscriptionWithPlanByID(ctx context.Context, subscriptionID int64) (SubscriptionWithPlan, error) {
 	if subscriptionID <= 0 {
 		return SubscriptionWithPlan{}, errors.New("subscriptionID 不合法")
@@ -188,43 +385,22 @@ func (s *Store) PurchaseSubscriptionByPlanID(ctx context.Context, userID int64, 
 		}
 		return UserSubscription{}, SubscriptionPlan{}, err
 	}
-	if plan.Status != 1 {
-		return UserSubscription{}, SubscriptionPlan{}, errors.New("订阅套餐不可用")
+	if err := ensureSubscriptionPlanPurchasable(ctx, s, userID, plan); err != nil {
+		return UserSubscription{}, SubscriptionPlan{}, err
 	}
-	group := strings.TrimSpace(plan.GroupName)
-	if group != "" {
-		ok, err := s.UserMainGroupAllowsSubgroup(ctx, userID, group)
-		if err != nil {
-			return UserSubscription{}, SubscriptionPlan{}, err
-		}
-		if !ok {
-			return UserSubscription{}, SubscriptionPlan{}, errors.New("无权限购买该套餐")
-		}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return UserSubscription{}, SubscriptionPlan{}, fmt.Errorf("开始事务失败: %w", err)
 	}
-	if plan.DurationDays <= 0 {
-		plan.DurationDays = 30
-	}
-	duration := time.Duration(plan.DurationDays) * 24 * time.Hour
+	defer func() { _ = tx.Rollback() }()
 
-	us := UserSubscription{
-		UserID:  userID,
-		PlanID:  plan.ID,
-		StartAt: now,
-		EndAt:   now.Add(duration),
-		Status:  1,
-	}
-	res, err := s.db.ExecContext(ctx, `
-INSERT INTO user_subscriptions(user_id, plan_id, start_at, end_at, status, created_at, updated_at)
-VALUES(?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-`, us.UserID, us.PlanID, us.StartAt, us.EndAt)
+	us, err := grantSubscriptionByPlanTx(ctx, tx, userID, plan, now, SubscriptionActivationModeImmediate)
 	if err != nil {
-		return UserSubscription{}, SubscriptionPlan{}, fmt.Errorf("创建 user_subscription 失败: %w", err)
+		return UserSubscription{}, SubscriptionPlan{}, err
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return UserSubscription{}, SubscriptionPlan{}, fmt.Errorf("获取 user_subscription id 失败: %w", err)
+	if err := tx.Commit(); err != nil {
+		return UserSubscription{}, SubscriptionPlan{}, fmt.Errorf("提交事务失败: %w", err)
 	}
-	us.ID = id
 	return us, plan, nil
 }
 

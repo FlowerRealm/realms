@@ -15,6 +15,7 @@ const OAuthAppDetailPage = lazy(() => import('./admin/OAuthAppDetailPage').then(
 const OAuthAppsAdminPage = lazy(() => import('./admin/OAuthAppsAdminPage').then((m) => ({ default: m.OAuthAppsAdminPage })));
 const OrdersPage = lazy(() => import('./admin/OrdersPage').then((m) => ({ default: m.OrdersPage })));
 const PaymentChannelsPage = lazy(() => import('./admin/PaymentChannelsPage').then((m) => ({ default: m.PaymentChannelsPage })));
+const RedemptionCodesPage = lazy(() => import('./admin/RedemptionCodesPage').then((m) => ({ default: m.RedemptionCodesPage })));
 const SettingsAdminPage = lazy(() => import('./admin/SettingsAdminPage').then((m) => ({ default: m.SettingsAdminPage })));
 const SubscriptionEditPage = lazy(() => import('./admin/SubscriptionEditPage').then((m) => ({ default: m.SubscriptionEditPage })));
 const SubscriptionsPage = lazy(() => import('./admin/SubscriptionsPage').then((m) => ({ default: m.SubscriptionsPage })));
@@ -55,6 +56,7 @@ export function AdminPage() {
         <Route path="submissions" element={<Navigate to="/admin/subscriptions" replace />} />
         <Route path="subscriptions" element={<SubscriptionsPage />} />
         <Route path="subscriptions/:id" element={<SubscriptionEditPage />} />
+        <Route path="redemption-codes" element={<RedemptionCodesPage />} />
         <Route path="orders" element={<OrdersPage />} />
         <Route path="payment-channels" element={<PaymentChannelsPage />} />
         <Route path="usage" element={<UsageAdminPage />} />

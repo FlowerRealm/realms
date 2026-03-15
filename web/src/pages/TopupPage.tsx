@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { createTopupOrder, getTopupPage, type BillingTopupPageResponse } from '../api/billing';
 import { DividedStack } from '../components/DividedStack';
+import { RedemptionCodeCard } from '../components/RedemptionCodeCard';
 import { SegmentedFrame } from '../components/SegmentedFrame';
 
 function orderBadge(status: string): string {
@@ -22,28 +23,25 @@ export function TopupPage() {
 
   const [amountCNY, setAmountCNY] = useState('');
 
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      setErr('');
-      setLoading(true);
-      try {
-        const res = await getTopupPage();
-        if (!res.success) throw new Error(res.message || '加载失败');
-        if (mounted) setData(res.data || null);
-      } catch (e) {
-        if (mounted) {
-          setErr(e instanceof Error ? e.message : '加载失败');
-          setData(null);
-        }
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
+  const refresh = useCallback(async (nextNotice?: string) => {
+    setErr('');
+    setLoading(true);
+    try {
+      const res = await getTopupPage();
+      if (!res.success) throw new Error(res.message || '加载失败');
+      setData(res.data || null);
+      if (nextNotice) setNotice(nextNotice);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '加载失败');
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   const orders = data?.topup_orders || [];
   const hasPayment = (data?.payment_channels || []).length > 0;
@@ -99,8 +97,17 @@ export function TopupPage() {
         </div>
 
         <div>
-          <div className="d-flex align-items-center mb-3">
-            <h4 className="mb-0 fw-bold">创建充值订单</h4>
+          <div className="d-flex align-items-center justify-content-between gap-3 mb-3">
+            <h4 className="mb-0 fw-bold">充值</h4>
+            <RedemptionCodeCard
+              kind="topup"
+              buttonLabel="使用兑换码"
+              buttonClassName="btn btn-outline-primary btn-sm"
+              submitLabel="兑换余额"
+              onRedeemed={async (message) => {
+                await refresh(message);
+              }}
+            />
           </div>
 
           <div className="card border-0 mb-0">
@@ -125,7 +132,10 @@ export function TopupPage() {
                   <div className="form-text small text-muted">最低充值：{data?.topup_min_cny || '-'}（示例：10.00）</div>
                 </div>
 
-                <div className="col-md-6 d-flex align-items-end">
+                <div className="col-md-6">
+                  <label className="form-label opacity-0 user-select-none" aria-hidden="true">
+                    创建充值订单
+                  </label>
                   <button type="submit" className="btn btn-primary w-100 fw-bold" disabled={!hasPayment || loading}>
                     创建订单并选择支付方式
                   </button>

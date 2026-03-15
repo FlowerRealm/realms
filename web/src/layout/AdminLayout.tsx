@@ -111,6 +111,11 @@ export function AdminLayout() {
                 </NavLink>
               </li>
               <li>
+                <NavLink to="/admin/redemption-codes" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`} onClick={closeSidebar}>
+                  <i className="ri-coupon-line"></i> 兑换码
+                </NavLink>
+              </li>
+              <li>
                 <NavLink to="/admin/payment-channels" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`} onClick={closeSidebar}>
                   <i className="ri-bank-card-line"></i> 支付渠道
                 </NavLink>

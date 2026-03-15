@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { getSubscriptionPage, purchaseSubscription, type BillingPlanView, type BillingSubscriptionPageResponse } from '../api/billing';
 import { DividedStack } from '../components/DividedStack';
+import { RedemptionCodeCard } from '../components/RedemptionCodeCard';
 import { SegmentedFrame } from '../components/SegmentedFrame';
 
 function subscriptionBadge(statusText: string): string {
@@ -26,28 +27,25 @@ export function SubscriptionPage() {
   const [err, setErr] = useState('');
   const [notice, setNotice] = useState('');
 
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      setErr('');
-      setLoading(true);
-      try {
-        const res = await getSubscriptionPage();
-        if (!res.success) throw new Error(res.message || '加载失败');
-        if (mounted) setData(res.data || null);
-      } catch (e) {
-        if (mounted) {
-          setErr(e instanceof Error ? e.message : '加载失败');
-          setData(null);
-        }
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
+  const refresh = useCallback(async (nextNotice?: string) => {
+    setErr('');
+    setLoading(true);
+    try {
+      const res = await getSubscriptionPage();
+      if (!res.success) throw new Error(res.message || '加载失败');
+      setData(res.data || null);
+      if (nextNotice) setNotice(nextNotice);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '加载失败');
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   const orders = data?.subscription_orders || [];
   const subscriptions = data?.subscriptions || [];
@@ -252,7 +250,18 @@ export function SubscriptionPage() {
         )}
 
         <div id="plans">
-          <h4 className="mb-4 fw-bold">购买新订阅</h4>
+          <div className="d-flex align-items-center justify-content-between gap-3 mb-4">
+            <h4 className="mb-0 fw-bold">购买新订阅</h4>
+            <RedemptionCodeCard
+              kind="subscription"
+              buttonLabel="使用兑换码"
+              buttonClassName="btn btn-outline-primary btn-sm"
+              submitLabel="兑换订阅"
+              onRedeemed={async (message) => {
+                await refresh(message);
+              }}
+            />
+          </div>
           {loading ? (
             <div className="text-muted">加载中…</div>
           ) : (
