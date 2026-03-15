@@ -146,6 +146,19 @@ func parseRedemptionCodeExpiry(raw string) (*time.Time, error) {
 	return nil, errors.New("expires_at 不合法")
 }
 
+func parseExpectedRedemptionRewardType(raw string) (store.RedemptionCodeRewardType, error) {
+	switch strings.TrimSpace(raw) {
+	case "":
+		return "", nil
+	case string(store.RedemptionCodeRewardBalance):
+		return store.RedemptionCodeRewardBalance, nil
+	case string(store.RedemptionCodeRewardSubscription):
+		return store.RedemptionCodeRewardSubscription, nil
+	default:
+		return "", errors.New("kind 不合法")
+	}
+}
+
 func redeemCodeHandler(opts Options) gin.HandlerFunc {
 	type reqBody struct {
 		Kind                       string  `json:"kind"`
@@ -170,7 +183,11 @@ func redeemCodeHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
 			return
 		}
-		expectedRewardType := store.RedemptionCodeRewardType(strings.TrimSpace(req.Kind))
+		expectedRewardType, err := parseExpectedRedemptionRewardType(req.Kind)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+			return
+		}
 		res, err := opts.Store.RedeemCode(c.Request.Context(), store.RedeemCodeInput{
 			UserID:                     userID,
 			Code:                       req.Code,
@@ -380,9 +397,9 @@ func adminCreateRedemptionCodesHandler(opts Options) gin.HandlerFunc {
 
 func adminUpdateRedemptionCodeHandler(opts Options) gin.HandlerFunc {
 	type reqBody struct {
-		MaxRedemptions int    `json:"max_redemptions"`
-		ExpiresAt      string `json:"expires_at"`
-		Status         int    `json:"status"`
+		MaxRedemptions *int    `json:"max_redemptions"`
+		ExpiresAt      *string `json:"expires_at"`
+		Status         *int    `json:"status"`
 	}
 	return func(c *gin.Context) {
 		if opts.Store == nil {
@@ -402,19 +419,43 @@ func adminUpdateRedemptionCodeHandler(opts Options) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的参数"})
 			return
 		}
-		expiresAt, err := parseRedemptionCodeExpiry(req.ExpiresAt)
+		current, err := opts.Store.GetRedemptionCodeByID(c.Request.Context(), codeID)
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+			switch {
+			case errors.Is(err, sql.ErrNoRows):
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Not Found"})
+			default:
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询兑换码失败"})
+			}
 			return
 		}
-		status := store.RedemptionCodeStatus(req.Status)
-		if status != store.RedemptionCodeStatusActive && status != store.RedemptionCodeStatusDisabled {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "status 不合法"})
-			return
+
+		maxRedemptions := current.Code.MaxRedemptions
+		if req.MaxRedemptions != nil {
+			maxRedemptions = *req.MaxRedemptions
 		}
+
+		expiresAt := current.Code.ExpiresAt
+		if req.ExpiresAt != nil {
+			expiresAt, err = parseRedemptionCodeExpiry(*req.ExpiresAt)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+				return
+			}
+		}
+
+		status := current.Code.Status
+		if req.Status != nil {
+			status = store.RedemptionCodeStatus(*req.Status)
+			if status != store.RedemptionCodeStatusActive && status != store.RedemptionCodeStatusDisabled {
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "status 不合法"})
+				return
+			}
+		}
+
 		err = opts.Store.UpdateSharedRedemptionCode(c.Request.Context(), store.RedemptionCodeUpdate{
 			ID:             codeID,
-			MaxRedemptions: req.MaxRedemptions,
+			MaxRedemptions: maxRedemptions,
 			ExpiresAt:      expiresAt,
 			Status:         status,
 		})

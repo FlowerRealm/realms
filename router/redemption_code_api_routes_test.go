@@ -235,6 +235,37 @@ func TestRedeemCodeRoute_RewardTypeMismatch(t *testing.T) {
 	}
 }
 
+func TestRedeemCodeRoute_InvalidKindRejected(t *testing.T) {
+	st, cleanup := newTestSQLiteStore(t)
+	defer cleanup()
+	ensureDefaultMainGroupForTest(t, st)
+	engine, cookieName := newTestEngine(t, st)
+
+	userID, sessionCookie := createLoggedInUser(t, st, engine, cookieName, "redeem-invalid-kind@example.com", "redeeminvalidkind", "password123")
+
+	body, _ := json.Marshal(map[string]any{"kind": "weird", "code": "ANY-CODE"})
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/billing/redeem", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Realms-User", strconv.FormatInt(userID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if resp.Success || resp.Message != "kind 不合法" {
+		t.Fatalf("expected invalid kind response, got body=%s", rr.Body.String())
+	}
+}
+
 func TestAdminCreateRedemptionCodesRoute_GenerateCodes(t *testing.T) {
 	st, cleanup := newTestSQLiteStore(t)
 	defer cleanup()
@@ -338,5 +369,61 @@ func TestAdminUpdateRedemptionCodeRoute_AcceptsDatetimeLocal(t *testing.T) {
 	}
 	if !resp.Success {
 		t.Fatalf("expected success, got body=%s", rr.Body.String())
+	}
+}
+
+func TestAdminUpdateRedemptionCodeRoute_AllowsPartialStatusOnly(t *testing.T) {
+	st, cleanup := newTestSQLiteStore(t)
+	defer cleanup()
+	ensureDefaultMainGroupForTest(t, st)
+	engine, sessionCookie, rootID := setupRootSession(t, st)
+
+	ctx := context.Background()
+	codeID, err := st.CreateRedemptionCode(ctx, store.RedemptionCodeCreate{
+		BatchName:        "shared-status-only",
+		Code:             "SHARED-STATUS",
+		DistributionMode: store.RedemptionCodeDistributionShared,
+		RewardType:       store.RedemptionCodeRewardBalance,
+		BalanceUSD:       decimal.RequireFromString("2"),
+		MaxRedemptions:   3,
+		Status:           store.RedemptionCodeStatusActive,
+		CreatedBy:        rootID,
+	})
+	if err != nil {
+		t.Fatalf("CreateRedemptionCode: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"status": 0,
+	})
+	req := httptest.NewRequest(http.MethodPatch, "http://example.com/api/admin/redemption-codes/"+strconv.FormatInt(codeID, 10), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Realms-User", strconv.FormatInt(rootID, 10))
+	req.Header.Set("Cookie", sessionCookie)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Success bool `json:"success"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("expected success, got body=%s", rr.Body.String())
+	}
+
+	item, err := st.GetRedemptionCodeByID(ctx, codeID)
+	if err != nil {
+		t.Fatalf("GetRedemptionCodeByID: %v", err)
+	}
+	if item.Code.MaxRedemptions != 3 {
+		t.Fatalf("expected max_redemptions to stay 3, got %d", item.Code.MaxRedemptions)
+	}
+	if item.Code.Status != store.RedemptionCodeStatusDisabled {
+		t.Fatalf("expected status disabled, got %d", item.Code.Status)
 	}
 }
