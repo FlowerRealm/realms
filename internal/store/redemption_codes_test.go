@@ -302,6 +302,88 @@ func TestRedeemCode_SubscriptionInvalidModeRejected(t *testing.T) {
 	}
 }
 
+func TestRedeemCode_SharedExhaustedStillReturnsAlreadyRedeemedForSameUser(t *testing.T) {
+	st := newSQLiteStoreForRedemptionTest(t)
+	ctx := context.Background()
+
+	if err := st.CreateMainGroup(ctx, "default", nil, 1); err != nil && err.Error() != "main_group 名称已存在" {
+	}
+	userID, err := st.CreateUser(ctx, "shared-exhausted-user@example.com", "sharedexhausteduser", []byte("pw"), store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if err := st.SetUserMainGroup(ctx, userID, "default"); err != nil {
+		t.Fatalf("SetUserMainGroup: %v", err)
+	}
+
+	_, err = st.CreateRedemptionCode(ctx, store.RedemptionCodeCreate{
+		BatchName:        "shared-exhausted-batch",
+		Code:             "SHARED-ONE",
+		DistributionMode: store.RedemptionCodeDistributionShared,
+		RewardType:       store.RedemptionCodeRewardBalance,
+		BalanceUSD:       decimal.RequireFromString("1"),
+		MaxRedemptions:   1,
+		Status:           store.RedemptionCodeStatusActive,
+	})
+	if err != nil {
+		t.Fatalf("CreateRedemptionCode: %v", err)
+	}
+
+	if _, err := st.RedeemCode(ctx, store.RedeemCodeInput{UserID: userID, Code: "SHARED-ONE"}); err != nil {
+		t.Fatalf("RedeemCode first: %v", err)
+	}
+	if _, err := st.RedeemCode(ctx, store.RedeemCodeInput{UserID: userID, Code: "SHARED-ONE"}); !errors.Is(err, store.ErrRedemptionCodeAlreadyRedeemed) {
+		t.Fatalf("expected already redeemed after exhaustion, got %v", err)
+	}
+}
+
+func TestRedeemCode_SubscriptionBypassesPurchasePermission(t *testing.T) {
+	st := newSQLiteStoreForRedemptionTest(t)
+	ctx := context.Background()
+
+	if err := st.CreateMainGroup(ctx, "default", nil, 1); err != nil && err.Error() != "main_group 名称已存在" {
+	}
+	userID, err := st.CreateUser(ctx, "redeem-restricted-plan@example.com", "redeemrestrictedplan", []byte("pw"), store.UserRoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if err := st.SetUserMainGroup(ctx, userID, "default"); err != nil {
+		t.Fatalf("SetUserMainGroup: %v", err)
+	}
+
+	planID, err := st.CreateSubscriptionPlan(ctx, store.SubscriptionPlanCreate{
+		Code:         "restricted_plan",
+		Name:         "Restricted Plan",
+		GroupName:    "restricted",
+		DurationDays: 30,
+		Status:       1,
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscriptionPlan: %v", err)
+	}
+
+	_, err = st.CreateRedemptionCode(ctx, store.RedemptionCodeCreate{
+		BatchName:          "restricted-plan-batch",
+		Code:               "RESTRICTED-PLAN",
+		DistributionMode:   store.RedemptionCodeDistributionSingle,
+		RewardType:         store.RedemptionCodeRewardSubscription,
+		SubscriptionPlanID: &planID,
+		MaxRedemptions:     1,
+		Status:             store.RedemptionCodeStatusActive,
+	})
+	if err != nil {
+		t.Fatalf("CreateRedemptionCode: %v", err)
+	}
+
+	res, err := st.RedeemCode(ctx, store.RedeemCodeInput{UserID: userID, Code: "RESTRICTED-PLAN"})
+	if err != nil {
+		t.Fatalf("RedeemCode: %v", err)
+	}
+	if res.Subscription == nil || res.Plan == nil || res.Plan.ID != planID {
+		t.Fatalf("expected restricted plan redemption to succeed, got %+v", res)
+	}
+}
+
 func TestCreateRedemptionCodes_AtomicOnDuplicate(t *testing.T) {
 	st := newSQLiteStoreForRedemptionTest(t)
 	ctx := context.Background()

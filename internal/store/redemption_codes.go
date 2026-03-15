@@ -688,9 +688,6 @@ WHERE code=?
 	if code.ExpiresAt != nil && !code.ExpiresAt.After(now) {
 		return RedeemCodeResult{}, ErrRedemptionCodeExpired
 	}
-	if code.RedeemedCount >= code.MaxRedemptions {
-		return RedeemCodeResult{}, ErrRedemptionCodeExhausted
-	}
 	if code.DistributionMode == RedemptionCodeDistributionShared {
 		exists, err := hasRedemptionRecordForUserTx(ctx, tx, code.ID, in.UserID)
 		if err != nil {
@@ -699,6 +696,9 @@ WHERE code=?
 		if exists {
 			return RedeemCodeResult{}, ErrRedemptionCodeAlreadyRedeemed
 		}
+	}
+	if code.RedeemedCount >= code.MaxRedemptions {
+		return RedeemCodeResult{}, ErrRedemptionCodeExhausted
 	}
 	code, err = reserveRedemptionSlotTx(ctx, tx, code, in.UserID)
 	if err != nil {
@@ -739,9 +739,6 @@ VALUES(?, ?, ?, ?, NULL, NULL, CURRENT_TIMESTAMP)
 		}
 		if plan.Status != 1 {
 			return RedeemCodeResult{}, errors.New("套餐不可用")
-		}
-		if err := ensureSubscriptionPlanPurchasableTx(ctx, tx, in.UserID, plan); err != nil {
-			return RedeemCodeResult{}, err
 		}
 		grantMode := SubscriptionActivationModeImmediate
 		samePlanActive, err := hasNonExpiredSubscriptionForPlanTx(ctx, tx, in.UserID, plan.ID, now)
